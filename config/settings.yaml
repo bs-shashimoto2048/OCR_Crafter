@@ -1,0 +1,39 @@
+app:
+  name: ocr-crafter
+  db_path: outputs/app.db
+
+paths:
+  data_projects: data/projects
+  outputs: outputs
+
+preprocess:
+  grayscale:
+    enabled: true
+  resize:
+    enabled: true
+    width: 64
+    height: 64
+  padding:
+    enabled: true
+    fill: 255
+  normalize:
+    enabled: true
+    mean: 0.5
+    std: 0.5
+
+dataset:
+  train_ratio: 0.7
+  val_ratio: 0.2
+  test_ratio: 0.1
+  seed: 42
+
+training:
+  default_epochs: 5
+  default_batch_size: 32
+  default_lr: 0.001
+  num_workers: 0
+  models:
+    square:
+      image_size: [64, 64]
+    wide:
+      image_size: [96, 48]
