@@ -1,3 +1,4 @@
+import { useState } from "react";
 import Card from "../components/Card";
 import Button from "../components/Button";
 import { imageUrl } from "../lib/api";
@@ -28,6 +29,8 @@ export default function LabelingView({
   onNext,
   imageShapes,
 }) {
+  const zoomLevels = [25, 50, 100, 150, 200];
+  const [zoomPercent, setZoomPercent] = useState(100);
   const selected = images[selectedIndex] || null;
 
   if (!selected) {
@@ -42,11 +45,27 @@ export default function LabelingView({
     <div className="grid grid-cols-[1.5fr_1fr] gap-6">
       <div className="space-y-6">
         <Card title="プレビュー" subtitle={`${selected.image} / ${imageShapes[selected.image] || "--"}`}>
-          <div className="rounded-xl border border-border bg-[#333d49] p-3">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium text-muted">表示倍率</span>
+            {zoomLevels.map((level) => (
+              <Button
+                key={level}
+                size="sm"
+                variant={zoomPercent === level ? "primary" : "secondary"}
+                className="h-8 px-2 text-xs"
+                onClick={() => setZoomPercent(level)}
+              >
+                {level}%
+              </Button>
+            ))}
+          </div>
+
+          <div className="max-h-[70vh] overflow-auto rounded-xl border border-border bg-[#333d49] p-3">
             <img
               src={imageUrl(selected.image, projectId, imageVersion)}
               alt={selected.image}
-              className="h-[420px] w-full rounded-lg object-contain"
+              className="mx-auto h-auto max-w-none rounded-lg"
+              style={{ width: `${zoomPercent}%` }}
             />
           </div>
 
@@ -203,8 +222,9 @@ export default function LabelingView({
                     <span className="text-[11px] font-semibold text-red-400">未</span>
                   )}
                 </div>
-                <p className="mt-1 truncate text-xs text-muted">
-                  ラベル: {isSet ? currentLabel : "-"}
+                <p className="mt-1 truncate text-xs text-muted">ラベル</p>
+                <p className="truncate text-base font-semibold text-text">
+                  {isSet ? currentLabel : "-"}
                 </p>
               </button>
             );
