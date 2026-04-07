@@ -8,7 +8,12 @@ export default function DashboardView({
   onRefresh,
   onPreprocess,
   onBuildDataset,
+  workflowState,
 }) {
+  const refreshed = Boolean(workflowState?.refreshed);
+  const preprocessed = Boolean(workflowState?.preprocessed);
+  const datasetBuilt = Boolean(workflowState?.datasetBuilt);
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-3 gap-4">
@@ -25,13 +30,25 @@ export default function DashboardView({
 
       <Card title="実行メニュー" subtitle="前処理とデータセット生成を実行します">
         <div className="flex gap-3">
-          <Button variant="secondary" onClick={onRefresh}>
+          <Button
+            variant={refreshed ? "primary" : "secondary"}
+            className={refreshed ? "!bg-success hover:!bg-emerald-500 text-white" : ""}
+            onClick={onRefresh}
+          >
             データ更新
           </Button>
-          <Button variant="primary" onClick={onPreprocess}>
+          <Button
+            variant={preprocessed ? "primary" : "secondary"}
+            className={preprocessed ? "!bg-success hover:!bg-emerald-500 text-white" : ""}
+            onClick={onPreprocess}
+          >
             前処理を実行
           </Button>
-          <Button variant="secondary" onClick={onBuildDataset}>
+          <Button
+            variant={datasetBuilt ? "primary" : "secondary"}
+            className={datasetBuilt ? "!bg-success hover:!bg-emerald-500 text-white" : ""}
+            onClick={onBuildDataset}
+          >
             データセット作成
           </Button>
         </div>

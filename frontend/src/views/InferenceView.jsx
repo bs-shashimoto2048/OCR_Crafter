@@ -16,6 +16,8 @@ export default function InferenceView({
   onFileChange,
   fileName,
   previewUrl,
+  rotation,
+  onRotate,
   onRun,
   loading,
   result,
@@ -103,12 +105,23 @@ export default function InferenceView({
           <div>
             <label className="app-label">画像</label>
             <input type="file" accept="image/*" onChange={onFileChange} className="block w-full text-sm text-muted" />
-            <p className="mt-2 truncate text-xs text-muted">{fileName || "ファイル未選択"}</p>
           </div>
 
           {previewUrl ? (
-            <img src={previewUrl} alt="preview" className="h-56 w-full rounded-lg border border-border object-contain" />
+            <img
+              src={previewUrl}
+              alt="preview"
+              className="h-56 w-full rounded-lg border border-border object-contain"
+              style={{ transform: `rotate(${Number(rotation || 0)}deg)` }}
+            />
           ) : null}
+
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" onClick={onRotate} disabled={!fileName || loading}>
+              90°回転
+            </Button>
+            <span className="text-xs text-muted">現在: {Number(rotation || 0)}°</span>
+          </div>
 
           <Button onClick={onRun} disabled={!fileName || loading}>
             {loading ? "推論中..." : "推論実行"}

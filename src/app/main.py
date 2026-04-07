@@ -159,6 +159,7 @@ def _attach_preview_prediction(
             project_id=project_id,
             engine=engine,
             easyocr_languages=langs,
+            apply_preprocess=False,
         )
         preview["prediction"] = prediction.get("prediction", "")
         preview["confidence"] = prediction.get("confidence")

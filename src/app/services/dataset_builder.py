@@ -60,9 +60,15 @@ def build_dataset(
     for label, image_paths in buckets.items():
         rng.shuffle(image_paths)
         n = len(image_paths)
-        n_train = int(n * train_ratio)
+        if n <= 0:
+            continue
+
+        # Ensure at least one sample per class is available for training.
+        n_train = max(1, int(n * train_ratio))
         n_val = int(n * val_ratio)
-        n_test = n - n_train - n_val
+        if n_train + n_val > n:
+            n_val = max(0, n - n_train)
+        n_test = max(0, n - n_train - n_val)
 
         split_map = {
             "train": image_paths[:n_train],
@@ -71,6 +77,8 @@ def build_dataset(
         }
 
         for split, split_paths in split_map.items():
+            if not split_paths:
+                continue
             label_dir = paths.dataset / split / str(label)
             label_dir.mkdir(parents=True, exist_ok=True)
             for src in split_paths:

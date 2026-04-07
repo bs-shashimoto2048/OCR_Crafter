@@ -79,6 +79,11 @@ export default function App() {
   const [imageShapes, setImageShapes] = useState({});
   const [imageVersion, setImageVersion] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [workflowState, setWorkflowState] = useState({
+    refreshed: false,
+    preprocessed: false,
+    datasetBuilt: false,
+  });
 
   const [modelType, setModelType] = useState("square");
   const [modelTypes, setModelTypes] = useState([]);
@@ -99,6 +104,7 @@ export default function App() {
   const [inferFile, setInferFile] = useState(null);
   const [inferFileName, setInferFileName] = useState("");
   const [inferPreviewUrl, setInferPreviewUrl] = useState("");
+  const [inferRotation, setInferRotation] = useState(0);
   const [inferLoading, setInferLoading] = useState(false);
   const [inferResult, setInferResult] = useState(null);
 
@@ -354,6 +360,14 @@ export default function App() {
       return;
     }
     refreshAll(projectId).catch((error) => notify("error", error.message));
+  }, [projectId]);
+
+  useEffect(() => {
+    setWorkflowState({
+      refreshed: false,
+      preprocessed: false,
+      datasetBuilt: false,
+    });
   }, [projectId]);
 
   useEffect(() => {
@@ -822,6 +836,11 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ project_id: projectId }),
       });
+      setWorkflowState((prev) => ({
+        refreshed: prev.refreshed,
+        preprocessed: true,
+        datasetBuilt: false,
+      }));
       notify("success", `${data.count} 件の前処理を実行しました`);
       pushLog(`前処理完了: ${data.count}`);
     } catch (error) {
@@ -840,6 +859,11 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ project_id: projectId, train_ratio: 0.7, val_ratio: 0.2, test_ratio: 0.1 }),
       });
+      setWorkflowState((prev) => ({
+        refreshed: prev.refreshed,
+        preprocessed: prev.preprocessed,
+        datasetBuilt: true,
+      }));
       notify(
         "success",
         `データセット作成完了 学習=${data.counts.train} 検証=${data.counts.val} テスト=${data.counts.test}`
@@ -927,7 +951,59 @@ export default function App() {
     setInferFile(file);
     setInferFileName(file.name);
     setInferPreviewUrl(URL.createObjectURL(file));
+    setInferRotation(0);
     setInferResult(null);
+  }
+
+  async function rotateInferenceFile(file, degrees) {
+    const normalized = ((Number(degrees || 0) % 360) + 360) % 360;
+    if (normalized === 0) {
+      return file;
+    }
+
+    const objectUrl = URL.createObjectURL(file);
+    try {
+      const image = await new Promise((resolve, reject) => {
+        const img = new window.Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error("画像の読み込みに失敗しました"));
+        img.src = objectUrl;
+      });
+
+      const width = image.naturalWidth || image.width;
+      const height = image.naturalHeight || image.height;
+      const canvas = document.createElement("canvas");
+      if (normalized === 90 || normalized === 270) {
+        canvas.width = height;
+        canvas.height = width;
+      } else {
+        canvas.width = width;
+        canvas.height = height;
+      }
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        throw new Error("画像回転に失敗しました");
+      }
+
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate((normalized * Math.PI) / 180);
+      ctx.drawImage(image, -width / 2, -height / 2);
+
+      const rotatedBlob = await new Promise((resolve) => {
+        canvas.toBlob((blob) => resolve(blob), file.type || "image/png");
+      });
+      if (!rotatedBlob) {
+        throw new Error("回転画像の生成に失敗しました");
+      }
+
+      return new File([rotatedBlob], file.name, {
+        type: rotatedBlob.type || file.type || "image/png",
+        lastModified: Date.now(),
+      });
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
   }
 
   async function runInference() {
@@ -940,21 +1016,22 @@ export default function App() {
       return;
     }
 
-    const formData = new FormData();
-    formData.append("file", inferFile);
-    formData.append("engine", inferEngine);
-    if (inferEngine === "custom") {
-      formData.append("model", inferModel);
-      if (inferModel === "latest" && inferModelType) {
-        formData.append("model_type", inferModelType);
-      }
-    } else if (inferEngine === "easyocr") {
-      formData.append("easyocr_langs", inferEasyOcrLangs.length > 0 ? inferEasyOcrLangs.join(",") : "en");
-    }
-    formData.append("project_id", projectId);
-
     setInferLoading(true);
     try {
+      const formData = new FormData();
+      const rotatedFile = await rotateInferenceFile(inferFile, inferRotation);
+      formData.append("file", rotatedFile);
+      formData.append("engine", inferEngine);
+      if (inferEngine === "custom") {
+        formData.append("model", inferModel);
+        if (inferModel === "latest" && inferModelType) {
+          formData.append("model_type", inferModelType);
+        }
+      } else if (inferEngine === "easyocr") {
+        formData.append("easyocr_langs", inferEasyOcrLangs.length > 0 ? inferEasyOcrLangs.join(",") : "en");
+      }
+      formData.append("project_id", projectId);
+
       const response = await fetch(`${API_BASE}/predict`, {
         method: "POST",
         body: formData,
@@ -1008,6 +1085,15 @@ export default function App() {
 
   const currentMeta = viewMeta[activeView] || viewMeta.dashboard;
 
+  async function refreshWorkflowData() {
+    await refreshAll(projectId);
+    setWorkflowState({
+      refreshed: true,
+      preprocessed: false,
+      datasetBuilt: false,
+    });
+  }
+
   let view = null;
   if (activeView === "dashboard") {
     view = (
@@ -1015,9 +1101,10 @@ export default function App() {
         imagesCount={images.length}
         labeledCount={labeledCount}
         modelCount={models.length}
-        onRefresh={() => refreshAll(projectId)}
+        onRefresh={refreshWorkflowData}
         onPreprocess={runPreprocess}
         onBuildDataset={buildDataset}
+        workflowState={workflowState}
       />
     );
   }
@@ -1149,6 +1236,8 @@ export default function App() {
         onFileChange={selectInferenceFile}
         fileName={inferFileName}
         previewUrl={inferPreviewUrl}
+        rotation={inferRotation}
+        onRotate={() => setInferRotation((prev) => (prev + 90) % 360)}
         onRun={runInference}
         loading={inferLoading}
         result={inferResult}
