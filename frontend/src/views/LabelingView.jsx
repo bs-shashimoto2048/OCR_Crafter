@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Card from "../components/Card";
 import Button from "../components/Button";
 import { imageUrl, processedImageUrl } from "../lib/api";
@@ -31,14 +31,53 @@ export default function LabelingView({
 }) {
   const zoomLevels = [25, 50, 100, 150, 200];
   const [zoomPercent, setZoomPercent] = useState(100);
+  const [showUnlabeledOnly, setShowUnlabeledOnly] = useState(false);
   const listRef = useRef(null);
   const cardRefs = useRef([]);
   const labelInputRef = useRef(null);
+  const saveButtonRef = useRef(null);
   const selected = images[selectedIndex] || null;
+  const visibleEntries = useMemo(() => {
+    const entries = images.map((item, originalIndex) => {
+      const savedLabel = String(item.label ?? "").trim();
+      const draftLabel = String(labelDrafts?.[item.image] ?? item.label ?? "").trim();
+      const isSet = savedLabel !== "";
+      return { item, originalIndex, savedLabel, draftLabel, isSet };
+    });
+    if (!showUnlabeledOnly) {
+      return entries;
+    }
+    return entries.filter((entry) => !entry.isSet);
+  }, [images, labelDrafts, showUnlabeledOnly]);
+
+  useEffect(() => {
+    cardRefs.current = [];
+  }, [showUnlabeledOnly, visibleEntries.length]);
+
+  useEffect(() => {
+    if (!showUnlabeledOnly) {
+      return;
+    }
+    const current = images[selectedIndex];
+    if (!current) {
+      return;
+    }
+    const currentSavedLabel = String(current.label ?? "").trim();
+    if (currentSavedLabel === "") {
+      return;
+    }
+    if (visibleEntries.length > 0) {
+      onSelectIndex(visibleEntries[0].originalIndex);
+    }
+  }, [showUnlabeledOnly, images, selectedIndex, labelDrafts, visibleEntries, onSelectIndex]);
 
   useEffect(() => {
     const listEl = listRef.current;
-    const cardEl = cardRefs.current[selectedIndex];
+    const visibleIndex = visibleEntries.findIndex((entry) => entry.originalIndex === selectedIndex);
+    if (visibleIndex < 0) {
+      return;
+    }
+    const cardEl = cardRefs.current[visibleIndex];
     if (!listEl || !cardEl) {
       return;
     }
@@ -46,7 +85,7 @@ export default function LabelingView({
     const top = cardEl.offsetTop - listEl.offsetTop;
     listEl.scrollTo({ top, behavior: "smooth" });
     cardEl.focus({ preventScroll: true });
-  }, [selectedIndex, images.length]);
+  }, [selectedIndex, visibleEntries]);
 
   useEffect(() => {
     if (!selected) {
@@ -117,9 +156,13 @@ export default function LabelingView({
             value={labelValue}
             onChange={(e) => onLabelChange(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") {
+              if (e.nativeEvent?.isComposing) {
+                return;
+              }
+              if (e.key === "Enter" || e.key === "NumpadEnter") {
                 e.preventDefault();
-                onSave();
+                e.stopPropagation();
+                saveButtonRef.current?.click();
               }
             }}
             className="app-input mb-4"
@@ -217,7 +260,7 @@ export default function LabelingView({
               >
                 スペース
               </Button>
-              <Button size="sm" className="col-span-2 h-9 text-xs" onClick={onSave}>
+              <Button ref={saveButtonRef} size="sm" className="col-span-2 h-9 text-xs" onClick={onSave}>
                 ラベル保存
               </Button>
             </div>
@@ -225,20 +268,31 @@ export default function LabelingView({
         </Card>
       </div>
 
-      <Card title="画像リスト" subtitle="ファイル名と設定ラベルを確認">
+      <Card
+        title="画像リスト"
+        subtitle="ファイル名と設定ラベルを確認"
+        actions={
+          <label className="inline-flex items-center gap-2 text-xs text-text">
+            <input
+              type="checkbox"
+              checked={showUnlabeledOnly}
+              onChange={(e) => setShowUnlabeledOnly(e.target.checked)}
+            />
+            未ラベルのみ
+          </label>
+        }
+      >
         <div ref={listRef} className="max-h-[80vh] space-y-2 overflow-auto pr-1">
-          {images.map((item, idx) => {
-            const currentLabel = String(labelDrafts?.[item.image] ?? item.label ?? "").trim();
-            const isSet = currentLabel !== "";
+          {visibleEntries.map(({ item, originalIndex, savedLabel, draftLabel, isSet }, idx) => {
             return (
               <button
                 key={item.image}
                 ref={(el) => {
                   cardRefs.current[idx] = el;
                 }}
-                onClick={() => onSelectIndex(idx)}
+                onClick={() => onSelectIndex(originalIndex)}
                 className={`w-full rounded-xl border p-3 text-left transition ${
-                  idx === selectedIndex
+                  originalIndex === selectedIndex
                     ? "border-accent bg-accent/15"
                     : "border-border bg-[#333d49] hover:border-slate-500"
                 }`}
@@ -265,11 +319,16 @@ export default function LabelingView({
                 </div>
                 <p className="mt-1 truncate text-xs text-muted">ラベル</p>
                 <p className="truncate text-base font-semibold text-lime-300">
-                  {isSet ? currentLabel : "-"}
+                  {isSet ? savedLabel : draftLabel || "-"}
                 </p>
               </button>
             );
           })}
+          {visibleEntries.length === 0 ? (
+            <div className="rounded-xl border border-border bg-[#333d49] px-3 py-6 text-center text-sm text-muted">
+              表示対象の画像がありません
+            </div>
+          ) : null}
         </div>
       </Card>
     </div>

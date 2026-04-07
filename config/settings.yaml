@@ -7,7 +7,7 @@ paths:
   outputs: outputs
 
 preprocess:
-  ratio_threshold: 2.0
+  ratio_threshold: 1.6
   pipelines:
     single:
       - grayscale
@@ -71,8 +71,8 @@ dataset:
   seed: 42
 
 training:
-  default_epochs: 5
-  default_batch_size: 32
+  default_epochs: 50
+  default_batch_size: 16
   default_lr: 0.001
   default_image_size: [64, 64]
   num_workers: 0

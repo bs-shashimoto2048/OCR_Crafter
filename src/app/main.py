@@ -36,11 +36,11 @@ from .schemas import (
     TrainRequest,
 )
 from .services.data_manager import import_images_from_directory, list_raw_images, rotate_project_image
-from .services.dataset_builder import build_dataset
+from .services.dataset_builder import build_dataset, read_dataset_meta
 from .services.dialogs import select_directory_path
 from .services.evaluation import evaluate_dataset
 from .services.labels import ensure_master_csv, read_labels, upsert_label
-from .services.model_registry import latest_model, list_model_types, list_models
+from .services.model_registry import delete_model, latest_model, list_model_infos, list_model_types, list_models
 from .services.preprocess import preview_preprocess, run_preprocess
 from .train import run_training
 
@@ -434,6 +434,12 @@ def dataset(req: DatasetBuildRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
+@app.get("/dataset/meta")
+def dataset_meta(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+    resolved = _resolve_project_id(project_id)
+    return read_dataset_meta(project_id=resolved)
+
+
 def _run_training_job(job_id: str) -> None:
     job = fetch_training_job(job_id)
     if not job:
@@ -449,6 +455,31 @@ def _run_training_job(job_id: str) -> None:
         }
     )
 
+    def _on_epoch_progress(epoch_metrics: dict[str, Any], total_epochs: int) -> None:
+        current = fetch_training_job(job_id) or job
+        epoch = int(epoch_metrics.get("epoch", 0))
+        train_loss = float(epoch_metrics.get("train_loss", 0.0))
+        train_acc = float(epoch_metrics.get("train_acc", 0.0))
+        if "val_acc" in epoch_metrics:
+            val_acc = float(epoch_metrics.get("val_acc", 0.0))
+            message = (
+                f"epoch {epoch}/{int(total_epochs)} "
+                f"train_loss={train_loss:.4f} train_acc={train_acc:.3f} val_acc={val_acc:.3f}"
+            )
+        else:
+            message = (
+                f"epoch {epoch}/{int(total_epochs)} "
+                f"train_loss={train_loss:.4f} train_acc={train_acc:.3f}"
+            )
+        upsert_training_job(
+            {
+                **current,
+                "status": "running",
+                "message": message,
+                "updated_at": _now_iso(),
+            }
+        )
+
     try:
         result = run_training(
             project_id=job["project_id"],
@@ -457,6 +488,7 @@ def _run_training_job(job_id: str) -> None:
             epochs=job["epochs"],
             batch_size=job["batch_size"],
             learning_rate=job.get("learning_rate", 1e-3),
+            progress_callback=_on_epoch_progress,
         )
 
         current = fetch_training_job(job_id) or job
@@ -517,6 +549,24 @@ def train_status(job_id: str) -> dict[str, Any]:
 def models_endpoint(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
     resolved = _resolve_project_id(project_id)
     return {"project_id": resolved, "items": list_models(project_id=resolved)}
+
+
+@app.get("/models/info")
+def model_infos_endpoint(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+    resolved = _resolve_project_id(project_id)
+    return {"project_id": resolved, "items": list_model_infos(project_id=resolved)}
+
+
+@app.delete("/models/{model_name}")
+def delete_model_endpoint(model_name: str, project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+    resolved = _resolve_project_id(project_id)
+    try:
+        deleted = delete_model(project_id=resolved, model_name=model_name)
+        return {"project_id": resolved, "deleted": deleted}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @app.get("/models/latest")

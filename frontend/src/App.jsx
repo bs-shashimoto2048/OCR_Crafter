@@ -40,7 +40,7 @@ const EASYOCR_LANGUAGE_OPTIONS = [
   "ru",
 ];
 const DEFAULT_PREPROCESS_PARAMS = {
-  ratio_threshold: 2.0,
+  ratio_threshold: 1.6,
   single_size: 64,
   wide_height: 48,
   wide_keep_ratio: true,
@@ -91,18 +91,23 @@ export default function App() {
     refreshed: false,
     preprocessed: false,
     datasetBuilt: false,
+    trainingStarted: false,
   });
 
   const [modelType, setModelType] = useState("square");
   const [modelTypes, setModelTypes] = useState([]);
-  const [epochs, setEpochs] = useState(5);
-  const [batchSize, setBatchSize] = useState(32);
+  const [trainRatio, setTrainRatio] = useState(0.7);
+  const [valRatio, setValRatio] = useState(0.2);
+  const [testRatio, setTestRatio] = useState(0.1);
+  const [epochs, setEpochs] = useState(50);
+  const [batchSize, setBatchSize] = useState(16);
   const [learningRate, setLearningRate] = useState(0.001);
   const [jobId, setJobId] = useState("");
   const [jobStatus, setJobStatus] = useState("idle");
   const [logs, setLogs] = useState([]);
 
   const [models, setModels] = useState([]);
+  const [modelInfos, setModelInfos] = useState({});
   const [latestModels, setLatestModels] = useState({ any: "", byType: {} });
 
   const [inferModelType, setInferModelType] = useState("square");
@@ -117,6 +122,7 @@ export default function App() {
   const [inferResult, setInferResult] = useState(null);
 
   const [evalDataset, setEvalDataset] = useState("val");
+  const [evalDatasetOptions, setEvalDatasetOptions] = useState(["val", "test"]);
   const [evalModelType, setEvalModelType] = useState("square");
   const [evalModel, setEvalModel] = useState("latest");
   const [evalUseOverrides, setEvalUseOverrides] = useState(false);
@@ -137,6 +143,7 @@ export default function App() {
   const [selectedPreset, setSelectedPreset] = useState("");
 
   const lastStatusRef = useRef("");
+  const lastMessageRef = useRef("");
   const stopPollingRef = useRef(false);
   const preprocessParamsByProjectRef = useRef({});
   const skipPreprocessPersistRef = useRef(false);
@@ -147,6 +154,19 @@ export default function App() {
 
   function notify(kind, text) {
     setNotice({ kind, text });
+  }
+
+  function resetTrainingLog(initialLine = "") {
+    stopPollingRef.current = true;
+    setJobId("");
+    setJobStatus("idle");
+    lastStatusRef.current = "";
+    lastMessageRef.current = "";
+    if (initialLine) {
+      setLogs([`[${nowLabel()}] ${initialLine}`]);
+      return;
+    }
+    setLogs([]);
   }
 
   async function exitApplication() {
@@ -262,17 +282,25 @@ export default function App() {
   async function loadModels(targetProjectId = projectId) {
     if (!targetProjectId) {
       setModels([]);
+      setModelInfos({});
       setLatestModels({ any: "", byType: {} });
       setModelTypes([]);
       return;
     }
     const pid = encodeURIComponent(targetProjectId);
-    const [modelsData, typesData] = await Promise.all([
+    const [modelsData, typesData, infosData] = await Promise.all([
       request(`/models?project_id=${pid}`),
       request(`/model-types?project_id=${pid}`),
+      request(`/models/info?project_id=${pid}`).catch(() => ({ items: [] })),
     ]);
     const modelItems = modelsData.items || [];
     const types = typesData.items || [];
+    const infoItems = infosData.items || [];
+    const infoMap = {};
+    for (const item of infoItems) {
+      if (!item?.name) continue;
+      infoMap[item.name] = item;
+    }
     const inferredTypes = modelItems
       .map((name) => {
         const stem = String(name || "").split("/").pop() || "";
@@ -284,6 +312,7 @@ export default function App() {
       .filter(Boolean);
     const mergedTypes = [...new Set([...types, ...inferredTypes, "square", "wide"])];
     setModels(modelItems);
+    setModelInfos(infoMap);
     setModelTypes(mergedTypes);
 
     const latestAny = await request(`/models/latest?project_id=${pid}`)
@@ -308,11 +337,57 @@ export default function App() {
       setLabelDrafts({});
       setSelectedIndex(0);
       setModels([]);
+      setModelInfos({});
       setLatestModels({ any: "", byType: {} });
       setModelTypes([]);
       return;
     }
     await Promise.all([loadImages(targetProjectId), loadModels(targetProjectId)]);
+  }
+
+  async function autoSelectTrainingModelType(targetProjectId = projectId) {
+    if (!targetProjectId) {
+      return;
+    }
+    const pid = encodeURIComponent(targetProjectId);
+    try {
+      const data = await request(`/dataset/meta?project_id=${pid}`);
+      const recommended = String(data?.recommended_model_type || "").trim();
+      if (!recommended) {
+        return;
+      }
+      setModelType((prev) => (prev === recommended ? prev : recommended));
+    } catch {
+      // ignore: no dataset yet or optional endpoint failure
+    }
+  }
+
+  async function refreshEvaluationDatasetOptions(targetProjectId = projectId) {
+    if (!targetProjectId) {
+      setEvalDatasetOptions(["val", "test"]);
+      setEvalDataset("val");
+      return;
+    }
+
+    const pid = encodeURIComponent(targetProjectId);
+    try {
+      const data = await request(`/dataset/meta?project_id=${pid}`);
+      const splitCounts = data?.counts || {};
+
+      const nextOptions = [];
+      if (Number(splitCounts?.val || 0) > 0) {
+        nextOptions.push("val");
+      }
+      if (Number(splitCounts?.test || 0) > 0) {
+        nextOptions.push("test");
+      }
+
+      setEvalDatasetOptions(nextOptions);
+      setEvalDataset((prev) => (nextOptions.includes(prev) ? prev : nextOptions[0] || ""));
+    } catch {
+      setEvalDatasetOptions(["val", "test"]);
+      setEvalDataset((prev) => prev || "val");
+    }
   }
 
   useEffect(() => {
@@ -385,7 +460,9 @@ export default function App() {
       refreshed: false,
       preprocessed: false,
       datasetBuilt: false,
+      trainingStarted: false,
     });
+    resetTrainingLog();
   }, [projectId]);
 
   useEffect(() => {
@@ -470,6 +547,17 @@ export default function App() {
       setPreprocessImage(images[0].image);
     }
   }, [images, preprocessImage]);
+
+  useEffect(() => {
+    if (activeView !== "training" || !projectId) {
+      return;
+    }
+    autoSelectTrainingModelType(projectId).catch(() => null);
+  }, [activeView, projectId]);
+
+  useEffect(() => {
+    refreshEvaluationDatasetOptions(projectId).catch(() => null);
+  }, [projectId]);
 
   useEffect(() => {
     if (activeView !== "preprocess") {
@@ -568,15 +656,16 @@ export default function App() {
       }
       try {
         const data = await request(`/train/${jobId}`);
-      setJobStatus(data.status || "unknown");
+        setJobStatus(data.status || "unknown");
 
-      if (data.status && data.status !== lastStatusRef.current) {
+        if (data.status && data.status !== lastStatusRef.current) {
           pushLog(`学習ステータス: ${data.status}`);
           lastStatusRef.current = data.status;
         }
 
-        if (data.message) {
+        if (data.message && data.message !== lastMessageRef.current) {
           pushLog(`メッセージ: ${data.message}`);
+          lastMessageRef.current = data.message;
         }
 
         if (data.status === "completed") {
@@ -630,18 +719,17 @@ export default function App() {
       }
 
       const key = event.key;
+      if ((key === "Enter" || key === "NumpadEnter") && !event.isComposing) {
+        event.preventDefault();
+        saveLabel(selected.image).catch(() => null);
+        return;
+      }
       if (/^[a-zA-Z0-9]$/.test(key)) {
         event.preventDefault();
         setLabelDrafts((prev) => ({
           ...prev,
           [selected.image]: `${prev[selected.image] || ""}${key}`,
         }));
-        return;
-      }
-
-      if (key === "Enter") {
-        event.preventDefault();
-        saveLabel(selected.image).catch(() => null);
         return;
       }
 
@@ -693,8 +781,12 @@ export default function App() {
     () => images.filter((item) => String(labelDrafts[item.image] || item.label || "").trim() !== "").length,
     [images, labelDrafts]
   );
+  const savedLabeledCount = useMemo(
+    () => images.filter((item) => String(item.label || "").trim() !== "").length,
+    [images]
+  );
 
-  const canTrain = images.length > 0;
+  const canTrain = workflowState.datasetBuilt && savedLabeledCount > 0;
 
   async function createProject() {
     const value = newProjectId.trim();
@@ -852,6 +944,12 @@ export default function App() {
       });
 
       setImages((prev) => prev.map((item) => (item.image === imageName ? { ...item, label: value } : item)));
+      setWorkflowState((prev) => ({
+        refreshed: prev.refreshed,
+        preprocessed: prev.preprocessed,
+        datasetBuilt: false,
+        trainingStarted: false,
+      }));
       setSelectedIndex((prev) => {
         const currentIndex = images.findIndex((item) => item.image === imageName);
         const base = currentIndex >= 0 ? currentIndex : prev;
@@ -868,6 +966,7 @@ export default function App() {
       notify("error", "プロジェクトを作成または選択してください");
       return;
     }
+    resetTrainingLog("前処理を再実行します");
     try {
       const data = await request("/preprocess/run", {
         method: "POST",
@@ -878,6 +977,7 @@ export default function App() {
         refreshed: prev.refreshed,
         preprocessed: true,
         datasetBuilt: false,
+        trainingStarted: false,
       }));
       notify("success", `${data.count} 件の前処理を実行しました`);
       pushLog(`前処理完了: ${data.count}`);
@@ -891,22 +991,69 @@ export default function App() {
       notify("error", "プロジェクトを作成または選択してください");
       return;
     }
+    resetTrainingLog("データセットを再作成します");
+    if (savedLabeledCount <= 0) {
+      setWorkflowState((prev) => ({
+        refreshed: prev.refreshed,
+        preprocessed: prev.preprocessed,
+        datasetBuilt: false,
+        trainingStarted: false,
+      }));
+      notify("error", "保存済みラベルが0件です。ラベル保存後にデータセット作成を実行してください。");
+      pushLog("データセット作成失敗: 保存済みラベルが0件");
+      return;
+    }
+
+    const train = Number(trainRatio);
+    const val = Number(valRatio);
+    const test = Number(testRatio);
+    const total = train + val + test;
+    if (!Number.isFinite(train) || !Number.isFinite(val) || !Number.isFinite(test)) {
+      notify("error", "データセット比率は数値で入力してください。");
+      return;
+    }
+    if (train <= 0 || val < 0 || test < 0) {
+      notify("error", "比率は train>0, val>=0, test>=0 を満たしてください。");
+      return;
+    }
+    if (Math.abs(total - 1.0) > 1e-6) {
+      notify("error", `比率の合計を1.00にしてください（現在: ${total.toFixed(2)}）。`);
+      return;
+    }
+
     try {
       const data = await request("/dataset/build", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project_id: projectId, train_ratio: 0.7, val_ratio: 0.2, test_ratio: 0.1 }),
+        body: JSON.stringify({ project_id: projectId, train_ratio: train, val_ratio: val, test_ratio: test }),
       });
+      const totalCount =
+        Number(data?.counts?.train || 0) + Number(data?.counts?.val || 0) + Number(data?.counts?.test || 0);
+      const totalImages = Number(data?.total_images || 0);
+      const labeledImages = Number(data?.labeled_images || 0);
+      const unlabeledImages = Number(data?.unlabeled_images || 0);
       setWorkflowState((prev) => ({
         refreshed: prev.refreshed,
         preprocessed: prev.preprocessed,
-        datasetBuilt: true,
+        datasetBuilt: totalCount > 0,
+        trainingStarted: false,
       }));
       notify(
-        "success",
-        `データセット作成完了 学習=${data.counts.train} 検証=${data.counts.val} テスト=${data.counts.test}`
+        totalCount > 0 ? "success" : "error",
+        totalCount > 0
+          ? `データセット作成完了 学習=${data.counts.train} 検証=${data.counts.val} テスト=${data.counts.test} (保存済みラベル ${labeledImages}/${totalImages})`
+          : "データセット作成結果が0件です。ラベルと前処理出力を確認してください。"
       );
+      const missing = Array.isArray(data?.missing_train_labels) ? data.missing_train_labels : [];
+      if (missing.length > 0) {
+        pushLog(`学習データ未収載ラベル: ${missing.join(", ")}`);
+      }
       pushLog(`データセット作成: ${JSON.stringify(data.counts)}`);
+      if (totalImages > 0) {
+        pushLog(`ラベル保存状況: ${labeledImages}/${totalImages}（未保存 ${unlabeledImages}）`);
+      }
+      autoSelectTrainingModelType(projectId).catch(() => null);
+      refreshEvaluationDatasetOptions(projectId).catch(() => null);
     } catch (error) {
       notify("error", error.message);
     }
@@ -932,7 +1079,14 @@ export default function App() {
 
       setJobId(data.job_id);
       setJobStatus(data.status || "queued");
+      setWorkflowState((prev) => ({
+        refreshed: prev.refreshed,
+        preprocessed: prev.preprocessed,
+        datasetBuilt: prev.datasetBuilt,
+        trainingStarted: true,
+      }));
       lastStatusRef.current = "";
+      lastMessageRef.current = "";
       pushLog(`学習開始要求: プロジェクト=${projectId} / ジョブ=${data.job_id}`);
       notify("info", `学習キューに追加しました (${data.job_id})`);
       setActiveView("training");
@@ -1090,9 +1244,40 @@ export default function App() {
     }
   }
 
+  async function deleteSelectedModels(modelNames) {
+    if (!projectId) {
+      notify("error", "プロジェクトを作成または選択してください");
+      return;
+    }
+    const names = Array.isArray(modelNames) ? modelNames.filter(Boolean) : [];
+    if (names.length === 0) {
+      return;
+    }
+
+    try {
+      const pid = encodeURIComponent(projectId);
+      await Promise.all(
+        names.map((name) =>
+          request(`/models/${encodeURIComponent(name)}?project_id=${pid}`, {
+            method: "DELETE",
+          })
+        )
+      );
+      await loadModels(projectId);
+      notify("success", `${names.length} 件のモデルを削除しました`);
+      pushLog(`モデル削除: ${names.join(", ")}`);
+    } catch (error) {
+      notify("error", error.message);
+    }
+  }
+
   async function runEvaluation() {
     if (!projectId) {
       notify("error", "プロジェクトを作成または選択してください");
+      return;
+    }
+    if (!["val", "test"].includes(evalDataset)) {
+      notify("error", "評価可能なデータセットがありません。ラベル保存後にデータセット作成を実行してください。");
       return;
     }
 
@@ -1126,7 +1311,6 @@ export default function App() {
         body: JSON.stringify(payload),
       });
       setEvalResult(data);
-      notify("success", `評価完了: 正解率 ${(Number(data.accuracy || 0) * 100).toFixed(1)}%`);
       pushLog(
         `評価 ${evalDataset}: 正解率=${(Number(data.accuracy || 0) * 100).toFixed(2)} / 件数=${data.total} / モデル=${
           data.model_name || selectedModel
@@ -1148,6 +1332,7 @@ export default function App() {
       refreshed: true,
       preprocessed: false,
       datasetBuilt: false,
+      trainingStarted: false,
     });
   }
 
@@ -1255,6 +1440,12 @@ export default function App() {
         modelType={modelType}
         setModelType={setModelType}
         modelTypes={modelTypes}
+        trainRatio={trainRatio}
+        setTrainRatio={setTrainRatio}
+        valRatio={valRatio}
+        setValRatio={setValRatio}
+        testRatio={testRatio}
+        setTestRatio={setTestRatio}
         epochs={epochs}
         setEpochs={setEpochs}
         batchSize={batchSize}
@@ -1268,12 +1459,21 @@ export default function App() {
         jobId={jobId}
         jobStatus={jobStatus}
         logs={logs}
+        workflowState={workflowState}
       />
     );
   }
 
   if (activeView === "models") {
-    view = <ModelsView models={models} latest={latestModels} onRefresh={() => loadModels(projectId)} />;
+    view = (
+      <ModelsView
+        models={models}
+        modelInfos={modelInfos}
+        latest={latestModels}
+        onRefresh={() => loadModels(projectId)}
+        onDeleteSelected={deleteSelectedModels}
+      />
+    );
   }
 
   if (activeView === "inference") {
@@ -1306,6 +1506,7 @@ export default function App() {
     view = (
       <EvaluationView
         dataset={evalDataset}
+        datasetOptions={evalDatasetOptions}
         setDataset={setEvalDataset}
         model={evalModel}
         setModel={setEvalModel}

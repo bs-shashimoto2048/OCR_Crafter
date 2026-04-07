@@ -13,6 +13,7 @@ from PIL import Image
 from sklearn.metrics import confusion_matrix
 from torchvision import transforms
 
+from ..config import get_settings
 from ..paths import IMAGE_EXTENSIONS
 from ..project_paths import ensure_project_directories
 from ..train import build_model, detect_device
@@ -72,10 +73,6 @@ def evaluate_dataset(
     overrides: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     paths = ensure_project_directories(project_id)
-    split_dir = paths.dataset / dataset_split
-    if not split_dir.exists() or not split_dir.is_dir():
-        raise FileNotFoundError(f"dataset split not found: {split_dir}")
-
     model_path = resolve_model_path(project_id=paths.project_id, model=model, model_type=model_type)
     if model_path is None:
         raise FileNotFoundError(f"model not found (model={model}, model_type={model_type or 'any'})")
@@ -85,6 +82,19 @@ def evaluate_dataset(
     resolved_model_type = str(checkpoint.get("model_type", model_type or ""))
     if not classes:
         raise ValueError("checkpoint classes are empty")
+
+    settings = get_settings()
+    image_type_to_model = settings.get("training", {}).get("image_type_to_model", {})
+    resolved_image_type = ""
+    for image_type, mapped_model_type in image_type_to_model.items():
+        if str(mapped_model_type) == resolved_model_type:
+            resolved_image_type = str(image_type)
+            break
+
+    typed_split_dir = paths.dataset / resolved_image_type / dataset_split if resolved_image_type else None
+    split_dir = typed_split_dir if typed_split_dir is not None and typed_split_dir.exists() else paths.dataset / dataset_split
+    if not split_dir.exists() or not split_dir.is_dir():
+        raise FileNotFoundError(f"dataset split not found: {split_dir}")
 
     image_size = checkpoint.get("image_size", [64, 64])
     transform = transforms.Compose(
@@ -164,6 +174,12 @@ def evaluate_dataset(
             y_pred.append(pred_label)
 
     total = len(samples)
+    if total <= 0:
+        raise ValueError(
+            "評価対象画像が0件です。"
+            f"dataset={dataset_split}, model_type={resolved_model_type}, dataset_path={split_dir}. "
+            "データセット作成時に train/val/test の比率と保存済みラベル数を確認してください。"
+        )
     correct = sum(1 for row in samples if row["correct"])
     accuracy = (correct / total) if total else 0.0
 
@@ -198,6 +214,8 @@ def evaluate_dataset(
     summary = {
         "project_id": paths.project_id,
         "dataset": dataset_split,
+        "dataset_path": str(split_dir),
+        "dataset_image_type": resolved_image_type,
         "model": model,
         "model_type": resolved_model_type,
         "model_name": model_path.name,

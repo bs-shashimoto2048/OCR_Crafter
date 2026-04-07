@@ -15,6 +15,7 @@ function MetricCard({ label, value, subValue }) {
 
 export default function EvaluationView({
   dataset,
+  datasetOptions,
   setDataset,
   model,
   setModel,
@@ -30,6 +31,12 @@ export default function EvaluationView({
 }) {
   const [onlyErrors, setOnlyErrors] = useState(false);
   const [classFilter, setClassFilter] = useState("");
+  const normalizedDatasetOptions = useMemo(() => {
+    if (!Array.isArray(datasetOptions)) {
+      return [];
+    }
+    return datasetOptions.filter((item) => item === "val" || item === "test");
+  }, [datasetOptions]);
 
   function datasetLabel(value) {
     if (value === "val") return "検証";
@@ -71,6 +78,13 @@ export default function EvaluationView({
     }
   }, [result]);
 
+  const evaluationSummaryText = useMemo(() => {
+    if (!result) {
+      return "";
+    }
+    return `評価完了: 正解率 ${(Number(result.accuracy || 0) * 100).toFixed(1)}%`;
+  }, [result]);
+
   function accuracyColor(value) {
     const ratio = Math.max(0, Math.min(1, Number(value || 0)));
     // 0%: red(0deg) -> 100%: green(120deg)
@@ -84,9 +98,21 @@ export default function EvaluationView({
         <div className="grid grid-cols-5 gap-3">
           <div>
             <label className="app-label">データセット</label>
-            <select value={dataset} onChange={(e) => setDataset(e.target.value)} className="app-select">
-              <option value="val">検証</option>
-              <option value="test">テスト</option>
+            <select
+              value={dataset}
+              onChange={(e) => setDataset(e.target.value)}
+              className="app-select"
+              disabled={normalizedDatasetOptions.length === 0}
+            >
+              {normalizedDatasetOptions.length === 0 ? (
+                <option value="">評価可能データなし</option>
+              ) : (
+                normalizedDatasetOptions.map((item) => (
+                  <option key={item} value={item}>
+                    {datasetLabel(item)}
+                  </option>
+                ))
+              )}
             </select>
           </div>
           <div>
@@ -130,7 +156,7 @@ export default function EvaluationView({
             </label>
           </div>
           <div className="flex items-end justify-end">
-            <Button onClick={onEvaluate} disabled={loading}>
+            <Button onClick={onEvaluate} disabled={loading || normalizedDatasetOptions.length === 0}>
               {loading ? "評価中..." : "評価実行"}
             </Button>
           </div>
@@ -194,7 +220,15 @@ export default function EvaluationView({
         </Card>
       </div>
 
-      <Card title="認識一覧" subtitle="フィルタで絞り込み">
+      <Card
+        title="認識一覧"
+        subtitle="フィルタで絞り込み"
+        actions={
+          evaluationSummaryText ? (
+            <span className="text-sm font-semibold text-emerald-300">{evaluationSummaryText}</span>
+          ) : null
+        }
+      >
         <div className="mb-3 grid grid-cols-3 gap-3">
           <div>
             <label className="app-label">特定クラス</label>

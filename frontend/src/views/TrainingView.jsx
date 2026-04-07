@@ -5,6 +5,12 @@ export default function TrainingView({
   modelType,
   setModelType,
   modelTypes,
+  trainRatio,
+  setTrainRatio,
+  valRatio,
+  setValRatio,
+  testRatio,
+  setTestRatio,
   epochs,
   setEpochs,
   batchSize,
@@ -18,7 +24,28 @@ export default function TrainingView({
   jobId,
   jobStatus,
   logs,
+  workflowState,
 }) {
+  const preprocessed = Boolean(workflowState?.preprocessed);
+  const datasetBuilt = Boolean(workflowState?.datasetBuilt);
+  const trainingStarted = Boolean(workflowState?.trainingStarted);
+  const isRunning = jobStatus === "queued" || jobStatus === "running";
+  const isCompleted = jobStatus === "completed";
+  const isFailed = jobStatus === "failed";
+
+  let trainingVariant = "secondary";
+  let trainingClassName = "";
+  if (isRunning) {
+    trainingVariant = "primary";
+  } else if (isCompleted) {
+    trainingVariant = "primary";
+    trainingClassName = "!bg-success hover:!bg-emerald-500 text-white";
+  } else if (isFailed) {
+    trainingVariant = "danger";
+  } else if (trainingStarted) {
+    trainingVariant = "primary";
+  }
+
   function statusLabel(value) {
     if (value === "queued") return "待機中";
     if (value === "running") return "実行中";
@@ -82,14 +109,67 @@ export default function TrainingView({
             />
           </div>
 
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label className="app-label">学習比率</label>
+              <input
+                type="number"
+                min="0"
+                max="1"
+                step="0.01"
+                value={trainRatio}
+                onChange={(e) => setTrainRatio(e.target.value)}
+                className="app-input"
+              />
+            </div>
+            <div>
+              <label className="app-label">検証比率</label>
+              <input
+                type="number"
+                min="0"
+                max="1"
+                step="0.01"
+                value={valRatio}
+                onChange={(e) => setValRatio(e.target.value)}
+                className="app-input"
+              />
+            </div>
+            <div>
+              <label className="app-label">テスト比率</label>
+              <input
+                type="number"
+                min="0"
+                max="1"
+                step="0.01"
+                value={testRatio}
+                onChange={(e) => setTestRatio(e.target.value)}
+                className="app-input"
+              />
+            </div>
+          </div>
+          <p className="text-xs text-muted">合計が 1.00 になるように設定してください。</p>
+
           <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" onClick={onPreprocess}>
+            <Button
+              variant={preprocessed ? "primary" : "secondary"}
+              className={preprocessed ? "!bg-success hover:!bg-emerald-500 text-white" : ""}
+              onClick={onPreprocess}
+            >
               前処理
             </Button>
-            <Button variant="secondary" onClick={onBuildDataset}>
+            <Button
+              variant={datasetBuilt ? "primary" : "secondary"}
+              className={datasetBuilt ? "!bg-success hover:!bg-emerald-500 text-white" : ""}
+              onClick={onBuildDataset}
+            >
               データセット作成
             </Button>
-            <Button onClick={onStartTraining} disabled={!canTrain}>
+            <Button
+              variant={trainingVariant}
+              className={trainingClassName}
+              onClick={onStartTraining}
+              disabled={!canTrain}
+            >
               学習開始
             </Button>
           </div>

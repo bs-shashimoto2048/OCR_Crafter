@@ -20,7 +20,7 @@ from .image_classifier import classify_image_type
 from .labels import upsert_image_type
 
 DEFAULT_PREPROCESS_CONFIG: dict[str, Any] = {
-    "ratio_threshold": 2.0,
+    "ratio_threshold": 1.6,
     "pipelines": {
         "single": ["grayscale", "sharpen", "threshold", "stroke_boost", "denoise", "pad", "resize"],
         "wide": ["grayscale", "clahe", "sharpen", "threshold", "stroke_boost", "deskew", "resize", "denoise"],
@@ -454,7 +454,7 @@ def _to_data_url(gray: np.ndarray) -> str:
 def _process_image(img: Image.Image, cfg: dict[str, Any]) -> tuple[str, np.ndarray, np.ndarray, list[str], float]:
     w, h = img.size
     ratio = (w / h) if h else 1.0
-    ratio_threshold = float(cfg.get("ratio_threshold", 2.0))
+    ratio_threshold = float(cfg.get("ratio_threshold", 1.6))
     image_type = classify_image_type(img, ratio_threshold=ratio_threshold)
     pipelines = cfg.get("pipelines", {})
     pipeline = list(pipelines.get(image_type, []))
@@ -514,6 +514,15 @@ def _process_one(file_path: Path, paths: Any, cfg: dict[str, Any]) -> dict[str, 
     processed_path = processed_dir / f"{file_path.stem}.png"
     Image.fromarray(interim_arr, mode="L").save(interim_path)
     Image.fromarray(processed_arr, mode="L").save(processed_path)
+
+    # If image type changed compared to past runs, remove stale processed output
+    # from the opposite type to avoid confusing UI/serving paths.
+    for other_type in ("single", "wide"):
+        if other_type == image_type:
+            continue
+        stale_path = paths.processed / other_type / "images" / f"{file_path.stem}.png"
+        if stale_path.exists():
+            stale_path.unlink()
 
     meta_path = _save_meta(
         paths.processed / "meta",

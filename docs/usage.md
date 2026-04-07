@@ -12,7 +12,7 @@
 
 ```bash
 python3.11 --version
-node --version
+node --version新選択時の種別
 npm --version
 ```
 
