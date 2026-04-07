@@ -89,6 +89,17 @@ def _auto_model_type_for_image(image_type: str) -> Optional[str]:
     return mapping.get(image_type) or fallback
 
 
+def _image_type_for_model_type(model_type: Optional[str]) -> Optional[str]:
+    if not model_type:
+        return None
+    settings = get_settings()
+    mapping = settings.get("training", {}).get("image_type_to_model", {"single": "square", "wide": "wide"})
+    for image_type, mapped_model_type in mapping.items():
+        if str(mapped_model_type) == str(model_type):
+            return str(image_type)
+    return None
+
+
 def predict_from_image(
     image_path: str,
     model_type: Optional[str] = None,
@@ -107,7 +118,8 @@ def predict_from_image(
     selected_model_type = model_type
 
     if apply_preprocess:
-        pre = preprocess_image_for_model(image_path)
+        forced_image_type = _image_type_for_model_type(selected_model_type)
+        pre = preprocess_image_for_model(image_path, force_image_type=forced_image_type)
         preprocess_meta = {
             "applied": True,
             "image_type": str(pre.get("type", "")),

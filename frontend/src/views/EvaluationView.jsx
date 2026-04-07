@@ -28,7 +28,7 @@ export default function EvaluationView({
   result,
   onEvaluate,
 }) {
-  const [onlyErrors, setOnlyErrors] = useState(true);
+  const [onlyErrors, setOnlyErrors] = useState(false);
   const [classFilter, setClassFilter] = useState("");
 
   function datasetLabel(value) {
@@ -58,6 +58,25 @@ export default function EvaluationView({
       return true;
     });
   }, [result, onlyErrors, classFilter]);
+
+  const preprocessConfigLine = useMemo(() => {
+    const cfg = result?.preprocess_config;
+    if (!cfg || typeof cfg !== "object") {
+      return "";
+    }
+    try {
+      return JSON.stringify(cfg);
+    } catch {
+      return "";
+    }
+  }, [result]);
+
+  function accuracyColor(value) {
+    const ratio = Math.max(0, Math.min(1, Number(value || 0)));
+    // 0%: red(0deg) -> 100%: green(120deg)
+    const hue = Math.round(ratio * 120);
+    return `hsl(${hue} 78% 58%)`;
+  }
 
   return (
     <div className="space-y-4">
@@ -118,6 +137,16 @@ export default function EvaluationView({
         </div>
       </Card>
 
+      <div className="rounded-lg border border-border bg-[#333d49] p-3">
+        <label className="app-label">このプロジェクトの前処理設定（コピー用）</label>
+        <input
+          className="app-input font-mono text-xs"
+          readOnly
+          value={preprocessConfigLine || "評価実行後に表示されます。"}
+          onFocus={(e) => e.target.select()}
+        />
+      </div>
+
       <div className="grid grid-cols-3 gap-4">
         <MetricCard
           label="正解率"
@@ -156,7 +185,7 @@ export default function EvaluationView({
                 <div key={label} className="mb-2 rounded-lg border border-border bg-[#333d49] px-3 py-2">
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-text">{label}</span>
-                    <span className="text-muted">{(Number(acc) * 100).toFixed(1)}%</span>
+                    <span style={{ color: accuracyColor(acc) }}>{(Number(acc) * 100).toFixed(1)}%</span>
                   </div>
                 </div>
               ))
@@ -165,12 +194,8 @@ export default function EvaluationView({
         </Card>
       </div>
 
-      <Card title="誤認識一覧" subtitle="フィルタで絞り込み">
+      <Card title="認識一覧" subtitle="フィルタで絞り込み">
         <div className="mb-3 grid grid-cols-3 gap-3">
-          <label className="inline-flex items-center gap-2 text-sm text-text">
-            <input type="checkbox" checked={onlyErrors} onChange={(e) => setOnlyErrors(e.target.checked)} />
-            誤認識のみ
-          </label>
           <div>
             <label className="app-label">特定クラス</label>
             <select value={classFilter} onChange={(e) => setClassFilter(e.target.value)} className="app-select">
@@ -182,28 +207,34 @@ export default function EvaluationView({
               ))}
             </select>
           </div>
+          <label className="inline-flex items-end gap-2 text-sm text-text pb-2">
+            <input type="checkbox" checked={onlyErrors} onChange={(e) => setOnlyErrors(e.target.checked)} />
+            誤認識のみ
+          </label>
           <div className="flex items-end justify-end text-sm text-muted">表示件数: {rows.length}</div>
         </div>
 
-        <div className="grid grid-cols-3 gap-3">
-          {rows.map((row, idx) => (
-            <div key={`${row.image}-${idx}`} className="rounded-lg border border-border bg-[#333d49] p-3">
-              {row.thumbnail_data_url ? (
-                <img
-                  src={row.thumbnail_data_url}
-                  alt={row.image}
-                  className="mb-2 h-28 w-full rounded-md border border-border object-contain"
-                />
-              ) : null}
-              <p className="truncate text-xs text-muted">{row.image}</p>
-              <p className="mt-1 text-sm text-text">
-                正解 <span className="font-semibold">{row.gt}</span> / 予測{" "}
-                <span className={`font-semibold ${row.correct ? "text-success" : "text-danger"}`}>{row.pred}</span>
-              </p>
-              <p className="text-xs text-muted">信頼度 {(Number(row.confidence || 0) * 100).toFixed(1)}%</p>
-            </div>
-          ))}
-          {rows.length === 0 ? <p className="text-sm text-muted">該当データがありません。</p> : null}
+        <div className="max-h-[520px] overflow-auto pr-1">
+          <div className="grid grid-cols-3 gap-3">
+            {rows.map((row, idx) => (
+              <div key={`${row.image}-${idx}`} className="rounded-lg border border-border bg-[#333d49] p-3">
+                {row.thumbnail_data_url ? (
+                  <img
+                    src={row.thumbnail_data_url}
+                    alt={row.image}
+                    className="mb-2 h-28 w-full rounded-md border border-border object-contain"
+                  />
+                ) : null}
+                <p className="truncate text-xs text-muted">{row.image}</p>
+                <p className="mt-1 text-sm text-text">
+                  正解 <span className="font-semibold">{row.gt}</span> / 予測{" "}
+                  <span className={`font-semibold ${row.correct ? "text-success" : "text-danger"}`}>{row.pred}</span>
+                </p>
+                <p className="text-xs text-muted">信頼度 {(Number(row.confidence || 0) * 100).toFixed(1)}%</p>
+              </div>
+            ))}
+            {rows.length === 0 ? <p className="text-sm text-muted">該当データがありません。</p> : null}
+          </div>
         </div>
       </Card>
     </div>

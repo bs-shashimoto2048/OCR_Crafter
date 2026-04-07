@@ -470,11 +470,26 @@ def preprocess_image_for_model(
     image_path: str | Path,
     overrides: Optional[dict[str, Any]] = None,
     config: Optional[dict[str, Any]] = None,
+    force_image_type: Optional[str] = None,
 ) -> dict[str, Any]:
     cfg = copy.deepcopy(config) if isinstance(config, dict) else _build_preprocess_config(overrides)
     with Image.open(image_path) as opened:
         img = ImageOps.exif_transpose(opened)
-        image_type, interim_arr, processed_arr, pipeline, ratio = _process_image(img, cfg)
+        if force_image_type:
+            forced = str(force_image_type).strip().lower()
+            pipelines = cfg.get("pipelines", {})
+            if forced not in pipelines:
+                raise ValueError(f"invalid force_image_type: {force_image_type}")
+            w, h = img.size
+            ratio = (w / h) if h else 1.0
+            pipeline = list(pipelines.get(forced, []))
+            if not pipeline:
+                raise ValueError(f"pipeline is empty for type={forced}")
+            operations_cfg = cfg.get("operations", {})
+            interim_arr, processed_arr = _run_pipeline(img, forced, pipeline, operations_cfg)
+            image_type = forced
+        else:
+            image_type, interim_arr, processed_arr, pipeline, ratio = _process_image(img, cfg)
     return {
         "type": image_type,
         "ratio": ratio,

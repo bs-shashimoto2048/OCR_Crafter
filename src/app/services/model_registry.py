@@ -21,11 +21,17 @@ def model_type_from_name(model_name: str) -> str:
 
 def list_model_types(project_id: Optional[str] = None) -> list[str]:
     settings = get_settings()
-    configured = list((settings.get("training", {}).get("models", {}) or {}).keys())
+    training_cfg = settings.get("training", {}) or {}
+    configured = list((training_cfg.get("models", {}) or {}).keys())
+    mapped_types = list((training_cfg.get("image_type_to_model", {}) or {}).values())
+    default_type = training_cfg.get("default_model_type")
+    fallback_types = ["square", "wide"]
     from_files = sorted({model_type_from_name(name) for name in list_models(project_id) if model_type_from_name(name) != "unknown"})
     seen = set()
     merged: list[str] = []
-    for item in configured + from_files:
+    for item in configured + mapped_types + ([default_type] if default_type else []) + from_files + fallback_types:
+        if not item:
+            continue
         if item in seen:
             continue
         seen.add(item)

@@ -82,6 +82,7 @@ def evaluate_dataset(
 
     checkpoint = torch.load(model_path, map_location="cpu")
     classes = [str(x) for x in checkpoint.get("classes", [])]
+    resolved_model_type = str(checkpoint.get("model_type", model_type or ""))
     if not classes:
         raise ValueError("checkpoint classes are empty")
 
@@ -198,7 +199,7 @@ def evaluate_dataset(
         "project_id": paths.project_id,
         "dataset": dataset_split,
         "model": model,
-        "model_type": model_type,
+        "model_type": resolved_model_type,
         "model_name": model_path.name,
         "model_path": str(model_path),
         "accuracy": accuracy,

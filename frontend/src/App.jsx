@@ -64,6 +64,14 @@ function nowLabel() {
   return new Date().toLocaleTimeString("ja-JP", { hour12: false });
 }
 
+function modelTypeFromModelName(modelName) {
+  const stem = String(modelName || "").split("/").pop() || "";
+  if (!stem.includes("_")) {
+    return "";
+  }
+  return stem.split("_", 1)[0];
+}
+
 export default function App() {
   const [activeView, setActiveView] = useState("dashboard");
   const [notice, setNotice] = useState({ kind: "info", text: "準備完了" });
@@ -265,15 +273,25 @@ export default function App() {
     ]);
     const modelItems = modelsData.items || [];
     const types = typesData.items || [];
+    const inferredTypes = modelItems
+      .map((name) => {
+        const stem = String(name || "").split("/").pop() || "";
+        if (!stem.includes("_")) {
+          return "";
+        }
+        return stem.split("_", 1)[0];
+      })
+      .filter(Boolean);
+    const mergedTypes = [...new Set([...types, ...inferredTypes, "square", "wide"])];
     setModels(modelItems);
-    setModelTypes(types);
+    setModelTypes(mergedTypes);
 
     const latestAny = await request(`/models/latest?project_id=${pid}`)
       .then((r) => r.model || "")
       .catch(() => "");
 
     const latestEntries = await Promise.all(
-      types.map(async (type) => {
+      mergedTypes.map(async (type) => {
         const model = await request(`/models/latest?project_id=${pid}&model_type=${encodeURIComponent(type)}`)
           .then((r) => r.model || "")
           .catch(() => "");
@@ -405,6 +423,26 @@ export default function App() {
       setPreprocessPredictModel("latest");
     }
   }, [models, inferModel, evalModel, preprocessPredictModel]);
+
+  useEffect(() => {
+    if (inferModel === "latest") {
+      return;
+    }
+    const inferred = modelTypeFromModelName(inferModel);
+    if (inferred && inferModelType !== inferred) {
+      setInferModelType(inferred);
+    }
+  }, [inferModel, inferModelType]);
+
+  useEffect(() => {
+    if (evalModel === "latest") {
+      return;
+    }
+    const inferred = modelTypeFromModelName(evalModel);
+    if (inferred && evalModelType !== inferred) {
+      setEvalModelType(inferred);
+    }
+  }, [evalModel, evalModelType]);
 
   useEffect(() => {
     try {
@@ -1060,11 +1098,26 @@ export default function App() {
 
     setEvalLoading(true);
     try {
+      let selectedModel = evalModel;
+      let selectedModelType = evalModel === "latest" ? evalModelType : null;
+      if (evalModel === "latest") {
+        const latest = await request(
+          `/models/latest?project_id=${encodeURIComponent(projectId)}&model_type=${encodeURIComponent(evalModelType)}`
+        );
+        const resolvedPath = String(latest?.model || "");
+        const resolvedName = resolvedPath.split("/").pop() || "";
+        if (!resolvedName) {
+          throw new Error(`最新モデルが見つかりません（種別: ${evalModelType}）`);
+        }
+        selectedModel = resolvedName;
+        selectedModelType = null;
+      }
+
       const payload = {
         project_id: projectId,
         dataset: evalDataset,
-        model: evalModel,
-        model_type: evalModel === "latest" ? evalModelType : null,
+        model: selectedModel,
+        model_type: selectedModelType,
         overrides: evalUseOverrides ? buildPreprocessOverrides(preprocessParams) : null,
       };
       const data = await request("/evaluate", {
@@ -1074,7 +1127,11 @@ export default function App() {
       });
       setEvalResult(data);
       notify("success", `評価完了: 正解率 ${(Number(data.accuracy || 0) * 100).toFixed(1)}%`);
-      pushLog(`評価 ${evalDataset}: 正解率=${(Number(data.accuracy || 0) * 100).toFixed(2)} / 件数=${data.total}`);
+      pushLog(
+        `評価 ${evalDataset}: 正解率=${(Number(data.accuracy || 0) * 100).toFixed(2)} / 件数=${data.total} / モデル=${
+          data.model_name || selectedModel
+        } / 前処理設定=${evalUseOverrides ? "ON" : "OFF"}`
+      );
       setActiveView("evaluation");
     } catch (error) {
       notify("error", error.message);

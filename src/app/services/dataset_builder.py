@@ -16,7 +16,21 @@ def _clear_split_dirs(dataset_dir: Path) -> None:
         target.mkdir(parents=True, exist_ok=True)
 
 
-def _resolve_image(image_name: str, interim_dir: Path, raw_dir: Path) -> Optional[Path]:
+def _resolve_image(image_name: str, image_type: str, processed_dir: Path, interim_dir: Path, raw_dir: Path) -> Optional[Path]:
+    stem = Path(image_name).stem
+    normalized_type = (image_type or "").strip().lower()
+    candidates: list[Path] = []
+
+    if normalized_type in {"single", "wide"}:
+        candidates.append(processed_dir / normalized_type / "images" / f"{stem}.png")
+    else:
+        candidates.append(processed_dir / "single" / "images" / f"{stem}.png")
+        candidates.append(processed_dir / "wide" / "images" / f"{stem}.png")
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
     interim_candidate = interim_dir / f"{Path(image_name).stem}.png"
     if interim_candidate.exists():
         return interim_candidate
@@ -26,6 +40,49 @@ def _resolve_image(image_name: str, interim_dir: Path, raw_dir: Path) -> Optiona
         return raw_candidate
 
     return None
+
+
+def _split_counts_for_class(n: int, train_ratio: float, val_ratio: float, test_ratio: float) -> tuple[int, int, int]:
+    if n <= 0:
+        return 0, 0, 0
+    if n == 1:
+        return 1, 0, 0
+    if n == 2:
+        # Keep one sample for train, and allocate the other to the larger eval split.
+        if val_ratio >= test_ratio:
+            return 1, 1, 0
+        return 1, 0, 1
+
+    if n == 3:
+        # Ensure all splits are represented when possible.
+        return 1, 1, 1
+
+    # n >= 4: guarantee each split has at least one sample, then distribute the rest
+    # by largest remainder to approximate the requested ratios.
+    counts = [1, 1, 1]  # train, val, test
+    remain = n - 3
+    targets = [n * train_ratio, n * val_ratio, n * test_ratio]
+    desired = [max(0.0, targets[i] - counts[i]) for i in range(3)]
+    base_extra = [int(x) for x in desired]
+    allocated = sum(base_extra)
+
+    for i in range(3):
+        counts[i] += base_extra[i]
+
+    remain -= allocated
+    if remain > 0:
+        remainders = sorted(
+            ((desired[i] - base_extra[i], i) for i in range(3)),
+            key=lambda x: x[0],
+            reverse=True,
+        )
+        idx = 0
+        while remain > 0:
+            counts[remainders[idx % 3][1]] += 1
+            remain -= 1
+            idx += 1
+
+    return counts[0], counts[1], counts[2]
 
 
 def build_dataset(
@@ -47,7 +104,7 @@ def build_dataset(
         image_name = row.get("filename") or row.get("image")
         if not image_name:
             continue
-        path = _resolve_image(image_name, paths.interim, paths.raw)
+        path = _resolve_image(image_name, row.get("type", ""), paths.processed, paths.interim, paths.raw)
         if path is None:
             continue
         buckets[row["label"]].append(path)
@@ -63,12 +120,7 @@ def build_dataset(
         if n <= 0:
             continue
 
-        # Ensure at least one sample per class is available for training.
-        n_train = max(1, int(n * train_ratio))
-        n_val = int(n * val_ratio)
-        if n_train + n_val > n:
-            n_val = max(0, n - n_train)
-        n_test = max(0, n - n_train - n_val)
+        n_train, n_val, n_test = _split_counts_for_class(n, train_ratio, val_ratio, test_ratio)
 
         split_map = {
             "train": image_paths[:n_train],
