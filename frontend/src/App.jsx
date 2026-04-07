@@ -1209,7 +1209,19 @@ export default function App() {
           </Button>
         </div>
 
-        <Header title={currentMeta.title} subtitle={`${currentMeta.subtitle} / プロジェクト: ${projectId}`} status={jobStatus} />
+        <Header
+          title={currentMeta.title}
+          subtitle={`${currentMeta.subtitle} / プロジェクト: ${projectId}`}
+          status={jobStatus}
+          labelProgress={
+            activeView === "labeling"
+              ? {
+                  labeled: labeledCount,
+                  total: images.length,
+                }
+              : null
+          }
+        />
 
         <section className="mt-6">{view}</section>
 

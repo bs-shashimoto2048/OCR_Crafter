@@ -34,14 +34,21 @@ function StatusIndicator({ status }) {
   );
 }
 
-export default function Header({ title, subtitle, status }) {
+export default function Header({ title, subtitle, status, labelProgress }) {
   return (
     <header className="flex items-start justify-between border-b border-border pb-5">
       <div>
         <h2 className="text-2xl font-semibold text-text">{title}</h2>
         <p className="mt-1 text-sm text-muted">{subtitle}</p>
       </div>
-      <StatusIndicator status={status} />
+      <div className="flex flex-col items-end gap-2">
+        <StatusIndicator status={status} />
+        {labelProgress ? (
+          <p className="text-sm font-medium text-lime-300">
+            {labelProgress.labeled} / {labelProgress.total}
+          </p>
+        ) : null}
+      </div>
     </header>
   );
 }
