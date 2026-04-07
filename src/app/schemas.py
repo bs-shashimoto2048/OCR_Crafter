@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -10,15 +10,7 @@ class ImportImagesRequest(BaseModel):
 
 class PreprocessRequest(BaseModel):
     project_id: Optional[str] = "default"
-    grayscale_enabled: Optional[bool] = None
-    resize_enabled: Optional[bool] = None
-    resize_width: Optional[int] = None
-    resize_height: Optional[int] = None
-    padding_enabled: Optional[bool] = None
-    padding_fill: Optional[int] = None
-    normalize_enabled: Optional[bool] = None
-    normalize_mean: Optional[float] = None
-    normalize_std: Optional[float] = None
+    overrides: Optional[dict[str, Any]] = None
 
 
 class LabelUpdateRequest(BaseModel):
@@ -35,7 +27,7 @@ class DatasetBuildRequest(BaseModel):
 
 class TrainRequest(BaseModel):
     project_id: Optional[str] = "default"
-    model_type: str = Field(default="square", pattern="^(square|wide)$")
+    model_type: str = Field(default="square")
     epochs: int = Field(default=5, ge=1, le=500)
     batch_size: int = Field(default=32, ge=1, le=1024)
     learning_rate: float = Field(default=1e-3, gt=0)
@@ -51,3 +43,25 @@ class DirectorySelectRequest(BaseModel):
 
 class RotateImageRequest(BaseModel):
     angle: int = Field(..., description="回転角度（90の倍数。右回転が正）")
+
+
+class PreprocessPreviewRequest(BaseModel):
+    image: str = Field(..., description="プレビュー対象の画像ファイル名")
+    project_id: Optional[str] = Field(default="default", description="プロジェクトID")
+    overrides: Optional[dict[str, Any]] = Field(default=None, description="前処理設定の上書き")
+    engine: str = Field(default="custom", description="推論エンジン: custom/easyocr")
+    model: str = Field(default="latest", description="custom時のモデル指定")
+    model_type: Optional[str] = Field(default=None, description="custom+latest時のモデル種別")
+    easyocr_langs: str = Field(default="en", description="easyocr使用言語 (comma separated)")
+
+
+class EvaluateRequest(BaseModel):
+    project_id: Optional[str] = Field(default="default", description="プロジェクトID")
+    dataset: str = Field(default="val", pattern="^(val|test)$")
+    model: str = Field(default="latest", description="latest またはモデルファイル名")
+    model_type: Optional[str] = Field(default=None, description="latest選択時のモデル種別絞り込み")
+    overrides: Optional[dict[str, Any]] = Field(default=None, description="前処理設定の上書き")
+
+
+class AppShutdownRequest(BaseModel):
+    frontend_port: Optional[int] = Field(default=None, description="フロントエンド開発サーバーのポート")

@@ -4,6 +4,7 @@ import Button from "../components/Button";
 export default function TrainingView({
   modelType,
   setModelType,
+  modelTypes,
   epochs,
   setEpochs,
   batchSize,
@@ -18,24 +19,40 @@ export default function TrainingView({
   jobStatus,
   logs,
 }) {
+  function statusLabel(value) {
+    if (value === "queued") return "待機中";
+    if (value === "running") return "実行中";
+    if (value === "completed") return "完了";
+    if (value === "failed") return "失敗";
+    if (value === "idle") return "未実行";
+    return value || "-";
+  }
+
   return (
     <div className="grid grid-cols-[1fr_1.2fr] gap-6">
-      <Card title="Training Parameters" subtitle="ResNet18ベース分類モデル">
+      <Card title="学習パラメータ" subtitle="ResNet18ベース分類モデル">
         <div className="space-y-4">
           <div>
-            <label className="app-label">Model Type</label>
+            <label className="app-label">モデル種別</label>
             <select
               value={modelType}
               onChange={(e) => setModelType(e.target.value)}
               className="app-select"
             >
-              <option value="square">square</option>
-              <option value="wide">wide</option>
+              {modelTypes.length === 0 ? (
+                <option value={modelType}>{modelType || "既定"}</option>
+              ) : (
+                modelTypes.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))
+              )}
             </select>
           </div>
 
           <div>
-            <label className="app-label">Epochs</label>
+            <label className="app-label">エポック数</label>
             <input
               type="number"
               value={epochs}
@@ -45,7 +62,7 @@ export default function TrainingView({
           </div>
 
           <div>
-            <label className="app-label">Batch Size</label>
+            <label className="app-label">バッチサイズ</label>
             <input
               type="number"
               value={batchSize}
@@ -55,7 +72,7 @@ export default function TrainingView({
           </div>
 
           <div>
-            <label className="app-label">Learning Rate</label>
+            <label className="app-label">学習率</label>
             <input
               type="number"
               step="0.0001"
@@ -67,27 +84,27 @@ export default function TrainingView({
 
           <div className="flex flex-wrap gap-2">
             <Button variant="secondary" onClick={onPreprocess}>
-              Preprocess
+              前処理
             </Button>
             <Button variant="secondary" onClick={onBuildDataset}>
-              Build Dataset
+              データセット作成
             </Button>
             <Button onClick={onStartTraining} disabled={!canTrain}>
-              Start Training
+              学習開始
             </Button>
           </div>
         </div>
       </Card>
 
-      <Card title="Training Logs" subtitle="学習状態をリアルタイムで表示します">
+      <Card title="学習ログ" subtitle="学習状態をリアルタイムで表示します">
         <div className="mb-3 flex items-center justify-between text-xs text-muted">
-          <span>Job ID: {jobId || "-"}</span>
-          <span>Status: {jobStatus}</span>
+          <span>ジョブID: {jobId || "-"}</span>
+          <span>状態: {statusLabel(jobStatus)}</span>
         </div>
 
         <div className="h-[360px] overflow-auto rounded-lg border border-border bg-[#333d49] p-3 font-mono text-xs text-slate-200">
           {logs.length === 0 ? (
-            <p className="text-muted">No logs yet.</p>
+            <p className="text-muted">ログはまだありません。</p>
           ) : (
             logs.map((line, idx) => (
               <p key={`${line}-${idx}`} className="mb-1">

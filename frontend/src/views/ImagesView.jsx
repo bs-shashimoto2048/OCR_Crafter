@@ -17,20 +17,22 @@ export default function ImagesView({
 }) {
   return (
     <div className="space-y-6">
-      <Card title="Import Images" subtitle="外部ディレクトリから project/raw にコピーします">
+      <Card title="画像取り込み" subtitle="外部ディレクトリから project/raw にコピーします">
         <div className="flex gap-3">
           <input
             value={sourceDir}
             onChange={(e) => setSourceDir(e.target.value)}
-            placeholder="/path/to/images"
-            className="app-input"
+            placeholder="画像フォルダのパス"
+            className="app-input min-w-0 flex-1"
           />
-          <Button variant="secondary" onClick={onBrowseDir}>
-            Browse
+          <Button variant="secondary" className="shrink-0 whitespace-nowrap" onClick={onBrowseDir}>
+            参照
           </Button>
-          <Button onClick={onImport}>Import</Button>
-          <Button variant="secondary" onClick={onRefresh}>
-            Refresh
+          <Button className="shrink-0 whitespace-nowrap" onClick={onImport}>
+            取り込み
+          </Button>
+          <Button variant="secondary" className="shrink-0 whitespace-nowrap" onClick={onRefresh}>
+            更新
           </Button>
         </div>
       </Card>
@@ -46,20 +48,20 @@ export default function ImagesView({
               />
               <div className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 transition duration-200 group-hover:opacity-100">
                 <Button size="sm" onClick={() => onOpenLabeling(item.image)}>
-                  Open in Labeling
+                  ラベル編集を開く
                 </Button>
               </div>
             </div>
             <div className="space-y-1 p-4">
               <p className="truncate text-sm font-medium text-text">{item.image}</p>
-              <p className="text-xs text-muted">Label: {item.label || "-"}</p>
-              <p className="text-xs text-muted">Shape: {imageShapes[item.image] || "--"}</p>
+              <p className="text-xs text-muted">ラベル: {item.label || "-"}</p>
+              <p className="text-xs text-muted">サイズ: {imageShapes[item.image] || "--"}</p>
               <div className="pt-2 flex gap-2">
                 <Button size="sm" variant="secondary" onClick={() => onRotate(item.image, -90)}>
-                  Rotate L
+                  左回転
                 </Button>
                 <Button size="sm" variant="secondary" onClick={() => onRotate(item.image, 90)}>
-                  Rotate R
+                  右回転
                 </Button>
               </div>
             </div>

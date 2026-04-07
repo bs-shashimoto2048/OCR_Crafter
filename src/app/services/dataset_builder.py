@@ -44,7 +44,10 @@ def build_dataset(
     buckets: dict[str, list[Path]] = defaultdict(list)
 
     for row in labels:
-        path = _resolve_image(row["image"], paths.interim, paths.raw)
+        image_name = row.get("filename") or row.get("image")
+        if not image_name:
+            continue
+        path = _resolve_image(image_name, paths.interim, paths.raw)
         if path is None:
             continue
         buckets[row["label"]].append(path)
@@ -54,17 +57,17 @@ def build_dataset(
 
     counts = {"train": 0, "val": 0, "test": 0}
 
-    for label, paths in buckets.items():
-        rng.shuffle(paths)
-        n = len(paths)
+    for label, image_paths in buckets.items():
+        rng.shuffle(image_paths)
+        n = len(image_paths)
         n_train = int(n * train_ratio)
         n_val = int(n * val_ratio)
         n_test = n - n_train - n_val
 
         split_map = {
-            "train": paths[:n_train],
-            "val": paths[n_train : n_train + n_val],
-            "test": paths[n_train + n_val : n_train + n_val + n_test],
+            "train": image_paths[:n_train],
+            "val": image_paths[n_train : n_train + n_val],
+            "test": image_paths[n_train + n_val : n_train + n_val + n_test],
         }
 
         for split, split_paths in split_map.items():

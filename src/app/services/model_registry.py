@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Optional
 
+from ..config import get_settings
 from ..project_paths import ensure_project_directories
 
 
@@ -9,6 +10,27 @@ def list_models(project_id: Optional[str] = None) -> list[str]:
     paths.models.mkdir(parents=True, exist_ok=True)
     files = [p.name for p in paths.models.glob("*.pt") if p.is_file()]
     return sorted(files)
+
+
+def model_type_from_name(model_name: str) -> str:
+    stem = Path(model_name).stem
+    if "_" not in stem:
+        return "unknown"
+    return stem.split("_", 1)[0]
+
+
+def list_model_types(project_id: Optional[str] = None) -> list[str]:
+    settings = get_settings()
+    configured = list((settings.get("training", {}).get("models", {}) or {}).keys())
+    from_files = sorted({model_type_from_name(name) for name in list_models(project_id) if model_type_from_name(name) != "unknown"})
+    seen = set()
+    merged: list[str] = []
+    for item in configured + from_files:
+        if item in seen:
+            continue
+        seen.add(item)
+        merged.append(item)
+    return merged
 
 
 def latest_model(project_id: Optional[str] = None, model_type: Optional[str] = None) -> Optional[Path]:
@@ -24,3 +46,19 @@ def latest_model(project_id: Optional[str] = None, model_type: Optional[str] = N
         return None
 
     return max(candidates, key=lambda p: p.stat().st_mtime)
+
+
+def resolve_model_path(
+    project_id: Optional[str] = None,
+    model: str = "latest",
+    model_type: Optional[str] = None,
+) -> Optional[Path]:
+    normalized_model = (model or "latest").strip()
+    if normalized_model in {"", "latest"}:
+        return latest_model(project_id=project_id, model_type=model_type)
+
+    paths = ensure_project_directories(project_id)
+    candidate = paths.models / Path(normalized_model).name
+    if not candidate.exists() or not candidate.is_file():
+        return None
+    return candidate

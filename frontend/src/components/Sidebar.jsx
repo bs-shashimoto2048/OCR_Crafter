@@ -1,17 +1,21 @@
+import Button from "./Button";
+
 const navItems = [
-  { id: "dashboard", label: "Dashboard" },
-  { id: "images", label: "Images" },
-  { id: "labeling", label: "Labeling" },
-  { id: "training", label: "Training" },
-  { id: "models", label: "Models" },
-  { id: "inference", label: "Inference" },
+  { id: "dashboard", label: "ダッシュボード" },
+  { id: "images", label: "画像" },
+  { id: "preprocess", label: "前処理調整" },
+  { id: "labeling", label: "ラベル編集" },
+  { id: "training", label: "学習" },
+  { id: "models", label: "モデル" },
+  { id: "inference", label: "推論" },
+  { id: "evaluation", label: "評価" },
 ];
 
-export default function Sidebar({ active, onChange }) {
+export default function Sidebar({ active, onChange, onExitApp }) {
   return (
-    <aside className="fixed inset-y-0 left-0 w-64 border-r border-border bg-[#27313c] px-5 py-6">
+    <aside className="fixed inset-y-0 left-0 flex w-64 flex-col border-r border-border bg-[#27313c] px-5 py-6">
       <div className="mb-8">
-        <p className="text-xs uppercase tracking-[0.18em] text-muted">OCR Platform</p>
+        <p className="text-xs uppercase tracking-[0.18em] text-muted">OCR プラットフォーム</p>
         <h1 className="mt-2 text-xl font-semibold text-text">OCR Crafter</h1>
       </div>
 
@@ -37,6 +41,17 @@ export default function Sidebar({ active, onChange }) {
           );
         })}
       </nav>
+
+      <div className="mt-auto border-t border-border pt-4">
+        <Button
+          variant="danger"
+          className="w-full whitespace-nowrap"
+          onClick={() => onExitApp?.()}
+          type="button"
+        >
+          アプリ終了
+        </Button>
+      </div>
     </aside>
   );
 }

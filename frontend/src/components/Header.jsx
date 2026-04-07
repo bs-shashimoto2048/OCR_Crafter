@@ -3,7 +3,7 @@ function StatusIndicator({ status }) {
     return (
       <div className="inline-flex items-center gap-2 rounded-full border border-blue-400/30 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-300">
         <span className="h-3 w-3 animate-spin rounded-full border-2 border-blue-300 border-t-transparent" />
-        Training...
+        学習中...
       </div>
     );
   }
@@ -12,7 +12,7 @@ function StatusIndicator({ status }) {
     return (
       <div className="inline-flex items-center gap-2 rounded-full border border-success/40 bg-success/10 px-3 py-1 text-xs font-medium text-success">
         <span className="h-2 w-2 rounded-full bg-success" />
-        Success
+        成功
       </div>
     );
   }
@@ -21,7 +21,7 @@ function StatusIndicator({ status }) {
     return (
       <div className="inline-flex items-center gap-2 rounded-full border border-danger/40 bg-danger/10 px-3 py-1 text-xs font-medium text-danger">
         <span className="h-2 w-2 rounded-full bg-danger" />
-        Failed
+        失敗
       </div>
     );
   }
@@ -29,7 +29,7 @@ function StatusIndicator({ status }) {
   return (
     <div className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs font-medium text-muted">
       <span className="h-2 w-2 rounded-full bg-muted/50" />
-      Idle
+      待機中
     </div>
   );
 }

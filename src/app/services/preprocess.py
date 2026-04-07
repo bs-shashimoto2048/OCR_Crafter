@@ -1,110 +1,601 @@
+import copy
+import io
+import json
+import base64
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import numpy as np
-import torch
-from PIL import Image, ImageOps
+from PIL import Image, ImageFilter, ImageOps
+
+try:
+    import cv2  # type: ignore
+except Exception:  # noqa: BLE001
+    cv2 = None
 
 from ..config import get_settings
 from ..paths import IMAGE_EXTENSIONS
 from ..project_paths import ensure_project_directories
+from .image_classifier import classify_image_type
+from .labels import upsert_image_type
+
+DEFAULT_PREPROCESS_CONFIG: dict[str, Any] = {
+    "ratio_threshold": 2.0,
+    "pipelines": {
+        "single": ["grayscale", "sharpen", "threshold", "stroke_boost", "denoise", "pad", "resize"],
+        "wide": ["grayscale", "clahe", "sharpen", "threshold", "stroke_boost", "deskew", "resize", "denoise"],
+    },
+    "operations": {
+        "threshold": {"type": "binary", "value": 128, "block_size": 35, "c": 11},
+        "clahe": {"clip_limit": 1.0, "tile_grid_size": 2},
+        "sharpen": {"enabled": True, "amount": 0.2, "sigma": 0.5},
+        "stroke_boost": {"enabled": True, "method": "close", "ksize": 1, "iterations": 1},
+        "denoise": {"method": "gaussian", "ksize": 1},
+        "pad": {"mode": "square", "fill": 255},
+        "resize": {"single": 64, "wide_height": 48, "keep_ratio": True, "interpolation": "area"},
+        "deskew": {"enabled": True, "min_foreground_pixels": 20, "border_value": 255},
+        "normalize": {"enabled": False, "mean": 0.5, "std": 0.5},
+    },
+}
 
 
-def _merge_preprocess_config(overrides: Optional[dict[str, Any]]) -> dict[str, Any]:
+def _deep_update(dst: dict[str, Any], src: dict[str, Any]) -> dict[str, Any]:
+    for key, value in src.items():
+        if isinstance(value, dict) and isinstance(dst.get(key), dict):
+            _deep_update(dst[key], value)
+        else:
+            dst[key] = value
+    return dst
+
+
+def _set_nested(cfg: dict[str, Any], keys: list[str], value: Any) -> None:
+    cur = cfg
+    for key in keys[:-1]:
+        if key not in cur or not isinstance(cur[key], dict):
+            cur[key] = {}
+        cur = cur[key]
+    cur[keys[-1]] = value
+
+
+def _build_preprocess_config(overrides: Optional[dict[str, Any]]) -> dict[str, Any]:
+    cfg = copy.deepcopy(DEFAULT_PREPROCESS_CONFIG)
     base = get_settings().get("preprocess", {})
+    if isinstance(base, dict):
+        _deep_update(cfg, base)
 
-    cfg = {
-        "grayscale": dict(base.get("grayscale", {})),
-        "resize": dict(base.get("resize", {})),
-        "padding": dict(base.get("padding", {})),
-        "normalize": dict(base.get("normalize", {})),
-    }
+    if overrides:
+        # Nested config override.
+        if isinstance(overrides.get("preprocess"), dict):
+            _deep_update(cfg, overrides["preprocess"])
+        else:
+            _deep_update(cfg, {k: v for k, v in overrides.items() if k not in {"project_id"}})
 
-    if not overrides:
-        return cfg
-
-    mapping = {
-        "grayscale_enabled": ("grayscale", "enabled"),
-        "resize_enabled": ("resize", "enabled"),
-        "resize_width": ("resize", "width"),
-        "resize_height": ("resize", "height"),
-        "padding_enabled": ("padding", "enabled"),
-        "padding_fill": ("padding", "fill"),
-        "normalize_enabled": ("normalize", "enabled"),
-        "normalize_mean": ("normalize", "mean"),
-        "normalize_std": ("normalize", "std"),
-    }
-
-    for key, value in overrides.items():
-        if value is None or key not in mapping:
-            continue
-        section, name = mapping[key]
-        cfg[section][name] = value
+        # Backward-compatible flat override keys.
+        legacy_map = {
+            "single_size": ["operations", "resize", "single"],
+            "wide_height": ["operations", "resize", "wide_height"],
+            "wide_keep_ratio": ["operations", "resize", "keep_ratio"],
+            "ratio_threshold": ["ratio_threshold"],
+            "blur_size": ["operations", "denoise", "ksize"],
+            "threshold_type": ["operations", "threshold", "type"],
+            "clahe_clip_limit": ["operations", "clahe", "clip_limit"],
+            "clahe_tile_grid_size": ["operations", "clahe", "tile_grid_size"],
+            "sharpen_enabled": ["operations", "sharpen", "enabled"],
+            "sharpen_amount": ["operations", "sharpen", "amount"],
+            "sharpen_sigma": ["operations", "sharpen", "sigma"],
+            "resize_size": ["operations", "resize", "single"],
+            "stroke_boost_enabled": ["operations", "stroke_boost", "enabled"],
+            "stroke_boost_method": ["operations", "stroke_boost", "method"],
+            "stroke_boost_ksize": ["operations", "stroke_boost", "ksize"],
+            "stroke_boost_iterations": ["operations", "stroke_boost", "iterations"],
+        }
+        for key, path in legacy_map.items():
+            if key in overrides and overrides[key] is not None:
+                _set_nested(cfg, path, overrides[key])
 
     return cfg
 
 
-def _pad_to_square(image: Image.Image, fill: int = 255) -> Image.Image:
-    w, h = image.size
-    if w == h:
-        return image
-    size = max(w, h)
-    pad_left = (size - w) // 2
-    pad_top = (size - h) // 2
-    pad_right = size - w - pad_left
-    pad_bottom = size - h - pad_top
-    return ImageOps.expand(image, border=(pad_left, pad_top, pad_right, pad_bottom), fill=fill)
+def build_preprocess_config(overrides: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    return _build_preprocess_config(overrides)
 
 
-def _process_one(file_path: Path, interim_dir: Path, processed_dir: Path, cfg: dict[str, Any]) -> tuple[str, str]:
-    image = Image.open(file_path)
+def _ensure_gray_uint8(value: Any) -> np.ndarray:
+    if isinstance(value, Image.Image):
+        arr = np.asarray(value.convert("L"))
+    else:
+        arr = np.asarray(value)
+    if arr.ndim == 3:
+        arr = np.asarray(Image.fromarray(arr.astype(np.uint8)).convert("L"))
+    if arr.dtype != np.uint8:
+        arr = np.clip(arr, 0, 255).astype(np.uint8)
+    return arr
 
-    if cfg["grayscale"].get("enabled", True):
-        image = image.convert("L")
 
-    if cfg["padding"].get("enabled", True):
-        fill = int(cfg["padding"].get("fill", 255))
-        image = _pad_to_square(image, fill=fill)
+def _otsu_threshold_np(gray: np.ndarray) -> np.ndarray:
+    hist = np.bincount(gray.ravel(), minlength=256).astype(np.float64)
+    total = gray.size
+    sum_total = np.dot(np.arange(256), hist)
+    sum_b = 0.0
+    weight_b = 0.0
+    best_var = -1.0
+    threshold = 0
+    for t in range(256):
+        weight_b += hist[t]
+        if weight_b == 0:
+            continue
+        weight_f = total - weight_b
+        if weight_f == 0:
+            break
+        sum_b += t * hist[t]
+        mean_b = sum_b / weight_b
+        mean_f = (sum_total - sum_b) / weight_f
+        var_between = weight_b * weight_f * (mean_b - mean_f) ** 2
+        if var_between > best_var:
+            best_var = var_between
+            threshold = t
+    return np.where(gray > threshold, 255, 0).astype(np.uint8)
 
-    if cfg["resize"].get("enabled", True):
-        width = int(cfg["resize"].get("width", 64))
-        height = int(cfg["resize"].get("height", 64))
-        image = image.resize((width, height))
 
-    interim_dir.mkdir(parents=True, exist_ok=True)
+def _resize_gray(gray: np.ndarray, width: int, height: int, interpolation: str) -> np.ndarray:
+    interpolation = str(interpolation).lower()
+    if cv2 is not None:
+        interp_map = {
+            "nearest": cv2.INTER_NEAREST,
+            "linear": cv2.INTER_LINEAR,
+            "cubic": cv2.INTER_CUBIC,
+            "area": cv2.INTER_AREA,
+        }
+        interp = interp_map.get(interpolation, cv2.INTER_AREA)
+        return cv2.resize(gray, (width, height), interpolation=interp)
+
+    pil_interpolation = {
+        "nearest": Image.Resampling.NEAREST,
+        "linear": Image.Resampling.BILINEAR,
+        "cubic": Image.Resampling.BICUBIC,
+        "area": Image.Resampling.LANCZOS,
+    }.get(interpolation, Image.Resampling.LANCZOS)
+    return np.asarray(Image.fromarray(gray, mode="L").resize((width, height), pil_interpolation), dtype=np.uint8)
+
+
+def _op_grayscale(value: Any, _: str, __: dict[str, Any]) -> np.ndarray:
+    return _ensure_gray_uint8(value)
+
+
+def _op_threshold(value: Any, _: str, operations: dict[str, Any]) -> np.ndarray:
+    gray = _ensure_gray_uint8(value)
+    cfg = operations.get("threshold", {})
+    mode = str(cfg.get("type", "otsu")).lower()
+
+    if mode == "otsu":
+        if cv2 is not None:
+            _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            return th
+        return _otsu_threshold_np(gray)
+
+    if mode == "adaptive":
+        block_size = int(cfg.get("block_size", 35))
+        c = int(cfg.get("c", 11))
+        if block_size % 2 == 0:
+            block_size += 1
+        if cv2 is not None:
+            return cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, block_size, c)
+        # Fallback when cv2 is unavailable.
+        value = int(cfg.get("value", 127))
+        return np.where(gray > value, 255, 0).astype(np.uint8)
+
+    # fixed/binary fallback
+    fixed = int(cfg.get("value", 127))
+    return np.where(gray > fixed, 255, 0).astype(np.uint8)
+
+
+def _op_denoise(value: Any, _: str, operations: dict[str, Any]) -> np.ndarray:
+    gray = _ensure_gray_uint8(value)
+    cfg = operations.get("denoise", {})
+    method = str(cfg.get("method", "median")).lower()
+    ksize = max(1, int(cfg.get("ksize", 3)))
+    if ksize % 2 == 0:
+        ksize += 1
+
+    if method == "none":
+        return gray
+
+    if method == "gaussian":
+        if cv2 is not None:
+            return cv2.GaussianBlur(gray, (ksize, ksize), 0)
+        return np.asarray(Image.fromarray(gray, mode="L").filter(ImageFilter.GaussianBlur(radius=max(1, ksize // 2))))
+
+    # median default
+    if cv2 is not None:
+        return cv2.medianBlur(gray, ksize)
+    return np.asarray(Image.fromarray(gray, mode="L").filter(ImageFilter.MedianFilter(size=ksize)))
+
+
+def _op_pad(value: Any, _: str, operations: dict[str, Any]) -> np.ndarray:
+    gray = _ensure_gray_uint8(value)
+    cfg = operations.get("pad", {})
+    mode = str(cfg.get("mode", "square")).lower()
+    fill = int(cfg.get("fill", 255))
+
+    if mode != "square":
+        return gray
+
+    h, w = gray.shape[:2]
+    if h == w:
+        return gray
+    size = max(h, w)
+    out = np.full((size, size), fill, dtype=np.uint8)
+    y = (size - h) // 2
+    x = (size - w) // 2
+    out[y : y + h, x : x + w] = gray
+    return out
+
+
+def _op_resize(value: Any, image_type: str, operations: dict[str, Any]) -> np.ndarray:
+    gray = _ensure_gray_uint8(value)
+    cfg = operations.get("resize", {})
+    interpolation = str(cfg.get("interpolation", "area"))
+
+    if image_type == "wide":
+        target_h = max(1, int(cfg.get("wide_height", 32)))
+        keep_ratio = bool(cfg.get("keep_ratio", True))
+        if keep_ratio:
+            h, w = gray.shape[:2]
+            target_w = max(1, int(round(w * (target_h / max(h, 1)))))
+        else:
+            target_w = max(1, int(cfg.get("wide_width", gray.shape[1])))
+        return _resize_gray(gray, target_w, target_h, interpolation)
+
+    # single
+    size = max(1, int(cfg.get("single", 64)))
+    return _resize_gray(gray, size, size, interpolation)
+
+
+def _op_clahe(value: Any, _: str, operations: dict[str, Any]) -> np.ndarray:
+    gray = _ensure_gray_uint8(value)
+    cfg = operations.get("clahe", {})
+    clip_limit = float(cfg.get("clip_limit", 2.0))
+    tile = max(2, int(cfg.get("tile_grid_size", 8)))
+
+    if cv2 is not None:
+        clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(tile, tile))
+        return clahe.apply(gray)
+
+    return np.asarray(ImageOps.autocontrast(Image.fromarray(gray, mode="L")), dtype=np.uint8)
+
+
+def _op_sharpen(value: Any, _: str, operations: dict[str, Any]) -> np.ndarray:
+    gray = _ensure_gray_uint8(value)
+    cfg = operations.get("sharpen", {})
+    if not bool(cfg.get("enabled", False)):
+        return gray
+
+    amount = float(cfg.get("amount", 1.0))
+    sigma = max(0.1, float(cfg.get("sigma", 1.0)))
+
+    if cv2 is not None:
+        blurred = cv2.GaussianBlur(gray, (0, 0), sigmaX=sigma, sigmaY=sigma)
+        sharpened = cv2.addWeighted(gray, 1.0 + amount, blurred, -amount, 0)
+        return np.clip(sharpened, 0, 255).astype(np.uint8)
+
+    radius = max(1, int(round(sigma)))
+    percent = int(max(0.1, amount) * 100)
+    image = Image.fromarray(gray, mode="L").filter(ImageFilter.UnsharpMask(radius=radius, percent=percent, threshold=0))
+    return np.asarray(image, dtype=np.uint8)
+
+
+def _to_binary_ink(gray: np.ndarray) -> tuple[np.ndarray, bool]:
+    """
+    Convert image to a binary "ink mask" (ink=255, background=0).
+    Returns (ink_mask, dark_is_ink).
+    """
+    binary = np.where(gray > 127, 255, 0).astype(np.uint8)
+    dark_count = int(np.count_nonzero(binary == 0))
+    light_count = int(binary.size - dark_count)
+    dark_is_ink = dark_count <= light_count
+    if dark_is_ink:
+        ink = np.where(binary == 0, 255, 0).astype(np.uint8)
+    else:
+        ink = np.where(binary == 255, 255, 0).astype(np.uint8)
+    return ink, dark_is_ink
+
+
+def _op_stroke_boost(value: Any, _: str, operations: dict[str, Any]) -> np.ndarray:
+    gray = _ensure_gray_uint8(value)
+    cfg = operations.get("stroke_boost", {})
+    if not bool(cfg.get("enabled", False)):
+        return gray
+
+    method = str(cfg.get("method", "close")).lower()
+    ksize = max(1, int(cfg.get("ksize", 3)))
+    if ksize % 2 == 0:
+        ksize += 1
+    iterations = max(1, int(cfg.get("iterations", 1)))
+
+    # Apply morphology on foreground (ink), auto-detecting polarity per image.
+    # This avoids targeting background when text polarity is reversed.
+    ink, dark_is_ink = _to_binary_ink(gray)
+
+    if cv2 is not None:
+        kernel = np.ones((ksize, ksize), dtype=np.uint8)
+        if method == "dilate":
+            out_ink = cv2.dilate(ink, kernel, iterations=iterations)
+        elif method == "erode":
+            out_ink = cv2.erode(ink, kernel, iterations=iterations)
+        elif method == "open":
+            out_ink = cv2.morphologyEx(ink, cv2.MORPH_OPEN, kernel, iterations=iterations)
+        else:
+            out_ink = cv2.morphologyEx(ink, cv2.MORPH_CLOSE, kernel, iterations=iterations)
+        if dark_is_ink:
+            return np.where(out_ink > 127, 0, 255).astype(np.uint8)
+        return np.where(out_ink > 127, 255, 0).astype(np.uint8)
+
+    # PIL fallback
+    result = ink
+    for _ in range(iterations):
+        image = Image.fromarray(result, mode="L")
+        if method == "dilate":
+            result = np.asarray(image.filter(ImageFilter.MaxFilter(size=ksize)), dtype=np.uint8)
+        elif method == "erode":
+            result = np.asarray(image.filter(ImageFilter.MinFilter(size=ksize)), dtype=np.uint8)
+        elif method == "open":
+            eroded = image.filter(ImageFilter.MinFilter(size=ksize))
+            result = np.asarray(eroded.filter(ImageFilter.MaxFilter(size=ksize)), dtype=np.uint8)
+        else:
+            dilated = image.filter(ImageFilter.MaxFilter(size=ksize))
+            result = np.asarray(dilated.filter(ImageFilter.MinFilter(size=ksize)), dtype=np.uint8)
+    if dark_is_ink:
+        return np.where(result > 127, 0, 255).astype(np.uint8)
+    return np.where(result > 127, 255, 0).astype(np.uint8)
+
+
+def _op_deskew(value: Any, _: str, operations: dict[str, Any]) -> np.ndarray:
+    gray = _ensure_gray_uint8(value)
+    cfg = operations.get("deskew", {})
+    if not bool(cfg.get("enabled", True)):
+        return gray
+    if cv2 is None:
+        return gray
+
+    min_fg = int(cfg.get("min_foreground_pixels", 20))
+    border_value = int(cfg.get("border_value", 255))
+    fg = np.column_stack(np.where(gray < 250))
+    if fg.shape[0] < min_fg:
+        return gray
+
+    rect = cv2.minAreaRect(fg.astype(np.float32))
+    angle = rect[-1]
+    if angle < -45:
+        angle = 90 + angle
+    if abs(angle) < 0.1:
+        return gray
+
+    h, w = gray.shape[:2]
+    center = (w / 2.0, h / 2.0)
+    matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
+    return cv2.warpAffine(
+        gray,
+        matrix,
+        (w, h),
+        flags=cv2.INTER_CUBIC,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=border_value,
+    )
+
+
+def _op_normalize(value: Any, _: str, operations: dict[str, Any]) -> np.ndarray:
+    gray = _ensure_gray_uint8(value)
+    cfg = operations.get("normalize", {})
+    if not bool(cfg.get("enabled", False)):
+        return gray
+
+    mean = float(cfg.get("mean", 0.5))
+    std = max(float(cfg.get("std", 0.5)), 1e-6)
+    normalized = (gray.astype(np.float32) / 255.0 - mean) / std
+    # Keep output image-compatible while applying normalization effect.
+    vis = np.clip((normalized + 3.0) / 6.0, 0.0, 1.0)
+    return (vis * 255.0).astype(np.uint8)
+
+
+OPERATIONS: dict[str, Callable[[Any, str, dict[str, Any]], np.ndarray]] = {
+    "grayscale": _op_grayscale,
+    "sharpen": _op_sharpen,
+    "threshold": _op_threshold,
+    "stroke_boost": _op_stroke_boost,
+    "denoise": _op_denoise,
+    "pad": _op_pad,
+    "resize": _op_resize,
+    "clahe": _op_clahe,
+    "deskew": _op_deskew,
+    "normalize": _op_normalize,
+}
+
+
+def _run_pipeline(
+    img: Image.Image,
+    image_type: str,
+    pipeline: list[str],
+    operations_cfg: dict[str, Any],
+) -> tuple[np.ndarray, np.ndarray]:
+    current: Any = img
+    interim_snapshot: Optional[np.ndarray] = None
+
+    for op_name in pipeline:
+        fn = OPERATIONS.get(op_name)
+        if fn is None:
+            raise ValueError(f"unsupported preprocess operation: {op_name}")
+        before = _ensure_gray_uint8(current)
+        current = fn(current, image_type, operations_cfg)
+        if op_name == "normalize" and interim_snapshot is None:
+            interim_snapshot = before
+
+    processed = _ensure_gray_uint8(current)
+    if interim_snapshot is None:
+        interim_snapshot = processed
+    return interim_snapshot, processed
+
+
+def _save_meta(meta_dir: Path, file_stem: str, payload: dict[str, Any]) -> str:
+    meta_dir.mkdir(parents=True, exist_ok=True)
+    meta_path = meta_dir / f"{file_stem}.json"
+    with meta_path.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    return str(meta_path)
+
+
+def _to_data_url(gray: np.ndarray) -> str:
+    image = Image.fromarray(gray, mode="L")
+    with io.BytesIO() as buf:
+        image.save(buf, format="PNG")
+        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{b64}"
+
+
+def _process_image(img: Image.Image, cfg: dict[str, Any]) -> tuple[str, np.ndarray, np.ndarray, list[str], float]:
+    w, h = img.size
+    ratio = (w / h) if h else 1.0
+    ratio_threshold = float(cfg.get("ratio_threshold", 2.0))
+    image_type = classify_image_type(img, ratio_threshold=ratio_threshold)
+    pipelines = cfg.get("pipelines", {})
+    pipeline = list(pipelines.get(image_type, []))
+    if not pipeline:
+        raise ValueError(f"pipeline is empty for type={image_type}")
+
+    operations_cfg = cfg.get("operations", {})
+    interim, processed = _run_pipeline(img, image_type, pipeline, operations_cfg)
+    return image_type, interim, processed, pipeline, ratio
+
+
+def preprocess_image_for_model(
+    image_path: str | Path,
+    overrides: Optional[dict[str, Any]] = None,
+    config: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    cfg = copy.deepcopy(config) if isinstance(config, dict) else _build_preprocess_config(overrides)
+    with Image.open(image_path) as opened:
+        img = ImageOps.exif_transpose(opened)
+        image_type, interim_arr, processed_arr, pipeline, ratio = _process_image(img, cfg)
+    return {
+        "type": image_type,
+        "ratio": ratio,
+        "pipeline": pipeline,
+        "interim": interim_arr,
+        "processed": processed_arr,
+        "config": cfg,
+    }
+
+
+def _process_one(file_path: Path, paths: Any, cfg: dict[str, Any]) -> dict[str, Any]:
+    with Image.open(file_path) as opened:
+        img = ImageOps.exif_transpose(opened)
+        width, height = img.size
+        image_type, interim_arr, processed_arr, pipeline, ratio = _process_image(img, cfg)
+
+    paths.interim.mkdir(parents=True, exist_ok=True)
+    processed_dir = paths.processed / image_type / "images"
     processed_dir.mkdir(parents=True, exist_ok=True)
 
-    interim_path = interim_dir / f"{file_path.stem}.png"
-    image.save(interim_path)
+    interim_path = paths.interim / f"{file_path.stem}.png"
+    processed_path = processed_dir / f"{file_path.stem}.png"
+    Image.fromarray(interim_arr, mode="L").save(interim_path)
+    Image.fromarray(processed_arr, mode="L").save(processed_path)
 
-    arr = np.asarray(image).astype(np.float32) / 255.0
-    if arr.ndim == 2:
-        arr = arr[None, :, :]
-    else:
-        arr = arr.transpose(2, 0, 1)
+    meta_path = _save_meta(
+        paths.processed / "meta",
+        file_path.stem,
+        {
+            "type": image_type,
+            "original_size": [width, height],
+            "ratio": round(ratio, 4),
+            "pipeline": pipeline,
+        },
+    )
 
-    if cfg["normalize"].get("enabled", True):
-        mean = float(cfg["normalize"].get("mean", 0.5))
-        std = float(cfg["normalize"].get("std", 0.5))
-        arr = (arr - mean) / max(std, 1e-6)
+    upsert_image_type(file_path.name, image_type, project_id=paths.project_id)
 
-    tensor = torch.tensor(arr, dtype=torch.float32)
-    processed_path = processed_dir / f"{file_path.stem}.pt"
-    torch.save(tensor, processed_path)
+    return {
+        "raw": file_path.name,
+        "type": image_type,
+        "ratio": ratio,
+        "pipeline": pipeline,
+        "interim": str(interim_path.relative_to(paths.root)),
+        "processed": str(processed_path.relative_to(paths.root)),
+        "meta": str(Path(meta_path).relative_to(paths.root)),
+    }
 
-    return interim_path.name, processed_path.name
 
-
-def run_preprocess(project_id: Optional[str] = None, overrides: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+def run_preprocess(
+    project_id: Optional[str] = None,
+    overrides: Optional[dict[str, Any]] = None,
+    only_files: Optional[list[str]] = None,
+) -> dict[str, Any]:
     paths = ensure_project_directories(project_id)
-    cfg = _merge_preprocess_config(overrides)
+    cfg = _build_preprocess_config(overrides)
     paths.raw.mkdir(parents=True, exist_ok=True)
+    include = set(only_files) if only_files is not None else None
 
-    raw_files = [p for p in sorted(paths.raw.iterdir()) if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS]
-    results = []
+    raw_files = []
+    for path in sorted(paths.raw.iterdir()):
+        if not path.is_file() or path.suffix.lower() not in IMAGE_EXTENSIONS:
+            continue
+        if include is not None and path.name not in include:
+            continue
+        raw_files.append(path)
 
-    for file_path in raw_files:
-        interim_name, processed_name = _process_one(file_path, paths.interim, paths.processed, cfg)
-        results.append({"raw": file_path.name, "interim": interim_name, "processed": processed_name})
+    results = [_process_one(file_path, paths, cfg) for file_path in raw_files]
 
-    return {"project_id": paths.project_id, "count": len(results), "config": cfg, "files": results}
+    type_counts = {"single": 0, "wide": 0}
+    for row in results:
+        row_type = row.get("type")
+        if row_type in type_counts:
+            type_counts[row_type] += 1
+
+    return {
+        "project_id": paths.project_id,
+        "count": len(results),
+        "type_counts": type_counts,
+        "config": cfg,
+        "files": results,
+    }
+
+
+def preview_preprocess(
+    image_name: str,
+    project_id: Optional[str] = None,
+    overrides: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    paths = ensure_project_directories(project_id)
+    safe_name = Path(image_name).name
+    if safe_name != image_name:
+        raise ValueError("invalid image name")
+
+    src = paths.raw / safe_name
+    if not src.exists() or not src.is_file():
+        raise FileNotFoundError(f"image not found: {safe_name}")
+
+    cfg = _build_preprocess_config(overrides)
+    with Image.open(src) as opened:
+        img = ImageOps.exif_transpose(opened)
+        width, height = img.size
+        image_type, interim_arr, processed_arr, pipeline, ratio = _process_image(img, cfg)
+
+    preview_dir = paths.outputs / "previews"
+    preview_dir.mkdir(parents=True, exist_ok=True)
+    stem = Path(safe_name).stem
+    interim_preview = preview_dir / f"{stem}_{image_type}_interim.png"
+    processed_preview = preview_dir / f"{stem}_{image_type}_processed.png"
+    Image.fromarray(interim_arr, mode="L").save(interim_preview)
+    Image.fromarray(processed_arr, mode="L").save(processed_preview)
+
+    return {
+        "project_id": paths.project_id,
+        "image": safe_name,
+        "type": image_type,
+        "original_size": [width, height],
+        "ratio": round(ratio, 4),
+        "pipeline": pipeline,
+        "interim_preview": str(interim_preview.relative_to(paths.root)),
+        "processed_preview": str(processed_preview.relative_to(paths.root)),
+        "interim_data_url": _to_data_url(interim_arr),
+        "processed_data_url": _to_data_url(processed_arr),
+    }

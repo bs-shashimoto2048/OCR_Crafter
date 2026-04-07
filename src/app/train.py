@@ -28,7 +28,8 @@ def build_model(num_classes: int) -> nn.Module:
 
 def _image_size_for_model_type(settings: dict[str, Any], model_type: str) -> tuple[int, int]:
     model_cfg = settings.get("training", {}).get("models", {}).get(model_type, {})
-    size = model_cfg.get("image_size", [64, 64])
+    fallback = settings.get("training", {}).get("default_image_size", [64, 64])
+    size = model_cfg.get("image_size", fallback)
     return int(size[0]), int(size[1])
 
 
@@ -163,7 +164,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Train OCR classifier")
     parser.add_argument("--project-id", type=str, default=default_paths.project_id)
     parser.add_argument("--dataset-dir", type=str, default=str(default_paths.dataset))
-    parser.add_argument("--model-type", type=str, default="square", choices=["square", "wide"])
+    parser.add_argument("--model-type", type=str, default="square")
     parser.add_argument("--epochs", type=int, default=int(settings.get("training", {}).get("default_epochs", 5)))
     parser.add_argument("--batch-size", type=int, default=int(settings.get("training", {}).get("default_batch_size", 32)))
     parser.add_argument("--learning-rate", type=float, default=float(settings.get("training", {}).get("default_lr", 1e-3)))

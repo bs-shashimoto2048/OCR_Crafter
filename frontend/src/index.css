@@ -9,6 +9,10 @@
     height: 100%;
   }
 
+  html {
+    scrollbar-gutter: stable;
+  }
+
   body {
     @apply bg-bg text-text font-sans antialiased;
   }
@@ -34,11 +38,24 @@
   .app-label {
     @apply mb-1 block text-xs font-medium uppercase tracking-wide text-muted;
   }
+
+  .preprocess-panel .app-label {
+    @apply text-sm font-bold normal-case tracking-normal text-white;
+  }
+
+  .preprocess-panel .param-hint {
+    @apply text-[11px] leading-4 text-slate-500;
+  }
 }
 
 @layer utilities {
   .animate-fade-in {
     animation: fade-in 0.2s ease-out both;
+  }
+
+  .scroll-stable {
+    scrollbar-gutter: stable both-edges;
+    overscroll-behavior: contain;
   }
 
   @keyframes fade-in {

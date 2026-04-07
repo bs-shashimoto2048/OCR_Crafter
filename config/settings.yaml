@@ -7,19 +7,62 @@ paths:
   outputs: outputs
 
 preprocess:
-  grayscale:
-    enabled: true
-  resize:
-    enabled: true
-    width: 64
-    height: 64
-  padding:
-    enabled: true
-    fill: 255
-  normalize:
-    enabled: true
-    mean: 0.5
-    std: 0.5
+  ratio_threshold: 2.0
+  pipelines:
+    single:
+      - grayscale
+      - sharpen
+      - threshold
+      - stroke_boost
+      - denoise
+      - pad
+      - resize
+    wide:
+      - grayscale
+      - clahe
+      - sharpen
+      - threshold
+      - stroke_boost
+      - deskew
+      - resize
+      - denoise
+  operations:
+    threshold:
+      type: binary
+      value: 128
+      block_size: 35
+      c: 11
+    clahe:
+      clip_limit: 1.0
+      tile_grid_size: 2
+    sharpen:
+      enabled: true
+      amount: 0.2
+      sigma: 0.5
+    stroke_boost:
+      enabled: true
+      method: close
+      ksize: 1
+      iterations: 1
+    denoise:
+      method: gaussian
+      ksize: 1
+    pad:
+      mode: square
+      fill: 255
+    resize:
+      single: 64
+      wide_height: 48
+      keep_ratio: true
+      interpolation: area
+    deskew:
+      enabled: true
+      min_foreground_pixels: 20
+      border_value: 255
+    normalize:
+      enabled: false
+      mean: 0.5
+      std: 0.5
 
 dataset:
   train_ratio: 0.7
@@ -31,7 +74,12 @@ training:
   default_epochs: 5
   default_batch_size: 32
   default_lr: 0.001
+  default_image_size: [64, 64]
   num_workers: 0
+  image_type_to_model:
+    single: square
+    wide: wide
+  default_model_type: square
   models:
     square:
       image_size: [64, 64]

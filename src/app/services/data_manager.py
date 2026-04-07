@@ -31,6 +31,7 @@ def import_images_from_directory(source_dir: str, project_id: Optional[str] = No
 
     paths.raw.mkdir(parents=True, exist_ok=True)
     copied = 0
+    copied_files: list[str] = []
 
     for file_path in sorted(src.rglob("*")):
         if not file_path.is_file():
@@ -41,8 +42,14 @@ def import_images_from_directory(source_dir: str, project_id: Optional[str] = No
         destination = _unique_destination(paths.raw, file_path.name)
         shutil.copy2(file_path, destination)
         copied += 1
+        copied_files.append(destination.name)
 
-    return {"source": str(src), "copied": copied, "project_id": paths.project_id}
+    return {
+        "source": str(src),
+        "copied": copied,
+        "copied_files": copied_files,
+        "project_id": paths.project_id,
+    }
 
 
 def list_raw_images(project_id: Optional[str] = None) -> list[str]:
@@ -82,23 +89,8 @@ def rotate_project_image(image_name: str, angle: int, project_id: Optional[str] 
 
     _rotate_image_file(raw_path, angle)
 
-    stem = Path(safe_name).stem
-    interim_path = paths.interim / f"{stem}.png"
-    rotated_interim = False
-    if interim_path.exists() and interim_path.is_file():
-        _rotate_image_file(interim_path, angle)
-        rotated_interim = True
-
-    processed_path = paths.processed / f"{stem}.pt"
-    deleted_processed = False
-    if processed_path.exists() and processed_path.is_file():
-        processed_path.unlink()
-        deleted_processed = True
-
     return {
         "project_id": paths.project_id,
         "image": safe_name,
         "angle": angle,
-        "rotated_interim": rotated_interim,
-        "deleted_processed": deleted_processed,
     }
