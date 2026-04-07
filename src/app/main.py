@@ -302,6 +302,54 @@ def image_file(image_name: str, project_id: Optional[str] = Query(default="defau
     return FileResponse(path)
 
 
+@app.get("/images/{image_name}/processed")
+def image_processed_file(
+    image_name: str,
+    project_id: Optional[str] = Query(default="default"),
+    image_type: Optional[str] = Query(default=None),
+) -> FileResponse:
+    safe_name = Path(image_name).name
+    if safe_name != image_name:
+        raise HTTPException(status_code=400, detail="invalid image name")
+
+    resolved = _resolve_project_id(project_id)
+    paths = ensure_project_directories(resolved)
+    stem = Path(safe_name).stem
+
+    candidates: list[Path] = []
+    normalized_type = (image_type or "").strip().lower()
+    if normalized_type in {"single", "wide"}:
+        candidates.append(paths.processed / normalized_type / "images" / f"{stem}.png")
+    else:
+        rows = read_labels(project_id=resolved)
+        type_map = {row.get("filename") or row.get("image"): row.get("type", "") for row in rows}
+        labeled_type = str(type_map.get(safe_name, "")).strip().lower()
+        if labeled_type in {"single", "wide"}:
+            candidates.append(paths.processed / labeled_type / "images" / f"{stem}.png")
+        candidates.extend(
+            [
+                paths.processed / "single" / "images" / f"{stem}.png",
+                paths.processed / "wide" / "images" / f"{stem}.png",
+            ]
+        )
+
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_file():
+            return FileResponse(candidate)
+
+    try:
+        preview = preview_preprocess(image_name=safe_name, project_id=resolved)
+        processed_rel = preview.get("processed_preview")
+        if processed_rel:
+            processed_path = paths.root / str(processed_rel)
+            if processed_path.exists() and processed_path.is_file():
+                return FileResponse(processed_path)
+    except Exception:  # noqa: BLE001
+        pass
+
+    raise HTTPException(status_code=404, detail="processed image not found")
+
+
 @app.post("/preprocess/run")
 def preprocess(req: PreprocessRequest) -> dict[str, Any]:
     project_id = _resolve_project_id(req.project_id)

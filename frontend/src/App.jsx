@@ -562,6 +562,21 @@ export default function App() {
     }
 
     const onKeyDown = (event) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) {
+        return;
+      }
+
+      const target = event.target;
+      const isEditableTarget =
+        target instanceof HTMLElement &&
+        (target.isContentEditable ||
+          target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT");
+      if (isEditableTarget) {
+        return;
+      }
+
       const key = event.key;
       if (/^[a-zA-Z0-9]$/.test(key)) {
         event.preventDefault();
@@ -785,6 +800,11 @@ export default function App() {
       });
 
       setImages((prev) => prev.map((item) => (item.image === imageName ? { ...item, label: value } : item)));
+      setSelectedIndex((prev) => {
+        const currentIndex = images.findIndex((item) => item.image === imageName);
+        const base = currentIndex >= 0 ? currentIndex : prev;
+        return Math.min(base + 1, Math.max(images.length - 1, 0));
+      });
       notify("success", `ラベル保存: ${imageName} -> ${value || "(空)"}`);
     } catch (error) {
       notify("error", error.message);

@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Card from "../components/Card";
 import Button from "../components/Button";
-import { imageUrl } from "../lib/api";
+import { imageUrl, processedImageUrl } from "../lib/api";
 
 const keyRows = [
   ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
@@ -31,7 +31,38 @@ export default function LabelingView({
 }) {
   const zoomLevels = [25, 50, 100, 150, 200];
   const [zoomPercent, setZoomPercent] = useState(100);
+  const listRef = useRef(null);
+  const cardRefs = useRef([]);
+  const labelInputRef = useRef(null);
   const selected = images[selectedIndex] || null;
+
+  useEffect(() => {
+    const listEl = listRef.current;
+    const cardEl = cardRefs.current[selectedIndex];
+    if (!listEl || !cardEl) {
+      return;
+    }
+
+    const top = cardEl.offsetTop - listEl.offsetTop;
+    listEl.scrollTo({ top, behavior: "smooth" });
+    cardEl.focus({ preventScroll: true });
+  }, [selectedIndex, images.length]);
+
+  useEffect(() => {
+    if (!selected) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      const input = labelInputRef.current;
+      if (!input) {
+        return;
+      }
+      input.focus();
+      const len = input.value?.length ?? 0;
+      input.setSelectionRange(len, len);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [selected?.image]);
 
   if (!selected) {
     return (
@@ -62,7 +93,7 @@ export default function LabelingView({
 
           <div className="max-h-[70vh] overflow-auto rounded-xl border border-border bg-[#333d49] p-3">
             <img
-              src={imageUrl(selected.image, projectId, imageVersion)}
+              src={processedImageUrl(selected.image, projectId, imageVersion, selected.type || "")}
               alt={selected.image}
               className="mx-auto h-auto max-w-none rounded-lg"
               style={{ width: `${zoomPercent}%` }}
@@ -82,8 +113,15 @@ export default function LabelingView({
         <Card title="ラベルエディタ" subtitle="複数文字 / 英数字入力に対応">
           <label className="app-label">現在のラベル</label>
           <input
+            ref={labelInputRef}
             value={labelValue}
             onChange={(e) => onLabelChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                onSave();
+              }
+            }}
             className="app-input mb-4"
             placeholder="ラベル文字列を入力"
           />
@@ -188,13 +226,16 @@ export default function LabelingView({
       </div>
 
       <Card title="画像リスト" subtitle="ファイル名と設定ラベルを確認">
-        <div className="max-h-[80vh] space-y-2 overflow-auto pr-1">
+        <div ref={listRef} className="max-h-[80vh] space-y-2 overflow-auto pr-1">
           {images.map((item, idx) => {
             const currentLabel = String(labelDrafts?.[item.image] ?? item.label ?? "").trim();
             const isSet = currentLabel !== "";
             return (
               <button
                 key={item.image}
+                ref={(el) => {
+                  cardRefs.current[idx] = el;
+                }}
                 onClick={() => onSelectIndex(idx)}
                 className={`w-full rounded-xl border p-3 text-left transition ${
                   idx === selectedIndex
@@ -223,7 +264,7 @@ export default function LabelingView({
                   )}
                 </div>
                 <p className="mt-1 truncate text-xs text-muted">ラベル</p>
-                <p className="truncate text-base font-semibold text-text">
+                <p className="truncate text-base font-semibold text-lime-300">
                   {isSet ? currentLabel : "-"}
                 </p>
               </button>
