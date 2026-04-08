@@ -11,19 +11,33 @@ preprocess:
   pipelines:
     single:
       - grayscale
+      - gamma
+      - local_contrast
+      - hist_equalize
+      - bilateral
       - sharpen
+      - unsharp
       - threshold
+      - morph
       - stroke_boost
       - denoise
+      - crop_margin
       - pad
       - resize
     wide:
       - grayscale
+      - gamma
       - clahe
+      - local_contrast
+      - hist_equalize
+      - bilateral
       - sharpen
+      - unsharp
       - threshold
+      - morph
       - stroke_boost
       - deskew
+      - crop_margin
       - resize
       - denoise
   operations:
@@ -39,6 +53,35 @@ preprocess:
       enabled: true
       amount: 0.2
       sigma: 0.5
+    gamma:
+      enabled: false
+      value: 1.0
+    morph:
+      enabled: false
+      method: close
+      ksize: 3
+      iterations: 1
+    unsharp:
+      enabled: false
+      amount: 0.8
+      radius: 1.0
+      threshold: 0
+    bilateral:
+      enabled: false
+      diameter: 5
+      sigma_color: 50
+      sigma_space: 50
+    local_contrast:
+      enabled: false
+      clip_limit: 2.0
+      tile_grid_size: 8
+    crop_margin:
+      enabled: false
+      threshold: 245
+      margin: 2
+      min_pixels: 10
+    hist_equalize:
+      enabled: false
     stroke_boost:
       enabled: true
       method: close

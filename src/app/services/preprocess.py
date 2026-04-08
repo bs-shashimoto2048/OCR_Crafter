@@ -22,13 +22,51 @@ from .labels import upsert_image_type
 DEFAULT_PREPROCESS_CONFIG: dict[str, Any] = {
     "ratio_threshold": 1.6,
     "pipelines": {
-        "single": ["grayscale", "sharpen", "threshold", "stroke_boost", "denoise", "pad", "resize"],
-        "wide": ["grayscale", "clahe", "sharpen", "threshold", "stroke_boost", "deskew", "resize", "denoise"],
+        "single": [
+            "grayscale",
+            "gamma",
+            "local_contrast",
+            "hist_equalize",
+            "bilateral",
+            "sharpen",
+            "unsharp",
+            "threshold",
+            "morph",
+            "stroke_boost",
+            "denoise",
+            "crop_margin",
+            "pad",
+            "resize",
+        ],
+        "wide": [
+            "grayscale",
+            "gamma",
+            "clahe",
+            "local_contrast",
+            "hist_equalize",
+            "bilateral",
+            "sharpen",
+            "unsharp",
+            "threshold",
+            "morph",
+            "stroke_boost",
+            "deskew",
+            "crop_margin",
+            "resize",
+            "denoise",
+        ],
     },
     "operations": {
         "threshold": {"type": "binary", "value": 128, "block_size": 35, "c": 11},
         "clahe": {"clip_limit": 1.0, "tile_grid_size": 2},
         "sharpen": {"enabled": True, "amount": 0.2, "sigma": 0.5},
+        "gamma": {"enabled": False, "value": 1.0},
+        "morph": {"enabled": False, "method": "close", "ksize": 3, "iterations": 1},
+        "unsharp": {"enabled": False, "amount": 0.8, "radius": 1.0, "threshold": 0},
+        "bilateral": {"enabled": False, "diameter": 5, "sigma_color": 50, "sigma_space": 50},
+        "local_contrast": {"enabled": False, "clip_limit": 2.0, "tile_grid_size": 8},
+        "crop_margin": {"enabled": False, "threshold": 245, "margin": 2, "min_pixels": 10},
+        "hist_equalize": {"enabled": False},
         "stroke_boost": {"enabled": True, "method": "close", "ksize": 1, "iterations": 1},
         "denoise": {"method": "gaussian", "ksize": 1},
         "pad": {"mode": "square", "fill": 255},
@@ -88,6 +126,27 @@ def _build_preprocess_config(overrides: Optional[dict[str, Any]]) -> dict[str, A
             "stroke_boost_method": ["operations", "stroke_boost", "method"],
             "stroke_boost_ksize": ["operations", "stroke_boost", "ksize"],
             "stroke_boost_iterations": ["operations", "stroke_boost", "iterations"],
+            "gamma_enabled": ["operations", "gamma", "enabled"],
+            "gamma_value": ["operations", "gamma", "value"],
+            "morph_enabled": ["operations", "morph", "enabled"],
+            "morph_method": ["operations", "morph", "method"],
+            "morph_ksize": ["operations", "morph", "ksize"],
+            "morph_iterations": ["operations", "morph", "iterations"],
+            "unsharp_enabled": ["operations", "unsharp", "enabled"],
+            "unsharp_amount": ["operations", "unsharp", "amount"],
+            "unsharp_radius": ["operations", "unsharp", "radius"],
+            "unsharp_threshold": ["operations", "unsharp", "threshold"],
+            "bilateral_enabled": ["operations", "bilateral", "enabled"],
+            "bilateral_diameter": ["operations", "bilateral", "diameter"],
+            "bilateral_sigma_color": ["operations", "bilateral", "sigma_color"],
+            "bilateral_sigma_space": ["operations", "bilateral", "sigma_space"],
+            "local_contrast_enabled": ["operations", "local_contrast", "enabled"],
+            "local_contrast_clip_limit": ["operations", "local_contrast", "clip_limit"],
+            "local_contrast_tile_grid_size": ["operations", "local_contrast", "tile_grid_size"],
+            "crop_margin_enabled": ["operations", "crop_margin", "enabled"],
+            "crop_margin_threshold": ["operations", "crop_margin", "threshold"],
+            "crop_margin_margin": ["operations", "crop_margin", "margin"],
+            "hist_equalize_enabled": ["operations", "hist_equalize", "enabled"],
         }
         for key, path in legacy_map.items():
             if key in overrides and overrides[key] is not None:
@@ -284,6 +343,159 @@ def _op_sharpen(value: Any, _: str, operations: dict[str, Any]) -> np.ndarray:
     return np.asarray(image, dtype=np.uint8)
 
 
+def _op_gamma(value: Any, _: str, operations: dict[str, Any]) -> np.ndarray:
+    gray = _ensure_gray_uint8(value)
+    cfg = operations.get("gamma", {})
+    if not bool(cfg.get("enabled", False)):
+        return gray
+
+    gamma = float(cfg.get("value", 1.0))
+    gamma = max(0.1, gamma)
+    inv_gamma = 1.0 / gamma
+    lut = np.array([((i / 255.0) ** inv_gamma) * 255.0 for i in range(256)], dtype=np.float32)
+    lut = np.clip(lut, 0, 255).astype(np.uint8)
+    if cv2 is not None:
+        return cv2.LUT(gray, lut)
+    return lut[gray]
+
+
+def _op_morph(value: Any, _: str, operations: dict[str, Any]) -> np.ndarray:
+    gray = _ensure_gray_uint8(value)
+    cfg = operations.get("morph", {})
+    if not bool(cfg.get("enabled", False)):
+        return gray
+
+    method = str(cfg.get("method", "close")).lower()
+    ksize = max(1, int(cfg.get("ksize", 3)))
+    if ksize % 2 == 0:
+        ksize += 1
+    iterations = max(1, int(cfg.get("iterations", 1)))
+
+    if cv2 is not None:
+        kernel = np.ones((ksize, ksize), dtype=np.uint8)
+        if method == "open":
+            return cv2.morphologyEx(gray, cv2.MORPH_OPEN, kernel, iterations=iterations)
+        return cv2.morphologyEx(gray, cv2.MORPH_CLOSE, kernel, iterations=iterations)
+
+    result = gray
+    for _ in range(iterations):
+        image = Image.fromarray(result, mode="L")
+        if method == "open":
+            eroded = image.filter(ImageFilter.MinFilter(size=ksize))
+            result = np.asarray(eroded.filter(ImageFilter.MaxFilter(size=ksize)), dtype=np.uint8)
+        else:
+            dilated = image.filter(ImageFilter.MaxFilter(size=ksize))
+            result = np.asarray(dilated.filter(ImageFilter.MinFilter(size=ksize)), dtype=np.uint8)
+    return result
+
+
+def _op_unsharp(value: Any, _: str, operations: dict[str, Any]) -> np.ndarray:
+    gray = _ensure_gray_uint8(value)
+    cfg = operations.get("unsharp", {})
+    if not bool(cfg.get("enabled", False)):
+        return gray
+
+    amount = float(cfg.get("amount", 0.8))
+    radius = max(0.1, float(cfg.get("radius", 1.0)))
+    threshold = max(0, int(cfg.get("threshold", 0)))
+
+    if cv2 is not None:
+        blurred = cv2.GaussianBlur(gray, (0, 0), sigmaX=radius, sigmaY=radius)
+        sharpened = cv2.addWeighted(gray, 1.0 + amount, blurred, -amount, 0)
+        if threshold > 0:
+            diff = cv2.absdiff(gray, blurred)
+            mask = diff >= threshold
+            out = gray.copy()
+            out[mask] = sharpened[mask]
+            return np.clip(out, 0, 255).astype(np.uint8)
+        return np.clip(sharpened, 0, 255).astype(np.uint8)
+
+    pil = Image.fromarray(gray, mode="L").filter(
+        ImageFilter.UnsharpMask(
+            radius=max(1, int(round(radius))),
+            percent=int(max(0.1, amount) * 100),
+            threshold=threshold,
+        )
+    )
+    return np.asarray(pil, dtype=np.uint8)
+
+
+def _op_bilateral(value: Any, _: str, operations: dict[str, Any]) -> np.ndarray:
+    gray = _ensure_gray_uint8(value)
+    cfg = operations.get("bilateral", {})
+    if not bool(cfg.get("enabled", False)):
+        return gray
+
+    diameter = max(1, int(cfg.get("diameter", 5)))
+    sigma_color = max(1.0, float(cfg.get("sigma_color", 50)))
+    sigma_space = max(1.0, float(cfg.get("sigma_space", 50)))
+
+    if cv2 is not None:
+        return cv2.bilateralFilter(gray, d=diameter, sigmaColor=sigma_color, sigmaSpace=sigma_space)
+
+    # fallback
+    return np.asarray(Image.fromarray(gray, mode="L").filter(ImageFilter.MedianFilter(size=3)), dtype=np.uint8)
+
+
+def _op_local_contrast(value: Any, _: str, operations: dict[str, Any]) -> np.ndarray:
+    gray = _ensure_gray_uint8(value)
+    cfg = operations.get("local_contrast", {})
+    if not bool(cfg.get("enabled", False)):
+        return gray
+
+    clip_limit = float(cfg.get("clip_limit", 2.0))
+    tile = max(2, int(cfg.get("tile_grid_size", 8)))
+    if cv2 is not None:
+        clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(tile, tile))
+        return clahe.apply(gray)
+    return np.asarray(ImageOps.autocontrast(Image.fromarray(gray, mode="L")), dtype=np.uint8)
+
+
+def _op_crop_margin(value: Any, _: str, operations: dict[str, Any]) -> np.ndarray:
+    gray = _ensure_gray_uint8(value)
+    cfg = operations.get("crop_margin", {})
+    if not bool(cfg.get("enabled", False)):
+        return gray
+
+    threshold = int(cfg.get("threshold", 245))
+    margin = max(0, int(cfg.get("margin", 2)))
+    min_pixels = max(1, int(cfg.get("min_pixels", 10)))
+
+    mask_dark = gray < threshold
+    mask_light = gray > (255 - threshold)
+    dark_count = int(mask_dark.sum())
+    light_count = int(mask_light.sum())
+
+    mask = mask_dark
+    if dark_count < min_pixels and light_count >= min_pixels:
+        mask = mask_light
+    elif light_count >= min_pixels and dark_count >= min_pixels and light_count < dark_count:
+        mask = mask_light
+
+    ys, xs = np.where(mask)
+    if ys.size < min_pixels or xs.size < min_pixels:
+        return gray
+
+    y0 = max(0, int(ys.min()) - margin)
+    y1 = min(gray.shape[0], int(ys.max()) + margin + 1)
+    x0 = max(0, int(xs.min()) - margin)
+    x1 = min(gray.shape[1], int(xs.max()) + margin + 1)
+    if y1 <= y0 or x1 <= x0:
+        return gray
+    return gray[y0:y1, x0:x1]
+
+
+def _op_hist_equalize(value: Any, _: str, operations: dict[str, Any]) -> np.ndarray:
+    gray = _ensure_gray_uint8(value)
+    cfg = operations.get("hist_equalize", {})
+    if not bool(cfg.get("enabled", False)):
+        return gray
+
+    if cv2 is not None:
+        return cv2.equalizeHist(gray)
+    return np.asarray(ImageOps.equalize(Image.fromarray(gray, mode="L")), dtype=np.uint8)
+
+
 def _to_binary_ink(gray: np.ndarray) -> tuple[np.ndarray, bool]:
     """
     Convert image to a binary "ink mask" (ink=255, background=0).
@@ -399,10 +611,17 @@ def _op_normalize(value: Any, _: str, operations: dict[str, Any]) -> np.ndarray:
 
 OPERATIONS: dict[str, Callable[[Any, str, dict[str, Any]], np.ndarray]] = {
     "grayscale": _op_grayscale,
+    "gamma": _op_gamma,
+    "local_contrast": _op_local_contrast,
+    "hist_equalize": _op_hist_equalize,
+    "bilateral": _op_bilateral,
     "sharpen": _op_sharpen,
+    "unsharp": _op_unsharp,
     "threshold": _op_threshold,
+    "morph": _op_morph,
     "stroke_boost": _op_stroke_boost,
     "denoise": _op_denoise,
+    "crop_margin": _op_crop_margin,
     "pad": _op_pad,
     "resize": _op_resize,
     "clahe": _op_clahe,

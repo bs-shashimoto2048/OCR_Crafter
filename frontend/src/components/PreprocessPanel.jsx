@@ -147,6 +147,116 @@ export default function PreprocessPanel({
           />
         </Section>
 
+        <Section title="ガンマ補正">
+          <p className="param-hint">明るさカーブを調整します。1.0で変化なし、低すぎると白飛びしやすくなります。</p>
+          <label className="inline-flex items-center gap-2 text-sm text-text">
+            <input
+              type="checkbox"
+              checked={params.gamma_enabled}
+              onChange={(e) => update("gamma_enabled", e.target.checked)}
+            />
+            有効
+          </label>
+          <label className="app-label mt-2">ガンマ値: {Number(params.gamma_value || 1).toFixed(2)}</label>
+          <input
+            type="range"
+            min="0.4"
+            max="2.5"
+            step="0.05"
+            value={params.gamma_value}
+            onChange={(e) => update("gamma_value", Number(e.target.value))}
+            className="w-full"
+          />
+        </Section>
+
+        <Section title="局所コントラスト">
+          <p className="param-hint">文字周辺だけコントラストを上げます。背景ムラが強い画像に有効です。</p>
+          <label className="inline-flex items-center gap-2 text-sm text-text">
+            <input
+              type="checkbox"
+              checked={params.local_contrast_enabled}
+              onChange={(e) => update("local_contrast_enabled", e.target.checked)}
+            />
+            有効
+          </label>
+          <label className="app-label mt-2">
+            クリップ上限: {Number(params.local_contrast_clip_limit || 2).toFixed(1)}
+          </label>
+          <input
+            type="range"
+            min="1.0"
+            max="8.0"
+            step="0.1"
+            value={params.local_contrast_clip_limit}
+            onChange={(e) => update("local_contrast_clip_limit", Number(e.target.value))}
+            className="w-full"
+          />
+          <label className="app-label">タイルサイズ: {params.local_contrast_tile_grid_size}</label>
+          <input
+            type="range"
+            min="2"
+            max="32"
+            step="1"
+            value={params.local_contrast_tile_grid_size}
+            onChange={(e) => update("local_contrast_tile_grid_size", Number(e.target.value))}
+            className="w-full"
+          />
+        </Section>
+
+        <Section title="ヒストグラム平坦化">
+          <p className="param-hint">画像全体の明暗分布を均します。コントラスト不足の画像を補正します。</p>
+          <label className="inline-flex items-center gap-2 text-sm text-text">
+            <input
+              type="checkbox"
+              checked={params.hist_equalize_enabled}
+              onChange={(e) => update("hist_equalize_enabled", e.target.checked)}
+            />
+            有効
+          </label>
+        </Section>
+
+        <Section title="バイラテラルノイズ除去">
+          <p className="param-hint">輪郭を保ちながらノイズを減らします。文字境界を残したいときに使います。</p>
+          <label className="inline-flex items-center gap-2 text-sm text-text">
+            <input
+              type="checkbox"
+              checked={params.bilateral_enabled}
+              onChange={(e) => update("bilateral_enabled", e.target.checked)}
+            />
+            有効
+          </label>
+          <label className="app-label mt-2">直径: {params.bilateral_diameter}</label>
+          <input
+            type="range"
+            min="1"
+            max="15"
+            step="1"
+            value={params.bilateral_diameter}
+            onChange={(e) => update("bilateral_diameter", Number(e.target.value))}
+            className="w-full"
+          />
+          <label className="app-label">色差シグマ: {params.bilateral_sigma_color}</label>
+          <input
+            type="range"
+            min="5"
+            max="150"
+            step="1"
+            value={params.bilateral_sigma_color}
+            onChange={(e) => update("bilateral_sigma_color", Number(e.target.value))}
+            className="w-full"
+          />
+          <label className="app-label">距離シグマ: {params.bilateral_sigma_space}</label>
+          <input
+            type="range"
+            min="5"
+            max="150"
+            step="1"
+            value={params.bilateral_sigma_space}
+            onChange={(e) => update("bilateral_sigma_space", Number(e.target.value))}
+            className="w-full"
+          />
+        </Section>
+
         <Section title="シャープ化">
           <p className="param-hint">輪郭を強調して文字の境界を見やすくします。強すぎるとノイズも強調されます。</p>
           <label className="inline-flex items-center gap-2 text-sm text-text">
@@ -176,6 +286,48 @@ export default function PreprocessPanel({
             step="0.1"
             value={params.sharpen_sigma}
             onChange={(e) => update("sharpen_sigma", Number(e.target.value))}
+            className="w-full"
+          />
+        </Section>
+
+        <Section title="アンシャープマスク">
+          <p className="param-hint">ぼかしとの差分で輪郭を強調します。線をくっきりさせたい時に有効です。</p>
+          <label className="inline-flex items-center gap-2 text-sm text-text">
+            <input
+              type="checkbox"
+              checked={params.unsharp_enabled}
+              onChange={(e) => update("unsharp_enabled", e.target.checked)}
+            />
+            有効
+          </label>
+          <label className="app-label mt-2">強さ: {Number(params.unsharp_amount || 0).toFixed(1)}</label>
+          <input
+            type="range"
+            min="0.1"
+            max="3.0"
+            step="0.1"
+            value={params.unsharp_amount}
+            onChange={(e) => update("unsharp_amount", Number(e.target.value))}
+            className="w-full"
+          />
+          <label className="app-label">半径: {Number(params.unsharp_radius || 1).toFixed(1)}</label>
+          <input
+            type="range"
+            min="0.3"
+            max="4.0"
+            step="0.1"
+            value={params.unsharp_radius}
+            onChange={(e) => update("unsharp_radius", Number(e.target.value))}
+            className="w-full"
+          />
+          <label className="app-label">しきい値: {params.unsharp_threshold}</label>
+          <input
+            type="range"
+            min="0"
+            max="64"
+            step="1"
+            value={params.unsharp_threshold}
+            onChange={(e) => update("unsharp_threshold", Number(e.target.value))}
             className="w-full"
           />
         </Section>
@@ -225,6 +377,43 @@ export default function PreprocessPanel({
           />
         </Section>
 
+        <Section title="オープン/クローズ処理">
+          <p className="param-hint">クローズは欠け埋め、オープンは小ノイズ除去に有効です。</p>
+          <label className="inline-flex items-center gap-2 text-sm text-text">
+            <input
+              type="checkbox"
+              checked={params.morph_enabled}
+              onChange={(e) => update("morph_enabled", e.target.checked)}
+            />
+            有効
+          </label>
+          <label className="app-label mt-2">方式</label>
+          <select value={params.morph_method} onChange={(e) => update("morph_method", e.target.value)} className="app-select">
+            <option value="close">クローズ</option>
+            <option value="open">オープン</option>
+          </select>
+          <label className="app-label mt-2">カーネルサイズ: {params.morph_ksize}</label>
+          <input
+            type="range"
+            min="1"
+            max="11"
+            step="2"
+            value={params.morph_ksize}
+            onChange={(e) => update("morph_ksize", Number(e.target.value))}
+            className="w-full"
+          />
+          <label className="app-label">反復回数: {params.morph_iterations}</label>
+          <input
+            type="range"
+            min="1"
+            max="4"
+            step="1"
+            value={params.morph_iterations}
+            onChange={(e) => update("morph_iterations", Number(e.target.value))}
+            className="w-full"
+          />
+        </Section>
+
         <Section title="ノイズ除去">
           <label className="app-label">方式</label>
           <p className="param-hint">背景ノイズを減らします。強すぎると細い線が消えることがあります。</p>
@@ -258,6 +447,38 @@ export default function PreprocessPanel({
             />
             有効
           </label>
+        </Section>
+
+        <Section title="余白トリミング">
+          <p className="param-hint">文字領域の外側余白を自動カットします。周辺ノイズがある画像に有効です。</p>
+          <label className="inline-flex items-center gap-2 text-sm text-text">
+            <input
+              type="checkbox"
+              checked={params.crop_margin_enabled}
+              onChange={(e) => update("crop_margin_enabled", e.target.checked)}
+            />
+            有効
+          </label>
+          <label className="app-label mt-2">背景しきい値: {params.crop_margin_threshold}</label>
+          <input
+            type="range"
+            min="180"
+            max="254"
+            step="1"
+            value={params.crop_margin_threshold}
+            onChange={(e) => update("crop_margin_threshold", Number(e.target.value))}
+            className="w-full"
+          />
+          <label className="app-label">余白マージン: {params.crop_margin_margin}px</label>
+          <input
+            type="range"
+            min="0"
+            max="20"
+            step="1"
+            value={params.crop_margin_margin}
+            onChange={(e) => update("crop_margin_margin", Number(e.target.value))}
+            className="w-full"
+          />
         </Section>
 
         <Section title="プリセット">
