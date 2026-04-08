@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import Button from "./components/Button";
 import Header from "./components/Header";
 import Sidebar from "./components/Sidebar";
 import DashboardView from "./views/DashboardView";
@@ -864,21 +863,22 @@ export default function App() {
     }
   }
 
-  async function deleteProject() {
-    if (!projectId) {
+  async function deleteProject(targetProjectId = projectId) {
+    const deletingProjectId = String(targetProjectId || "");
+    if (!deletingProjectId) {
       notify("error", "削除対象のプロジェクトが選択されていません");
       return;
     }
 
     const confirmed = window.confirm(
-      `プロジェクト「${projectId}」を削除します。\n生画像・アノテーション・モデル・データセットを含むデータが削除されます。続行しますか？`
+      `プロジェクト「${deletingProjectId}」を削除します。\n生画像・アノテーション・モデル・データセットを含むデータが削除されます。続行しますか？`
     );
     if (!confirmed) {
       return;
     }
 
     try {
-      const data = await request(`/projects/${encodeURIComponent(projectId)}`, {
+      const data = await request(`/projects/${encodeURIComponent(deletingProjectId)}`, {
         method: "DELETE",
       });
       notify("success", `プロジェクトを削除しました: ${data.project_id}`);
@@ -1382,27 +1382,20 @@ export default function App() {
 
   const currentMeta = viewMeta[activeView] || viewMeta.dashboard;
 
-  async function refreshWorkflowData() {
-    await refreshAll(projectId);
-    setWorkflowState({
-      refreshed: true,
-      preprocessed: false,
-      datasetBuilt: false,
-      trainingStarted: false,
-    });
-  }
-
   let view = null;
   if (activeView === "dashboard") {
     view = (
       <DashboardView
+        projectId={projectId}
+        projects={projects}
+        newProjectId={newProjectId}
+        onNewProjectIdChange={setNewProjectId}
+        onSelectProject={setProjectId}
+        onCreateProject={createProject}
+        onDeleteProject={deleteProject}
         imagesCount={images.length}
         labeledCount={labeledCount}
         modelCount={models.length}
-        onRefresh={refreshWorkflowData}
-        onPreprocess={runPreprocess}
-        onBuildDataset={buildDataset}
-        workflowState={workflowState}
       />
     );
   }
@@ -1584,34 +1577,6 @@ export default function App() {
       <Sidebar active={activeView} onChange={setActiveView} onExitApp={exitApplication} />
 
       <main className="ml-64 min-h-screen px-8 py-6">
-        <div className="mb-4 flex items-center justify-end gap-3 rounded-xl border border-border bg-card px-4 py-3">
-          <span className="text-xs uppercase tracking-wide text-muted">プロジェクト</span>
-          <select value={projectId} onChange={(e) => setProjectId(e.target.value)} className="app-select w-52">
-            {projects.length === 0 && (
-              <option value="" disabled>
-                （プロジェクトなし）
-              </option>
-            )}
-            {projects.map((pid) => (
-              <option key={pid} value={pid}>
-                {pid}
-              </option>
-            ))}
-          </select>
-          <input
-            value={newProjectId}
-            onChange={(e) => setNewProjectId(e.target.value)}
-            className="app-input w-44"
-            placeholder="新規プロジェクト名"
-          />
-          <Button variant="secondary" onClick={createProject}>
-            作成
-          </Button>
-          <Button variant="danger" onClick={deleteProject} disabled={!projectId}>
-            削除
-          </Button>
-        </div>
-
         <Header
           title={currentMeta.title}
           subtitle={`${currentMeta.subtitle} / プロジェクト: ${projectId}`}
