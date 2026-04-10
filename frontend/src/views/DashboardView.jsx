@@ -58,7 +58,7 @@ export default function DashboardView({
                   className={`rounded-xl border p-4 transition ${
                     selected
                       ? "border-accent bg-accent/10 shadow-card"
-                      : "border-border bg-[#2f3946] hover:border-accent/50"
+                      : "border-border bg-[#3b444e]/70 hover:border-accent/50"
                   }`}
                   role="button"
                   tabIndex={0}

@@ -5,7 +5,7 @@ import Card from "../components/Card";
 
 function MetricCard({ label, value, subValue }) {
   return (
-    <div className="rounded-lg border border-border bg-[#333d49] p-4">
+    <div className="rounded-lg border border-border bg-card/60 backdrop-blur-md p-4">
       <p className="text-xs uppercase tracking-wide text-muted">{label}</p>
       <p className="mt-2 text-3xl font-semibold text-text">{value}</p>
       {subValue ? <p className="mt-1 text-sm text-muted">{subValue}</p> : null}
@@ -23,6 +23,7 @@ export default function EvaluationView({
   setModelType,
   modelTypes,
   models,
+  latestModels,
   useOverrides,
   setUseOverrides,
   loading,
@@ -37,6 +38,14 @@ export default function EvaluationView({
     }
     return datasetOptions.filter((item) => item === "val" || item === "test");
   }, [datasetOptions]);
+  const latestAny = String(latestModels?.any || "");
+  const latestByType = latestModels?.byType || {};
+
+  function basename(path) {
+    if (!path) return "";
+    const parts = String(path).split("/");
+    return parts[parts.length - 1];
+  }
 
   function datasetLabel(value) {
     if (value === "val") return "検証";
@@ -91,6 +100,9 @@ export default function EvaluationView({
     const hue = Math.round(ratio * 120);
     return `hsl(${hue} 78% 58%)`;
   }
+
+  const resolvedModelName =
+    model === "latest" ? basename(latestByType[modelType] || latestAny) || "該当モデルなし" : model;
 
   return (
     <div className="space-y-4">
@@ -161,9 +173,17 @@ export default function EvaluationView({
             </Button>
           </div>
         </div>
+        <div className="mt-3 rounded-lg border border-border bg-card/45 p-2 text-xs text-muted">
+          評価に使用されるモデル: <span className="font-semibold text-text">{resolvedModelName}</span>
+        </div>
+        {normalizedDatasetOptions.length === 0 ? (
+          <p className="mt-2 text-xs text-amber-200">
+            評価対象データがありません。ラベル保存後に「データセット作成」を実行してください。
+          </p>
+        ) : null}
       </Card>
 
-      <div className="rounded-lg border border-border bg-[#333d49] p-3">
+      <div className="rounded-lg border border-border bg-card/60 backdrop-blur-md p-3">
         <label className="app-label">このプロジェクトの前処理設定（コピー用）</label>
         <input
           className="app-input font-mono text-xs"
@@ -193,10 +213,10 @@ export default function EvaluationView({
             <img
               src={result.confusion_matrix_data_url}
               alt="混同行列"
-              className="w-full rounded-lg border border-border bg-[#333d49]"
+              className="w-full rounded-lg border border-border bg-card/60 backdrop-blur-md"
             />
           ) : (
-            <div className="rounded-lg border border-border bg-[#333d49] p-8 text-center text-muted">
+            <div className="rounded-lg border border-border bg-card/60 backdrop-blur-md p-8 text-center text-muted">
               評価後に表示されます。
             </div>
           )}
@@ -208,7 +228,7 @@ export default function EvaluationView({
               <p className="text-sm text-muted">データがありません。</p>
             ) : (
               Object.entries(result.per_class_accuracy).map(([label, acc]) => (
-                <div key={label} className="mb-2 rounded-lg border border-border bg-[#333d49] px-3 py-2">
+                <div key={label} className="mb-2 rounded-lg border border-border bg-card/60 backdrop-blur-md px-3 py-2">
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-text">{label}</span>
                     <span style={{ color: accuracyColor(acc) }}>{(Number(acc) * 100).toFixed(1)}%</span>
@@ -251,7 +271,7 @@ export default function EvaluationView({
         <div className="max-h-[520px] overflow-auto pr-1">
           <div className="grid grid-cols-3 gap-3">
             {rows.map((row, idx) => (
-              <div key={`${row.image}-${idx}`} className="rounded-lg border border-border bg-[#333d49] p-3">
+              <div key={`${row.image}-${idx}`} className="rounded-lg border border-border bg-card/60 backdrop-blur-md p-3">
                 {row.thumbnail_data_url ? (
                   <img
                     src={row.thumbnail_data_url}

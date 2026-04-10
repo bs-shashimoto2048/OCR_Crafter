@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import Header from "./components/Header";
 import Sidebar from "./components/Sidebar";
+import WorkflowProgress from "./components/WorkflowProgress";
 import DashboardView from "./views/DashboardView";
 import ImagesView from "./views/ImagesView";
 import LabelingView from "./views/LabelingView";
@@ -15,7 +16,7 @@ import { API_BASE, imageUrl, request } from "./lib/api";
 const viewMeta = {
   dashboard: { title: "ダッシュボード", subtitle: "OCR学習ワークフロー全体を管理" },
   images: { title: "画像", subtitle: "画像取り込みと一覧確認" },
-  preprocess: { title: "前処理調整", subtitle: "前処理パラメータ調整とプレビュー" },
+  preprocess: { title: "前処理設定", subtitle: "前処理パラメータ設定とプレビュー" },
   labeling: { title: "ラベル編集", subtitle: "数字ラベル編集" },
   training: { title: "学習", subtitle: "学習ジョブ実行とログ監視" },
   models: { title: "モデル", subtitle: "保存済みモデル管理" },
@@ -842,6 +843,41 @@ export default function App() {
   );
 
   const canTrain = workflowState.datasetBuilt && savedLabeledCount > 0;
+  const workflowSteps = useMemo(() => {
+    const labelDone = images.length > 0 && savedLabeledCount === images.length;
+    const defs = [
+      { id: "images", label: "画像取込", done: images.length > 0, meta: `${images.length}件` },
+      { id: "preprocess", label: "前処理", done: workflowState.preprocessed },
+      { id: "labeling", label: "ラベル", done: labelDone, meta: `${savedLabeledCount}/${images.length}` },
+      { id: "dataset", label: "データセット", done: workflowState.datasetBuilt },
+      {
+        id: "training",
+        label: "学習",
+        done: jobStatus === "completed",
+        running: jobStatus === "running" || jobStatus === "queued",
+        error: jobStatus === "failed",
+      },
+      { id: "evaluation", label: "評価", done: Boolean(evalResult) },
+    ];
+
+    let currentAssigned = false;
+    return defs.map((step) => {
+      if (step.error) {
+        return { ...step, status: "error" };
+      }
+      if (step.running) {
+        return { ...step, status: "running" };
+      }
+      if (step.done) {
+        return { ...step, status: "done" };
+      }
+      if (!currentAssigned) {
+        currentAssigned = true;
+        return { ...step, status: "current" };
+      }
+      return { ...step, status: "todo" };
+    });
+  }, [images.length, savedLabeledCount, workflowState.preprocessed, workflowState.datasetBuilt, jobStatus, evalResult]);
 
   async function createProject() {
     const value = newProjectId.trim();
@@ -874,6 +910,11 @@ export default function App() {
       `プロジェクト「${deletingProjectId}」を削除します。\n生画像・アノテーション・モデル・データセットを含むデータが削除されます。続行しますか？`
     );
     if (!confirmed) {
+      return;
+    }
+    const typed = window.prompt(`確認のため、削除するプロジェクトIDを入力してください: ${deletingProjectId}`, "");
+    if (typed !== deletingProjectId) {
+      notify("info", "プロジェクト削除をキャンセルしました（入力不一致）");
       return;
     }
 
@@ -935,6 +976,12 @@ export default function App() {
       });
       await loadImages(projectId);
       setImageVersion((prev) => prev + 1);
+      setWorkflowState({
+        refreshed: true,
+        preprocessed: false,
+        datasetBuilt: false,
+        trainingStarted: false,
+      });
       notify("success", `${data.copied} 件の画像を取り込みました`);
     } catch (error) {
       notify("error", error.message);
@@ -979,6 +1026,12 @@ export default function App() {
         return next;
       });
       setImageVersion((prev) => prev + 1);
+      setWorkflowState((prev) => ({
+        refreshed: prev.refreshed,
+        preprocessed: false,
+        datasetBuilt: false,
+        trainingStarted: false,
+      }));
       notify("success", `${imageName} を回転しました（${angle > 0 ? "+" : ""}${angle}°）`);
     } catch (error) {
       notify("error", error.message);
@@ -1438,6 +1491,7 @@ export default function App() {
         easyocrLanguageOptions={EASYOCR_LANGUAGE_OPTIONS}
         modelTypes={modelTypes}
         models={models}
+        latestModels={latestModels}
         params={preprocessParams}
         onParamsChange={setPreprocessParams}
         preview={preprocessPreview}
@@ -1539,6 +1593,7 @@ export default function App() {
         model={inferModel}
         setModel={setInferModel}
         models={models}
+        latestModels={latestModels}
         onFileChange={selectInferenceFile}
         fileName={inferFileName}
         previewUrl={inferPreviewUrl}
@@ -1563,6 +1618,7 @@ export default function App() {
         setModelType={setEvalModelType}
         modelTypes={modelTypes}
         models={models}
+        latestModels={latestModels}
         useOverrides={evalUseOverrides}
         setUseOverrides={setEvalUseOverrides}
         loading={evalLoading}
@@ -1573,7 +1629,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-bg text-text">
+    <div className="min-h-screen bg-transparent text-text">
       <Sidebar active={activeView} onChange={setActiveView} onExitApp={exitApplication} />
 
       <main className="ml-64 min-h-screen px-8 py-6">
@@ -1590,6 +1646,7 @@ export default function App() {
               : null
           }
         />
+        <WorkflowProgress steps={workflowSteps} />
 
         <section className="mt-6">{view}</section>
 

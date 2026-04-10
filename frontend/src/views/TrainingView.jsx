@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import Card from "../components/Card";
 import Button from "../components/Button";
 
@@ -26,6 +27,7 @@ export default function TrainingView({
   logs,
   workflowState,
 }) {
+  const [showImportantOnly, setShowImportantOnly] = useState(false);
   const preprocessed = Boolean(workflowState?.preprocessed);
   const datasetBuilt = Boolean(workflowState?.datasetBuilt);
   const trainingStarted = Boolean(workflowState?.trainingStarted);
@@ -55,8 +57,29 @@ export default function TrainingView({
     return value || "-";
   }
 
+  function logLevel(line) {
+    const text = String(line || "").toLowerCase();
+    if (text.includes("failed") || text.includes("error") || text.includes("失敗") || text.includes("例外")) {
+      return "error";
+    }
+    if (text.includes("completed") || text.includes("success") || text.includes("完了")) {
+      return "success";
+    }
+    if (text.includes("warning") || text.includes("警告") || text.includes("missing") || text.includes("0件")) {
+      return "warn";
+    }
+    return "info";
+  }
+
+  const filteredLogs = useMemo(() => {
+    if (!showImportantOnly) {
+      return logs;
+    }
+    return logs.filter((line) => logLevel(line) !== "info");
+  }, [logs, showImportantOnly]);
+
   return (
-    <div className="grid grid-cols-[1fr_1.2fr] gap-6">
+    <div className="grid grid-cols-[3fr_7fr] gap-6">
       <Card title="学習パラメータ" subtitle="ResNet18ベース分類モデル">
         <div className="space-y-4">
           <div>
@@ -177,20 +200,45 @@ export default function TrainingView({
       </Card>
 
       <Card title="学習ログ" subtitle="学習状態をリアルタイムで表示します">
-        <div className="mb-3 flex items-center justify-between text-xs text-muted">
+        <div className="mb-2 flex items-center justify-between text-xs text-muted">
           <span>ジョブID: {jobId || "-"}</span>
           <span>状態: {statusLabel(jobStatus)}</span>
         </div>
+        <div className="mb-3 flex items-center justify-between text-xs">
+          <label className="inline-flex items-center gap-2 text-muted">
+            <input
+              type="checkbox"
+              checked={showImportantOnly}
+              onChange={(e) => setShowImportantOnly(e.target.checked)}
+            />
+            重要イベントのみ表示
+          </label>
+          <span className="text-muted">表示: {filteredLogs.length}件</span>
+        </div>
 
-        <div className="h-[360px] overflow-auto rounded-lg border border-border bg-[#333d49] p-3 font-mono text-xs text-slate-200">
-          {logs.length === 0 ? (
+        <div className="h-[360px] overflow-auto rounded-lg border border-border bg-card/60 backdrop-blur-md p-3 font-mono text-xs text-slate-200">
+          {filteredLogs.length === 0 ? (
             <p className="text-muted">ログはまだありません。</p>
           ) : (
-            logs.map((line, idx) => (
-              <p key={`${line}-${idx}`} className="mb-1">
-                {line}
-              </p>
-            ))
+            filteredLogs.map((line, idx) => {
+              const level = logLevel(line);
+              return (
+                <p
+                  key={`${line}-${idx}`}
+                  className={`mb-1 rounded px-1.5 py-0.5 ${
+                    level === "error"
+                      ? "bg-danger/20 text-red-100"
+                      : level === "success"
+                        ? "bg-success/20 text-emerald-100"
+                        : level === "warn"
+                          ? "bg-amber-400/20 text-amber-100"
+                          : "text-slate-100"
+                  }`}
+                >
+                  {line}
+                </p>
+              );
+            })
           )}
         </div>
       </Card>

@@ -1,10 +1,10 @@
 import { forwardRef } from "react";
 
 const variants = {
-  primary: "bg-accent text-white hover:bg-blue-500",
-  secondary: "bg-[#3b4654] text-text border border-border hover:bg-[#465362]",
-  ghost: "bg-transparent text-muted hover:bg-[#3b4654] hover:text-text",
-  danger: "bg-danger text-white hover:bg-red-500",
+  primary: "bg-accent text-white shadow-[0_6px_18px_rgba(88,166,255,0.32)] hover:bg-[#79b8ff]",
+  secondary: "bg-[#3a434d]/88 text-text border border-border/80 backdrop-blur-md hover:bg-[#45505b]/90",
+  ghost: "bg-transparent text-muted hover:bg-[#3a434d]/65 hover:text-text",
+  danger: "bg-danger text-white shadow-[0_6px_16px_rgba(248,81,73,0.28)] hover:bg-[#ff6a63]",
 };
 
 const sizes = {
@@ -26,7 +26,7 @@ const Button = forwardRef(function Button(
   return (
     <button
       ref={ref}
-      className={`inline-flex items-center justify-center rounded-lg font-medium transition duration-200 disabled:cursor-not-allowed disabled:opacity-50 ${variants[variant]} ${sizes[size]} ${className}`}
+      className={`inline-flex items-center justify-center rounded-lg font-medium transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 focus-visible:ring-offset-2 focus-visible:ring-offset-bg disabled:cursor-not-allowed disabled:opacity-50 ${variants[variant]} ${sizes[size]} ${className}`}
       {...props}
     >
       {children}

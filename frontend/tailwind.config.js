@@ -4,20 +4,21 @@ export default {
   theme: {
     extend: {
       colors: {
-        bg: "#1e242b",
-        card: "#2b333e",
-        border: "#45515f",
-        text: "#f2f6fb",
-        muted: "#c1cad5",
-        accent: "#3b82f6",
-        success: "#22c55e",
-        danger: "#ef4444",
+        bg: "#2b3138",
+        card: "#343b44",
+        border: "#626d79",
+        text: "#e6edf3",
+        muted: "#c2ccd8",
+        accent: "#58a6ff",
+        success: "#3fb950",
+        danger: "#f85149",
       },
       borderRadius: {
         card: "12px",
       },
       boxShadow: {
-        card: "0 10px 30px rgba(0, 0, 0, 0.25)",
+        card: "0 14px 28px rgba(20, 24, 28, 0.36)",
+        glass: "0 20px 44px rgba(10, 14, 18, 0.38)",
       },
       fontFamily: {
         sans: ["Inter", "system-ui", "-apple-system", "Segoe UI", "sans-serif"],

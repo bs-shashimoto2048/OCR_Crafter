@@ -1,8 +1,8 @@
 function StatusIndicator({ status }) {
   if (status === "running" || status === "queued") {
     return (
-      <div className="inline-flex items-center gap-2 rounded-full border border-blue-400/30 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-300">
-        <span className="h-3 w-3 animate-spin rounded-full border-2 border-blue-300 border-t-transparent" />
+      <div className="inline-flex items-center gap-2 rounded-full border border-accent/40 bg-accent/15 px-3 py-1 text-xs font-medium text-accent">
+        <span className="h-3 w-3 animate-spin rounded-full border-2 border-accent border-t-transparent" />
         学習中...
       </div>
     );

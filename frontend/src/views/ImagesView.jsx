@@ -44,7 +44,7 @@ export default function ImagesView({
               <img
                 src={imageUrl(item.image, projectId, imageVersion)}
                 alt={item.image}
-                className="h-44 w-full object-contain bg-[#333d49] p-2"
+                className="h-44 w-full object-contain bg-card/60 backdrop-blur-md p-2"
               />
               <div className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 transition duration-200 group-hover:opacity-100">
                 <Button size="sm" onClick={() => onOpenLabeling(item.image)}>
@@ -68,6 +68,16 @@ export default function ImagesView({
           </Card>
         ))}
       </div>
+
+      {images.length === 0 ? (
+        <Card title="画像が未登録です" subtitle="次の操作">
+          <ol className="list-decimal space-y-1 pl-5 text-sm text-muted">
+            <li>「参照」で画像フォルダを選択</li>
+            <li>「取り込み」を実行</li>
+            <li>取り込み後にラベル編集へ進む</li>
+          </ol>
+        </Card>
+      ) : null}
     </div>
   );
 }

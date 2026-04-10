@@ -13,6 +13,7 @@ export default function InferenceView({
   model,
   setModel,
   models,
+  latestModels,
   onFileChange,
   fileName,
   previewUrl,
@@ -22,6 +23,15 @@ export default function InferenceView({
   loading,
   result,
 }) {
+  const latestAny = String(latestModels?.any || "");
+  const latestByType = latestModels?.byType || {};
+
+  function basename(path) {
+    if (!path) return "";
+    const parts = String(path).split("/");
+    return parts[parts.length - 1];
+  }
+
   function engineLabel(value) {
     if (value === "easyocr") return "EasyOCR";
     return "カスタムモデル";
@@ -37,8 +47,15 @@ export default function InferenceView({
     });
   }
 
+  const resolvedModelName =
+    engine !== "custom"
+      ? "EasyOCR"
+      : model === "latest"
+        ? basename(latestByType[modelType] || latestAny) || "該当モデルなし"
+        : model;
+
   return (
-    <div className="grid grid-cols-[1fr_1fr] gap-6">
+    <div className="grid grid-cols-[4fr_6fr] gap-6">
       <Card title="画像アップロード" subtitle="1枚画像を選択して推論します">
         <div className="space-y-4">
           <div>
@@ -83,11 +100,16 @@ export default function InferenceView({
                   </select>
                 </div>
               ) : null}
+              {models.length === 0 ? (
+                <p className="text-xs text-amber-200">
+                  カスタムモデルがありません。学習画面で学習完了後に推論できます。
+                </p>
+              ) : null}
             </>
           ) : (
             <div>
               <label className="app-label">EasyOCR 言語</label>
-              <div className="grid grid-cols-3 gap-2 rounded-lg border border-border bg-[#333d49] p-2">
+              <div className="grid grid-cols-3 gap-2 rounded-lg border border-border bg-card/60 backdrop-blur-md p-2">
                 {easyocrLanguageOptions.map((lang) => (
                   <label key={lang} className="inline-flex items-center gap-2 text-xs text-text">
                     <input
@@ -101,6 +123,10 @@ export default function InferenceView({
               </div>
             </div>
           )}
+
+          <div className="rounded-lg border border-border bg-card/45 p-2 text-xs text-muted">
+            実際に使用される推論先: <span className="font-semibold text-text">{resolvedModelName}</span>
+          </div>
 
           <div>
             <label className="app-label">画像</label>
@@ -132,7 +158,7 @@ export default function InferenceView({
       <Card title="推論結果" subtitle="推論結果を大きく表示します">
         {result ? (
           <div className="space-y-6">
-            <div className="rounded-xl border border-border bg-[#333d49] p-8 text-center">
+            <div className="rounded-xl border border-border bg-card/60 backdrop-blur-md p-8 text-center">
               <p className="text-xs uppercase tracking-[0.18em] text-muted">予測結果</p>
               <p className="mt-3 text-7xl font-semibold text-text">{result.prediction}</p>
             </div>
@@ -142,7 +168,7 @@ export default function InferenceView({
                 <span>信頼度</span>
                 <span>{(Number(result.confidence || 0) * 100).toFixed(1)}%</span>
               </div>
-              <div className="h-2 rounded-full bg-[#3f4b59]">
+              <div className="h-2 rounded-full bg-[#3f4854]/65">
                 <div
                   className="h-2 rounded-full bg-accent transition-all duration-200"
                   style={{ width: `${Math.max(4, Number(result.confidence || 0) * 100)}%` }}
@@ -150,7 +176,7 @@ export default function InferenceView({
               </div>
             </div>
 
-            <div className="rounded-lg border border-border bg-[#333d49] p-3 text-xs text-muted">
+            <div className="rounded-lg border border-border bg-card/60 backdrop-blur-md p-3 text-xs text-muted">
               <p>エンジン: {engineLabel(result.engine || "custom")}</p>
               <p className="truncate">モデル: {result.model_path}</p>
               <p>種別: {result.model_type}</p>
@@ -161,7 +187,7 @@ export default function InferenceView({
             </div>
           </div>
         ) : (
-          <div className="rounded-lg border border-border bg-[#333d49] p-8 text-center text-muted">
+          <div className="rounded-lg border border-border bg-card/60 backdrop-blur-md p-8 text-center text-muted">
             推論結果はここに表示されます。
           </div>
         )}

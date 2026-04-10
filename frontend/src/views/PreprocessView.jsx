@@ -22,6 +22,7 @@ export default function PreprocessView({
   easyocrLanguageOptions,
   modelTypes,
   models,
+  latestModels,
   params,
   onParamsChange,
   preview,
@@ -35,6 +36,15 @@ export default function PreprocessView({
   onSavePreset,
   onLoadPreset,
 }) {
+  const latestAny = String(latestModels?.any || "");
+  const latestByType = latestModels?.byType || {};
+
+  function basename(path) {
+    if (!path) return "";
+    const parts = String(path).split("/");
+    return parts[parts.length - 1];
+  }
+
   function toggleEasyOcrLang(lang) {
     setPredictEasyOcrLangs((prev) => {
       const list = Array.isArray(prev) ? prev : [];
@@ -44,6 +54,13 @@ export default function PreprocessView({
       return [...list, lang];
     });
   }
+
+  const resolvedModelName =
+    predictEngine !== "custom"
+      ? "EasyOCR"
+      : predictModel === "latest"
+        ? basename(latestByType[predictModelType] || latestAny) || "該当モデルなし"
+        : predictModel;
 
   return (
     <div className="grid grid-cols-[220px_minmax(0,1fr)_360px] gap-4">
@@ -59,10 +76,10 @@ export default function PreprocessView({
                 className={`w-full rounded-lg border px-3 py-2 text-left text-xs transition ${
                   active
                     ? "border-accent bg-accent/15 text-blue-200"
-                    : "border-border bg-[#333d49] text-muted hover:text-text"
+                    : "border-border bg-card/60 backdrop-blur-md text-muted hover:text-text"
                 }`}
               >
-                <div className="mb-2 overflow-hidden rounded-md border border-border bg-[#3a4450] p-1">
+                <div className="mb-2 overflow-hidden rounded-md border border-border bg-[#3b444f]/80 p-1">
                   <img src={thumbSrc} alt={item.image} className="h-20 w-full object-contain" loading="lazy" />
                 </div>
                 <div className="truncate font-medium">{item.image}</div>
@@ -106,7 +123,7 @@ export default function PreprocessView({
           error={error || preview?.predict_error || ""}
         />
 
-        <Card title="推論テスト設定" subtitle="前処理プレビューの推論エンジン設定">
+        <Card title="推論設定" subtitle="前処理プレビューで使う推論設定">
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="app-label">エンジン</label>
@@ -152,11 +169,16 @@ export default function PreprocessView({
                     </select>
                   </div>
                 ) : null}
+                {models.length === 0 ? (
+                  <p className="col-span-2 text-xs text-amber-200">
+                    カスタムモデルがありません。学習完了までは EasyOCR を使ってプレビューできます。
+                  </p>
+                ) : null}
               </>
             ) : (
               <div className="col-span-2">
                 <label className="app-label">EasyOCR 言語</label>
-                <div className="grid grid-cols-6 gap-2 rounded-lg border border-border bg-[#333d49] p-2">
+                <div className="grid grid-cols-6 gap-2 rounded-lg border border-border bg-card/60 backdrop-blur-md p-2">
                   {easyocrLanguageOptions.map((lang) => (
                     <label key={lang} className="inline-flex items-center gap-2 text-xs text-text">
                       <input
@@ -170,6 +192,9 @@ export default function PreprocessView({
                 </div>
               </div>
             )}
+          </div>
+          <div className="mt-3 rounded-lg border border-border bg-card/45 p-2 text-xs text-muted">
+            実際に使用される推論先: <span className="font-semibold text-text">{resolvedModelName}</span>
           </div>
         </Card>
       </div>

@@ -32,8 +32,9 @@ export default function LabelingView({
   const zoomLevels = [25, 50, 100, 150, 200];
   const [zoomPercent, setZoomPercent] = useState(100);
   const [showUnlabeledOnly, setShowUnlabeledOnly] = useState(false);
+  const [listMode, setListMode] = useState("card");
   const listRef = useRef(null);
-  const cardRefs = useRef([]);
+  const itemRefs = useRef([]);
   const labelInputRef = useRef(null);
   const saveButtonRef = useRef(null);
   const selected = images[selectedIndex] || null;
@@ -51,8 +52,8 @@ export default function LabelingView({
   }, [images, labelDrafts, showUnlabeledOnly]);
 
   useEffect(() => {
-    cardRefs.current = [];
-  }, [showUnlabeledOnly, visibleEntries.length]);
+    itemRefs.current = [];
+  }, [showUnlabeledOnly, visibleEntries.length, listMode]);
 
   useEffect(() => {
     if (!showUnlabeledOnly) {
@@ -77,14 +78,14 @@ export default function LabelingView({
     if (visibleIndex < 0) {
       return;
     }
-    const cardEl = cardRefs.current[visibleIndex];
-    if (!listEl || !cardEl) {
+    const itemEl = itemRefs.current[visibleIndex];
+    if (!listEl || !itemEl) {
       return;
     }
 
-    const top = cardEl.offsetTop - listEl.offsetTop;
+    const top = itemEl.offsetTop - listEl.offsetTop;
     listEl.scrollTo({ top, behavior: "smooth" });
-    cardEl.focus({ preventScroll: true });
+    itemEl.focus({ preventScroll: true });
   }, [selectedIndex, visibleEntries]);
 
   useEffect(() => {
@@ -130,7 +131,7 @@ export default function LabelingView({
             ))}
           </div>
 
-          <div className="max-h-[70vh] overflow-auto rounded-xl border border-border bg-[#333d49] p-3">
+          <div className="max-h-[70vh] overflow-auto rounded-xl border border-border bg-card/60 backdrop-blur-md p-3">
             <img
               src={processedImageUrl(selected.image, projectId, imageVersion, selected.type || "")}
               alt={selected.image}
@@ -169,7 +170,7 @@ export default function LabelingView({
             placeholder="ラベル文字列を入力"
           />
 
-          <div className="space-y-2 rounded-xl border border-border bg-[#333d49] p-3">
+          <div className="space-y-2 rounded-xl border border-border bg-card/60 backdrop-blur-md p-3">
             <div className="grid grid-cols-10 gap-1.5">
               {keyRows[0].map((key) => (
                 <Button
@@ -272,60 +273,114 @@ export default function LabelingView({
         title="画像リスト"
         subtitle="ファイル名と設定ラベルを確認"
         actions={
-          <label className="inline-flex items-center gap-2 text-xs text-text">
-            <input
-              type="checkbox"
-              checked={showUnlabeledOnly}
-              onChange={(e) => setShowUnlabeledOnly(e.target.checked)}
-            />
-            未ラベルのみ
-          </label>
+          <div className="flex items-center gap-3">
+            <div className="inline-flex rounded-lg border border-border bg-card/45 p-1">
+              <Button
+                size="sm"
+                variant={listMode === "card" ? "primary" : "ghost"}
+                className="h-7 px-2 text-[11px]"
+                onClick={() => setListMode("card")}
+              >
+                カード
+              </Button>
+              <Button
+                size="sm"
+                variant={listMode === "table" ? "primary" : "ghost"}
+                className="h-7 px-2 text-[11px]"
+                onClick={() => setListMode("table")}
+              >
+                一覧
+              </Button>
+            </div>
+            <label className="inline-flex items-center gap-2 text-xs text-text">
+              <input
+                type="checkbox"
+                checked={showUnlabeledOnly}
+                onChange={(e) => setShowUnlabeledOnly(e.target.checked)}
+              />
+              未ラベルのみ
+            </label>
+          </div>
         }
       >
-        <div ref={listRef} className="max-h-[80vh] space-y-2 overflow-auto pr-1">
-          {visibleEntries.map(({ item, originalIndex, savedLabel, draftLabel, isSet }, idx) => {
-            return (
-              <button
-                key={item.image}
-                ref={(el) => {
-                  cardRefs.current[idx] = el;
-                }}
-                onClick={() => onSelectIndex(originalIndex)}
-                className={`w-full rounded-xl border p-3 text-left transition ${
-                  originalIndex === selectedIndex
-                    ? "border-accent bg-accent/15"
-                    : "border-border bg-[#333d49] hover:border-slate-500"
-                }`}
-              >
-                <div className="mb-2 overflow-hidden rounded-md border border-border bg-[#3a4450] p-1">
-                  <img
-                    src={imageUrl(item.image, projectId, imageVersion)}
-                    alt={item.image}
-                    className="h-20 w-full object-contain"
-                    loading="lazy"
-                  />
-                </div>
-                <div className="flex items-start justify-between gap-2">
-                  <p className="truncate text-sm font-medium text-text" title={item.image}>
-                    {item.image}
-                  </p>
-                  {isSet ? (
-                    <span className="rounded-full border border-emerald-400/50 bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-300">
-                      済
+        <div ref={listRef} className="max-h-[80vh] overflow-auto pr-1">
+          {listMode === "card" ? (
+            <div className="space-y-2">
+              {visibleEntries.map(({ item, originalIndex, savedLabel, draftLabel, isSet }, idx) => {
+                return (
+                  <button
+                    key={item.image}
+                    ref={(el) => {
+                      itemRefs.current[idx] = el;
+                    }}
+                    onClick={() => onSelectIndex(originalIndex)}
+                    className={`w-full rounded-xl border p-3 text-left transition ${
+                      originalIndex === selectedIndex
+                        ? "border-accent bg-accent/15"
+                        : "border-border bg-card/60 backdrop-blur-md hover:border-slate-500"
+                    }`}
+                  >
+                    <div className="mb-2 overflow-hidden rounded-md border border-border bg-[#3b444f]/80 p-1">
+                      <img
+                        src={imageUrl(item.image, projectId, imageVersion)}
+                        alt={item.image}
+                        className="h-20 w-full object-contain"
+                        loading="lazy"
+                      />
+                    </div>
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="truncate text-sm font-medium text-text" title={item.image}>
+                        {item.image}
+                      </p>
+                      {isSet ? (
+                        <span className="rounded-full border border-emerald-400/50 bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-300">
+                          済
+                        </span>
+                      ) : (
+                        <span className="text-[11px] font-semibold text-red-400">未</span>
+                      )}
+                    </div>
+                    <p className="mt-1 truncate text-xs text-muted">ラベル</p>
+                    <p className="truncate text-base font-semibold text-lime-300">
+                      {isSet ? savedLabel : draftLabel || "-"}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="overflow-hidden rounded-xl border border-border bg-card/55 backdrop-blur-md">
+              <div className="grid grid-cols-[minmax(0,1fr)_140px_54px] gap-2 border-b border-border/70 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted">
+                <span>ファイル名</span>
+                <span>ラベル</span>
+                <span className="text-center">状態</span>
+              </div>
+              <div className="divide-y divide-border/50">
+                {visibleEntries.map(({ item, originalIndex, savedLabel, draftLabel, isSet }, idx) => (
+                  <button
+                    key={item.image}
+                    ref={(el) => {
+                      itemRefs.current[idx] = el;
+                    }}
+                    onClick={() => onSelectIndex(originalIndex)}
+                    className={`grid w-full grid-cols-[minmax(0,1fr)_140px_54px] items-center gap-2 px-3 py-2 text-left text-xs transition ${
+                      originalIndex === selectedIndex ? "bg-accent/15" : "hover:bg-accent/10"
+                    }`}
+                  >
+                    <span className="truncate text-text" title={item.image}>
+                      {item.image}
                     </span>
-                  ) : (
-                    <span className="text-[11px] font-semibold text-red-400">未</span>
-                  )}
-                </div>
-                <p className="mt-1 truncate text-xs text-muted">ラベル</p>
-                <p className="truncate text-base font-semibold text-lime-300">
-                  {isSet ? savedLabel : draftLabel || "-"}
-                </p>
-              </button>
-            );
-          })}
+                    <span className="truncate font-semibold text-lime-300">{isSet ? savedLabel : draftLabel || "-"}</span>
+                    <span className={`text-center font-semibold ${isSet ? "text-emerald-300" : "text-red-400"}`}>
+                      {isSet ? "済" : "未"}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {visibleEntries.length === 0 ? (
-            <div className="rounded-xl border border-border bg-[#333d49] px-3 py-6 text-center text-sm text-muted">
+            <div className="rounded-xl border border-border bg-card/60 backdrop-blur-md px-3 py-6 text-center text-sm text-muted">
               表示対象の画像がありません
             </div>
           ) : null}

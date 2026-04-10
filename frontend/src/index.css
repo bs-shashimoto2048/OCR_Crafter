@@ -14,38 +14,45 @@
     font-size: 17px;
   }
 
+  :where(button, [role="button"], input, select, textarea):focus-visible {
+    outline: 2px solid #9ecbff;
+    outline-offset: 2px;
+  }
+
   body {
     @apply bg-bg text-text font-sans antialiased;
+    background-image: linear-gradient(to bottom right, #000000 0%, #000000 60%, #ffffff 100%);
+    background-attachment: fixed;
   }
 }
 
 @layer components {
   .surface-card {
-    @apply rounded-card border border-border bg-card p-5 transition duration-200;
+    @apply rounded-card border border-border/80 bg-card/80 p-5 shadow-glass backdrop-blur-xl transition duration-200;
   }
 
   .surface-card-hover {
-    @apply hover:shadow-card hover:scale-[1.02];
+    @apply hover:-translate-y-0.5 hover:shadow-card hover:scale-[1.01];
   }
 
   .app-input {
-    @apply h-10 w-full rounded-lg border border-border bg-[#333d49] px-3 text-sm text-text outline-none transition placeholder:text-muted/70 focus:border-accent;
+    @apply h-10 w-full rounded-lg border border-border/80 bg-card/80 px-3 text-sm text-text outline-none transition placeholder:text-muted/75 focus:border-accent focus:bg-card/90 focus-visible:ring-2 focus-visible:ring-accent/55;
   }
 
   .app-select {
-    @apply h-10 w-full rounded-lg border border-border bg-[#333d49] px-3 text-sm text-text outline-none transition focus:border-accent;
+    @apply h-10 w-full rounded-lg border border-border/80 bg-card/80 px-3 text-sm text-text outline-none transition focus:border-accent focus:bg-card/90 focus-visible:ring-2 focus-visible:ring-accent/55;
   }
 
   .app-label {
-    @apply mb-1 block text-xs font-medium uppercase tracking-wide text-muted;
+    @apply mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-200;
   }
 
   .preprocess-panel .app-label {
-    @apply text-sm font-bold normal-case tracking-normal text-white;
+    @apply text-sm font-bold normal-case tracking-normal text-slate-100;
   }
 
   .preprocess-panel .param-hint {
-    @apply text-[11px] leading-4 text-slate-500;
+    @apply text-[11px] leading-4 text-slate-300/70;
   }
 }
 

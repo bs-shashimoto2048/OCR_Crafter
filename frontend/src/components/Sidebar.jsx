@@ -3,7 +3,7 @@ import Button from "./Button";
 const navItems = [
   { id: "dashboard", label: "ダッシュボード" },
   { id: "images", label: "画像" },
-  { id: "preprocess", label: "前処理調整" },
+  { id: "preprocess", label: "前処理設定" },
   { id: "labeling", label: "ラベル編集" },
   { id: "training", label: "学習" },
   { id: "models", label: "モデル" },
@@ -13,7 +13,7 @@ const navItems = [
 
 export default function Sidebar({ active, onChange, onExitApp }) {
   return (
-    <aside className="fixed inset-y-0 left-0 flex w-64 flex-col border-r border-border bg-[#27313c] px-5 py-6">
+    <aside className="fixed inset-y-0 left-0 flex w-64 flex-col border-r border-border/80 bg-[#2b3138]/90 px-5 py-6 backdrop-blur-xl">
       <div className="mb-8">
         <p className="text-xs uppercase tracking-[0.18em] text-muted">OCR プラットフォーム</p>
         <h1 className="mt-2 text-xl font-semibold text-text">OCR Crafter</h1>
@@ -28,8 +28,8 @@ export default function Sidebar({ active, onChange, onExitApp }) {
               onClick={() => onChange(item.id)}
               className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition ${
                 isActive
-                  ? "bg-[#3a4654] text-text border border-border"
-                  : "text-muted hover:bg-[#36414e] hover:text-text"
+                  ? "border border-border/90 bg-[#3c444f]/88 text-text shadow-[0_7px_20px_rgba(16,22,30,0.36)]"
+                  : "text-muted hover:bg-[#37404a]/72 hover:text-text"
               }`}
             >
               <span

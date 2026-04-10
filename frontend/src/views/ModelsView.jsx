@@ -51,8 +51,16 @@ export default function ModelsView({ models, modelInfos, latest, onRefresh, onDe
     if (selectedModels.length === 0) {
       return;
     }
-    const ok = window.confirm(`選択した ${selectedModels.length} 件のモデルを削除します。よろしいですか？`);
+    const previewList = selectedModels.slice(0, 3).join(", ");
+    const hasMore = selectedModels.length > 3 ? ` ほか${selectedModels.length - 3}件` : "";
+    const ok = window.confirm(
+      `選択した ${selectedModels.length} 件のモデルを削除します。\n対象: ${previewList}${hasMore}\nこの操作は取り消せません。続行しますか？`
+    );
     if (!ok) {
+      return;
+    }
+    const typed = window.prompt("確認のため DELETE と入力してください。", "");
+    if (typed !== "DELETE") {
       return;
     }
     await onDeleteSelected(selectedModels);
@@ -123,12 +131,12 @@ export default function ModelsView({ models, modelInfos, latest, onRefresh, onDe
       }
     >
       <div className="mb-4 grid grid-cols-3 gap-3 text-sm">
-        <div className="rounded-lg border border-border bg-[#333d49] p-3">
+        <div className="rounded-lg border border-border bg-card/60 backdrop-blur-md p-3">
           <p className="text-muted">最新（全体）</p>
           <p className="mt-1 truncate text-text">{latestAny || "-"}</p>
         </div>
         {Object.entries(latestByType).map(([type, value]) => (
-          <div key={type} className="rounded-lg border border-border bg-[#333d49] p-3">
+          <div key={type} className="rounded-lg border border-border bg-card/60 backdrop-blur-md p-3">
             <p className="text-muted">最新 {type}</p>
             <p className="mt-1 truncate text-text">{basename(value) || "-"}</p>
           </div>
@@ -159,7 +167,7 @@ export default function ModelsView({ models, modelInfos, latest, onRefresh, onDe
             const ratio = ratioText(name);
             const counts = countText(name);
             return (
-              <tr key={name} className="border-b border-border/80 transition hover:bg-[#3f4b59]">
+              <tr key={name} className="border-b border-border/80 transition hover:bg-[#3b444e]/65">
                 <td className="px-2 py-3">
                   <input
                     type="checkbox"
