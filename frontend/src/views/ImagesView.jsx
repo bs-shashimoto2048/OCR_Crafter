@@ -26,7 +26,7 @@ export default function ImagesView({
             className="app-input min-w-0 flex-1"
           />
           <Button variant="secondary" className="shrink-0 whitespace-nowrap" onClick={onBrowseDir}>
-            参照
+            Browse
           </Button>
           <Button className="shrink-0 whitespace-nowrap" onClick={onImport}>
             取り込み
@@ -72,7 +72,7 @@ export default function ImagesView({
       {images.length === 0 ? (
         <Card title="画像が未登録です" subtitle="次の操作">
           <ol className="list-decimal space-y-1 pl-5 text-sm text-muted">
-            <li>「参照」で画像フォルダを選択</li>
+            <li>「Browse」で画像フォルダを選択</li>
             <li>「取り込み」を実行</li>
             <li>取り込み後にラベル編集へ進む</li>
           </ol>

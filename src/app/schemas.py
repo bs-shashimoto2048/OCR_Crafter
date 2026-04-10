@@ -41,6 +41,10 @@ class DirectorySelectRequest(BaseModel):
     initial_dir: Optional[str] = Field(default=None, description="初期表示ディレクトリ")
 
 
+class FileSelectRequest(BaseModel):
+    initial_dir: Optional[str] = Field(default=None, description="初期表示ディレクトリ")
+
+
 class RotateImageRequest(BaseModel):
     angle: int = Field(..., description="回転角度（90の倍数。右回転が正）")
 

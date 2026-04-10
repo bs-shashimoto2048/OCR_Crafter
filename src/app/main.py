@@ -27,6 +27,7 @@ from .schemas import (
     DatasetBuildRequest,
     DirectorySelectRequest,
     EvaluateRequest,
+    FileSelectRequest,
     ImportImagesRequest,
     LabelUpdateRequest,
     PreprocessPreviewRequest,
@@ -37,11 +38,17 @@ from .schemas import (
 )
 from .services.data_manager import import_images_from_directory, list_raw_images, rotate_project_image
 from .services.dataset_builder import build_dataset, read_dataset_meta
-from .services.dialogs import select_directory_path
+from .services.dialogs import select_directory_path, select_file_path
 from .services.evaluation import evaluate_dataset
 from .services.labels import ensure_master_csv, read_labels, upsert_label
 from .services.model_registry import delete_model, latest_model, list_model_infos, list_model_types, list_models
 from .services.preprocess import preview_preprocess, run_preprocess
+from .services.training_image_builder import (
+    detect_bboxes_with_yolo,
+    export_selected_crops,
+    list_yolo_models,
+    make_resize_preview,
+)
 from .train import run_training
 
 app = FastAPI(title="OCR Crafter API", version="0.2.0")
@@ -250,6 +257,17 @@ def select_directory(req: DirectorySelectRequest) -> dict[str, str]:
         raise HTTPException(status_code=500, detail=str(e)) from e
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"failed to open directory dialog: {e}") from e
+    return {"path": path}
+
+
+@app.post("/dialogs/select-file")
+def select_file(req: FileSelectRequest) -> dict[str, str]:
+    try:
+        path = select_file_path(req.initial_dir, extensions=["pt"])
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"failed to open file dialog: {e}") from e
     return {"path": path}
 
 
@@ -617,6 +635,79 @@ async def predict(
         raise HTTPException(status_code=400, detail=str(e)) from e
     finally:
         Path(tmp_path).unlink(missing_ok=True)
+
+
+@app.get("/image-builder/yolo-models")
+def image_builder_yolo_models(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+    resolved = _resolve_project_id(project_id)
+    return list_yolo_models(project_id=resolved)
+
+
+@app.post("/image-builder/resize-preview")
+async def image_builder_resize_preview(
+    file: UploadFile = File(...),
+    resize_long_side: int = Form(...),
+    use_resize: bool = Form(True),
+) -> dict[str, Any]:
+    suffix = Path(file.filename or "image.png").suffix.lower()
+    if suffix not in {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}:
+        raise HTTPException(status_code=400, detail="unsupported image format")
+    content = await file.read()
+    try:
+        return make_resize_preview(content, int(resize_long_side), bool(use_resize))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/image-builder/detect")
+async def image_builder_detect(
+    file: UploadFile = File(...),
+    resize_long_side: int = Form(...),
+    use_resize: bool = Form(True),
+    model: str = Form(...),
+    conf_threshold: float = Form(0.25),
+    project_id: str = Form("default"),
+) -> dict[str, Any]:
+    resolved = _resolve_project_id(project_id)
+    content = await file.read()
+    try:
+        return detect_bboxes_with_yolo(
+            image_bytes=content,
+            long_side=int(resize_long_side),
+            use_resize=bool(use_resize),
+            model_name=model,
+            conf_threshold=float(conf_threshold),
+            project_id=resolved,
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/image-builder/export")
+async def image_builder_export(
+    file: UploadFile = File(...),
+    resize_long_side: int = Form(...),
+    use_resize: bool = Form(True),
+    boxes_json: str = Form(...),
+    output_dir: str = Form(...),
+    crop_height: int = Form(32),
+) -> dict[str, Any]:
+    content = await file.read()
+    try:
+        return export_selected_crops(
+            image_bytes=content,
+            long_side=int(resize_long_side),
+            use_resize=bool(use_resize),
+            boxes_json=boxes_json,
+            output_dir=output_dir,
+            crop_height=int(crop_height),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @app.post("/evaluate")

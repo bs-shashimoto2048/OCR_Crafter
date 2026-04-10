@@ -11,6 +11,7 @@ import ModelsView from "./views/ModelsView";
 import InferenceView from "./views/InferenceView";
 import PreprocessView from "./views/PreprocessView";
 import EvaluationView from "./views/EvaluationView";
+import TrainingImageBuilderView from "./views/TrainingImageBuilderView";
 import { API_BASE, imageUrl, request } from "./lib/api";
 
 const viewMeta = {
@@ -22,6 +23,10 @@ const viewMeta = {
   models: { title: "モデル", subtitle: "保存済みモデル管理" },
   inference: { title: "推論", subtitle: "画像推論と精度確認" },
   evaluation: { title: "評価", subtitle: "精度評価と誤認識分析" },
+  "image-builder-step1": { title: "学習画像作成", subtitle: "Step1: 画像指定とリサイズ" },
+  "image-builder-step2": { title: "学習画像作成", subtitle: "Step2: YOLO検出" },
+  "image-builder-step3": { title: "学習画像作成", subtitle: "Step3: Bounding Box選択" },
+  "image-builder-step4": { title: "学習画像作成", subtitle: "Step4: クロップ出力" },
 };
 
 const PRESET_STORAGE_KEY = "ocr_preprocess_presets_v1";
@@ -1628,6 +1633,38 @@ export default function App() {
     );
   }
 
+  const imageBuilderStepMap = {
+    "image-builder-step1": 1,
+    "image-builder-step2": 2,
+    "image-builder-step3": 3,
+    "image-builder-step4": 4,
+  };
+  const activeImageBuilderStep = imageBuilderStepMap[activeView];
+
+  if (activeImageBuilderStep) {
+    view = (
+      <TrainingImageBuilderView
+        projectId={projectId}
+        activeStep={activeImageBuilderStep}
+        onStepChange={(step) => {
+          const nextView = `image-builder-step${step}`;
+          setActiveView(nextView);
+        }}
+      />
+    );
+  }
+
+  const showWorkflow = [
+    "dashboard",
+    "images",
+    "preprocess",
+    "labeling",
+    "training",
+    "models",
+    "inference",
+    "evaluation",
+  ].includes(activeView);
+
   return (
     <div className="min-h-screen bg-transparent text-text">
       <Sidebar active={activeView} onChange={setActiveView} onExitApp={exitApplication} />
@@ -1646,7 +1683,7 @@ export default function App() {
               : null
           }
         />
-        <WorkflowProgress steps={workflowSteps} />
+        {showWorkflow ? <WorkflowProgress steps={workflowSteps} /> : null}
 
         <section className="mt-6">{view}</section>
 
