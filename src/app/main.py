@@ -52,6 +52,17 @@ from .services.training_image_builder import (
 from .train import run_training
 
 app = FastAPI(title="OCR Crafter API", version="0.2.0")
+IMAGE_BUILDER_ALLOWED_EXTENSIONS = {
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".bmp",
+    ".tif",
+    ".tiff",
+    ".webp",
+    ".heic",
+    ".heif",
+}
 
 app.add_middleware(
     CORSMiddleware,
@@ -648,13 +659,14 @@ async def image_builder_resize_preview(
     file: UploadFile = File(...),
     resize_long_side: int = Form(...),
     use_resize: bool = Form(True),
+    resize_axis: str = Form("long"),
 ) -> dict[str, Any]:
     suffix = Path(file.filename or "image.png").suffix.lower()
-    if suffix not in {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}:
+    if suffix not in IMAGE_BUILDER_ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail="unsupported image format")
     content = await file.read()
     try:
-        return make_resize_preview(content, int(resize_long_side), bool(use_resize))
+        return make_resize_preview(content, int(resize_long_side), bool(use_resize), str(resize_axis))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -664,8 +676,11 @@ async def image_builder_detect(
     file: UploadFile = File(...),
     resize_long_side: int = Form(...),
     use_resize: bool = Form(True),
+    resize_axis: str = Form("long"),
     model: str = Form(...),
     conf_threshold: float = Form(0.25),
+    merge_overlaps: bool = Form(True),
+    merge_iou_threshold: float = Form(0.5),
     project_id: str = Form("default"),
 ) -> dict[str, Any]:
     resolved = _resolve_project_id(project_id)
@@ -675,8 +690,11 @@ async def image_builder_detect(
             image_bytes=content,
             long_side=int(resize_long_side),
             use_resize=bool(use_resize),
+            resize_axis=str(resize_axis),
             model_name=model,
             conf_threshold=float(conf_threshold),
+            merge_overlaps=bool(merge_overlaps),
+            merge_iou_threshold=float(merge_iou_threshold),
             project_id=resolved,
         )
     except FileNotFoundError as e:
@@ -692,6 +710,7 @@ async def image_builder_export(
     file: UploadFile = File(...),
     resize_long_side: int = Form(...),
     use_resize: bool = Form(True),
+    resize_axis: str = Form("long"),
     boxes_json: str = Form(...),
     output_dir: str = Form(...),
     crop_height: int = Form(32),
@@ -702,6 +721,7 @@ async def image_builder_export(
             image_bytes=content,
             long_side=int(resize_long_side),
             use_resize=bool(use_resize),
+            resize_axis=str(resize_axis),
             boxes_json=boxes_json,
             output_dir=output_dir,
             crop_height=int(crop_height),
