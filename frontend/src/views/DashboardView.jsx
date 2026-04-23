@@ -4,6 +4,7 @@ import Button from "../components/Button";
 export default function DashboardView({
   projectId,
   projects,
+  projectSummaries,
   newProjectId,
   onNewProjectIdChange,
   onSelectProject,
@@ -52,6 +53,7 @@ export default function DashboardView({
           <div className="grid grid-cols-3 gap-3">
             {projects.map((pid) => {
               const selected = pid === projectId;
+              const summary = projectSummaries?.[pid] || {};
               return (
                 <div
                   key={pid}
@@ -77,6 +79,24 @@ export default function DashboardView({
                         選択中
                       </span>
                     ) : null}
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
+                    <div className="rounded border border-border bg-card/50 px-2 py-1">
+                      <p className="text-muted">取込画像</p>
+                      <p className="font-semibold text-text">{Number(summary.images || 0)}</p>
+                    </div>
+                    <div className="rounded border border-border bg-card/50 px-2 py-1">
+                      <p className="text-muted">ラベル確定</p>
+                      <p className="font-semibold text-text">{Number(summary.labeled || 0)}</p>
+                    </div>
+                    <div className="rounded border border-border bg-card/50 px-2 py-1">
+                      <p className="text-muted">修正確定</p>
+                      <p className="font-semibold text-emerald-300">{Number(summary.ocr_confirmed || 0)}</p>
+                    </div>
+                    <div className="rounded border border-border bg-card/50 px-2 py-1">
+                      <p className="text-muted">モデル数</p>
+                      <p className="font-semibold text-text">{Number(summary.models || 0)}</p>
+                    </div>
                   </div>
                   <div className="mt-3 flex items-center gap-2">
                     <Button size="sm" variant={selected ? "primary" : "secondary"} onClick={() => onSelectProject(pid)}>

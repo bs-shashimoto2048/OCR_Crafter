@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Card from "../components/Card";
 import Button from "../components/Button";
-import { imageUrl, processedImageUrl } from "../lib/api";
+import { imageUrl, processedImageUrl, request } from "../lib/api";
 
 const keyRows = [
   ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
@@ -13,6 +13,7 @@ const keyRows = [
 export default function LabelingView({
   projectId,
   imageVersion,
+  preprocessOverrides,
   images,
   selectedIndex,
   onSelectIndex,
@@ -33,6 +34,7 @@ export default function LabelingView({
   const [zoomPercent, setZoomPercent] = useState(100);
   const [showUnlabeledOnly, setShowUnlabeledOnly] = useState(false);
   const [listMode, setListMode] = useState("card");
+  const [previewSrc, setPreviewSrc] = useState("");
   const listRef = useRef(null);
   const itemRefs = useRef([]);
   const labelInputRef = useRef(null);
@@ -104,6 +106,43 @@ export default function LabelingView({
     return () => window.cancelAnimationFrame(frame);
   }, [selected?.image]);
 
+  useEffect(() => {
+    let cancelled = false;
+    async function loadPreview() {
+      if (!selected?.image || !projectId) {
+        setPreviewSrc("");
+        return;
+      }
+      try {
+        const data = await request("/preprocess/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            image: selected.image,
+            project_id: projectId,
+            overrides: preprocessOverrides || null,
+          }),
+        });
+        if (cancelled) {
+          return;
+        }
+        const nextSrc =
+          data?.processed_data_url ||
+          processedImageUrl(selected.image, projectId, imageVersion, selected.type || "");
+        setPreviewSrc(nextSrc);
+      } catch {
+        if (cancelled) {
+          return;
+        }
+        setPreviewSrc(processedImageUrl(selected.image, projectId, imageVersion, selected.type || ""));
+      }
+    }
+    loadPreview();
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.image, selected?.type, projectId, imageVersion, preprocessOverrides]);
+
   if (!selected) {
     return (
       <Card title="ラベル編集" subtitle="画像がありません。画像画面で取り込んでください。">
@@ -133,7 +172,7 @@ export default function LabelingView({
 
           <div className="max-h-[70vh] overflow-auto rounded-xl border border-border bg-card/60 backdrop-blur-md p-3">
             <img
-              src={processedImageUrl(selected.image, projectId, imageVersion, selected.type || "")}
+              src={previewSrc || processedImageUrl(selected.image, projectId, imageVersion, selected.type || "")}
               alt={selected.image}
               className="mx-auto h-auto max-w-none rounded-lg"
               style={{ width: `${zoomPercent}%` }}

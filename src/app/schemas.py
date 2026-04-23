@@ -53,10 +53,10 @@ class PreprocessPreviewRequest(BaseModel):
     image: str = Field(..., description="プレビュー対象の画像ファイル名")
     project_id: Optional[str] = Field(default="default", description="プロジェクトID")
     overrides: Optional[dict[str, Any]] = Field(default=None, description="前処理設定の上書き")
-    engine: str = Field(default="custom", description="推論エンジン: custom/easyocr")
+    engine: str = Field(default="custom", description="推論エンジン: custom/easyocr/paddleocr")
     model: str = Field(default="latest", description="custom時のモデル指定")
     model_type: Optional[str] = Field(default=None, description="custom+latest時のモデル種別")
-    easyocr_langs: str = Field(default="en", description="easyocr使用言語 (comma separated)")
+    easyocr_langs: str = Field(default="en", description="OCR使用言語 (comma separated)")
 
 
 class EvaluateRequest(BaseModel):
@@ -69,3 +69,70 @@ class EvaluateRequest(BaseModel):
 
 class AppShutdownRequest(BaseModel):
     frontend_port: Optional[int] = Field(default=None, description="フロントエンド開発サーバーのポート")
+
+
+class OcrTuningExportRequest(BaseModel):
+    project_id: Optional[str] = Field(default="default", description="プロジェクトID")
+    engine: str = Field(default="both", description="easyocr / paddleocr / both")
+    output_dir: Optional[str] = Field(default=None, description="出力先ディレクトリ（未指定時はproject outputs配下）")
+    image_types: list[str] = Field(default_factory=lambda: ["wide"], description="対象画像種別: single / wide")
+    train_ratio: float = Field(default=0.8, gt=0)
+    val_ratio: float = Field(default=0.1, ge=0)
+    test_ratio: float = Field(default=0.1, ge=0)
+    seed: int = Field(default=42)
+    overwrite: bool = Field(default=False)
+
+
+class OcrDatasetCreateRequest(BaseModel):
+    project_id: Optional[str] = Field(default="default")
+    image_types: list[str] = Field(default_factory=lambda: ["wide"])
+    charset: str = Field(default="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+    max_text_length: int = Field(default=8, ge=1, le=64)
+    image_shape: list[int] = Field(default_factory=lambda: [3, 48, 320])
+    use_augmentation: bool = Field(default=False)
+    aug_strength: int = Field(default=1, ge=1, le=3)
+    train_ratio: float = Field(default=0.8, gt=0)
+    val_ratio: float = Field(default=0.1, ge=0)
+    test_ratio: float = Field(default=0.1, ge=0)
+    seed: int = Field(default=42)
+    output_dir: Optional[str] = Field(default=None)
+    overwrite: bool = Field(default=False)
+
+
+class OcrTrainStartRequest(BaseModel):
+    project_id: Optional[str] = Field(default="default")
+    engine: str = Field(default="paddleocr")
+    dataset_dir: str = Field(...)
+    paddle_repo_dir: Optional[str] = Field(default=None)
+    charset: str = Field(default="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+    max_text_length: int = Field(default=8, ge=1, le=64)
+    image_shape: list[int] = Field(default_factory=lambda: [3, 48, 320])
+    batch_size: int = Field(default=16, ge=1, le=1024)
+    epochs: int = Field(default=50, ge=1, le=2000)
+
+
+class OcrLogSaveRequest(BaseModel):
+    project_id: Optional[str] = Field(default="default")
+    image_path: str = Field(...)
+    predicted_text: str = Field(default="")
+    corrected_text: Optional[str] = Field(default=None)
+    confidence: Optional[float] = Field(default=None)
+    is_valid: bool = Field(default=False)
+    reason: Optional[str] = Field(default=None)
+    model_name: Optional[str] = Field(default=None)
+    engine: Optional[str] = Field(default=None)
+    char_scores: Optional[list[float]] = Field(default=None)
+    used_retry: Optional[bool] = Field(default=None)
+    multi_ocr: Optional[bool] = Field(default=None)
+    extra: Optional[dict[str, Any]] = Field(default=None)
+
+
+class OcrDatasetFromLogsRequest(BaseModel):
+    project_id: Optional[str] = Field(default="default")
+    only_invalid: bool = Field(default=True)
+    include_corrected: bool = Field(default=True)
+    max_text_length: int = Field(default=8, ge=1, le=64)
+    charset: str = Field(default="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+    image_shape: list[int] = Field(default_factory=lambda: [3, 48, 320])
+    output_dir: Optional[str] = Field(default=None)
+    overwrite: bool = Field(default=False)

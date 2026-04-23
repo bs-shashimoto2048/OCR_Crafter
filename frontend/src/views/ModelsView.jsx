@@ -9,6 +9,13 @@ function basename(path) {
   return parts[parts.length - 1];
 }
 
+function formatDateTime(value) {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleString("ja-JP", { hour12: false });
+}
+
 export default function ModelsView({ models, modelInfos, latest, onRefresh, onDeleteSelected }) {
   const latestAny = basename(latest.any || "");
   const latestByType = latest.byType || {};
@@ -76,6 +83,18 @@ export default function ModelsView({ models, modelInfos, latest, onRefresh, onDe
     const idx = stem.indexOf("_");
     if (idx <= 0) return "不明";
     return stem.slice(0, idx);
+  }
+
+  function trainingFamily(name) {
+    return modelInfos?.[name]?.training_family || "classification";
+  }
+
+  function engineName(name) {
+    return modelInfos?.[name]?.engine || "custom";
+  }
+
+  function createdAt(name) {
+    return modelInfos?.[name]?.created_at || modelInfos?.[name]?.modified_at || "";
   }
 
   function ratioText(name) {
@@ -156,6 +175,9 @@ export default function ModelsView({ models, modelInfos, latest, onRefresh, onDe
             </th>
             <th className="px-2 py-3 font-medium">モデルファイル</th>
             <th className="px-2 py-3 font-medium">種別</th>
+            <th className="px-2 py-3 font-medium">方式</th>
+            <th className="px-2 py-3 font-medium">エンジン</th>
+            <th className="px-2 py-3 font-medium">作成日</th>
             <th className="px-2 py-3 font-medium">比率 / 件数(train/val/test)</th>
             <th className="px-2 py-3 font-medium">状態</th>
           </tr>
@@ -178,6 +200,9 @@ export default function ModelsView({ models, modelInfos, latest, onRefresh, onDe
                 </td>
                 <td className="px-2 py-3 text-text">{name}</td>
                 <td className="px-2 py-3 text-muted">{modelTypeFromName(name)}</td>
+                <td className="px-2 py-3 text-muted">{trainingFamily(name)}</td>
+                <td className="px-2 py-3 text-muted">{engineName(name)}</td>
+                <td className="px-2 py-3 text-muted">{formatDateTime(createdAt(name))}</td>
                 <td className="px-2 py-3 text-muted">
                   <div className="flex items-center gap-2">
                     <span>{ratio}</span>

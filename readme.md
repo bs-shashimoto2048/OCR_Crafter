@@ -58,11 +58,16 @@ VITE_API_BASE=http://127.0.0.1:8000
 - `POST /dataset/build` : `train/val/test` 分割して `data/projects/{project_id}/dataset` へ出力
 - `POST /train/start` : 非同期学習ジョブ開始（BackgroundTasks）
 - `GET /train/{job_id}` : 学習ジョブ状態取得（SQLite）
+- `POST /api/ocr/dataset/create` : OCR用 `path\ttext` データセット作成（PaddleOCR学習向け）
+- `POST /api/ocr/train/start` : PaddleOCR 学習ジョブ開始
+- `GET /api/ocr/train/status/{job_id}` : OCR学習状態取得
+- `GET /api/ocr/train/log/{job_id}` : OCR学習ログ取得
 - `GET /models?project_id=...` : 保存済みモデル一覧
 - `GET /models/latest?project_id=...&model_type=...` : 最新モデル参照（種別指定可）
 - `GET /model-types?project_id=...` : モデル種別一覧
-- `POST /predict` : 画像推論（`custom` / `easyocr`）
+- `POST /predict` : 画像推論（`custom` / `easyocr` / `paddleocr`）
 - `POST /evaluate` : 精度評価（accuracy、混同行列、誤認識ログ）
+- `POST /ocr/tuning/export` : EasyOCR/PaddleOCR 学習用データをエクスポート
 - `POST /system/shutdown` : フロント/バックエンド終了
 
 ## 6. 学習・推論CLI
@@ -70,6 +75,8 @@ VITE_API_BASE=http://127.0.0.1:8000
 ```bash
 python3 -m src.app.train --project-id default --model-type square --epochs 5 --batch-size 32
 python3 -m src.app.predict path/to/image.png --project-id default --model-type square
+python3 -m src.app.predict path/to/image.png --project-id default --engine paddleocr --easyocr-langs en
+python3 -m src.app.ocr_tuning --project-id default --engine both --image-types wide --train-ratio 0.8 --val-ratio 0.1 --test-ratio 0.1
 ```
 
 ## 7. 設定
@@ -78,7 +85,34 @@ python3 -m src.app.predict path/to/image.png --project-id default --model-type s
 - device は `mps` 利用可能なら自動で `mps`、不可なら `cpu`
 - データは `data/projects/{project_id}/` 配下でプロジェクトごとに分離管理
 
-## 8. 旧データ移行（必要時）
+## 8. OCRチューニング（EasyOCR / PaddleOCR）
+
+1. 追加依存をインストール（任意）
+
+```bash
+source .venv/bin/activate
+pip install -r requirements-ocr-tuning.txt
+```
+
+2. 学習用データをエクスポート
+
+```bash
+python3 -m src.app.ocr_tuning \
+  --project-id default \
+  --engine both \
+  --image-types wide \
+  --train-ratio 0.8 \
+  --val-ratio 0.1 \
+  --test-ratio 0.1
+```
+
+出力先: `data/projects/<project_id>/outputs/ocr_tuning/<timestamp>/`
+
+- EasyOCR: `easyocr/train_labels.txt`, `easyocr/val_labels.txt`, `easyocr/test_labels.txt`
+- PaddleOCR: `paddleocr/rec/train.txt`, `paddleocr/rec/val.txt`, `paddleocr/rec/test.txt`, `paddleocr/rec/charset.txt`
+- 共通メタ: `meta.json`
+
+## 9. 旧データ移行（必要時）
 
 旧構造（`data/raw` など）から新構造へ移す場合:
 

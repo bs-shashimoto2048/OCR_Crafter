@@ -1,0 +1,6 @@
+easyocr>=1.7.1
+paddleocr>=2.8.1
+paddlepaddle>=2.6.0
+albumentations>=1.4.0
+lmdb>=1.4.1
+rapidfuzz>=3.9.0

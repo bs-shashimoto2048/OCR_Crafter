@@ -71,7 +71,7 @@ DEFAULT_PREPROCESS_CONFIG: dict[str, Any] = {
         "denoise": {"method": "gaussian", "ksize": 1},
         "pad": {"mode": "square", "fill": 255},
         "resize": {"single": 64, "wide_height": 48, "keep_ratio": True, "interpolation": "area"},
-        "deskew": {"enabled": True, "min_foreground_pixels": 20, "border_value": 255},
+        "deskew": {"enabled": True, "min_foreground_pixels": 20, "border_value": 255, "max_abs_angle": 8.0},
         "normalize": {"enabled": False, "mean": 0.5, "std": 0.5},
     },
 }
@@ -571,6 +571,7 @@ def _op_deskew(value: Any, _: str, operations: dict[str, Any]) -> np.ndarray:
 
     min_fg = int(cfg.get("min_foreground_pixels", 20))
     border_value = int(cfg.get("border_value", 255))
+    max_abs_angle = float(cfg.get("max_abs_angle", 8.0))
     fg = np.column_stack(np.where(gray < 250))
     if fg.shape[0] < min_fg:
         return gray
@@ -579,6 +580,11 @@ def _op_deskew(value: Any, _: str, operations: dict[str, Any]) -> np.ndarray:
     angle = rect[-1]
     if angle < -45:
         angle = 90 + angle
+    elif angle > 45:
+        angle = angle - 90
+    # Prevent accidental 90-degree flips from unstable angle estimation.
+    if abs(angle) > max_abs_angle:
+        return gray
     if abs(angle) < 0.1:
         return gray
 

@@ -79,12 +79,18 @@ UIのプレビューは前処理後画像を表示します。
 `モデル種別 / エポック / バッチサイズ / 学習率` を設定して `学習開始`。  
 非同期ジョブで実行され、状態は `queued/running/completed/failed` で確認できます。
 
+補足（新仕様）:
+
+- 学習方式 `classification` / `ocr` を選択可能
+- `ocr` では `PaddleOCR` のみ学習可能
+- `EasyOCR` は推論専用（学習UIは非表示）
+
 7. 評価（Evaluation）  
 `val` または `test` に対して評価を実行。  
 Accuracy、クラス別精度、混同行列、誤認識一覧を確認します。
 
 8. 推論（Inference）  
-カスタムモデルまたは EasyOCR で推論可能です。
+カスタムモデル / EasyOCR / PaddleOCR で推論可能です。
 
 ## 5. 学習の詳細
 
@@ -143,11 +149,16 @@ Accuracy、クラス別精度、混同行列、誤認識一覧を確認します
 - `POST /dataset/build`
 - `POST /train/start`
 - `GET /train/{job_id}`
+- `POST /api/ocr/dataset/create`
+- `POST /api/ocr/train/start`
+- `GET /api/ocr/train/status/{job_id}`
+- `GET /api/ocr/train/log/{job_id}`
 - `GET /models`
 - `GET /models/latest`
 - `GET /model-types`
-- `POST /predict`（`engine=custom|easyocr`）
+- `POST /predict`（`engine=custom|easyocr|paddleocr`）
 - `POST /evaluate`
+- `POST /ocr/tuning/export`
 - `POST /system/shutdown`
 
 ## 8. 生成物
@@ -161,7 +172,47 @@ Accuracy、クラス別精度、混同行列、誤認識一覧を確認します
   - `data/projects/<project_id>/outputs/errors/errors_*.json`
 - 学習ジョブDB: `outputs/app.db`（SQLite）
 
-## 9. トラブルシュート
+## 9. 特殊フォント向けOCRチューニング（EasyOCR / PaddleOCR）
+
+### 9.1 追加依存（任意）
+
+```bash
+source .venv/bin/activate
+pip install -r requirements-ocr-tuning.txt
+```
+
+### 9.2 学習用データをエクスポート
+
+```bash
+cd /Users/hashimoto/vscode/_app/ocr_crafter
+source .venv/bin/activate
+python -m src.app.ocr_tuning \
+  --project-id default \
+  --engine both \
+  --image-types wide \
+  --train-ratio 0.8 \
+  --val-ratio 0.1 \
+  --test-ratio 0.1
+```
+
+出力先（既定）:
+
+- `data/projects/<project_id>/outputs/ocr_tuning/<timestamp>/easyocr/`
+- `data/projects/<project_id>/outputs/ocr_tuning/<timestamp>/paddleocr/rec/`
+- `data/projects/<project_id>/outputs/ocr_tuning/<timestamp>/meta.json`
+
+主なファイル:
+
+- EasyOCR: `train_labels.txt`, `val_labels.txt`, `test_labels.txt`
+- PaddleOCR: `train.txt`, `val.txt`, `test.txt`, `charset.txt`, `rec_train_config.yaml`
+
+注意:
+
+- ラベルは `annotations/master.csv` の `label` を使用します。
+- 画像は `processed/<type>/images` を優先し、なければ `interim` / `raw` を参照します。
+- `--image-types wide` を推奨（複数文字列OCR向け）。
+
+## 10. トラブルシュート
 
 - Python 3.9で `unsupported operand type(s) for |` が出る  
   Python 3.11以上で仮想環境を作り直してください。
@@ -179,3 +230,36 @@ PY
 
 - ポート競合  
   `uvicorn ... --port 8001` のように変更してください。
+
+## 11. OCR作業手順（今日追加分）
+
+### A. 初回モデル作成（最短）
+
+1. `モデル作成 > ダッシュボード` でプロジェクトを選択/作成する。
+2. `モデル作成 > 画像` で学習画像を取り込む。
+3. `モデル作成 > ラベル編集` で文字列ラベルを保存する。
+4. `モデル作成 > 学習` を開き、`学習方式 = ocr`、`OCRタイプ = PaddleOCR` を選ぶ。
+5. `charset`、`max_text_length`、`image_shape(3,48,320)` を確認する。
+6. `Augmentationを使用` と `Aug強度(1-3)` を必要に応じて設定する。
+   - 適用処理（ランダム）: コントラスト変化、軽微ガウシアンブラー、ガウシアンノイズ、微小回転（±1〜2度）
+   - 強度1〜3で適用確率と強さが上がる
+7. `OCRデータ作成` を実行する。
+8. `PaddleOCR リポジトリ` は固定パス（`/Users/hashimoto/vscode/_app/ocr_crafter/external/PaddleOCR`）を使用し、`OCR学習開始` を押す。
+9. 学習ログが `completed` になれば、`モデル作成 > モデル` に OCRモデルが追加される。
+
+### B. 今日追加した強化機能を使った再学習ループ（推奨）
+
+1. `モデル作成 > 高速OCR修正` を開く。
+2. OCR結果を確認し、ヒートマップの赤/黄文字をクリックして1文字修正する。
+3. `Enter` で確定して次へ、`Shift+Enter` で保留する。
+4. 修正結果は OCRログに保存される。
+5. `モデル作成 > 学習` に戻り、`ログ再学習データ作成` を実行する。
+6. `invalidのみ対象 / correctedを優先` を必要に応じて切替える。
+7. 生成された再学習データで再度 `OCR学習開始` を実行する。
+
+### C. 補足（今日の追加で有効）
+
+- 推論は内部でマルチOCR（複数前処理）＋多数決で安定化。
+- 結果に `char_scores` と `char_confidence_normalized` が付き、文字単位の怪しさを可視化。
+- 業務ルール（`^[A-Z0-9]{8}$`、禁止パターン）で `valid/invalid` 判定。
+- `image_shape` は `1,48,320`（グレースケール）または `3,48,320`（RGB）を使用可能。

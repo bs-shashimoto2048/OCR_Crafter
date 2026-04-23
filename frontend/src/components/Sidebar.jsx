@@ -3,14 +3,33 @@ import { useState } from "react";
 import Button from "./Button";
 
 const modelCreationItems = [
-  { id: "dashboard", label: "ダッシュボード" },
-  { id: "images", label: "画像" },
-  { id: "preprocess", label: "前処理設定" },
-  { id: "labeling", label: "ラベル編集" },
-  { id: "training", label: "学習" },
-  { id: "models", label: "モデル" },
-  { id: "inference", label: "推論" },
-  { id: "evaluation", label: "評価" },
+  { id: "dashboard", label: "1. ダッシュボード" },
+  { id: "images", label: "2. 画像" },
+  { id: "preprocess", label: "3. 前処理設定" },
+  { id: "labeling", label: "4. ラベル編集" },
+  {
+    type: "group",
+    id: "ocr-training-group",
+    label: "学習 > OCR認識モデル",
+    items: [
+      { id: "ocr-training", label: "1. データ作成・学習" },
+      { id: "ocr-models", label: "2. モデル管理" },
+      { id: "ocr-inference", label: "3. 推論" },
+      { id: "rapid-ocr", label: "4. OCR修正" },
+      { id: "ocr-batch", label: "5. バッチ推論" },
+    ],
+  },
+  {
+    type: "group",
+    id: "cls-training-group",
+    label: "学習 > 分割学習モデル",
+    items: [
+      { id: "cls-training", label: "1. 前処理・データセット作成・学習" },
+      { id: "cls-models", label: "2. 分類モデル管理" },
+      { id: "cls-inference", label: "3. 分類推論" },
+      { id: "cls-evaluation", label: "4. 分類評価" },
+    ],
+  },
 ];
 
 const imageCreationItems = [
@@ -25,6 +44,10 @@ export default function Sidebar({ active, onChange, onExitApp }) {
     modelCreation: true,
     imageCreation: true,
   });
+  const [openGroups, setOpenGroups] = useState({
+    "ocr-training-group": false,
+    "cls-training-group": false,
+  });
 
   const treeSections = [
     { id: "modelCreation", label: "モデル作成", items: modelCreationItems },
@@ -33,6 +56,10 @@ export default function Sidebar({ active, onChange, onExitApp }) {
 
   function toggleTree(treeId) {
     setOpenTrees((prev) => ({ ...prev, [treeId]: !prev[treeId] }));
+  }
+
+  function toggleGroup(groupId) {
+    setOpenGroups((prev) => ({ ...prev, [groupId]: !prev[groupId] }));
   }
 
   return (
@@ -51,7 +78,7 @@ export default function Sidebar({ active, onChange, onExitApp }) {
               className="flex w-full items-center justify-between rounded-lg px-2 py-1 text-left text-sm font-semibold text-slate-200 transition hover:bg-[#37404a]/50"
             >
               <span>{section.label}</span>
-              <span className="text-xs text-muted" aria-hidden="true">
+              <span className="text-2xl font-semibold leading-none text-muted" aria-hidden="true">
                 {openTrees[section.id] ? "▾" : "▸"}
               </span>
             </button>
@@ -59,6 +86,58 @@ export default function Sidebar({ active, onChange, onExitApp }) {
             {openTrees[section.id] && (
               <div className="mt-1 space-y-1 pl-2">
                 {section.items.map((item) => {
+                  if (item.type === "group") {
+                    const isOpen = Boolean(openGroups[item.id]);
+                    return (
+                      <div key={`${section.id}-${item.id}`} className="pt-2">
+                        <button
+                          type="button"
+                          onClick={() => toggleGroup(item.id)}
+                          className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-xs font-semibold tracking-[0.04em] text-slate-300/90 transition hover:bg-[#37404a]/50"
+                        >
+                          <span>{item.label}</span>
+                          <span className="text-2xl font-semibold leading-none text-muted" aria-hidden="true">
+                            {isOpen ? "▾" : "▸"}
+                          </span>
+                        </button>
+                        {isOpen ? (
+                          <div className="mt-1 space-y-1 pl-2">
+                            {item.items.map((subItem) => {
+                              const isActive = active === subItem.id;
+                              const isDisabled = Boolean(subItem.disabled);
+                              return (
+                                <button
+                                  key={subItem.id}
+                                  type="button"
+                                  onClick={() => {
+                                    if (!isDisabled) {
+                                      onChange(subItem.id);
+                                    }
+                                  }}
+                                  disabled={isDisabled}
+                                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition ${
+                                    isDisabled
+                                      ? "cursor-not-allowed text-muted/55"
+                                      : isActive
+                                        ? "border border-border/90 bg-[#3c444f]/88 text-text shadow-[0_7px_20px_rgba(16,22,30,0.36)]"
+                                        : "text-muted hover:bg-[#37404a]/72 hover:text-text"
+                                  }`}
+                                >
+                                  <span
+                                    className={`h-2 w-2 rounded-full ${
+                                      isDisabled ? "bg-muted/25" : isActive ? "bg-accent" : "bg-muted/40"
+                                    }`}
+                                    aria-hidden="true"
+                                  />
+                                  <span className={isActive ? "sidebar-active-wave" : ""}>{subItem.label}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  }
                   const isActive = active === item.id;
                   const isDisabled = Boolean(item.disabled);
                   return (
@@ -85,7 +164,7 @@ export default function Sidebar({ active, onChange, onExitApp }) {
                         }`}
                         aria-hidden="true"
                       />
-                      {item.label}
+                      <span className={isActive ? "sidebar-active-wave" : ""}>{item.label}</span>
                     </button>
                   );
                 })}

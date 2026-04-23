@@ -61,9 +61,46 @@
     animation: fade-in 0.2s ease-out both;
   }
 
+  .sidebar-active-wave {
+    color: #b6ff7f;
+    text-shadow:
+      0 0 4px rgba(166, 255, 118, 0.95),
+      0 0 10px rgba(117, 255, 86, 0.72),
+      0 0 18px rgba(72, 255, 104, 0.42);
+    background-image: linear-gradient(
+      90deg,
+      #b6ff7f 0%,
+      #76ff56 22%,
+      #d7ffb7 45%,
+      #7eff66 68%,
+      #b6ff7f 100%
+    );
+    background-size: 220% 100%;
+    background-position: 0% 50%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: sidebar-wave-glow 1.8s linear infinite;
+  }
+
   .scroll-stable {
     scrollbar-gutter: stable both-edges;
     overscroll-behavior: contain;
+  }
+
+  @keyframes sidebar-wave-glow {
+    0% {
+      background-position: 0% 50%;
+      filter: drop-shadow(0 0 0 rgba(118, 255, 86, 0.1));
+    }
+    50% {
+      background-position: 100% 50%;
+      filter: drop-shadow(0 0 3px rgba(118, 255, 86, 0.65));
+    }
+    100% {
+      background-position: 200% 50%;
+      filter: drop-shadow(0 0 0 rgba(118, 255, 86, 0.1));
+    }
   }
 
   @keyframes fade-in {

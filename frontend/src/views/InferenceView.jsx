@@ -1,5 +1,6 @@
 import Card from "../components/Card";
 import Button from "../components/Button";
+import CharHeatmap from "../components/CharHeatmap";
 
 export default function InferenceView({
   engine,
@@ -13,6 +14,9 @@ export default function InferenceView({
   model,
   setModel,
   models,
+  paddleModel,
+  setPaddleModel,
+  paddleModels,
   latestModels,
   onFileChange,
   fileName,
@@ -34,6 +38,7 @@ export default function InferenceView({
 
   function engineLabel(value) {
     if (value === "easyocr") return "EasyOCR";
+    if (value === "paddleocr") return "PaddleOCR";
     return "カスタムモデル";
   }
 
@@ -48,11 +53,24 @@ export default function InferenceView({
   }
 
   const resolvedModelName =
-    engine !== "custom"
-      ? "EasyOCR"
-      : model === "latest"
+    engine === "custom"
+      ? model === "latest"
         ? basename(latestByType[modelType] || latestAny) || "該当モデルなし"
-        : model;
+        : model
+      : engine === "paddleocr"
+        ? paddleModel === "latest"
+          ? basename(latestModels?.ocrPaddle || "") || "PaddleOCR既定モデル"
+          : paddleModel
+        : "EasyOCR";
+  const confidenceValue = Number(result?.confidence || 0);
+  const confidencePercent = (confidenceValue * 100).toFixed(1);
+  const isLowConfidence = confidenceValue < 0.9;
+  const isValid = result ? Boolean(result.valid ?? true) : true;
+  const validationReason = result?.validation?.reason || null;
+  const resultText = String(result?.text ?? result?.prediction ?? "");
+  const heatScores = Array.isArray(result?.char_confidence_normalized)
+    ? result?.char_confidence_normalized
+    : result?.char_scores;
 
   return (
     <div className="grid grid-cols-[4fr_6fr] gap-6">
@@ -63,6 +81,7 @@ export default function InferenceView({
             <select value={engine} onChange={(e) => setEngine(e.target.value)} className="app-select">
               <option value="custom">カスタムモデル</option>
               <option value="easyocr">EasyOCR</option>
+              <option value="paddleocr">PaddleOCR</option>
             </select>
           </div>
 
@@ -106,9 +125,42 @@ export default function InferenceView({
                 </p>
               ) : null}
             </>
+          ) : engine === "paddleocr" ? (
+            <>
+              <div>
+                <label className="app-label">PaddleOCRモデル</label>
+                <select
+                  value={paddleModel}
+                  onChange={(e) => setPaddleModel(e.target.value)}
+                  className="app-select"
+                >
+                  <option value="latest">最新</option>
+                  {paddleModels.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="app-label">PaddleOCR 言語</label>
+                <div className="grid grid-cols-3 gap-2 rounded-lg border border-border bg-card/60 backdrop-blur-md p-2">
+                  {easyocrLanguageOptions.map((lang) => (
+                    <label key={lang} className="inline-flex items-center gap-2 text-xs text-text">
+                      <input
+                        type="checkbox"
+                        checked={Array.isArray(easyocrLangs) ? easyocrLangs.includes(lang) : false}
+                        onChange={() => toggleEasyOcrLang(lang)}
+                      />
+                      {lang}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </>
           ) : (
             <div>
-              <label className="app-label">EasyOCR 言語</label>
+              <label className="app-label">{engine === "paddleocr" ? "PaddleOCR 言語" : "EasyOCR 言語"}</label>
               <div className="grid grid-cols-3 gap-2 rounded-lg border border-border bg-card/60 backdrop-blur-md p-2">
                 {easyocrLanguageOptions.map((lang) => (
                   <label key={lang} className="inline-flex items-center gap-2 text-xs text-text">
@@ -160,18 +212,37 @@ export default function InferenceView({
           <div className="space-y-6">
             <div className="rounded-xl border border-border bg-card/60 backdrop-blur-md p-8 text-center">
               <p className="text-xs uppercase tracking-[0.18em] text-muted">予測結果</p>
-              <p className="mt-3 text-7xl font-semibold text-text">{result.prediction}</p>
+              <p className="mt-3 text-7xl font-semibold tracking-[0.08em] text-text">{resultText}</p>
+              <div className="mt-3 flex justify-center">
+                <CharHeatmap text={resultText} scores={heatScores} />
+              </div>
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-xs">
+                <span
+                  className={`rounded-full px-2 py-1 font-semibold ${
+                    isValid ? "bg-emerald-500/20 text-emerald-300" : "bg-red-500/20 text-red-300"
+                  }`}
+                >
+                  {isValid ? "valid" : "invalid"}
+                </span>
+                <span
+                  className={`rounded-full px-2 py-1 font-semibold ${
+                    isLowConfidence ? "bg-amber-500/20 text-amber-300" : "bg-sky-500/20 text-sky-300"
+                  }`}
+                >
+                  信頼度 {confidencePercent}%
+                </span>
+              </div>
             </div>
 
             <div>
               <div className="mb-2 flex justify-between text-sm text-muted">
                 <span>信頼度</span>
-                <span>{(Number(result.confidence || 0) * 100).toFixed(1)}%</span>
+                <span>{confidencePercent}%</span>
               </div>
               <div className="h-2 rounded-full bg-[#3f4854]/65">
                 <div
-                  className="h-2 rounded-full bg-accent transition-all duration-200"
-                  style={{ width: `${Math.max(4, Number(result.confidence || 0) * 100)}%` }}
+                  className={`h-2 rounded-full transition-all duration-200 ${isLowConfidence ? "bg-amber-400" : "bg-accent"}`}
+                  style={{ width: `${Math.max(4, confidenceValue * 100)}%` }}
                 />
               </div>
             </div>
@@ -181,9 +252,12 @@ export default function InferenceView({
               <p className="truncate">モデル: {result.model_path}</p>
               <p>種別: {result.model_type}</p>
               <p>名前: {result.model_name || "-"}</p>
-              {result.engine === "easyocr" ? (
-                <p>言語: {(result.easyocr_languages || []).join(", ") || "-"}</p>
+              {result.engine === "easyocr" || result.engine === "paddleocr" ? (
+                <p>言語: {(result.easyocr_languages || result.paddleocr_languages || []).join(", ") || "-"}</p>
               ) : null}
+              {result.validation ? <p>検証結果: {isValid ? "正常" : "要確認"}</p> : null}
+              {validationReason ? <p>検証理由: {validationReason}</p> : null}
+              {result.retry_performed ? <p>再OCR: 実行 ({result.retry_used ? "再OCR結果を採用" : "初回結果を採用"})</p> : null}
             </div>
           </div>
         ) : (

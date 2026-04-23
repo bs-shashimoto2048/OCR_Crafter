@@ -1,17 +1,33 @@
 import argparse
+import math
+import tempfile
+from collections import Counter
 from pathlib import Path
 from typing import Any, Optional
 
 import torch
-from PIL import Image
+from PIL import Image, ImageEnhance, ImageFilter
 from torchvision import transforms
 
 from .config import get_settings
-from .services.model_registry import resolve_model_path
-from .services.preprocess import preprocess_image_for_model
+from .services.model_registry import resolve_model_path, resolve_ocr_model_meta
+from .services.ocr_pipeline import (
+    CONF_THRESHOLD,
+    OCR_CHARSET_DEFAULT,
+    preprocess_ocr_image,
+    validate_business_rules,
+    validate_ocr_result,
+)
+from .services.preprocess import build_preprocess_config, preprocess_image_for_model
 from .train import build_model, detect_device
 
 _EASYOCR_READER_CACHE: dict[tuple[tuple[str, ...], bool], Any] = {}
+_PADDLEOCR_READER_CACHE: dict[tuple[str, bool], Any] = {}
+
+
+def normalize_confidence(score: float) -> float:
+    value = float(score)
+    return 1.0 / (1.0 + math.exp(-5.0 * (value - 0.8)))
 
 
 def _load_checkpoint(
@@ -29,6 +45,157 @@ def _load_checkpoint(
     return checkpoint, path
 
 
+def _normalize_ocr_languages(languages: Optional[list[str]]) -> list[str]:
+    langs = [lang.strip() for lang in (languages or ["en"]) if lang.strip()]
+    if not langs:
+        langs = ["en"]
+    return langs
+
+
+def _normalize_ocr_shape(shape: Any) -> list[int]:
+    raw = shape if isinstance(shape, (list, tuple)) else [3, 48, 320]
+    nums = [int(x) for x in raw]
+    if len(nums) != 3 or nums[0] != 3 or nums[1] <= 0 or nums[2] <= 0:
+        return [3, 48, 320]
+    return nums
+
+
+def _prepare_ocr_input_path(
+    image_source: Any,
+    image_shape: list[int],
+    apply_preprocess: bool,
+    variant: str = "base",
+) -> tuple[str, Optional[Path]]:
+    if not apply_preprocess:
+        if isinstance(image_source, (str, Path)):
+            return str(image_source), None
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+        tmp_path = Path(tmp.name)
+        tmp.close()
+        if isinstance(image_source, Image.Image):
+            image_source.save(tmp_path)
+        else:
+            Image.fromarray(image_source).save(tmp_path)  # type: ignore[arg-type]
+        return str(tmp_path), tmp_path
+
+    base = preprocess_ocr_image(image_source, image_shape=image_shape, strong=False)
+    processed = base
+    if variant == "contrast":
+        processed = ImageEnhance.Contrast(base).enhance(1.15)
+    elif variant == "blur":
+        processed = base.filter(ImageFilter.GaussianBlur(radius=0.6))
+    elif variant == "strong":
+        processed = preprocess_ocr_image(image_source, image_shape=image_shape, strong=True)
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+    tmp_path = Path(tmp.name)
+    tmp.close()
+    processed.save(tmp_path)
+    return str(tmp_path), tmp_path
+
+
+def _choose_ocr_candidate(primary: dict[str, Any], secondary: Optional[dict[str, Any]]) -> tuple[dict[str, Any], bool]:
+    if secondary is None:
+        return primary, False
+    p_valid = bool(primary.get("validation", {}).get("valid"))
+    s_valid = bool(secondary.get("validation", {}).get("valid"))
+    p_conf = float(primary.get("confidence") or 0.0)
+    s_conf = float(secondary.get("confidence") or 0.0)
+
+    if s_valid and not p_valid:
+        return secondary, True
+    if s_valid and p_valid and s_conf >= p_conf:
+        return secondary, True
+    if not p_valid and not s_valid and s_conf > p_conf:
+        return secondary, True
+    return primary, False
+
+
+def _compute_char_scores(text: str, candidates: list[dict[str, Any]], confidence: float) -> list[float]:
+    normalized = str(text or "")
+    if not normalized:
+        return []
+    conf = max(0.0, min(1.0, float(confidence)))
+    scores: list[float] = []
+    for idx, ch in enumerate(normalized):
+        agree = 0
+        total = 0
+        for row in candidates:
+            candidate_text = str(row.get("prediction") or "")
+            if len(candidate_text) <= idx:
+                continue
+            total += 1
+            if candidate_text[idx] == ch:
+                agree += 1
+        ratio = (agree / total) if total else 0.0
+        score = conf * (0.55 + 0.45 * ratio)
+        scores.append(max(0.0, min(1.0, score)))
+    return scores
+
+
+def _build_char_scores(text: str, raw_scores: Optional[list[float]], confidence: float) -> list[float]:
+    normalized_text = str(text or "")
+    target_len = len(normalized_text)
+    if target_len <= 0:
+        return []
+    if not isinstance(raw_scores, list) or len(raw_scores) == 0:
+        fallback = max(0.0, min(1.0, float(confidence)))
+        return [fallback for _ in range(target_len)]
+
+    values = [max(0.0, min(1.0, float(x))) for x in raw_scores]
+    if len(values) < target_len:
+        pad_value = values[-1] if values else max(0.0, min(1.0, float(confidence)))
+        values.extend([pad_value for _ in range(target_len - len(values))])
+    if len(values) > target_len:
+        values = values[:target_len]
+    return values
+
+
+def _normalize_char_confidence(scores: list[float]) -> list[float]:
+    return [max(0.0, min(1.0, float(normalize_confidence(x)))) for x in scores]
+
+
+def _merge_validation(validation: dict[str, Any], business: dict[str, Any]) -> dict[str, Any]:
+    valid = bool(validation.get("valid")) and bool(business.get("valid"))
+    if not valid:
+        reason = validation.get("reason") or business.get("reason")
+    else:
+        reason = None
+    return {
+        **validation,
+        "valid": valid,
+        "reason": reason,
+        "business_valid": bool(business.get("valid")),
+        "business_reason": business.get("reason"),
+    }
+
+
+def _apply_char_confidence_gate(validation: dict[str, Any], char_scores: list[float], threshold: float = 0.7) -> dict[str, Any]:
+    if not char_scores:
+        return validation
+    min_score = min(float(x) for x in char_scores)
+    if min_score < float(threshold):
+        if bool(validation.get("valid")):
+            return {
+                **validation,
+                "valid": False,
+                "reason": "low_char_confidence",
+            }
+    return validation
+
+
+def _pick_majority_candidate(candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    if not candidates:
+        return {}
+    text_counter = Counter(str(row.get("prediction") or "") for row in candidates)
+    if not text_counter:
+        return max(candidates, key=lambda row: float(row.get("confidence") or 0.0))
+    top_count = max(text_counter.values())
+    top_texts = {text for text, count in text_counter.items() if count == top_count}
+    top_rows = [row for row in candidates if str(row.get("prediction") or "") in top_texts]
+    return max(top_rows, key=lambda row: float(row.get("confidence") or 0.0))
+
+
 def _get_easyocr_reader(languages: list[str]) -> tuple[Any, bool]:
     try:
         import easyocr  # type: ignore
@@ -42,18 +209,8 @@ def _get_easyocr_reader(languages: list[str]) -> tuple[Any, bool]:
     return _EASYOCR_READER_CACHE[key], use_gpu
 
 
-def _predict_with_easyocr(
-    image_path: str,
-    project_id: Optional[str] = None,
-    languages: Optional[list[str]] = None,
-) -> dict[str, Any]:
-    langs = [lang.strip() for lang in (languages or ["en"]) if lang.strip()]
-    if not langs:
-        langs = ["en"]
-
-    reader, use_gpu = _get_easyocr_reader(langs)
-    raw_results = reader.readtext(image_path, detail=1, paragraph=False)
-
+def _run_easyocr(reader: Any, input_path: str) -> tuple[str, float, list[dict[str, Any]]]:
+    raw_results = reader.readtext(input_path, detail=1, paragraph=False)
     parsed_results: list[dict[str, Any]] = []
     for row in raw_results[:20]:
         if len(row) < 3:
@@ -68,9 +225,83 @@ def _predict_with_easyocr(
         prediction = ""
         confidence = 0.0
 
+    return prediction, confidence, parsed_results
+
+
+def _predict_with_easyocr(
+    image_source: Any,
+    project_id: Optional[str] = None,
+    languages: Optional[list[str]] = None,
+    charset: str = OCR_CHARSET_DEFAULT,
+    max_text_length: int = 8,
+    image_shape: Optional[list[int]] = None,
+    apply_preprocess: bool = True,
+) -> dict[str, Any]:
+    shape = _normalize_ocr_shape(image_shape or [3, 48, 320])
+    langs = _normalize_ocr_languages(languages)
+    reader, use_gpu = _get_easyocr_reader(langs)
+
+    def _infer(variant: str) -> dict[str, Any]:
+        input_path, temp_path = _prepare_ocr_input_path(image_source, shape, apply_preprocess, variant=variant)
+        try:
+            prediction, confidence, parsed_results = _run_easyocr(reader, input_path)
+        finally:
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
+        validation = validate_ocr_result(
+            prediction,
+            max_text_length=max_text_length,
+            charset=charset,
+            confidence=confidence,
+            conf_threshold=CONF_THRESHOLD,
+        )
+        business = validate_business_rules(validation["text"])
+        merged_validation = _merge_validation(validation, business)
+        return {
+            "prediction": merged_validation["text"],
+            "raw_prediction": prediction,
+            "confidence": confidence,
+            "validation": merged_validation,
+            "easyocr_results": parsed_results,
+            "preprocess_variant": variant,
+        }
+
+    variants = ["base", "contrast", "blur"]
+    variant_results = [_infer(variant) for variant in variants]
+    primary = _pick_majority_candidate(variant_results)
+    char_scores = _compute_char_scores(
+        str(primary.get("prediction") or ""),
+        variant_results,
+        float(primary.get("confidence") or 0.0),
+    )
+    min_char_score = min(char_scores) if char_scores else 1.0
+
+    retry_candidate: Optional[dict[str, Any]] = None
+    if (not bool(primary.get("validation", {}).get("valid"))) or min_char_score < 0.7:
+        retry_candidate = _infer("strong")
+        retry_char_scores = _compute_char_scores(
+            str(retry_candidate.get("prediction") or ""),
+            variant_results + [retry_candidate],
+            float(retry_candidate.get("confidence") or 0.0),
+        )
+        retry_candidate["char_scores"] = retry_char_scores
+    chosen, used_retry = _choose_ocr_candidate(primary, retry_candidate)
+    chosen_char_scores = chosen.get("char_scores")
+    if not isinstance(chosen_char_scores, list) or len(chosen_char_scores) == 0:
+        chosen_char_scores = _compute_char_scores(
+            str(chosen.get("prediction") or ""),
+            variant_results + ([retry_candidate] if retry_candidate else []),
+            float(chosen.get("confidence") or 0.0),
+        )
+    chosen_text = str(chosen.get("prediction") or "")
+    chosen_char_scores = _build_char_scores(chosen_text, chosen_char_scores, float(chosen.get("confidence") or 0.0))
+    normalized_char_scores = _normalize_char_confidence(chosen_char_scores)
+    final_validation = _apply_char_confidence_gate(dict(chosen["validation"]), chosen_char_scores)
+
     return {
-        "prediction": prediction,
-        "confidence": confidence,
+        "text": chosen_text,
+        "prediction": chosen_text,
+        "confidence": float(chosen["confidence"]),
         "model_path": "",
         "project_id": project_id,
         "model_type": "easyocr",
@@ -78,7 +309,293 @@ def _predict_with_easyocr(
         "engine": "easyocr",
         "easyocr_gpu": use_gpu,
         "easyocr_languages": langs,
-        "easyocr_results": parsed_results,
+        "easyocr_results": chosen["easyocr_results"],
+        "multi_ocr_candidates": variant_results,
+        "multi_ocr": True,
+        "validation": final_validation,
+        "valid": bool(final_validation["valid"]),
+        "char_scores": chosen_char_scores,
+        "char_confidence_normalized": normalized_char_scores,
+        "low_char_confidence": (min(chosen_char_scores) if chosen_char_scores else 1.0) < 0.7,
+        "retry_performed": retry_candidate is not None,
+        "retry_used": bool(used_retry),
+        "retry_validation": retry_candidate["validation"] if retry_candidate else None,
+        "raw_prediction": chosen["raw_prediction"],
+    }
+
+
+def _get_paddleocr_reader(language: str, use_angle_cls: bool) -> Any:
+    try:
+        from paddleocr import PaddleOCR  # type: ignore
+    except ImportError as e:
+        raise RuntimeError(
+            "paddleocr is not installed. Please run: pip install paddleocr paddlepaddle"
+        ) from e
+
+    lang = (language or "en").strip() or "en"
+    key = (lang, bool(use_angle_cls))
+    if key not in _PADDLEOCR_READER_CACHE:
+        _PADDLEOCR_READER_CACHE[key] = _create_paddleocr_instance(
+            PaddleOCR,
+            lang=lang,
+            use_angle_cls=bool(use_angle_cls),
+        )
+    return _PADDLEOCR_READER_CACHE[key]
+
+
+def _create_paddleocr_instance(paddleocr_cls: Any, **base_kwargs: Any) -> Any:
+    """
+    PaddleOCRのバージョン差異で受け付ける引数が異なるため、
+    利用可能な引数組み合わせへフォールバックしつつ生成する。
+    """
+    attempts: list[dict[str, Any]] = []
+    include_det_off = "rec_model_dir" in base_kwargs
+
+    kwargs = dict(base_kwargs)
+    kwargs["show_log"] = False
+    if include_det_off:
+        kwargs["det"] = False
+    attempts.append(kwargs)
+
+    kwargs = dict(base_kwargs)
+    if include_det_off:
+        kwargs["det"] = False
+    attempts.append(kwargs)
+
+    kwargs = dict(base_kwargs)
+    kwargs["show_log"] = False
+    attempts.append(kwargs)
+
+    attempts.append(dict(base_kwargs))
+
+    last_error: Optional[Exception] = None
+    for kwargs in attempts:
+        try:
+            return paddleocr_cls(**kwargs)
+        except Exception as e:  # noqa: BLE001
+            message = str(e)
+            if (
+                "Unknown argument" in message
+                or "unexpected keyword argument" in message
+                or "got an unexpected keyword argument" in message
+            ):
+                last_error = e
+                continue
+            raise
+
+    if last_error is not None:
+        raise RuntimeError(f"failed to initialize PaddleOCR with compatible args: {last_error}") from last_error
+    raise RuntimeError("failed to initialize PaddleOCR")
+
+
+def _is_paddle_rec_inference_dir(model_dir: Path) -> bool:
+    if not model_dir.exists() or not model_dir.is_dir():
+        return False
+    markers = [
+        model_dir / "inference.yml",
+        model_dir / "inference.pdiparams",
+        model_dir / "inference.pdmodel",
+        model_dir / "inference.json",
+    ]
+    return any(marker.exists() and marker.is_file() for marker in markers)
+
+
+def _run_paddleocr(reader: Any, input_path: str, use_angle_cls: bool) -> tuple[str, float, list[dict[str, Any]]]:
+    raw_results: Any
+    if hasattr(reader, "ocr"):
+        try:
+            raw_results = reader.ocr(input_path, cls=use_angle_cls)
+        except Exception as e:  # noqa: BLE001
+            message = str(e)
+            if "unexpected keyword argument 'cls'" in message or "Unknown argument: cls" in message:
+                raw_results = reader.ocr(input_path)
+            else:
+                raise
+    elif hasattr(reader, "predict"):
+        raw_results = reader.predict(input_path)
+    else:
+        raise RuntimeError("PaddleOCR reader has no callable ocr/predict method")
+
+    parsed_results: list[dict[str, Any]] = []
+
+    # 新しいPaddleOCR(3.x)形式: [{rec_texts:[...], rec_scores:[...], ...}]
+    if isinstance(raw_results, list) and raw_results and isinstance(raw_results[0], dict):
+        for block in raw_results:
+            if not isinstance(block, dict):
+                continue
+            rec_texts = block.get("rec_texts")
+            rec_scores = block.get("rec_scores")
+            if isinstance(rec_texts, list):
+                for idx, text in enumerate(rec_texts):
+                    score = 0.0
+                    if isinstance(rec_scores, list) and idx < len(rec_scores):
+                        try:
+                            score = float(rec_scores[idx])
+                        except Exception:  # noqa: BLE001
+                            score = 0.0
+                    parsed_results.append({"text": str(text or "").strip(), "confidence": score})
+
+    # 旧PaddleOCR形式: [[box, [text, score]], ...]
+    for block in raw_results or []:
+        if not isinstance(block, list):
+            continue
+        for row in block:
+            if not isinstance(row, (list, tuple)) or len(row) < 2:
+                continue
+            rec = row[1]
+            if not isinstance(rec, (list, tuple)) or len(rec) < 2:
+                continue
+            text = str(rec[0]).strip()
+            try:
+                confidence = float(rec[1])
+            except Exception:  # noqa: BLE001
+                confidence = 0.0
+            parsed_results.append({"text": text, "confidence": confidence})
+
+    if parsed_results:
+        best = max(parsed_results, key=lambda x: float(x.get("confidence", 0.0)))
+        prediction = str(best.get("text", "")).strip()
+        confidence = float(best.get("confidence", 0.0))
+    else:
+        prediction = ""
+        confidence = 0.0
+    return prediction, confidence, parsed_results
+
+
+def _predict_with_paddleocr(
+    image_source: Any,
+    project_id: Optional[str] = None,
+    languages: Optional[list[str]] = None,
+    model: str = "latest",
+    charset: str = OCR_CHARSET_DEFAULT,
+    max_text_length: int = 8,
+    image_shape: Optional[list[int]] = None,
+    apply_preprocess: bool = True,
+) -> dict[str, Any]:
+    langs = _normalize_ocr_languages(languages)
+    selected_lang = langs[0]
+    use_angle_cls = True
+    model_meta = resolve_ocr_model_meta(project_id=project_id, model=model, engine="paddleocr")
+    if (model or "latest").strip() not in {"", "latest"} and model_meta is None:
+        raise FileNotFoundError(f"paddleocr model not found: {model}")
+
+    effective_charset = str(model_meta.get("charset") or charset) if model_meta else charset
+    effective_max_text_length = int(model_meta.get("max_text_length") or max_text_length) if model_meta else int(max_text_length)
+    if model_meta:
+        shape = _normalize_ocr_shape(model_meta.get("image_shape") or image_shape or [3, 48, 320])
+    else:
+        shape = _normalize_ocr_shape(image_shape or [3, 48, 320])
+
+    model_warning: Optional[str] = None
+    if model_meta and str(model_meta.get("model_dir") or "").strip():
+        requested_model_name = str(model_meta.get("name") or "")
+        model_dir = Path(str(model_meta.get("model_dir")))
+        if _is_paddle_rec_inference_dir(model_dir):
+            try:
+                from paddleocr import PaddleOCR  # type: ignore
+            except ImportError as e:
+                raise RuntimeError(
+                    "paddleocr is not installed. Please run: pip install paddleocr paddlepaddle"
+                ) from e
+            reader = _create_paddleocr_instance(
+                PaddleOCR,
+                lang=selected_lang,
+                use_angle_cls=use_angle_cls,
+                rec_model_dir=str(model_dir),
+            )
+        else:
+            # 学習直後のrunディレクトリは推論用export前だと読み込めないため、標準モデルへフォールバックする。
+            reader = _get_paddleocr_reader(selected_lang, use_angle_cls=use_angle_cls)
+            model_warning = (
+                f"selected model '{requested_model_name}' is not inference-exported. "
+                "fallback to builtin PaddleOCR model."
+            )
+    else:
+        reader = _get_paddleocr_reader(selected_lang, use_angle_cls=use_angle_cls)
+
+    def _infer(variant: str) -> dict[str, Any]:
+        input_path, temp_path = _prepare_ocr_input_path(image_source, shape, apply_preprocess, variant=variant)
+        try:
+            prediction, confidence, parsed_results = _run_paddleocr(reader, input_path, use_angle_cls=use_angle_cls)
+        finally:
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
+        validation = validate_ocr_result(
+            prediction,
+            max_text_length=effective_max_text_length,
+            charset=effective_charset,
+            confidence=confidence,
+            conf_threshold=CONF_THRESHOLD,
+        )
+        business = validate_business_rules(validation["text"])
+        merged_validation = _merge_validation(validation, business)
+        return {
+            "prediction": merged_validation["text"],
+            "raw_prediction": prediction,
+            "confidence": confidence,
+            "validation": merged_validation,
+            "paddleocr_results": parsed_results,
+            "preprocess_variant": variant,
+        }
+
+    variants = ["base", "contrast", "blur"]
+    variant_results = [_infer(variant) for variant in variants]
+    primary = _pick_majority_candidate(variant_results)
+    char_scores = _compute_char_scores(
+        str(primary.get("prediction") or ""),
+        variant_results,
+        float(primary.get("confidence") or 0.0),
+    )
+    min_char_score = min(char_scores) if char_scores else 1.0
+
+    retry_candidate: Optional[dict[str, Any]] = None
+    if (not bool(primary.get("validation", {}).get("valid"))) or min_char_score < 0.7:
+        retry_candidate = _infer("strong")
+        retry_char_scores = _compute_char_scores(
+            str(retry_candidate.get("prediction") or ""),
+            variant_results + [retry_candidate],
+            float(retry_candidate.get("confidence") or 0.0),
+        )
+        retry_candidate["char_scores"] = retry_char_scores
+    chosen, used_retry = _choose_ocr_candidate(primary, retry_candidate)
+    chosen_char_scores = chosen.get("char_scores")
+    if not isinstance(chosen_char_scores, list) or len(chosen_char_scores) == 0:
+        chosen_char_scores = _compute_char_scores(
+            str(chosen.get("prediction") or ""),
+            variant_results + ([retry_candidate] if retry_candidate else []),
+            float(chosen.get("confidence") or 0.0),
+        )
+    chosen_text = str(chosen.get("prediction") or "")
+    chosen_char_scores = _build_char_scores(chosen_text, chosen_char_scores, float(chosen.get("confidence") or 0.0))
+    normalized_char_scores = _normalize_char_confidence(chosen_char_scores)
+    final_validation = _apply_char_confidence_gate(dict(chosen["validation"]), chosen_char_scores)
+
+    return {
+        "text": chosen_text,
+        "prediction": chosen_text,
+        "confidence": float(chosen["confidence"]),
+        "model_path": "",
+        "project_id": project_id,
+        "model_type": "paddleocr",
+        "model_name": str(model_meta.get("name")) if model_meta else "paddleocr",
+        "engine": "paddleocr",
+        "paddleocr_language": selected_lang,
+        "paddleocr_languages": langs,
+        "paddleocr_results": chosen["paddleocr_results"],
+        "multi_ocr_candidates": variant_results,
+        "multi_ocr": True,
+        "validation": final_validation,
+        "valid": bool(final_validation["valid"]),
+        "char_scores": chosen_char_scores,
+        "char_confidence_normalized": normalized_char_scores,
+        "low_char_confidence": (min(chosen_char_scores) if chosen_char_scores else 1.0) < 0.7,
+        "retry_performed": retry_candidate is not None,
+        "retry_used": bool(used_retry),
+        "retry_validation": retry_candidate["validation"] if retry_candidate else None,
+        "raw_prediction": chosen["raw_prediction"],
+        "charset": effective_charset,
+        "max_text_length": effective_max_text_length,
+        "model_warning": model_warning,
     }
 
 
@@ -108,18 +625,54 @@ def predict_from_image(
     engine: str = "custom",
     easyocr_languages: Optional[list[str]] = None,
     apply_preprocess: bool = True,
+    preprocess_overrides: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     engine_name = (engine or "custom").strip().lower()
-    if engine_name == "easyocr":
-        return _predict_with_easyocr(image_path, project_id=project_id, languages=easyocr_languages)
-
     preprocess_meta: dict[str, Any] = {"applied": False, "image_type": "", "pipeline": []}
+    ocr_input_source: Any = image_path
+
+    if apply_preprocess and preprocess_overrides:
+        forced_image_type = _image_type_for_model_type(model_type)
+        preprocess_cfg = build_preprocess_config(preprocess_overrides)
+        pre = preprocess_image_for_model(image_path, force_image_type=forced_image_type, config=preprocess_cfg)
+        preprocess_meta = {
+            "applied": True,
+            "image_type": str(pre.get("type", "")),
+            "pipeline": list(pre.get("pipeline", [])),
+        }
+        ocr_input_source = Image.fromarray(pre["processed"], mode="L")
+
+    if engine_name == "easyocr":
+        result = _predict_with_easyocr(
+            ocr_input_source,
+            project_id=project_id,
+            languages=easyocr_languages,
+            apply_preprocess=(apply_preprocess and not preprocess_overrides),
+        )
+        result["preprocess_applied"] = preprocess_meta["applied"]
+        result["preprocess_image_type"] = preprocess_meta["image_type"]
+        result["preprocess_pipeline"] = preprocess_meta["pipeline"]
+        return result
+    if engine_name == "paddleocr":
+        result = _predict_with_paddleocr(
+            ocr_input_source,
+            project_id=project_id,
+            languages=easyocr_languages,
+            model=model,
+            apply_preprocess=(apply_preprocess and not preprocess_overrides),
+        )
+        result["preprocess_applied"] = preprocess_meta["applied"]
+        result["preprocess_image_type"] = preprocess_meta["image_type"]
+        result["preprocess_pipeline"] = preprocess_meta["pipeline"]
+        return result
+
     inference_image: Image.Image
     selected_model_type = model_type
 
     if apply_preprocess:
         forced_image_type = _image_type_for_model_type(selected_model_type)
-        pre = preprocess_image_for_model(image_path, force_image_type=forced_image_type)
+        preprocess_cfg = build_preprocess_config(preprocess_overrides) if preprocess_overrides else None
+        pre = preprocess_image_for_model(image_path, force_image_type=forced_image_type, config=preprocess_cfg)
         preprocess_meta = {
             "applied": True,
             "image_type": str(pre.get("type", "")),
@@ -163,9 +716,15 @@ def predict_from_image(
         probs = torch.softmax(logits, dim=1)
         conf, idx = torch.max(probs, dim=1)
 
+    predicted_text = str(classes[idx.item()])
+    conf_value = float(conf.item())
+    char_scores = _build_char_scores(predicted_text, None, conf_value)
+    normalized_char_scores = _normalize_char_confidence(char_scores)
+
     return {
-        "prediction": classes[idx.item()],
-        "confidence": float(conf.item()),
+        "text": predicted_text,
+        "prediction": predicted_text,
+        "confidence": conf_value,
         "model_path": str(resolved_model_path),
         "project_id": checkpoint.get("project_id", project_id),
         "model_type": checkpoint.get("model_type", selected_model_type or ""),
@@ -174,6 +733,9 @@ def predict_from_image(
         "preprocess_applied": preprocess_meta["applied"],
         "preprocess_image_type": preprocess_meta["image_type"],
         "preprocess_pipeline": preprocess_meta["pipeline"],
+        "char_scores": char_scores,
+        "char_confidence_normalized": normalized_char_scores,
+        "valid": True,
     }
 
 
@@ -183,7 +745,7 @@ def main() -> None:
     parser.add_argument("--project-id", type=str, default="default")
     parser.add_argument("--model-type", type=str, default="")
     parser.add_argument("--model", type=str, default="latest")
-    parser.add_argument("--engine", type=str, default="custom", choices=["custom", "easyocr"])
+    parser.add_argument("--engine", type=str, default="custom", choices=["custom", "easyocr", "paddleocr"])
     parser.add_argument("--easyocr-langs", type=str, default="en")
     args = parser.parse_args()
 

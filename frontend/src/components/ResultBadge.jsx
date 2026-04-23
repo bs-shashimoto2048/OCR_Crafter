@@ -1,7 +1,7 @@
 import Card from "./Card";
 
 export default function ResultBadge({ loading, prediction, confidence, modelType, modelName, engine, error }) {
-  const engineLabel = engine === "easyocr" ? "EasyOCR" : "カスタムモデル";
+  const engineLabel = engine === "easyocr" ? "EasyOCR" : engine === "paddleocr" ? "PaddleOCR" : "カスタムモデル";
 
   if (error) {
     return (

@@ -10,6 +10,7 @@ const HEIC_EXTENSIONS = [".heic", ".heif"];
 const IMAGE_ZOOM_MIN = 0.1;
 const IMAGE_ZOOM_MAX = 4.0;
 const RESIZE_AXES = ["width", "height"];
+const COPY_PASTE_OFFSET = 12;
 
 function loadImageBuilderState() {
   const defaults = {
@@ -123,6 +124,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
   const [bboxUndoStack, setBboxUndoStack] = useState([]);
   const [step3PaneHeight, setStep3PaneHeight] = useState(0);
   const [imageZoom, setImageZoom] = useState(1);
+  const [copiedBboxes, setCopiedBboxes] = useState([]);
 
   function cloneDetections(rows) {
     return (rows || []).map((row) => ({ ...row }));
@@ -331,6 +333,67 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
     }
   }
 
+  function getCopySourceRows() {
+    if (editingBboxId != null) {
+      const target = detections.find((row) => row.id === editingBboxId);
+      if (target) return [target];
+    }
+    if (focusedBboxId != null) {
+      const target = detections.find((row) => row.id === focusedBboxId);
+      if (target) return [target];
+    }
+    return detections.filter((row) => row.selected);
+  }
+
+  function copyBboxes() {
+    const sourceRows = getCopySourceRows();
+    if (sourceRows.length === 0) {
+      setFail("コピー対象のROIがありません");
+      return;
+    }
+    setCopiedBboxes(sourceRows.map((row) => ({ ...row })));
+    setOk(`${sourceRows.length}件のROIをコピーしました`);
+  }
+
+  function pasteBboxes() {
+    if (!currentImageSize) {
+      setFail("貼り付け先の画像がありません");
+      return;
+    }
+    if (copiedBboxes.length === 0) {
+      setFail("貼り付けるROIがありません");
+      return;
+    }
+
+    const currentMaxId = detections.reduce((m, row) => Math.max(m, Number(row.id) || 0), 0);
+    const pastedRows = copiedBboxes.map((row, idx) => {
+      const x1 = Number(row.x1) + COPY_PASTE_OFFSET;
+      const y1 = Number(row.y1) + COPY_PASTE_OFFSET;
+      const x2 = Number(row.x2) + COPY_PASTE_OFFSET;
+      const y2 = Number(row.y2) + COPY_PASTE_OFFSET;
+      return clampBox({
+        ...row,
+        id: currentMaxId + idx + 1,
+        x1,
+        y1,
+        x2,
+        y2,
+        width: Math.max(0, x2 - x1),
+        height: Math.max(0, y2 - y1),
+        selected: true,
+      });
+    });
+
+    pushUndoSnapshot(detections);
+    setDetections((prev) => [...prev, ...pastedRows]);
+    const firstId = pastedRows[0]?.id ?? null;
+    if (firstId != null) {
+      setEditingBboxId(firstId);
+      focusBboxCard(firstId);
+    }
+    setOk(`${pastedRows.length}件のROIを貼り付けました`);
+  }
+
   function scheduleBBoxClick(id) {
     if (clickTimerRef.current) {
       clearTimeout(clickTimerRef.current);
@@ -361,8 +424,9 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
     if (!point) {
       return;
     }
-    const defaultW = Math.max(24, currentImageSize[0] * 0.12);
-    const defaultH = Math.max(24, currentImageSize[1] * 0.08);
+    // Added ROI should start as a horizontal box for OCR text strings.
+    const defaultH = Math.max(20, currentImageSize[1] * 0.08);
+    const defaultW = Math.max(defaultH * 2.8, currentImageSize[0] * 0.18, 56);
     const maxW = currentImageSize[0];
     const maxH = currentImageSize[1];
     let x1 = point.x - defaultW / 2;
@@ -751,6 +815,19 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       }
 
       const key = String(ev.key || "").toLowerCase();
+      const withModifier = !!(ev.ctrlKey || ev.metaKey);
+
+      if (withModifier && key === "c") {
+        ev.preventDefault();
+        copyBboxes();
+        return;
+      }
+      if (withModifier && key === "v") {
+        ev.preventDefault();
+        pasteBboxes();
+        return;
+      }
+
       if (key !== "delete" && key !== "backspace") {
         return;
       }
@@ -776,7 +853,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [activeStep, detections, editingBboxId, focusedBboxId]);
+  }, [activeStep, detections, editingBboxId, focusedBboxId, copiedBboxes, currentImageSize]);
 
   async function browseOutputDir() {
     try {
@@ -1191,6 +1268,12 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                 <Button variant="secondary" onClick={undoDetections} disabled={bboxUndoStack.length === 0}>
                   Undo
                 </Button>
+                <Button variant="secondary" onClick={copyBboxes} disabled={detections.length === 0}>
+                  コピー
+                </Button>
+                <Button variant="secondary" onClick={pasteBboxes} disabled={copiedBboxes.length === 0}>
+                  貼り付け
+                </Button>
                 <Button
                   variant="secondary"
                   onClick={() => setDetections((prev) => prev.map((row) => ({ ...row, selected: true })))}
@@ -1270,6 +1353,8 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                   <li>編集モードONで画像をダブルクリック: 新規BBox追加</li>
                   <li>ドラッグ: 移動</li>
                   <li>四隅ハンドル: サイズ変更</li>
+                  <li>Ctrl/Cmd + C: ROIをコピー</li>
+                  <li>Ctrl/Cmd + V: ROIを貼り付け</li>
                   <li>Delキー: 編集中またはフォーカス中BBox削除</li>
                 </ul>
               </div>

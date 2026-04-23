@@ -12,6 +12,8 @@ import InferenceView from "./views/InferenceView";
 import PreprocessView from "./views/PreprocessView";
 import EvaluationView from "./views/EvaluationView";
 import TrainingImageBuilderView from "./views/TrainingImageBuilderView";
+import RapidOCRView from "./views/RapidOCRView";
+import OcrBatchView from "./views/OcrBatchView";
 import { API_BASE, imageUrl, request } from "./lib/api";
 
 const viewMeta = {
@@ -20,9 +22,18 @@ const viewMeta = {
   preprocess: { title: "前処理設定", subtitle: "前処理パラメータ設定とプレビュー" },
   labeling: { title: "ラベル編集", subtitle: "数字ラベル編集" },
   training: { title: "学習", subtitle: "学習ジョブ実行とログ監視" },
+  "ocr-training": { title: "学習", subtitle: "OCR認識モデル: OCRデータ作成・学習" },
+  "cls-training": { title: "学習", subtitle: "分割学習モデル: 前処理・データセット作成・学習" },
   models: { title: "モデル", subtitle: "保存済みモデル管理" },
+  "ocr-models": { title: "モデル", subtitle: "OCR認識モデルの管理" },
+  "cls-models": { title: "モデル", subtitle: "分割学習モデルの管理" },
   inference: { title: "推論", subtitle: "画像推論と精度確認" },
+  "ocr-inference": { title: "推論", subtitle: "OCR認識モデルで推論" },
+  "cls-inference": { title: "推論", subtitle: "分割学習モデルで推論" },
   evaluation: { title: "評価", subtitle: "精度評価と誤認識分析" },
+  "cls-evaluation": { title: "評価", subtitle: "分割学習モデルの精度評価" },
+  "rapid-ocr": { title: "OCR修正", subtitle: "キーボード中心でOCR結果を素早く修正" },
+  "ocr-batch": { title: "バッチ推論", subtitle: "OCR認識モデルで複数画像を一括推論" },
   "image-builder-step1": { title: "学習画像作成", subtitle: "Step1: 画像指定とリサイズ" },
   "image-builder-step2": { title: "学習画像作成", subtitle: "Step2: YOLO検出" },
   "image-builder-step3": { title: "学習画像作成", subtitle: "Step3: Bounding Box選択" },
@@ -31,6 +42,7 @@ const viewMeta = {
 
 const PRESET_STORAGE_KEY = "ocr_preprocess_presets_v1";
 const PREPROCESS_PARAMS_BY_PROJECT_STORAGE_KEY = "ocr_preprocess_params_by_project_v1";
+const NOTICE_AUTO_HIDE_MS = 4500;
 const EASYOCR_LANGUAGE_OPTIONS = [
   "en",
   "ja",
@@ -44,6 +56,7 @@ const EASYOCR_LANGUAGE_OPTIONS = [
   "pt",
   "ru",
 ];
+const FIXED_PADDLE_OCR_REPO_DIR = "/Users/hashimoto/vscode/_app/ocr_crafter/external/PaddleOCR";
 const DEFAULT_PREPROCESS_PARAMS = {
   ratio_threshold: 1.6,
   single_size: 64,
@@ -85,9 +98,78 @@ const DEFAULT_PREPROCESS_PARAMS = {
   denoise_ksize: 1,
   deskew_enabled: true,
 };
+const OCR_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
 function nowLabel() {
   return new Date().toLocaleTimeString("ja-JP", { hour12: false });
+}
+
+function summarizePpocrLogLine(rawLine) {
+  const line = String(rawLine || "");
+  if (!line.includes("ppocr")) {
+    return line;
+  }
+
+  const tsMatch = line.match(/^\[(\d{4}\/\d{2}\/\d{2}\s+(\d{2}:\d{2}:\d{2}))\]/);
+  const time = tsMatch?.[2] || "";
+  const prefix = time ? `[${time}] ` : "";
+  const body = line.replace(/^\[[^\]]+\]\s*ppocr\s+INFO:\s*/, "").trim();
+
+  const epochMatch = body.match(
+    /epoch:\s*\[(\d+)\/(\d+)\],\s*global_step:\s*([\d.]+),\s*lr:\s*([\d.eE+-]+),\s*acc:\s*([\d.eE+-]+),\s*norm_edit_dis:\s*([\d.eE+-]+),\s*loss:\s*([\d.eE+-]+),\s*avg_reader_cost:\s*([\d.eE+-]+)\s*s,\s*avg_batch_cost:\s*([\d.eE+-]+)\s*s,\s*avg_samples:\s*([\d.eE+-]+),\s*ips:\s*([\d.eE+-]+)\s*samples\/s,\s*eta:\s*([0-9:]+)/
+  );
+  if (epochMatch) {
+    const [
+      ,
+      epoch,
+      totalEpoch,
+      step,
+      lr,
+      acc,
+      normEditDis,
+      loss,
+      readerCost,
+      batchCost,
+      avgSamples,
+      ips,
+      eta,
+    ] = epochMatch;
+    const accValue = Number(acc);
+    const lossVal = Number(loss).toFixed(4);
+    const reader = Number(readerCost).toFixed(3);
+    const batch = Number(batchCost).toFixed(3);
+    const speed = Number(ips).toFixed(2);
+    const lrValue = Number(lr);
+    const parts = [
+      `${prefix}学習 ${epoch}/${totalEpoch}`,
+      `step ${step}`,
+      `損失 ${lossVal}`,
+      `文字一致度 ${normEditDis}`,
+      `読込 ${reader}s`,
+      `バッチ ${batch}s`,
+      `平均${avgSamples}件`,
+      `${speed}枚/秒`,
+      `残り ${eta}`,
+    ];
+    // acc=0% が長く続くケースが多く監視ノイズになるため、変化がある時のみ表示
+    if (Number.isFinite(accValue) && accValue > 0) {
+      parts.splice(3, 0, `精度 ${(accValue * 100).toFixed(2)}%`);
+    }
+    // 既定の固定学習率(0.0005)は情報量が低いため非表示、変更時のみ表示
+    if (Number.isFinite(lrValue) && Math.abs(lrValue - 0.0005) > 1e-12) {
+      parts.splice(parts.length - 1, 0, `学習率 ${lr}`);
+    }
+    return parts.join(" | ");
+  }
+
+  const saveMatch = body.match(/^save model in\s+(.+)$/i);
+  if (saveMatch) {
+    const path = saveMatch[1];
+    const label = path.endsWith("/latest") ? "latest" : path.split("/").pop() || "checkpoint";
+    return `${prefix}モデル保存 | ${label} | ${path}`;
+  }
+
+  return `${prefix}${body}`;
 }
 
 function modelTypeFromModelName(modelName) {
@@ -100,9 +182,10 @@ function modelTypeFromModelName(modelName) {
 
 export default function App() {
   const [activeView, setActiveView] = useState("dashboard");
-  const [notice, setNotice] = useState({ kind: "info", text: "準備完了" });
+  const [notice, setNotice] = useState(null);
 
   const [projects, setProjects] = useState([]);
+  const [projectSummaries, setProjectSummaries] = useState({});
   const [projectId, setProjectId] = useState("");
   const [newProjectId, setNewProjectId] = useState("");
 
@@ -120,6 +203,7 @@ export default function App() {
     trainingStarted: false,
   });
 
+  const [trainingFamily, setTrainingFamily] = useState("classification");
   const [modelType, setModelType] = useState("square");
   const [modelTypes, setModelTypes] = useState([]);
   const [trainRatio, setTrainRatio] = useState(0.7);
@@ -130,16 +214,53 @@ export default function App() {
   const [learningRate, setLearningRate] = useState(0.001);
   const [jobId, setJobId] = useState("");
   const [jobStatus, setJobStatus] = useState("idle");
+  const [jobFamily, setJobFamily] = useState("classification");
   const [logs, setLogs] = useState([]);
+
+  const [ocrEngine, setOcrEngine] = useState("paddleocr");
+  const [ocrCharset, setOcrCharset] = useState(OCR_CHARSET_DEFAULT);
+  const [ocrMaxTextLength, setOcrMaxTextLength] = useState(8);
+  const [ocrImageShape, setOcrImageShape] = useState("3,48,320");
+  const [ocrUseAugmentation, setOcrUseAugmentation] = useState(false);
+  const [ocrAugStrength, setOcrAugStrength] = useState(1);
+  const [ocrDatasetDir, setOcrDatasetDir] = useState("");
+  const [ocrDatasetInfo, setOcrDatasetInfo] = useState(null);
+  const [ocrFromLogsOnlyInvalid, setOcrFromLogsOnlyInvalid] = useState(true);
+  const [ocrFromLogsIncludeCorrected, setOcrFromLogsIncludeCorrected] = useState(true);
 
   const [models, setModels] = useState([]);
   const [modelInfos, setModelInfos] = useState({});
-  const [latestModels, setLatestModels] = useState({ any: "", byType: {} });
+  const [latestModels, setLatestModels] = useState({ any: "", byType: {}, ocrPaddle: "" });
+  const classificationModels = useMemo(
+    () =>
+      models.filter((name) => {
+        const info = modelInfos[name] || {};
+        return (info.training_family || "classification") === "classification";
+      }),
+    [models, modelInfos]
+  );
+  const ocrPaddleModels = useMemo(
+    () =>
+      models.filter((name) => {
+        const info = modelInfos[name] || {};
+        return info.training_family === "ocr" && info.engine === "paddleocr";
+      }),
+    [models, modelInfos]
+  );
+  const ocrModels = useMemo(
+    () =>
+      models.filter((name) => {
+        const info = modelInfos[name] || {};
+        return info.training_family === "ocr";
+      }),
+    [models, modelInfos]
+  );
 
   const [inferModelType, setInferModelType] = useState("square");
   const [inferModel, setInferModel] = useState("latest");
   const [inferEngine, setInferEngine] = useState("custom");
   const [inferEasyOcrLangs, setInferEasyOcrLangs] = useState(["en"]);
+  const [inferPaddleModel, setInferPaddleModel] = useState("latest");
   const [inferFile, setInferFile] = useState(null);
   const [inferFileName, setInferFileName] = useState("");
   const [inferPreviewUrl, setInferPreviewUrl] = useState("");
@@ -159,6 +280,7 @@ export default function App() {
   const [preprocessImage, setPreprocessImage] = useState("");
   const [preprocessPredictEngine, setPreprocessPredictEngine] = useState("easyocr");
   const [preprocessPredictModel, setPreprocessPredictModel] = useState("latest");
+  const [preprocessPredictPaddleModel, setPreprocessPredictPaddleModel] = useState("latest");
   const [preprocessPredictModelType, setPreprocessPredictModelType] = useState("square");
   const [preprocessPredictEasyOcrLangs, setPreprocessPredictEasyOcrLangs] = useState(["en"]);
   const [preprocessPreview, setPreprocessPreview] = useState(null);
@@ -167,25 +289,63 @@ export default function App() {
   const [preprocessPresets, setPreprocessPresets] = useState({});
   const [presetName, setPresetName] = useState("");
   const [selectedPreset, setSelectedPreset] = useState("");
+  const [rapidPreprocessEnabled, setRapidPreprocessEnabled] = useState(true);
 
   const lastStatusRef = useRef("");
   const lastMessageRef = useRef("");
   const stopPollingRef = useRef(false);
   const preprocessParamsByProjectRef = useRef({});
   const skipPreprocessPersistRef = useRef(false);
+  const noticeTimerRef = useRef(null);
 
   function pushLog(line) {
     setLogs((prev) => [...prev.slice(-120), `[${nowLabel()}] ${line}`]);
   }
 
-  function notify(kind, text) {
-    setNotice({ kind, text });
+  function clearNotice() {
+    if (noticeTimerRef.current) {
+      window.clearTimeout(noticeTimerRef.current);
+      noticeTimerRef.current = null;
+    }
+    setNotice(null);
   }
+
+  function notify(kind, text) {
+    if (!text) {
+      clearNotice();
+      return;
+    }
+    if (noticeTimerRef.current) {
+      window.clearTimeout(noticeTimerRef.current);
+      noticeTimerRef.current = null;
+    }
+    setNotice({ kind, text });
+    noticeTimerRef.current = window.setTimeout(() => {
+      setNotice(null);
+      noticeTimerRef.current = null;
+    }, NOTICE_AUTO_HIDE_MS);
+  }
+
+  useEffect(() => {
+    clearNotice();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeView]);
+
+  useEffect(
+    () => () => {
+      if (noticeTimerRef.current) {
+        window.clearTimeout(noticeTimerRef.current);
+        noticeTimerRef.current = null;
+      }
+    },
+    []
+  );
 
   function resetTrainingLog(initialLine = "") {
     stopPollingRef.current = true;
     setJobId("");
     setJobStatus("idle");
+    setJobFamily("classification");
     lastStatusRef.current = "";
     lastMessageRef.current = "";
     if (initialLine) {
@@ -303,6 +463,20 @@ export default function App() {
   async function loadProjects(preferredProjectId = projectId) {
     const data = await request("/projects");
     const items = data.items || [];
+    const summaries = Array.isArray(data.summaries) ? data.summaries : [];
+    const summaryMap = {};
+    for (const row of summaries) {
+      const pid = String(row?.project_id || "");
+      if (!pid) continue;
+      summaryMap[pid] = {
+        images: Number(row?.images || 0),
+        labeled: Number(row?.labeled || 0),
+        ocr_confirmed: Number(row?.ocr_confirmed || 0),
+        ocr_pending: Number(row?.ocr_pending || 0),
+        models: Number(row?.models || 0),
+      };
+    }
+    setProjectSummaries(summaryMap);
     setProjects(items);
     let nextProjectId = preferredProjectId;
     if (items.length === 0) {
@@ -344,7 +518,7 @@ export default function App() {
     if (!targetProjectId) {
       setModels([]);
       setModelInfos({});
-      setLatestModels({ any: "", byType: {} });
+      setLatestModels({ any: "", byType: {}, ocrPaddle: "" });
       setModelTypes([]);
       return;
     }
@@ -364,6 +538,10 @@ export default function App() {
     }
     const inferredTypes = modelItems
       .map((name) => {
+        const info = infoMap[name] || {};
+        if ((info.training_family || "classification") !== "classification") {
+          return "";
+        }
         const stem = String(name || "").split("/").pop() || "";
         if (!stem.includes("_")) {
           return "";
@@ -389,7 +567,12 @@ export default function App() {
       })
     );
     const byType = Object.fromEntries(latestEntries);
-    setLatestModels({ any: latestAny, byType });
+    const latestOcrPaddle = await request(
+      `/models/latest?project_id=${pid}&training_family=ocr&engine=paddleocr`
+    )
+      .then((r) => r.model || "")
+      .catch(() => "");
+    setLatestModels({ any: latestAny, byType, ocrPaddle: latestOcrPaddle });
   }
 
   async function refreshAll(targetProjectId = projectId) {
@@ -399,7 +582,7 @@ export default function App() {
       setSelectedIndex(0);
       setModels([]);
       setModelInfos({});
-      setLatestModels({ any: "", byType: {} });
+      setLatestModels({ any: "", byType: {}, ocrPaddle: "" });
       setModelTypes([]);
       return;
     }
@@ -530,6 +713,8 @@ export default function App() {
     setImageShapes({});
     setEvalResult(null);
     setInferResult(null);
+    setOcrDatasetInfo(null);
+    setOcrDatasetDir("");
   }, [projectId]);
 
   useEffect(() => {
@@ -551,16 +736,30 @@ export default function App() {
   }, [modelTypes, modelType, inferModelType, evalModelType, preprocessPredictModelType]);
 
   useEffect(() => {
-    if (inferModel !== "latest" && !models.includes(inferModel)) {
+    if (inferModel !== "latest" && !classificationModels.includes(inferModel)) {
       setInferModel("latest");
     }
-    if (evalModel !== "latest" && !models.includes(evalModel)) {
+    if (inferPaddleModel !== "latest" && !ocrPaddleModels.includes(inferPaddleModel)) {
+      setInferPaddleModel("latest");
+    }
+    if (evalModel !== "latest" && !classificationModels.includes(evalModel)) {
       setEvalModel("latest");
     }
-    if (preprocessPredictModel !== "latest" && !models.includes(preprocessPredictModel)) {
+    if (preprocessPredictModel !== "latest" && !classificationModels.includes(preprocessPredictModel)) {
       setPreprocessPredictModel("latest");
     }
-  }, [models, inferModel, evalModel, preprocessPredictModel]);
+    if (preprocessPredictPaddleModel !== "latest" && !ocrPaddleModels.includes(preprocessPredictPaddleModel)) {
+      setPreprocessPredictPaddleModel("latest");
+    }
+  }, [
+    classificationModels,
+    ocrPaddleModels,
+    inferModel,
+    inferPaddleModel,
+    evalModel,
+    preprocessPredictModel,
+    preprocessPredictPaddleModel,
+  ]);
 
   useEffect(() => {
     if (inferModel === "latest") {
@@ -610,11 +809,31 @@ export default function App() {
   }, [images, preprocessImage]);
 
   useEffect(() => {
-    if (activeView !== "training" || !projectId) {
+    if (!["training", "cls-training"].includes(activeView) || !projectId) {
       return;
     }
     autoSelectTrainingModelType(projectId).catch(() => null);
   }, [activeView, projectId]);
+
+  useEffect(() => {
+    if (activeView === "ocr-training" && trainingFamily !== "ocr") {
+      setTrainingFamily("ocr");
+      return;
+    }
+    if (activeView === "cls-training" && trainingFamily !== "classification") {
+      setTrainingFamily("classification");
+    }
+  }, [activeView, trainingFamily]);
+
+  useEffect(() => {
+    if (activeView === "ocr-inference" && inferEngine === "custom") {
+      setInferEngine("paddleocr");
+      return;
+    }
+    if (activeView === "cls-inference" && inferEngine !== "custom") {
+      setInferEngine("custom");
+    }
+  }, [activeView, inferEngine]);
 
   useEffect(() => {
     refreshEvaluationDatasetOptions(projectId).catch(() => null);
@@ -642,13 +861,18 @@ export default function App() {
             project_id: projectId,
             overrides: buildPreprocessOverrides(preprocessParams),
             engine: preprocessPredictEngine,
-            model: preprocessPredictEngine === "custom" ? preprocessPredictModel : "latest",
+            model:
+              preprocessPredictEngine === "custom"
+                ? preprocessPredictModel
+                : preprocessPredictEngine === "paddleocr"
+                  ? preprocessPredictPaddleModel
+                  : "latest",
             model_type:
               preprocessPredictEngine === "custom" && preprocessPredictModel === "latest"
                 ? preprocessPredictModelType
                 : null,
             easyocr_langs:
-              preprocessPredictEngine === "easyocr"
+              preprocessPredictEngine === "easyocr" || preprocessPredictEngine === "paddleocr"
                 ? (preprocessPredictEasyOcrLangs.length > 0 ? preprocessPredictEasyOcrLangs.join(",") : "en")
                 : "en",
           }),
@@ -672,6 +896,7 @@ export default function App() {
     preprocessParams,
     preprocessPredictEngine,
     preprocessPredictModel,
+    preprocessPredictPaddleModel,
     preprocessPredictModelType,
     preprocessPredictEasyOcrLangs,
   ]);
@@ -716,7 +941,8 @@ export default function App() {
         return;
       }
       try {
-        const data = await request(`/train/${jobId}`);
+        const statusPath = jobFamily === "ocr" ? `/api/ocr/train/status/${jobId}` : `/train/${jobId}`;
+        const data = await request(statusPath);
         setJobStatus(data.status || "unknown");
 
         if (data.status && data.status !== lastStatusRef.current) {
@@ -727,6 +953,13 @@ export default function App() {
         if (data.message && data.message !== lastMessageRef.current) {
           pushLog(`メッセージ: ${data.message}`);
           lastMessageRef.current = data.message;
+        }
+
+        if (jobFamily === "ocr") {
+          const logData = await request(`/api/ocr/train/log/${jobId}?tail=300`).catch(() => ({ lines: [] }));
+          if (Array.isArray(logData?.lines)) {
+            setLogs(logData.lines.slice(-300).map((line) => summarizePpocrLogLine(line)));
+          }
         }
 
         if (data.status === "completed") {
@@ -751,7 +984,7 @@ export default function App() {
       stopPollingRef.current = true;
       clearInterval(timer);
     };
-  }, [jobId, projectId]);
+  }, [jobId, jobFamily, projectId]);
 
   useEffect(() => {
     if (activeView !== "labeling") {
@@ -837,6 +1070,14 @@ export default function App() {
 
   const selectedImage = images[selectedIndex] || null;
   const selectedLabel = selectedImage ? labelDrafts[selectedImage.image] ?? "" : "";
+  const labelingPreprocessOverrides = useMemo(
+    () => buildPreprocessOverrides(preprocessParams),
+    [preprocessParams]
+  );
+  const rapidPreprocessOverrides = useMemo(
+    () => buildPreprocessOverrides(preprocessParams),
+    [preprocessParams]
+  );
 
   const labeledCount = useMemo(
     () => images.filter((item) => String(labelDrafts[item.image] || item.label || "").trim() !== "").length,
@@ -848,6 +1089,7 @@ export default function App() {
   );
 
   const canTrain = workflowState.datasetBuilt && savedLabeledCount > 0;
+  const canStartOcrTraining = ocrEngine === "paddleocr" && String(ocrDatasetDir || "").trim() !== "";
   const workflowSteps = useMemo(() => {
     const labelDone = images.length > 0 && savedLabeledCount === images.length;
     const defs = [
@@ -1173,6 +1415,110 @@ export default function App() {
     }
   }
 
+  function parseOcrImageShape(value) {
+    const raw = String(value || "")
+      .split(",")
+      .map((x) => Number.parseInt(x.trim(), 10))
+      .filter((x) => Number.isFinite(x));
+    if (raw.length !== 3 || ![1, 3].includes(raw[0]) || raw[1] <= 0 || raw[2] <= 0) {
+      throw new Error("image_shape は 1,48,320 または 3,48,320 のように入力してください（Cは1または3）");
+    }
+    return raw;
+  }
+
+  async function browseOcrDatasetDirectory() {
+    try {
+      const data = await request("/dialogs/select-directory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initial_dir: ocrDatasetDir || null }),
+      });
+      if (data.path) {
+        setOcrDatasetDir(data.path);
+      }
+    } catch (error) {
+      notify("error", error.message);
+    }
+  }
+
+  async function createOcrDataset() {
+    if (!projectId) {
+      notify("error", "プロジェクトを作成または選択してください");
+      return;
+    }
+    try {
+      const imageShape = parseOcrImageShape(ocrImageShape);
+      const payload = {
+        project_id: projectId,
+        image_types: ["wide"],
+        charset: (ocrCharset || OCR_CHARSET_DEFAULT).toUpperCase(),
+        max_text_length: Number(ocrMaxTextLength),
+        image_shape: imageShape,
+        use_augmentation: Boolean(ocrUseAugmentation),
+        aug_strength: Number(ocrAugStrength),
+        train_ratio: Number(trainRatio),
+        val_ratio: Number(valRatio),
+        test_ratio: Number(testRatio),
+        output_dir: null,
+        overwrite: false,
+      };
+      const data = await request("/api/ocr/dataset/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      setOcrDatasetInfo(data);
+      setOcrDatasetDir(data.dataset_root || "");
+      resetTrainingLog("OCRデータセットを作成します");
+      pushLog(
+        `OCRデータ作成: train=${data?.counts?.train ?? 0}, val=${data?.counts?.val ?? 0}, test=${data?.counts?.test ?? 0}`
+      );
+      notify("success", "OCRデータセットを作成しました");
+    } catch (error) {
+      notify("error", error.message);
+    }
+  }
+
+  async function createOcrDatasetFromLogs() {
+    if (!projectId) {
+      notify("error", "プロジェクトを作成または選択してください");
+      return;
+    }
+    try {
+      const imageShape = parseOcrImageShape(ocrImageShape);
+      const payload = {
+        project_id: projectId,
+        only_invalid: Boolean(ocrFromLogsOnlyInvalid),
+        include_corrected: Boolean(ocrFromLogsIncludeCorrected),
+        max_text_length: Number(ocrMaxTextLength),
+        charset: (ocrCharset || OCR_CHARSET_DEFAULT).toUpperCase(),
+        image_shape: imageShape,
+      };
+      const data = await request("/api/ocr/dataset/from_logs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      setOcrDatasetInfo(data);
+      setOcrDatasetDir(data.dataset_root || "");
+      pushLog(`ログ再学習データ作成: count=${data?.count ?? 0}`);
+      if (data?.skipped) {
+        const toInt = (value) => {
+          const n = Number(value);
+          return Number.isFinite(n) ? n : 0;
+        };
+        pushLog(
+          `除外内訳: missing_image=${toInt(data.skipped?.missing_image)}, over_max_length=${toInt(
+            data.skipped?.over_max_length
+          )}, charset=${toInt(data.skipped?.charset)}, empty_text=${toInt(data.skipped?.empty_text)}`
+        );
+      }
+      notify("success", "OCRログから再学習データを作成しました");
+    } catch (error) {
+      notify("error", error.message);
+    }
+  }
+
   async function startTraining() {
     if (!projectId) {
       notify("error", "プロジェクトを作成または選択してください");
@@ -1193,6 +1539,7 @@ export default function App() {
 
       setJobId(data.job_id);
       setJobStatus(data.status || "queued");
+      setJobFamily("classification");
       setWorkflowState((prev) => ({
         refreshed: prev.refreshed,
         preprocessed: prev.preprocessed,
@@ -1203,7 +1550,52 @@ export default function App() {
       lastMessageRef.current = "";
       pushLog(`学習開始要求: プロジェクト=${projectId} / ジョブ=${data.job_id}`);
       notify("info", `学習キューに追加しました (${data.job_id})`);
-      setActiveView("training");
+      setActiveView("cls-training");
+    } catch (error) {
+      notify("error", error.message);
+    }
+  }
+
+  async function startOcrTraining() {
+    if (!projectId) {
+      notify("error", "プロジェクトを作成または選択してください");
+      return;
+    }
+    if (ocrEngine !== "paddleocr") {
+      notify("error", "EasyOCR は学習対象外です。PaddleOCRを選択してください。");
+      return;
+    }
+    try {
+      const imageShape = parseOcrImageShape(ocrImageShape);
+      resetTrainingLog(`OCR学習開始要求: プロジェクト=${projectId}`);
+      const payload = {
+        project_id: projectId,
+        engine: "paddleocr",
+        dataset_dir: ocrDatasetDir,
+        paddle_repo_dir: FIXED_PADDLE_OCR_REPO_DIR,
+        charset: (ocrCharset || OCR_CHARSET_DEFAULT).toUpperCase(),
+        max_text_length: Number(ocrMaxTextLength),
+        image_shape: imageShape,
+        batch_size: Number(batchSize),
+        epochs: Number(epochs),
+      };
+      const data = await request("/api/ocr/train/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      setJobId(data.job_id);
+      setJobStatus(data.status || "queued");
+      setJobFamily("ocr");
+      setWorkflowState((prev) => ({
+        ...prev,
+        trainingStarted: true,
+      }));
+      lastStatusRef.current = "";
+      lastMessageRef.current = "";
+      pushLog(`OCR学習開始要求: プロジェクト=${projectId} / ジョブ=${data.job_id}`);
+      notify("info", `OCR学習キューに追加しました (${data.job_id})`);
+      setActiveView("ocr-training");
     } catch (error) {
       notify("error", error.message);
     }
@@ -1333,6 +1725,9 @@ export default function App() {
         if (inferModel === "latest" && inferModelType) {
           formData.append("model_type", inferModelType);
         }
+      } else if (inferEngine === "paddleocr") {
+        formData.append("model", inferPaddleModel || "latest");
+        formData.append("easyocr_langs", inferEasyOcrLangs.length > 0 ? inferEasyOcrLangs.join(",") : "en");
       } else if (inferEngine === "easyocr") {
         formData.append("easyocr_langs", inferEasyOcrLangs.length > 0 ? inferEasyOcrLangs.join(",") : "en");
       }
@@ -1401,7 +1796,7 @@ export default function App() {
       let selectedModelType = evalModel === "latest" ? evalModelType : null;
       if (evalModel === "latest") {
         const latest = await request(
-          `/models/latest?project_id=${encodeURIComponent(projectId)}&model_type=${encodeURIComponent(evalModelType)}`
+          `/models/latest?project_id=${encodeURIComponent(projectId)}&training_family=classification&model_type=${encodeURIComponent(evalModelType)}`
         );
         const resolvedPath = String(latest?.model || "");
         const resolvedName = resolvedPath.split("/").pop() || "";
@@ -1430,7 +1825,7 @@ export default function App() {
           data.model_name || selectedModel
         } / 前処理設定=${evalUseOverrides ? "ON" : "OFF"}`
       );
-      setActiveView("evaluation");
+      setActiveView("cls-evaluation");
     } catch (error) {
       notify("error", error.message);
     } finally {
@@ -1443,12 +1838,13 @@ export default function App() {
   let view = null;
   if (activeView === "dashboard") {
     view = (
-      <DashboardView
-        projectId={projectId}
-        projects={projects}
-        newProjectId={newProjectId}
-        onNewProjectIdChange={setNewProjectId}
-        onSelectProject={setProjectId}
+        <DashboardView
+          projectId={projectId}
+          projects={projects}
+          projectSummaries={projectSummaries}
+          newProjectId={newProjectId}
+          onNewProjectIdChange={setNewProjectId}
+          onSelectProject={setProjectId}
         onCreateProject={createProject}
         onDeleteProject={deleteProject}
         imagesCount={images.length}
@@ -1489,13 +1885,16 @@ export default function App() {
         setPredictEngine={setPreprocessPredictEngine}
         predictModel={preprocessPredictModel}
         setPredictModel={setPreprocessPredictModel}
+        predictPaddleModel={preprocessPredictPaddleModel}
+        setPredictPaddleModel={setPreprocessPredictPaddleModel}
         predictModelType={preprocessPredictModelType}
         setPredictModelType={setPreprocessPredictModelType}
         predictEasyOcrLangs={preprocessPredictEasyOcrLangs}
         setPredictEasyOcrLangs={setPreprocessPredictEasyOcrLangs}
         easyocrLanguageOptions={EASYOCR_LANGUAGE_OPTIONS}
         modelTypes={modelTypes}
-        models={models}
+        models={classificationModels}
+        paddleModels={ocrPaddleModels}
         latestModels={latestModels}
         params={preprocessParams}
         onParamsChange={setPreprocessParams}
@@ -1518,6 +1917,7 @@ export default function App() {
       <LabelingView
         projectId={projectId}
         imageVersion={imageVersion}
+        preprocessOverrides={labelingPreprocessOverrides}
         images={images}
         selectedIndex={selectedIndex}
         onSelectIndex={setSelectedIndex}
@@ -1542,9 +1942,13 @@ export default function App() {
     );
   }
 
-  if (activeView === "training") {
+  if (["training", "ocr-training", "cls-training"].includes(activeView)) {
+    const trainingMode = activeView === "ocr-training" ? "ocr" : activeView === "cls-training" ? "classification" : "all";
     view = (
       <TrainingView
+        trainingMode={trainingMode}
+        trainingFamily={trainingFamily}
+        setTrainingFamily={setTrainingFamily}
         modelType={modelType}
         setModelType={setModelType}
         modelTypes={modelTypes}
@@ -1560,10 +1964,34 @@ export default function App() {
         setBatchSize={setBatchSize}
         learningRate={learningRate}
         setLearningRate={setLearningRate}
+        ocrEngine={ocrEngine}
+        setOcrEngine={setOcrEngine}
+        ocrCharset={ocrCharset}
+        setOcrCharset={setOcrCharset}
+        ocrMaxTextLength={ocrMaxTextLength}
+        setOcrMaxTextLength={setOcrMaxTextLength}
+        ocrImageShape={ocrImageShape}
+        setOcrImageShape={setOcrImageShape}
+        ocrUseAugmentation={ocrUseAugmentation}
+        setOcrUseAugmentation={setOcrUseAugmentation}
+        ocrAugStrength={ocrAugStrength}
+        setOcrAugStrength={setOcrAugStrength}
+        ocrDatasetDir={ocrDatasetDir}
+        setOcrDatasetDir={setOcrDatasetDir}
+        ocrDatasetInfo={ocrDatasetInfo}
+        ocrFromLogsOnlyInvalid={ocrFromLogsOnlyInvalid}
+        setOcrFromLogsOnlyInvalid={setOcrFromLogsOnlyInvalid}
+        ocrFromLogsIncludeCorrected={ocrFromLogsIncludeCorrected}
+        setOcrFromLogsIncludeCorrected={setOcrFromLogsIncludeCorrected}
+        onBrowseOcrDatasetDir={browseOcrDatasetDirectory}
+        onCreateOcrDataset={createOcrDataset}
+        onCreateOcrDatasetFromLogs={createOcrDatasetFromLogs}
         onPreprocess={runPreprocess}
         onBuildDataset={buildDataset}
         onStartTraining={startTraining}
+        onStartOcrTraining={startOcrTraining}
         canTrain={canTrain}
+        canStartOcrTraining={canStartOcrTraining}
         jobId={jobId}
         jobStatus={jobStatus}
         logs={logs}
@@ -1572,19 +2000,25 @@ export default function App() {
     );
   }
 
-  if (activeView === "models") {
+  if (["models", "ocr-models", "cls-models"].includes(activeView)) {
+    const modelItems = activeView === "ocr-models" ? ocrModels : activeView === "cls-models" ? classificationModels : models;
+    const latestForView =
+      activeView === "ocr-models"
+        ? { any: latestModels.ocrPaddle || "", byType: { ocr: latestModels.ocrPaddle || "" } }
+        : latestModels;
     view = (
       <ModelsView
-        models={models}
+        models={modelItems}
         modelInfos={modelInfos}
-        latest={latestModels}
+        latest={latestForView}
         onRefresh={() => loadModels(projectId)}
         onDeleteSelected={deleteSelectedModels}
       />
     );
   }
 
-  if (activeView === "inference") {
+  if (["inference", "ocr-inference", "cls-inference"].includes(activeView)) {
+    const inferenceModels = activeView === "ocr-inference" ? ocrModels : classificationModels;
     view = (
       <InferenceView
         engine={inferEngine}
@@ -1597,7 +2031,10 @@ export default function App() {
         modelTypes={modelTypes}
         model={inferModel}
         setModel={setInferModel}
-        models={models}
+        models={inferenceModels}
+        paddleModel={inferPaddleModel}
+        setPaddleModel={setInferPaddleModel}
+        paddleModels={ocrPaddleModels}
         latestModels={latestModels}
         onFileChange={selectInferenceFile}
         fileName={inferFileName}
@@ -1611,7 +2048,64 @@ export default function App() {
     );
   }
 
-  if (activeView === "evaluation") {
+  if (activeView === "rapid-ocr") {
+    view = (
+      <RapidOCRView
+        projectId={projectId}
+        imageVersion={imageVersion}
+        images={images}
+        selectedImageName={selectedImage?.image || ""}
+        onSelectImageName={(name) => {
+          const idx = images.findIndex((item) => item.image === name);
+          if (idx >= 0) setSelectedIndex(idx);
+        }}
+        engine={inferEngine}
+        setEngine={setInferEngine}
+        modelType={inferModelType}
+        setModelType={setInferModelType}
+        modelTypes={modelTypes}
+        model={inferModel}
+        setModel={setInferModel}
+        models={classificationModels}
+        paddleModel={inferPaddleModel}
+        setPaddleModel={setInferPaddleModel}
+        paddleModels={ocrPaddleModels}
+        easyocrLangs={inferEasyOcrLangs}
+        setEasyocrLangs={setInferEasyOcrLangs}
+        easyocrLanguageOptions={EASYOCR_LANGUAGE_OPTIONS}
+        preprocessEnabled={rapidPreprocessEnabled}
+        setPreprocessEnabled={setRapidPreprocessEnabled}
+        preprocessOverrides={rapidPreprocessOverrides}
+      />
+    );
+  }
+
+  if (activeView === "ocr-batch") {
+    view = (
+      <OcrBatchView
+        projectId={projectId}
+        engine={inferEngine}
+        setEngine={setInferEngine}
+        modelType={inferModelType}
+        setModelType={setInferModelType}
+        modelTypes={modelTypes}
+        model={inferModel}
+        setModel={setInferModel}
+        models={classificationModels}
+        paddleModel={inferPaddleModel}
+        setPaddleModel={setInferPaddleModel}
+        paddleModels={ocrPaddleModels}
+        easyocrLangs={inferEasyOcrLangs}
+        setEasyocrLangs={setInferEasyOcrLangs}
+        easyocrLanguageOptions={EASYOCR_LANGUAGE_OPTIONS}
+        preprocessEnabled={rapidPreprocessEnabled}
+        setPreprocessEnabled={setRapidPreprocessEnabled}
+        preprocessOverrides={rapidPreprocessOverrides}
+      />
+    );
+  }
+
+  if (["evaluation", "cls-evaluation"].includes(activeView)) {
     view = (
       <EvaluationView
         dataset={evalDataset}
@@ -1622,7 +2116,7 @@ export default function App() {
         modelType={evalModelType}
         setModelType={setEvalModelType}
         modelTypes={modelTypes}
-        models={models}
+        models={classificationModels}
         latestModels={latestModels}
         useOverrides={evalUseOverrides}
         setUseOverrides={setEvalUseOverrides}
@@ -1660,10 +2154,21 @@ export default function App() {
     "preprocess",
     "labeling",
     "training",
+    "ocr-training",
+    "cls-training",
     "models",
+    "ocr-models",
+    "cls-models",
     "inference",
+    "ocr-inference",
+    "cls-inference",
+    "rapid-ocr",
+    "ocr-batch",
     "evaluation",
+    "cls-evaluation",
   ].includes(activeView);
+  const suppressRapidOcrInferenceNotice =
+    activeView === "rapid-ocr" && /^推論結果:\s*/.test(String(notice?.text || ""));
 
   return (
     <div className="min-h-screen bg-transparent text-text">
@@ -1687,17 +2192,19 @@ export default function App() {
 
         <section className="mt-6">{view}</section>
 
-        <div
-          className={`fixed bottom-5 right-6 rounded-lg border px-4 py-2 text-sm ${
-            notice.kind === "success"
-              ? "border-success/30 bg-success/10 text-success"
-              : notice.kind === "error"
-                ? "border-danger/30 bg-danger/10 text-danger"
-                : "border-border bg-card text-muted"
-          }`}
-        >
-          {notice.text}
-        </div>
+        {!notice || suppressRapidOcrInferenceNotice ? null : (
+          <div
+            className={`fixed bottom-5 right-6 rounded-lg border px-4 py-2 text-sm ${
+              notice.kind === "success"
+                ? "border-success/30 bg-success/10 text-success"
+                : notice.kind === "error"
+                  ? "border-danger/30 bg-danger/10 text-danger"
+                  : "border-border bg-card text-muted"
+            }`}
+          >
+            {notice.text}
+          </div>
+        )}
       </main>
     </div>
   );

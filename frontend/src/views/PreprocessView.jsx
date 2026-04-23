@@ -15,6 +15,8 @@ export default function PreprocessView({
   setPredictEngine,
   predictModel,
   setPredictModel,
+  predictPaddleModel,
+  setPredictPaddleModel,
   predictModelType,
   setPredictModelType,
   predictEasyOcrLangs,
@@ -22,6 +24,7 @@ export default function PreprocessView({
   easyocrLanguageOptions,
   modelTypes,
   models,
+  paddleModels,
   latestModels,
   params,
   onParamsChange,
@@ -56,11 +59,15 @@ export default function PreprocessView({
   }
 
   const resolvedModelName =
-    predictEngine !== "custom"
-      ? "EasyOCR"
-      : predictModel === "latest"
+    predictEngine === "custom"
+      ? predictModel === "latest"
         ? basename(latestByType[predictModelType] || latestAny) || "該当モデルなし"
-        : predictModel;
+        : predictModel
+      : predictEngine === "paddleocr"
+        ? predictPaddleModel === "latest"
+          ? basename(latestModels?.ocrPaddle || "") || "PaddleOCR既定モデル"
+          : predictPaddleModel
+        : "EasyOCR";
 
   return (
     <div className="grid grid-cols-[220px_minmax(0,1fr)_360px] gap-4">
@@ -130,6 +137,7 @@ export default function PreprocessView({
               <select value={predictEngine} onChange={(e) => setPredictEngine(e.target.value)} className="app-select">
                 <option value="custom">カスタムモデル</option>
                 <option value="easyocr">EasyOCR</option>
+                <option value="paddleocr">PaddleOCR</option>
               </select>
             </div>
             {predictEngine === "custom" ? (
@@ -175,9 +183,42 @@ export default function PreprocessView({
                   </p>
                 ) : null}
               </>
+            ) : predictEngine === "paddleocr" ? (
+              <div className="col-span-2 grid grid-cols-2 gap-3">
+                <div>
+                  <label className="app-label">PaddleOCRモデル</label>
+                  <select
+                    value={predictPaddleModel}
+                    onChange={(e) => setPredictPaddleModel(e.target.value)}
+                    className="app-select"
+                  >
+                    <option value="latest">最新</option>
+                    {paddleModels.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="app-label">PaddleOCR 言語</label>
+                  <div className="grid grid-cols-3 gap-2 rounded-lg border border-border bg-card/60 backdrop-blur-md p-2">
+                    {easyocrLanguageOptions.map((lang) => (
+                      <label key={lang} className="inline-flex items-center gap-2 text-xs text-text">
+                        <input
+                          type="checkbox"
+                          checked={Array.isArray(predictEasyOcrLangs) ? predictEasyOcrLangs.includes(lang) : false}
+                          onChange={() => toggleEasyOcrLang(lang)}
+                        />
+                        {lang}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
             ) : (
               <div className="col-span-2">
-                <label className="app-label">EasyOCR 言語</label>
+                <label className="app-label">{predictEngine === "paddleocr" ? "PaddleOCR 言語" : "EasyOCR 言語"}</label>
                 <div className="grid grid-cols-6 gap-2 rounded-lg border border-border bg-card/60 backdrop-blur-md p-2">
                   {easyocrLanguageOptions.map((lang) => (
                     <label key={lang} className="inline-flex items-center gap-2 text-xs text-text">
