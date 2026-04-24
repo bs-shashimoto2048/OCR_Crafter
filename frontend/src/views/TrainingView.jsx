@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Card from "../components/Card";
 import Button from "../components/Button";
+import { PADDLEOCR_OFFICIAL_MODELS_TOOLTIP } from "../lib/paddleocrOfficialTooltip";
 
 const OCR_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
@@ -57,6 +58,7 @@ export default function TrainingView({
   ocrInitSourceValue,
   setOcrInitSourceValue,
   ocrInitModelOptions,
+  ocrOfficialInitModelOptions,
   ocrDatasetInfo,
   onCreateSelectedOcrDataset,
   onPreprocess,
@@ -72,6 +74,7 @@ export default function TrainingView({
 }) {
   const [showImportantOnly, setShowImportantOnly] = useState(false);
   const [paramsCollapsed, setParamsCollapsed] = useState(false);
+  const [showOcrOfficialModelHelp, setShowOcrOfficialModelHelp] = useState(false);
   const logContainerRef = useRef(null);
   const preprocessed = Boolean(workflowState?.preprocessed);
   const datasetBuilt = Boolean(workflowState?.datasetBuilt);
@@ -178,7 +181,6 @@ export default function TrainingView({
   const clsNeedsInitModel = clsInitSourceType === "classification_model";
   const clsHasInitModel = !clsNeedsInitModel || String(clsInitSourceValue || "").trim() !== "";
   const clsFreezeEpochs = Number(freezeBackboneEpochs);
-  const clsBackboneScale = Number(backboneLrScale);
   const showFreezeWarning = clsTrainingMode === "finetune" && Number.isFinite(clsFreezeEpochs) && clsFreezeEpochs <= 0;
   const showScratchSmallDataWarning =
     clsTrainingMode === "scratch" &&
@@ -187,8 +189,7 @@ export default function TrainingView({
     Number(savedLabeledCount || 0) < 80;
   const clsNextAction = !preprocessed ? "preprocess" : !datasetBuilt ? "dataset" : "train";
 
-  const ocrTrainingMode = ocrInitSourceType === "scratch" ? "scratch" : "finetune";
-  const ocrHasInitModel = ocrTrainingMode === "scratch" || String(ocrInitSourceValue || "").trim() !== "";
+  const ocrHasInitModel = ocrInitSourceType === "scratch" || String(ocrInitSourceValue || "").trim() !== "";
   const ocrDatasetReady = String(ocrDatasetDir || "").trim() !== "";
   const ocrNextAction = ocrDatasetReady ? "train" : "dataset";
 
@@ -275,59 +276,7 @@ export default function TrainingView({
             {trainingFamily === "classification" ? (
               <>
                 <div className="space-y-3 rounded-xl border border-border/80 bg-card/45 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">モデル設定</p>
-                  <div>
-                    <label className="app-label">モデル種別</label>
-                    <select
-                      value={modelType}
-                      onChange={(e) => setModelType(e.target.value)}
-                      className="app-select"
-                    >
-                      {modelTypes.length === 0 ? (
-                        <option value={modelType}>{modelType || "既定"}</option>
-                      ) : (
-                        modelTypes.map((item) => (
-                          <option key={item} value={item}>
-                            {item}
-                          </option>
-                        ))
-                      )}
-                    </select>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div>
-                      <label className="app-label">エポック数</label>
-                      <input
-                        type="number"
-                        value={epochs}
-                        onChange={(e) => setEpochs(e.target.value)}
-                        className="app-input"
-                      />
-                    </div>
-                    <div>
-                      <label className="app-label">バッチサイズ</label>
-                      <input
-                        type="number"
-                        value={batchSize}
-                        onChange={(e) => setBatchSize(e.target.value)}
-                        className="app-input"
-                      />
-                    </div>
-                    <div>
-                      <label className="app-label">学習率</label>
-                      <input
-                        type="number"
-                        step="0.0001"
-                        value={learningRate}
-                        onChange={(e) => setLearningRate(e.target.value)}
-                        className="app-input"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-3 rounded-xl border border-border/80 bg-card/45 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">データ分割</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">1. データ準備</p>
                   <div className="grid grid-cols-3 gap-2">
                     <div>
                       <label className="app-label">学習比率</label>
@@ -375,40 +324,158 @@ export default function TrainingView({
                   >
                     比率合計: {ratioSummary.total} {ratioSummary.valid ? "(OK)" : "(1.00 になるよう調整してください)"}
                   </div>
+                  <div className="rounded-lg border border-border bg-card/40 px-3 py-2 text-xs text-muted">
+                    <p>
+                      状態: 前処理 {preprocessed ? "完了" : "未実行"} / データセット {datasetBuilt ? "完了" : "未作成"} / 保存済みラベル{" "}
+                      {Number(savedLabeledCount || 0)}件
+                    </p>
+                  </div>
                 </div>
 
-                <div className="rounded-xl border border-border/80 bg-card/45 p-4">
-                  <p className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">実行</p>
+                <div className="space-y-3 rounded-xl border border-border/80 bg-card/45 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">2. 初期重み</p>
+                  <div>
+                    <label className="app-label">初期化方式</label>
+                    <select value={clsInitSourceType} onChange={(e) => setClsInitSourceType(e.target.value)} className="app-select">
+                      <option value="scratch">scratch</option>
+                      <option value="imagenet">imagenet（推奨）</option>
+                      <option value="classification_model">既存モデル</option>
+                    </select>
+                  </div>
+                  {clsInitSourceType === "classification_model" ? (
+                    <div>
+                      <label className="app-label">初期モデル</label>
+                      <select
+                        value={clsInitSourceValue}
+                        onChange={(e) => setClsInitSourceValue(e.target.value)}
+                        className="app-select"
+                      >
+                        <option value="">選択してください</option>
+                        <option value="latest">latest（最新）</option>
+                        {(classificationInitModelOptions || []).map((name) => (
+                          <option key={name} value={name}>
+                            {name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : null}
+                  <div className="rounded-lg border border-success/35 bg-success/10 px-3 py-2 text-xs text-emerald-100">
+                    推奨: init=imagenet / freeze=1 / backbone_lr_scale=0.1
+                  </div>
+                  {showFreezeWarning ? (
+                    <div className="rounded-lg border border-amber-300/40 bg-amber-300/10 px-3 py-2 text-xs text-amber-100">
+                      freeze=0 は上級設定です。初期重みの破壊リスクが上がります。
+                    </div>
+                  ) : null}
+                  {showScratchSmallDataWarning ? (
+                    <div className="rounded-lg border border-amber-300/40 bg-amber-300/10 px-3 py-2 text-xs text-amber-100">
+                      少量データでは scratch より imagenet / 既存モデルの Fine-tune を推奨します。
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="space-y-3 rounded-xl border border-border/80 bg-card/45 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">3. 学習パラメータ</p>
+                  <div>
+                    <label className="app-label">モデル種別</label>
+                    <select value={modelType} onChange={(e) => setModelType(e.target.value)} className="app-select">
+                      {modelTypes.length === 0 ? (
+                        <option value={modelType}>{modelType || "既定"}</option>
+                      ) : (
+                        modelTypes.map((item) => (
+                          <option key={item} value={item}>
+                            {item}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </div>
                   <div className="grid grid-cols-3 gap-2">
-                    <Button
-                      variant={preprocessed ? "primary" : "secondary"}
-                      className={preprocessed ? "!bg-success hover:!bg-emerald-500 text-white" : ""}
-                      onClick={onPreprocess}
-                    >
-                      前処理
-                    </Button>
-                    <Button
-                      variant={datasetBuilt ? "primary" : "secondary"}
-                      className={datasetBuilt ? "!bg-success hover:!bg-emerald-500 text-white" : ""}
-                      onClick={onBuildDataset}
-                    >
-                      データセット作成
-                    </Button>
-                    <Button
-                      variant={trainingVariant}
-                      className={trainingClassName}
-                      onClick={onStartTraining}
-                      disabled={!canTrain}
-                    >
-                      学習開始
-                    </Button>
+                    <div>
+                      <label className="app-label">エポック数</label>
+                      <input type="number" value={epochs} onChange={(e) => setEpochs(e.target.value)} className="app-input" />
+                    </div>
+                    <div>
+                      <label className="app-label">バッチサイズ</label>
+                      <input type="number" value={batchSize} onChange={(e) => setBatchSize(e.target.value)} className="app-input" />
+                    </div>
+                    <div>
+                      <label className="app-label">学習率</label>
+                      <input
+                        type="number"
+                        step="0.0001"
+                        value={learningRate}
+                        onChange={(e) => setLearningRate(e.target.value)}
+                        className="app-input"
+                      />
+                    </div>
+                  </div>
+                  {clsTrainingMode === "finetune" ? (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="app-label">凍結エポック</label>
+                        <select
+                          value={freezeBackboneEpochs}
+                          onChange={(e) => setFreezeBackboneEpochs(e.target.value)}
+                          className="app-select"
+                        >
+                          <option value="0">0（上級）</option>
+                          <option value="1">1（推奨）</option>
+                          <option value="3">3（安全）</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="app-label">Backbone LR倍率</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0.01"
+                          max="1"
+                          value={backboneLrScale}
+                          onChange={(e) => setBackboneLrScale(e.target.value)}
+                          className="app-input"
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="space-y-3 rounded-xl border border-border/80 bg-card/45 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">4. 実行</p>
+                  <Button
+                    variant={clsNextAction === "train" ? trainingVariant : "secondary"}
+                    className={`${clsNextAction === "train" ? trainingClassName : ""} w-full`}
+                    onClick={clsNextAction === "preprocess" ? onPreprocess : clsNextAction === "dataset" ? onBuildDataset : onStartTraining}
+                    disabled={clsNextAction === "train" ? !canTrain || !clsHasInitModel : false}
+                  >
+                    {clsNextAction === "preprocess"
+                      ? "次アクション: 前処理を実行"
+                      : clsNextAction === "dataset"
+                        ? "次アクション: データセット作成"
+                        : "次アクション: 学習開始"}
+                  </Button>
+                  {!clsHasInitModel ? (
+                    <p className="text-xs text-amber-100">既存モデルFine-tuneを選択中です。初期モデルを指定してください。</p>
+                  ) : null}
+                  <div className="space-y-2">
+                    {clsNextAction !== "preprocess" ? (
+                      <Button variant="secondary" className="w-full" onClick={onPreprocess}>
+                        前処理のみ実行
+                      </Button>
+                    ) : null}
+                    {clsNextAction !== "dataset" ? (
+                      <Button variant="secondary" className="w-full" onClick={onBuildDataset}>
+                        データセット作成のみ実行
+                      </Button>
+                    ) : null}
                   </div>
                 </div>
               </>
             ) : (
               <>
                 <div className="space-y-3 rounded-xl border border-border/80 bg-card/45 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">OCR設定</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">1. データ準備</p>
                   <div className="grid grid-cols-[7fr_3fr] gap-2">
                     <div>
                       <label className="app-label">OCRタイプ</label>
@@ -428,6 +495,37 @@ export default function TrainingView({
                       />
                     </div>
                   </div>
+                  <div>
+                    <label className="app-label">学習データ作成方法</label>
+                    <select value={ocrDatasetCreateMode} onChange={(e) => setOcrDatasetCreateMode(e.target.value)} className="app-select">
+                      <option value="new">新規作成（ラベルデータから）</option>
+                      <option value="from_logs">再学習作成（OCRログから）</option>
+                    </select>
+                  </div>
+                  {ocrDatasetCreateMode === "from_logs" ? (
+                    <div className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-card/40 p-3 text-xs text-muted">
+                      <label className="inline-flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ocrFromLogsOnlyInvalid)}
+                          onChange={(e) => setOcrFromLogsOnlyInvalid(e.target.checked)}
+                        />
+                        invalidのみ対象
+                      </label>
+                      <label className="inline-flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ocrFromLogsIncludeCorrected)}
+                          onChange={(e) => setOcrFromLogsIncludeCorrected(e.target.checked)}
+                        />
+                        correctedを優先
+                      </label>
+                    </div>
+                  ) : null}
+                  <div>
+                    <label className="app-label">学習データディレクトリ</label>
+                    <input className="app-input" value={ocrDatasetDir} readOnly placeholder="データ作成後に自動設定されます" />
+                  </div>
                 </div>
 
                 {ocrEngine === "easyocr" ? (
@@ -437,7 +535,56 @@ export default function TrainingView({
                 ) : (
                   <>
                     <div className="space-y-3 rounded-xl border border-border/80 bg-card/45 p-4">
-                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">入力仕様</p>
+                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">2. 初期重み</p>
+                      <div>
+                        <label className="app-label">初期化方式</label>
+                        <select value={ocrInitSourceType} onChange={(e) => setOcrInitSourceType(e.target.value)} className="app-select">
+                          <option value="scratch">scratch</option>
+                          <option value="ocr_model">既存OCRモデル（Fine-tune）</option>
+                        </select>
+                      </div>
+                      {ocrInitSourceType === "ocr_model" ? (
+                        <div>
+                          <div className="flex items-center justify-between gap-3">
+                            <label className="app-label">初期モデル</label>
+                            <button
+                              type="button"
+                              className="text-xs font-medium text-accent underline underline-offset-2 transition hover:opacity-80"
+                              onClick={() => setShowOcrOfficialModelHelp((current) => !current)}
+                              aria-expanded={showOcrOfficialModelHelp}
+                            >
+                              {showOcrOfficialModelHelp ? "説明を隠す" : "公式モデルの説明を表示"}
+                            </button>
+                          </div>
+                          <select value={ocrInitSourceValue} onChange={(e) => setOcrInitSourceValue(e.target.value)} className="app-select">
+                            <option value="">選択してください</option>
+                            {Array.isArray(ocrInitModelOptions) && ocrInitModelOptions.length > 0 ? (
+                              <>
+                                <option value="latest">latest（作成済み最新）</option>
+                                {ocrInitModelOptions.map((name) => (
+                                  <option key={name} value={name}>
+                                    {name}（作成済み）
+                                  </option>
+                                ))}
+                              </>
+                            ) : null}
+                            {(ocrOfficialInitModelOptions || []).map((name) => (
+                              <option key={`official-${name}`} value={name}>
+                                {name}（公式）
+                              </option>
+                            ))}
+                          </select>
+                          {showOcrOfficialModelHelp ? (
+                            <div className="mt-2 whitespace-pre-line rounded-lg border border-border/80 bg-card/55 px-3 py-2 text-xs leading-6 text-muted">
+                              {PADDLEOCR_OFFICIAL_MODELS_TOOLTIP}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="space-y-3 rounded-xl border border-border/80 bg-card/45 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">3. 学習パラメータ</p>
                       <div>
                         <label className="app-label">文字セット（charset）</label>
                         <input
@@ -452,11 +599,7 @@ export default function TrainingView({
                         <div className="grid grid-cols-3 gap-2">
                           <div>
                             <label className="app-label">Channel</label>
-                            <select
-                              className="app-select"
-                              value={ocrChannel}
-                              onChange={(e) => updateOcrImageShape({ c: e.target.value })}
-                            >
+                            <select className="app-select" value={ocrChannel} onChange={(e) => updateOcrImageShape({ c: e.target.value })}>
                               <option value="1">1 (Gray)</option>
                               <option value="3">3 (RGB)</option>
                             </select>
@@ -483,10 +626,6 @@ export default function TrainingView({
                           </div>
                         </div>
                       </div>
-                    </div>
-
-                    <div className="space-y-3 rounded-xl border border-border/80 bg-card/45 p-4">
-                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">拡張と学習条件</p>
                       <div className="grid grid-cols-2 gap-2">
                         <label className="inline-flex items-center gap-2 rounded-lg border border-border/70 bg-card/55 px-3 py-2 text-sm text-text">
                           <input
@@ -509,96 +648,40 @@ export default function TrainingView({
                           />
                         </div>
                       </div>
-                      <div className="rounded-lg border border-border bg-card/40 p-3 text-xs text-muted">
-                        <p className="font-medium text-text">Augmentation内容（ランダム適用）</p>
-                        <p>コントラスト変化 / 軽微ガウシアンブラー / ガウシアンノイズ / 微小回転（±1〜2度）</p>
-                        <p>強度1〜3で適用確率・強さが上がります（目安: 適用確率 0.35 / 0.55 / 0.75）。</p>
-                      </div>
                       <div className="grid grid-cols-2 gap-2">
                         <div>
                           <label className="app-label">エポック数</label>
-                          <input
-                            type="number"
-                            className="app-input"
-                            value={epochs}
-                            onChange={(e) => setEpochs(e.target.value)}
-                          />
+                          <input type="number" className="app-input" value={epochs} onChange={(e) => setEpochs(e.target.value)} />
                         </div>
                         <div>
                           <label className="app-label">バッチサイズ</label>
-                          <input
-                            type="number"
-                            className="app-input"
-                            value={batchSize}
-                            onChange={(e) => setBatchSize(e.target.value)}
-                          />
+                          <input type="number" className="app-input" value={batchSize} onChange={(e) => setBatchSize(e.target.value)} />
                         </div>
                       </div>
                     </div>
 
                     <div className="space-y-3 rounded-xl border border-border/80 bg-card/45 p-4">
-                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">データセット生成</p>
-                      <div>
-                        <label className="app-label">学習データ作成方法</label>
-                        <select
-                          value={ocrDatasetCreateMode}
-                          onChange={(e) => setOcrDatasetCreateMode(e.target.value)}
-                          className="app-select"
-                        >
-                          <option value="new">新規作成（ラベルデータから）</option>
-                          <option value="from_logs">再学習作成（OCRログから）</option>
-                        </select>
-                      </div>
-                      {ocrDatasetCreateMode === "from_logs" ? (
-                        <div className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-card/40 p-3 text-xs text-muted">
-                          <label className="inline-flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={Boolean(ocrFromLogsOnlyInvalid)}
-                              onChange={(e) => setOcrFromLogsOnlyInvalid(e.target.checked)}
-                            />
-                            invalidのみ対象
-                          </label>
-                          <label className="inline-flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={Boolean(ocrFromLogsIncludeCorrected)}
-                              onChange={(e) => setOcrFromLogsIncludeCorrected(e.target.checked)}
-                            />
-                            correctedを優先
-                          </label>
-                        </div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">4. 実行</p>
+                      <Button
+                        variant={ocrNextAction === "train" ? trainingVariant : "secondary"}
+                        className={`${ocrNextAction === "train" ? trainingClassName : ""} w-full`}
+                        onClick={ocrNextAction === "dataset" ? onCreateSelectedOcrDataset : onStartOcrTraining}
+                        disabled={ocrNextAction === "train" ? !canStartOcrTraining || !ocrHasInitModel : false}
+                      >
+                        {ocrNextAction === "dataset"
+                          ? ocrDatasetCreateMode === "from_logs"
+                            ? "次アクション: 再学習データ作成"
+                            : "次アクション: 新規学習データ作成"
+                          : "次アクション: OCR学習開始"}
+                      </Button>
+                      {!ocrHasInitModel ? (
+                        <p className="text-xs text-amber-100">OCR Fine-tuneを選択中です。初期モデルを指定してください。</p>
                       ) : null}
-
-                      <div>
-                        <label className="app-label">学習データディレクトリ</label>
-                        <input
-                          className="app-input"
-                          value={ocrDatasetDir}
-                          readOnly
-                          placeholder="データ作成後に自動設定されます"
-                        />
-                        <p className="mt-1 text-xs text-muted">
-                          先に学習データ作成を実行してください。作成後にこのパスへ自動反映されます。
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl border border-border/80 bg-card/45 p-4">
-                      <p className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">実行</p>
-                      <div className="grid grid-cols-2 gap-2">
-                        <Button variant="secondary" onClick={onCreateSelectedOcrDataset}>
-                          {ocrDatasetCreateMode === "from_logs" ? "再学習データ作成" : "新規学習データ作成"}
+                      {ocrDatasetReady ? (
+                        <Button variant="secondary" className="w-full" onClick={onCreateSelectedOcrDataset}>
+                          データを再作成
                         </Button>
-                        <Button
-                          variant={trainingVariant}
-                          className={trainingClassName}
-                          onClick={onStartOcrTraining}
-                          disabled={!canStartOcrTraining}
-                        >
-                          OCR学習開始
-                        </Button>
-                      </div>
+                      ) : null}
                     </div>
 
                     {ocrDatasetInfo ? (

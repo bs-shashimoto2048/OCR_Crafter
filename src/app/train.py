@@ -36,9 +36,19 @@ def _load_checkpoint_state(path: Path) -> dict[str, Any]:
     return payload
 
 
-def _resolve_existing_model_path(project_id: Optional[str], model_name: str) -> Path:
+def _resolve_existing_model_path(project_id: Optional[str], model_name: str, model_type: Optional[str]) -> Path:
     paths = ensure_project_directories(project_id)
-    safe_name = Path(str(model_name or "").strip()).name
+    normalized = str(model_name or "").strip()
+    if normalized in {"", "latest"}:
+        if model_type:
+            candidates = [p for p in paths.models.glob(f"{model_type}_*.pt") if p.is_file()]
+        else:
+            candidates = [p for p in paths.models.glob("*.pt") if p.is_file()]
+        if not candidates:
+            raise FileNotFoundError("no classification model found for fine-tune initialization")
+        return max(candidates, key=lambda p: p.stat().st_mtime)
+
+    safe_name = Path(normalized).name
     if not safe_name:
         raise ValueError("init_source_value is required when init_source_type=classification_model")
     candidate = paths.models / safe_name
@@ -54,6 +64,7 @@ def _build_model_with_initializer(
     init_source_type: Literal["scratch", "imagenet", "classification_model"],
     init_source_value: Optional[str],
     project_id: Optional[str],
+    model_type: Optional[str],
 ) -> tuple[nn.Module, dict[str, Any]]:
     init_type = str(init_source_type or "scratch").strip().lower()
     if init_type not in {"scratch", "imagenet", "classification_model"}:
@@ -74,7 +85,11 @@ def _build_model_with_initializer(
     model.fc = nn.Linear(in_features, num_classes)
 
     if init_type == "classification_model":
-        model_path = _resolve_existing_model_path(project_id=project_id, model_name=str(init_source_value or ""))
+        model_path = _resolve_existing_model_path(
+            project_id=project_id,
+            model_name=str(init_source_value or ""),
+            model_type=model_type,
+        )
         payload = _load_checkpoint_state(model_path)
         source_state = payload.get("state_dict") if isinstance(payload.get("state_dict"), dict) else {}
         filtered_state = {k: v for k, v in source_state.items() if not str(k).startswith("fc.")}
@@ -284,6 +299,7 @@ def run_training(
         init_source_type=normalized_init_source_type,  # type: ignore[arg-type]
         init_source_value=init_source_value,
         project_id=paths.project_id,
+        model_type=model_type,
     )
     model = model.to(device)
 

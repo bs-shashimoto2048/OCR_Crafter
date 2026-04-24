@@ -2048,6 +2048,7 @@ export default function App() {
         ocrInitSourceValue={ocrInitSourceValue}
         setOcrInitSourceValue={setOcrInitSourceValue}
         ocrInitModelOptions={ocrPaddleModels}
+        ocrOfficialInitModelOptions={officialPaddleModels}
         onCreateSelectedOcrDataset={createSelectedOcrDataset}
         onPreprocess={runPreprocess}
         onBuildDataset={buildDataset}

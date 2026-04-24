@@ -70,6 +70,7 @@ from .services.ocr_pipeline import (
     migrate_ocr_models_to_inference,
     read_latest_rapid_ocr_states,
     read_training_log_lines,
+    resolve_official_paddleocr_rec_spec,
     run_paddleocr_training,
     save_ocr_prediction_log,
 )
@@ -928,7 +929,10 @@ def api_ocr_train_start(req: OcrTrainStartRequest, background_tasks: BackgroundT
             raise HTTPException(status_code=400, detail="OCR finetune requires init_source_type=ocr_model")
         if not init_source_value:
             raise HTTPException(status_code=400, detail="init_source_value is required for OCR finetune")
-        if resolve_ocr_model_meta(project_id=project_id, model=init_source_value, engine="paddleocr") is None:
+        if (
+            resolve_ocr_model_meta(project_id=project_id, model=init_source_value, engine="paddleocr") is None
+            and resolve_official_paddleocr_rec_spec(init_source_value) is None
+        ):
             raise HTTPException(status_code=404, detail=f"OCR model not found: {init_source_value}")
 
     paddle_repo_dir = str(req.paddle_repo_dir or "").strip() or FIXED_PADDLE_OCR_REPO_DIR

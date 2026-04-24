@@ -23,6 +23,28 @@ CONF_THRESHOLD = 0.9
 DEFAULT_BUSINESS_PATTERN = r"^[A-Z0-9]{8}$"
 BANNED_PATTERNS = {"AAAAAAAA", "00000000"}
 PADDLE_INFERENCE_MARKERS = ("inference.yml", "inference.pdiparams", "inference.pdmodel", "inference.json")
+OFFICIAL_PADDLEOCR_REC_SPECS: dict[str, dict[str, str]] = {
+    "en_PP-OCRv5_mobile_rec": {
+        "config_path": "configs/rec/PP-OCRv5/multi_language/en_PP-OCRv5_mobile_rec.yaml",
+        "pretrained_url": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_pretrained_model/en_PP-OCRv5_mobile_rec_pretrained.pdparams",
+    },
+    "PP-OCRv5_server_rec": {
+        "config_path": "configs/rec/PP-OCRv5/PP-OCRv5_server_rec.yml",
+        "pretrained_url": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_pretrained_model/PP-OCRv5_server_rec_pretrained.pdparams",
+    },
+    "en_PP-OCRv4_mobile_rec": {
+        "config_path": "configs/rec/PP-OCRv4/en_PP-OCRv4_mobile_rec.yml",
+        "pretrained_url": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_pretrained_model/en_PP-OCRv4_mobile_rec_pretrained.pdparams",
+    },
+    "PP-OCRv4_mobile_rec": {
+        "config_path": "configs/rec/PP-OCRv4/PP-OCRv4_mobile_rec.yml",
+        "pretrained_url": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_pretrained_model/PP-OCRv4_mobile_rec_pretrained.pdparams",
+    },
+    "PP-OCRv3_mobile_rec": {
+        "config_path": "configs/rec/PP-OCRv3/PP-OCRv3_mobile_rec.yml",
+        "pretrained_url": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_pretrained_model/PP-OCRv3_mobile_rec_pretrained.pdparams",
+    },
+}
 
 
 def _now_tag() -> str:
@@ -604,7 +626,30 @@ def create_ocr_dataset(
     }
 
 
-def _resolve_paddle_base_config(repo_dir: Path) -> Path:
+def resolve_official_paddleocr_rec_spec(model_name: str) -> Optional[dict[str, str]]:
+    key = str(model_name or "").strip()
+    if not key:
+        return None
+    spec = OFFICIAL_PADDLEOCR_REC_SPECS.get(key)
+    if not isinstance(spec, dict):
+        return None
+    return {
+        "model_name": key,
+        "config_path": str(spec.get("config_path") or ""),
+        "pretrained_url": str(spec.get("pretrained_url") or ""),
+    }
+
+
+def _resolve_paddle_base_config(repo_dir: Path, official_model_name: Optional[str] = None) -> Path:
+    if official_model_name:
+        official_spec = resolve_official_paddleocr_rec_spec(str(official_model_name))
+        if official_spec is None:
+            raise FileNotFoundError(f"unsupported official PaddleOCR rec model: {official_model_name}")
+        official_candidate = repo_dir / str(official_spec.get("config_path") or "")
+        if official_candidate.exists() and official_candidate.is_file():
+            return official_candidate
+        raise FileNotFoundError(f"official PaddleOCR config not found: {official_candidate}")
+
     candidates = [
         repo_dir / "configs/rec/PP-OCRv3/en_PP-OCRv3_rec.yml",
         repo_dir / "configs/rec/PP-OCRv4/en_PP-OCRv4_rec.yml",
@@ -937,10 +982,10 @@ def run_paddleocr_training(
     charset: str,
     max_text_length: int,
     image_shape: list[int],
+    log_path: Path,
     training_mode: str = "scratch",
     init_source_type: str = "scratch",
     init_source_value: Optional[str] = None,
-    log_path: Path,
 ) -> dict[str, Any]:
     _ensure_paddle_training_dependencies()
     dataset_root = Path(dataset_dir).expanduser().resolve()
@@ -952,8 +997,6 @@ def run_paddleocr_training(
     train_py = repo_dir / "tools/train.py"
     if not train_py.exists():
         raise FileNotFoundError(f"PaddleOCR train script not found: {train_py}")
-
-    base_config = _resolve_paddle_base_config(repo_dir)
 
     train_txt = dataset_root / "train.txt"
     val_txt = dataset_root / "val.txt"
@@ -1002,26 +1045,39 @@ def run_paddleocr_training(
         normalized_init_source_type = "scratch"
         resolved_init_source_value = ""
 
+    official_init_spec: Optional[dict[str, str]] = None
     init_checkpoint_prefix = ""
+    init_pretrained_url = ""
     if normalized_training_mode == "finetune":
+        official_init_spec = resolve_official_paddleocr_rec_spec(resolved_init_source_value)
         if normalized_init_source_type != "ocr_model":
             raise ValueError("OCR finetune requires init_source_type=ocr_model")
         if not resolved_init_source_value:
             raise ValueError("init_source_value is required for OCR finetune")
-        init_model = resolve_ocr_model_meta(
-            project_id=project_id,
-            model=resolved_init_source_value,
-            engine="paddleocr",
-        )
-        if init_model is None:
-            raise FileNotFoundError(f"OCR model not found for fine-tune: {resolved_init_source_value}")
-        checkpoint_dir_raw = str(init_model.get("checkpoint_dir") or init_model.get("train_dir") or "").strip()
-        if not checkpoint_dir_raw:
-            raise FileNotFoundError(f"checkpoint_dir not found in OCR model metadata: {resolved_init_source_value}")
-        checkpoint_dir = Path(checkpoint_dir_raw).expanduser().resolve()
-        if not checkpoint_dir.exists() or not checkpoint_dir.is_dir():
-            raise FileNotFoundError(f"checkpoint_dir not found: {checkpoint_dir}")
-        init_checkpoint_prefix = str(_resolve_export_model_prefix(checkpoint_dir))
+        if official_init_spec is not None:
+            init_pretrained_url = str(official_init_spec.get("pretrained_url") or "").strip()
+            if not init_pretrained_url:
+                raise FileNotFoundError(f"pretrained_url not found for official OCR model: {resolved_init_source_value}")
+        else:
+            init_model = resolve_ocr_model_meta(
+                project_id=project_id,
+                model=resolved_init_source_value,
+                engine="paddleocr",
+            )
+            if init_model is None:
+                raise FileNotFoundError(f"OCR model not found for fine-tune: {resolved_init_source_value}")
+            checkpoint_dir_raw = str(init_model.get("checkpoint_dir") or init_model.get("train_dir") or "").strip()
+            if not checkpoint_dir_raw:
+                raise FileNotFoundError(f"checkpoint_dir not found in OCR model metadata: {resolved_init_source_value}")
+            checkpoint_dir = Path(checkpoint_dir_raw).expanduser().resolve()
+            if not checkpoint_dir.exists() or not checkpoint_dir.is_dir():
+                raise FileNotFoundError(f"checkpoint_dir not found: {checkpoint_dir}")
+            init_checkpoint_prefix = str(_resolve_export_model_prefix(checkpoint_dir))
+
+    base_config = _resolve_paddle_base_config(
+        repo_dir,
+        official_model_name=(resolved_init_source_value if official_init_spec is not None else None),
+    )
 
     command = [
         sys.executable,
@@ -1040,7 +1096,7 @@ def run_paddleocr_training(
         f"Eval.dataset.label_file_list=['{str(val_txt)}']",
         f"Train.loader.batch_size_per_card={effective_train_batch}",
         f"Eval.loader.batch_size_per_card={effective_eval_batch}",
-        "Global.pretrained_model=",
+        (f"Global.pretrained_model={init_pretrained_url}" if init_pretrained_url else "Global.pretrained_model="),
         (f"Global.checkpoints={init_checkpoint_prefix}" if init_checkpoint_prefix else "Global.checkpoints="),
     ]
 
