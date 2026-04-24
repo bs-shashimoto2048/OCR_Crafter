@@ -6,6 +6,7 @@ import json
 import torch
 
 from ..config import get_settings
+from ..db import fetch_training_job
 from ..project_paths import ensure_project_directories
 
 
@@ -27,6 +28,76 @@ def _safe_load_checkpoint(path: Path) -> dict:
     return {}
 
 
+def _safe_load_json(path: Path) -> dict:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(payload, dict):
+            return payload
+    except Exception:  # noqa: BLE001
+        return {}
+    return {}
+
+
+def _safe_int(value: object, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:  # noqa: BLE001
+        return default
+
+
+def _safe_float(value: object, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:  # noqa: BLE001
+        return default
+
+
+def _normalize_int_list(value: object) -> list[int]:
+    if not isinstance(value, (list, tuple)):
+        return []
+    normalized: list[int] = []
+    for item in value:
+        try:
+            normalized.append(int(item))
+        except Exception:  # noqa: BLE001
+            continue
+    return normalized
+
+
+def _read_ocr_dataset_meta(dataset_root_value: str) -> dict:
+    dataset_root_text = str(dataset_root_value or "").strip()
+    if not dataset_root_text:
+        return {}
+    dataset_root = Path(dataset_root_text).expanduser()
+    if not dataset_root.exists() or not dataset_root.is_dir():
+        return {}
+    return _safe_load_json(dataset_root / "meta.json")
+
+
+def _ocr_counts_from_meta(meta: dict) -> dict[str, int]:
+    counts = meta.get("counts")
+    if isinstance(counts, dict):
+        train = _safe_int(counts.get("train", 0))
+        val = _safe_int(counts.get("val", 0))
+        test = _safe_int(counts.get("test", 0))
+        return {
+            "train": train,
+            "val": val,
+            "test": test,
+            "total": train + val + test,
+        }
+    total = _safe_int(meta.get("count", 0))
+    return {"train": 0, "val": 0, "test": 0, "total": total}
+
+
+def _ocr_ratio_from_meta(meta: dict) -> dict[str, float]:
+    return {
+        "train": _safe_float(meta.get("train_ratio", 0.0)),
+        "val": _safe_float(meta.get("val_ratio", 0.0)),
+        "test": _safe_float(meta.get("test_ratio", 0.0)),
+    }
+
+
 def list_model_infos(project_id: Optional[str] = None) -> list[dict]:
     paths = ensure_project_directories(project_id)
     paths.models.mkdir(parents=True, exist_ok=True)
@@ -36,11 +107,48 @@ def list_model_infos(project_id: Optional[str] = None) -> list[dict]:
     for path in sorted(files):
         st = path.stat()
         if path.name.endswith(".ocr.json"):
-            payload = {}
-            try:
-                payload = json.loads(path.read_text(encoding="utf-8"))
-            except Exception:  # noqa: BLE001
-                payload = {}
+            payload = _safe_load_json(path)
+            job_id = str(payload.get("job_id") or "").strip()
+            job = fetch_training_job(job_id) if job_id else None
+            dataset_root = str(payload.get("dataset_root") or (job or {}).get("dataset_dir") or "")
+            dataset_meta = _read_ocr_dataset_meta(dataset_root)
+            dataset_counts = _ocr_counts_from_meta(dataset_meta)
+            if dataset_counts["total"] <= 0:
+                payload_counts = payload.get("dataset_split_counts") if isinstance(payload.get("dataset_split_counts"), dict) else {}
+                dataset_counts = {
+                    "train": _safe_int(payload_counts.get("train", 0)),
+                    "val": _safe_int(payload_counts.get("val", 0)),
+                    "test": _safe_int(payload_counts.get("test", 0)),
+                    "total": _safe_int(payload_counts.get("total", 0)),
+                }
+                if dataset_counts["total"] <= 0:
+                    dataset_counts["total"] = dataset_counts["train"] + dataset_counts["val"] + dataset_counts["test"]
+            dataset_ratio = _ocr_ratio_from_meta(dataset_meta)
+            if dataset_ratio["train"] <= 0 and dataset_ratio["val"] <= 0 and dataset_ratio["test"] <= 0:
+                payload_ratio = payload.get("dataset_split_ratio") if isinstance(payload.get("dataset_split_ratio"), dict) else {}
+                dataset_ratio = {
+                    "train": _safe_float(payload_ratio.get("train", 0.0)),
+                    "val": _safe_float(payload_ratio.get("val", 0.0)),
+                    "test": _safe_float(payload_ratio.get("test", 0.0)),
+                }
+            payload_preprocess = payload.get("preprocess") if isinstance(payload.get("preprocess"), dict) else {}
+            payload_training = payload.get("training_params") if isinstance(payload.get("training_params"), dict) else {}
+            payload_aug = payload.get("augmentation") if isinstance(payload.get("augmentation"), dict) else {}
+            image_shape = _normalize_int_list(
+                payload.get("image_shape")
+                or payload_preprocess.get("image_shape")
+                or dataset_meta.get("image_shape")
+                or (job or {}).get("image_shape")
+            )
+            image_types = dataset_meta.get("image_types")
+            if not isinstance(image_types, list):
+                image_types = payload_preprocess.get("image_types") if isinstance(payload_preprocess.get("image_types"), list) else []
+            augmentation_enabled = dataset_meta.get("use_augmentation")
+            if augmentation_enabled is None and "enabled" in payload_aug:
+                augmentation_enabled = payload_aug.get("enabled")
+            augmentation_strength = dataset_meta.get("aug_strength")
+            if augmentation_strength is None and "strength" in payload_aug:
+                augmentation_strength = payload_aug.get("strength")
             items.append(
                 {
                     "name": path.name,
@@ -49,11 +157,44 @@ def list_model_infos(project_id: Optional[str] = None) -> list[dict]:
                     "engine": str(payload.get("engine") or "paddleocr"),
                     "created_at": str(payload.get("created_at") or ""),
                     "modified_at": datetime.fromtimestamp(st.st_mtime).isoformat(),
-                    "dataset_split_ratio": {"train": 0.0, "val": 0.0, "test": 0.0},
-                    "dataset_split_counts": {"train": 0, "val": 0, "test": 0},
-                    "charset": str(payload.get("charset") or ""),
-                    "max_text_length": int(payload.get("max_text_length") or 0),
+                    "dataset_split_ratio": dataset_ratio,
+                    "dataset_split_counts": {
+                        "train": dataset_counts["train"],
+                        "val": dataset_counts["val"],
+                        "test": dataset_counts["test"],
+                    },
+                    "charset": str(payload.get("charset") or dataset_meta.get("charset") or (job or {}).get("charset") or ""),
+                    "max_text_length": _safe_int(
+                        payload.get("max_text_length")
+                        or payload_preprocess.get("max_text_length")
+                        or dataset_meta.get("max_text_length")
+                        or (job or {}).get("max_text_length")
+                    ),
+                    "image_shape": image_shape,
                     "model_dir": str(payload.get("model_dir") or ""),
+                    "ocr_dataset_root": dataset_root,
+                    "ocr_dataset_counts": dataset_counts,
+                    "ocr_dataset_meta_created_at": str(dataset_meta.get("created_at") or ""),
+                    "ocr_preprocess": {
+                        "image_shape": image_shape,
+                        "image_types": image_types,
+                        "charset": str(payload.get("charset") or dataset_meta.get("charset") or (job or {}).get("charset") or ""),
+                        "max_text_length": _safe_int(
+                            payload.get("max_text_length")
+                            or payload_preprocess.get("max_text_length")
+                            or dataset_meta.get("max_text_length")
+                            or (job or {}).get("max_text_length")
+                        ),
+                    },
+                    "ocr_training_params": {
+                        "epochs": _safe_int((job or {}).get("epochs", payload_training.get("epochs", 0))),
+                        "batch_size": _safe_int((job or {}).get("batch_size", payload_training.get("batch_size", 0))),
+                        "learning_rate": _safe_float((job or {}).get("learning_rate", payload_training.get("learning_rate", 0.0))),
+                    },
+                    "ocr_augmentation": {
+                        "enabled": bool(augmentation_enabled) if isinstance(augmentation_enabled, bool) else None,
+                        "strength": _safe_int(augmentation_strength) if augmentation_strength is not None else None,
+                    },
                 }
             )
         else:

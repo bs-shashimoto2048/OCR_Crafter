@@ -4,6 +4,9 @@ import Button from "../components/Button";
 import Card from "../components/Card";
 import { API_BASE } from "../lib/api";
 
+const BATCH_TEXT_MIN_LENGTH = 1;
+const BATCH_TEXT_MAX_LENGTH = 12;
+
 function parseApiErrorText(text, fallback = "バッチ推論に失敗しました") {
   const raw = String(text || "").trim();
   if (!raw) return fallback;
@@ -39,29 +42,50 @@ function toHalfWidthAlnum(value) {
     .replace(/[^A-Z0-9]/g, "");
 }
 
-function classifyDraftState(value, expectedLength = 8) {
+function classifyDraftState(value) {
   const normalized = String(value || "").trim().toUpperCase();
   if (!normalized) return { kind: "invalid" };
   if (!/^[A-Z0-9]+$/.test(normalized)) return { kind: "invalid" };
-  if (Number(expectedLength) > 0 && normalized.length !== Number(expectedLength)) {
+  if (normalized.length < BATCH_TEXT_MIN_LENGTH || normalized.length > BATCH_TEXT_MAX_LENGTH) {
     return { kind: "incomplete" };
   }
   return { kind: "valid" };
 }
 
 function resolveBatchExpectedLength(row) {
-  const fromValidation = Number(row?.validation?.max_text_length || 0);
-  if (fromValidation > 0) return fromValidation;
   const fromPrediction = String(row?.prediction || "").trim().length;
-  if (fromPrediction > 0) return fromPrediction;
-  return 8;
+  if (fromPrediction > BATCH_TEXT_MAX_LENGTH) return fromPrediction;
+  return BATCH_TEXT_MAX_LENGTH;
 }
 
 function resolveBatchValid(row) {
   if (typeof row?.valid === "boolean") return row.valid;
   if (typeof row?.is_valid === "boolean") return row.is_valid;
-  const expectedLength = resolveBatchExpectedLength(row);
-  return classifyDraftState(row?.corrected ?? row?.prediction ?? "", expectedLength).kind === "valid";
+  return classifyDraftState(row?.corrected ?? row?.prediction ?? "").kind === "valid";
+}
+
+function formatConfidencePercent(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "-";
+  const ratio = num <= 1 ? num : num / 100;
+  if (!Number.isFinite(ratio)) return "-";
+  return `${Math.max(0, Math.min(100, ratio * 100)).toFixed(1)}%`;
+}
+
+function normalizeConfidencePercent(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return null;
+  const ratio = num <= 1 ? num : num / 100;
+  if (!Number.isFinite(ratio)) return null;
+  return Math.max(0, Math.min(100, ratio * 100));
+}
+
+function confidenceTextClass(value) {
+  const score = normalizeConfidencePercent(value);
+  if (score == null) return "text-muted";
+  if (score > 95) return "text-emerald-300";
+  if (score >= 90) return "text-amber-300";
+  return "text-red-300";
 }
 
 export default function OcrBatchView({
@@ -129,20 +153,27 @@ export default function OcrBatchView({
 
   const batchSummary = useMemo(() => {
     const total = batchRows.length;
-    const valid = batchRows.filter((row) => Boolean(row.is_valid)).length;
+    const done = batchRows.filter((row) => row.status === "done").length;
+    const valid = batchRows.filter((row) => row.status === "done" && Boolean(row.is_valid)).length;
+    const errored = batchRows.filter((row) => row.status === "error").length;
     return {
       total,
+      done,
       valid,
-      invalid: Math.max(0, total - valid),
+      invalid: Math.max(0, done - valid),
+      errored,
     };
   }, [batchRows]);
 
   const filteredBatchRows = useMemo(() => {
     const keyword = String(batchSearch || "").trim().toLowerCase();
     return batchRows.filter((row) => {
-      if (batchFilterInvalid && row.is_valid) return false;
+      if (batchFilterInvalid) {
+        if (row.status === "pending") return false;
+        if (row.status === "done" && row.is_valid) return false;
+      }
       if (!keyword) return true;
-      const text = `${row.file_name || ""} ${row.prediction || ""} ${row.corrected || ""}`.toLowerCase();
+      const text = `${row.file_name || ""} ${row.prediction || ""} ${row.corrected || ""} ${row.error || ""}`.toLowerCase();
       return text.includes(keyword);
     });
   }, [batchRows, batchFilterInvalid, batchSearch]);
@@ -166,46 +197,91 @@ export default function OcrBatchView({
       const previewUrls = files.map((file) => URL.createObjectURL(file));
       previewUrlsRef.current = previewUrls;
 
-      const formData = new FormData();
-      for (const f of files) {
-        formData.append("files", f);
-      }
-      formData.append("project_id", projectId);
-      formData.append("engine", engine);
-      formData.append("apply_preprocess", preprocessEnabled ? "true" : "false");
-      if (preprocessEnabled && preprocessOverrides) {
-        formData.append("preprocess_overrides_json", JSON.stringify(preprocessOverrides));
-      }
-      if (engine === "custom") {
-        formData.append("model", model);
-        if (model === "latest" && modelType) formData.append("model_type", modelType);
-      } else if (engine === "paddleocr") {
-        formData.append("model", paddleModel || "latest");
-        formData.append("easyocr_langs", (easyocrLangs || []).join(",") || "en");
-      } else {
-        formData.append("easyocr_langs", (easyocrLangs || []).join(",") || "en");
+      const initialRows = files.map((file, idx) => ({
+        file_name: relativeName(file),
+        prediction: "",
+        corrected: "",
+        expected_length: 8,
+        is_valid: false,
+        status: "pending",
+        error: "",
+        preview_url: previewUrls[idx] || "",
+        processed_preview_url: "",
+      }));
+      setBatchRows(initialRows);
+      setNotice(`バッチ推論中: 0/${files.length}`);
+
+      let successCount = 0;
+      for (let idx = 0; idx < files.length; idx += 1) {
+        const file = files[idx];
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("project_id", projectId);
+        formData.append("engine", engine);
+        formData.append("apply_preprocess", preprocessEnabled ? "true" : "false");
+        if (preprocessEnabled && preprocessOverrides) {
+          formData.append("preprocess_overrides_json", JSON.stringify(preprocessOverrides));
+        }
+        if (engine === "custom") {
+          formData.append("model", model);
+          if (model === "latest" && modelType) formData.append("model_type", modelType);
+        } else if (engine === "paddleocr") {
+          formData.append("model", paddleModel || "latest");
+          formData.append("easyocr_langs", (easyocrLangs || []).join(",") || "en");
+        } else {
+          formData.append("easyocr_langs", (easyocrLangs || []).join(",") || "en");
+        }
+
+        try {
+          const response = await fetch(`${API_BASE}/predict`, { method: "POST", body: formData });
+          if (!response.ok) {
+            const message = parseApiErrorText(await response.text(), "バッチ推論に失敗しました");
+            throw new Error(normalizePredictError(message));
+          }
+          const result = await response.json();
+          const prediction = toHalfWidthAlnum(result.prediction || result.text || "");
+          const corrected = prediction;
+          const expected_length = resolveBatchExpectedLength({ ...result, prediction });
+          const is_valid = resolveBatchValid({ ...result, prediction, corrected, expected_length });
+          setBatchRows((prev) =>
+            prev.map((row, i) =>
+              i === idx
+                ? {
+                    ...row,
+                    ...result,
+                    prediction,
+                    corrected,
+                    expected_length,
+                    is_valid,
+                    status: "done",
+                    error: "",
+                    processed_preview_url: result.preprocess_preview_data_url || "",
+                  }
+                : row
+            )
+          );
+          successCount += 1;
+        } catch (e) {
+          const errorText = normalizePredictError(e.message);
+          setBatchRows((prev) =>
+            prev.map((row, i) =>
+              i === idx
+                ? {
+                    ...row,
+                    prediction: "",
+                    corrected: "",
+                    is_valid: false,
+                    status: "error",
+                    error: errorText,
+                  }
+                : row
+            )
+          );
+        }
+        setNotice(`バッチ推論中: ${idx + 1}/${files.length}`);
       }
 
-      const response = await fetch(`${API_BASE}/api/ocr/predict/batch`, { method: "POST", body: formData });
-      if (!response.ok) {
-        const message = parseApiErrorText(await response.text(), "バッチ推論に失敗しました");
-        throw new Error(normalizePredictError(message));
-      }
-
-      const data = await response.json();
-      const rows = (data.items || []).map((row, idx) => {
-        const corrected = toHalfWidthAlnum(row.prediction || "");
-        const expected_length = resolveBatchExpectedLength(row);
-        return {
-          ...row,
-          corrected,
-          expected_length,
-          is_valid: resolveBatchValid({ ...row, corrected, expected_length }),
-          preview_url: previewUrls[idx] || "",
-        };
-      });
-      setBatchRows(rows);
-      setNotice(`バッチ推論完了: ${rows.length}件`);
+      setNotice(`バッチ推論完了: ${successCount}/${files.length}件成功`);
     } catch (e) {
       setNotice(normalizePredictError(e.message));
     } finally {
@@ -351,6 +427,7 @@ export default function OcrBatchView({
                   onChange={(e) => setPreprocessEnabled?.(e.target.checked)}
                 />
                 前処理設定を適用
+                <span className="ml-1 text-xs text-muted">※３. 前処理設定の処理を施します。</span>
               </label>
             </div>
           </div>
@@ -425,12 +502,20 @@ export default function OcrBatchView({
         <div className="col-span-8">
           <div className="mb-2 rounded-lg border border-border bg-card/40 p-3">
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="rounded-full border border-border px-2 py-1 text-muted">総数: {batchSummary.total}</span>
+              <span className="rounded-full border border-border px-2 py-1 text-muted">
+                対象画像: {batchSummary.total}件
+              </span>
+              <span className="rounded-full border border-accent/30 bg-accent/10 px-2 py-1 text-accent">
+                推論完了: {batchSummary.done}件
+              </span>
               <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-emerald-200">
-                valid: {batchSummary.valid}
+                妥当: {batchSummary.valid}件
               </span>
               <span className="rounded-full border border-red-500/30 bg-red-500/10 px-2 py-1 text-red-200">
-                invalid: {batchSummary.invalid}
+                要確認(条件外): {batchSummary.invalid}件
+              </span>
+              <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-amber-200">
+                推論失敗: {batchSummary.errored}件
               </span>
             </div>
             <div className="mt-2 grid grid-cols-2 gap-2">
@@ -440,7 +525,7 @@ export default function OcrBatchView({
                   checked={batchFilterInvalid}
                   onChange={(e) => setBatchFilterInvalid(e.target.checked)}
                 />
-                invalidのみ表示
+                要確認/失敗のみ表示
               </label>
               <input
                 className="app-input h-8 text-xs"
@@ -452,57 +537,75 @@ export default function OcrBatchView({
           </div>
 
           <div className="h-[600px] overflow-auto rounded-lg border border-border">
-            <table className="min-w-full text-sm">
+            <table className="min-w-full table-fixed text-sm">
+              <colgroup>
+                <col className="w-[150px]" />
+                <col className="w-[150px]" />
+                <col className="w-[180px]" />
+                <col className="w-[120px]" />
+                <col />
+              </colgroup>
               <thead className="sticky top-0 z-10 bg-card/90 text-left text-xs text-muted backdrop-blur">
                 <tr>
-                  <th className="px-3 py-2">プレビュー</th>
-                  <th className="px-3 py-2">OCR結果</th>
-                  <th className="px-3 py-2">画像</th>
-                  <th className="px-3 py-2">valid</th>
-                  <th className="px-3 py-2">修正</th>
+                  <th className="px-2 py-2">サムネ(元画像)</th>
+                  <th className="px-2 py-2">サムネ(処理後)</th>
+                  <th className="px-2 py-2">OCR結果</th>
+                  <th className="px-2 py-2">信頼スコア</th>
+                  <th className="px-3 py-2">画像名</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredBatchRows.map((row, idx) => {
-                  const rowValid = Boolean(row.is_valid);
+                  const rowStatus = String(row.status || "done");
+                  const isPending = rowStatus === "pending";
+                  const isHardError = rowStatus === "error";
+                  const isInvalid = rowStatus === "done" && !Boolean(row.is_valid);
                   return (
-                    <tr key={`${row.file_name}-${idx}`} className={`border-t border-border/70 ${rowValid ? "" : "bg-red-500/5"}`}>
-                      <td className="px-3 py-2">
+                    <tr
+                      key={`${row.file_name}-${idx}`}
+                      className={`border-t border-border/70 ${isPending ? "" : isHardError || isInvalid ? "bg-red-500/5" : ""}`}
+                    >
+                      <td className="px-2 py-2 align-top">
                         {row.preview_url ? (
                           <img
                             src={row.preview_url}
                             alt={row.file_name || `batch-${idx + 1}`}
-                            className="h-14 w-24 rounded border border-border/70 bg-card/70 object-contain p-1"
+                            className="h-20 w-32 rounded border border-border/70 bg-card/70 object-contain p-1"
                           />
                         ) : (
                           <span className="text-xs text-muted">-</span>
                         )}
                       </td>
-                      <td className="px-3 py-2">{row.prediction}</td>
-                      <td className="px-3 py-2 text-muted">{row.file_name}</td>
-                      <td className={`px-3 py-2 ${rowValid ? "text-emerald-300" : "text-red-300"}`}>
-                        {rowValid ? "valid" : "invalid"}
+                      <td className="px-2 py-2 align-top">
+                        {row.processed_preview_url ? (
+                          <img
+                            src={row.processed_preview_url}
+                            alt={`${row.file_name || `batch-${idx + 1}`}-processed`}
+                            className="h-20 w-32 rounded border border-border/70 bg-card/70 object-contain p-1"
+                          />
+                        ) : (
+                          <span className="text-xs text-muted">{isPending ? "処理中..." : "-"}</span>
+                        )}
                       </td>
-                      <td className="px-3 py-2">
-                        <input
-                          className="app-input"
-                          value={row.corrected}
-                          onChange={(e) => {
-                            const value = toHalfWidthAlnum(e.target.value);
-                            setBatchRows((prev) =>
-                              prev.map((item, i) =>
-                                i === idx
-                                  ? {
-                                      ...item,
-                                      corrected: value,
-                                      is_valid: classifyDraftState(value, Number(item.expected_length || 8)).kind === "valid",
-                                    }
-                                  : item
-                              )
-                            );
-                          }}
-                        />
+                      <td className="px-2 py-2 align-middle text-center">
+                        {isPending ? (
+                          <span className="text-sm text-muted">推論中...</span>
+                        ) : isHardError ? (
+                          <span className="text-sm text-danger">{row.error || "error"}</span>
+                        ) : (
+                          <span className="text-base font-bold tracking-wide">{row.prediction}</span>
+                        )}
                       </td>
+                      <td className="px-2 py-2 align-middle text-center">
+                        {isPending || isHardError ? (
+                          <span className="text-sm text-muted">-</span>
+                        ) : (
+                          <span className={`text-sm font-semibold ${confidenceTextClass(row.confidence)}`}>
+                            {formatConfidencePercent(row.confidence)}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-muted break-all">{row.file_name}</td>
                     </tr>
                   );
                 })}
@@ -516,6 +619,13 @@ export default function OcrBatchView({
               </tbody>
             </table>
           </div>
+          <p className="mt-2 rounded-md border border-border/70 bg-card/45 px-3 py-2 text-xs text-muted">
+            <span className="font-semibold text-amber-300">注意:</span>{" "}
+            <span className="font-semibold text-cyan-300">信頼スコア</span> は
+            「OCRがこの結果らしいと判断した強さ」です。{" "}
+            <span className="font-semibold text-red-300">正解率</span> ではありません。
+            値が高くても、<span className="font-semibold text-red-300">必ず正解とは限りません</span>。
+          </p>
         </div>
       </div>
     </Card>

@@ -220,10 +220,11 @@ export default function App() {
   const [ocrEngine, setOcrEngine] = useState("paddleocr");
   const [ocrCharset, setOcrCharset] = useState(OCR_CHARSET_DEFAULT);
   const [ocrMaxTextLength, setOcrMaxTextLength] = useState(8);
-  const [ocrImageShape, setOcrImageShape] = useState("3,48,320");
+  const [ocrImageShape, setOcrImageShape] = useState("1,48,320");
   const [ocrUseAugmentation, setOcrUseAugmentation] = useState(false);
   const [ocrAugStrength, setOcrAugStrength] = useState(1);
   const [ocrDatasetDir, setOcrDatasetDir] = useState("");
+  const [ocrDatasetCreateMode, setOcrDatasetCreateMode] = useState("new");
   const [ocrDatasetInfo, setOcrDatasetInfo] = useState(null);
   const [ocrFromLogsOnlyInvalid, setOcrFromLogsOnlyInvalid] = useState(true);
   const [ocrFromLogsIncludeCorrected, setOcrFromLogsIncludeCorrected] = useState(true);
@@ -1519,6 +1520,14 @@ export default function App() {
     }
   }
 
+  async function createSelectedOcrDataset() {
+    if (ocrDatasetCreateMode === "from_logs") {
+      await createOcrDatasetFromLogs();
+      return;
+    }
+    await createOcrDataset();
+  }
+
   async function startTraining() {
     if (!projectId) {
       notify("error", "プロジェクトを作成または選択してください");
@@ -1977,15 +1986,14 @@ export default function App() {
         ocrAugStrength={ocrAugStrength}
         setOcrAugStrength={setOcrAugStrength}
         ocrDatasetDir={ocrDatasetDir}
-        setOcrDatasetDir={setOcrDatasetDir}
+        ocrDatasetCreateMode={ocrDatasetCreateMode}
+        setOcrDatasetCreateMode={setOcrDatasetCreateMode}
         ocrDatasetInfo={ocrDatasetInfo}
         ocrFromLogsOnlyInvalid={ocrFromLogsOnlyInvalid}
         setOcrFromLogsOnlyInvalid={setOcrFromLogsOnlyInvalid}
         ocrFromLogsIncludeCorrected={ocrFromLogsIncludeCorrected}
         setOcrFromLogsIncludeCorrected={setOcrFromLogsIncludeCorrected}
-        onBrowseOcrDatasetDir={browseOcrDatasetDirectory}
-        onCreateOcrDataset={createOcrDataset}
-        onCreateOcrDatasetFromLogs={createOcrDatasetFromLogs}
+        onCreateSelectedOcrDataset={createSelectedOcrDataset}
         onPreprocess={runPreprocess}
         onBuildDataset={buildDataset}
         onStartTraining={startTraining}

@@ -36,15 +36,14 @@ export default function TrainingView({
   ocrAugStrength,
   setOcrAugStrength,
   ocrDatasetDir,
-  setOcrDatasetDir,
+  ocrDatasetCreateMode,
+  setOcrDatasetCreateMode,
   ocrFromLogsOnlyInvalid,
   setOcrFromLogsOnlyInvalid,
   ocrFromLogsIncludeCorrected,
   setOcrFromLogsIncludeCorrected,
   ocrDatasetInfo,
-  onBrowseOcrDatasetDir,
-  onCreateOcrDataset,
-  onCreateOcrDatasetFromLogs,
+  onCreateSelectedOcrDataset,
   onPreprocess,
   onBuildDataset,
   onStartTraining,
@@ -120,6 +119,21 @@ export default function TrainingView({
     }
     return "-";
   }, [logs]);
+
+  const [ocrChannel, ocrHeight, ocrWidth] = useMemo(() => {
+    const [c = "", h = "", w = ""] = String(ocrImageShape || "").split(",");
+    return [c || "1", h || "48", w || "320"];
+  }, [ocrImageShape]);
+
+  function updateOcrImageShape(next) {
+    const merged = {
+      c: ocrChannel,
+      h: ocrHeight,
+      w: ocrWidth,
+      ...next,
+    };
+    setOcrImageShape(`${merged.c},${merged.h},${merged.w}`);
+  }
 
   useEffect(() => {
     const el = logContainerRef.current;
@@ -287,12 +301,24 @@ export default function TrainingView({
             </>
           ) : (
             <>
-              <div>
-                <label className="app-label">OCRタイプ</label>
-                <select value={ocrEngine} onChange={(e) => setOcrEngine(e.target.value)} className="app-select">
-                  <option value="paddleocr">PaddleOCR（学習可）</option>
-                  <option value="easyocr">EasyOCR（推論専用）</option>
-                </select>
+              <div className="grid grid-cols-[7fr_3fr] gap-2">
+                <div>
+                  <label className="app-label">OCRタイプ</label>
+                  <select value={ocrEngine} onChange={(e) => setOcrEngine(e.target.value)} className="app-select">
+                    <option value="paddleocr">PaddleOCR（学習可）</option>
+                    <option value="easyocr">EasyOCR（推論専用）</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="app-label">最大文字数</label>
+                  <input
+                    type="number"
+                    className="app-input"
+                    value={ocrMaxTextLength}
+                    onChange={(e) => setOcrMaxTextLength(e.target.value)}
+                    disabled={ocrEngine === "easyocr"}
+                  />
+                </div>
               </div>
 
               {ocrEngine === "easyocr" ? (
@@ -312,24 +338,40 @@ export default function TrainingView({
                   </div>
 
                   <div>
-                    <label className="app-label">最大文字長（max_text_length）</label>
-                    <input
-                      type="number"
-                      className="app-input"
-                      value={ocrMaxTextLength}
-                      onChange={(e) => setOcrMaxTextLength(e.target.value)}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="app-label">画像形状（image_shape: C,H,W）</label>
-                    <input
-                      className="app-input"
-                      value={ocrImageShape}
-                      onChange={(e) => setOcrImageShape(e.target.value)}
-                      placeholder="1,48,320 or 3,48,320"
-                    />
-                    <p className="mt-1 text-xs text-muted">Cは 1（グレースケール）または 3（RGB）を指定できます。</p>
+                    <label className="app-label">画像形状</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <label className="app-label">Channel</label>
+                        <select
+                          className="app-select"
+                          value={ocrChannel}
+                          onChange={(e) => updateOcrImageShape({ c: e.target.value })}
+                        >
+                          <option value="1">1 (Gray)</option>
+                          <option value="3">3 (RGB)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="app-label">Height [px]</label>
+                        <input
+                          type="number"
+                          className="app-input"
+                          value={ocrHeight}
+                          onChange={(e) => updateOcrImageShape({ h: e.target.value })}
+                          placeholder="48"
+                        />
+                      </div>
+                      <div>
+                        <label className="app-label">Width [px]</label>
+                        <input
+                          type="number"
+                          className="app-input"
+                          value={ocrWidth}
+                          onChange={(e) => updateOcrImageShape({ w: e.target.value })}
+                          placeholder="320"
+                        />
+                      </div>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2">
@@ -382,29 +424,49 @@ export default function TrainingView({
                   </div>
 
                   <div>
-                    <label className="app-label">学習データディレクトリ</label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        className="app-input"
-                        value={ocrDatasetDir}
-                        onChange={(e) => setOcrDatasetDir(e.target.value)}
-                        placeholder="/path/to/ocr_dataset"
-                      />
-                      <Button variant="secondary" onClick={onBrowseOcrDatasetDir}>
-                        参照
-                      </Button>
+                    <label className="app-label">学習データ作成方法</label>
+                    <select
+                      value={ocrDatasetCreateMode}
+                      onChange={(e) => setOcrDatasetCreateMode(e.target.value)}
+                      className="app-select"
+                    >
+                      <option value="new">新規作成（ラベルデータから）</option>
+                      <option value="from_logs">再学習作成（OCRログから）</option>
+                    </select>
+                  </div>
+
+                  {ocrDatasetCreateMode === "from_logs" ? (
+                    <div className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-card/40 p-3 text-xs text-muted">
+                      <label className="inline-flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ocrFromLogsOnlyInvalid)}
+                          onChange={(e) => setOcrFromLogsOnlyInvalid(e.target.checked)}
+                        />
+                        invalidのみ対象
+                      </label>
+                      <label className="inline-flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ocrFromLogsIncludeCorrected)}
+                          onChange={(e) => setOcrFromLogsIncludeCorrected(e.target.checked)}
+                        />
+                        correctedを優先
+                      </label>
                     </div>
+                  ) : null}
+
+                  <div>
+                    <label className="app-label">学習データディレクトリ</label>
+                    <input className="app-input" value={ocrDatasetDir} readOnly placeholder="データ作成後に自動設定されます" />
                     <p className="mt-1 text-xs text-muted">
-                      通常は「OCRデータ作成」を実行すると自動で設定されます（手動指定も可能）。
+                      先に学習データ作成を実行してください。作成後にこのパスへ自動反映されます。
                     </p>
                   </div>
 
                   <div className="flex flex-wrap gap-2">
-                    <Button variant="secondary" onClick={onCreateOcrDataset}>
-                      OCRデータ作成
-                    </Button>
-                    <Button variant="secondary" onClick={onCreateOcrDatasetFromLogs}>
-                      ログ再学習データ作成
+                    <Button variant="secondary" onClick={onCreateSelectedOcrDataset}>
+                      {ocrDatasetCreateMode === "from_logs" ? "再学習データ作成" : "新規学習データ作成"}
                     </Button>
                     <Button
                       variant={trainingVariant}
@@ -414,25 +476,6 @@ export default function TrainingView({
                     >
                       OCR学習開始
                     </Button>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-card/40 p-3 text-xs text-muted">
-                    <label className="inline-flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={Boolean(ocrFromLogsOnlyInvalid)}
-                        onChange={(e) => setOcrFromLogsOnlyInvalid(e.target.checked)}
-                      />
-                      invalidのみ対象
-                    </label>
-                    <label className="inline-flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={Boolean(ocrFromLogsIncludeCorrected)}
-                        onChange={(e) => setOcrFromLogsIncludeCorrected(e.target.checked)}
-                      />
-                      correctedを優先
-                    </label>
                   </div>
 
                   {ocrDatasetInfo ? (

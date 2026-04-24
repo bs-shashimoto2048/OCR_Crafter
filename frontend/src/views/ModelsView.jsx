@@ -97,6 +97,11 @@ export default function ModelsView({ models, modelInfos, latest, onRefresh, onDe
     return modelInfos?.[name]?.created_at || modelInfos?.[name]?.modified_at || "";
   }
 
+  const allOcr = useMemo(
+    () => models.length > 0 && models.every((name) => trainingFamily(name) === "ocr"),
+    [models, modelInfos]
+  );
+
   function ratioText(name) {
     const ratio = modelInfos?.[name]?.dataset_split_ratio;
     if (!ratio) {
@@ -128,6 +133,56 @@ export default function ModelsView({ models, modelInfos, latest, onRefresh, onDe
       return "-";
     }
     return `${train} / ${val} / ${test}`;
+  }
+
+  function ocrPreprocessText(name) {
+    const info = modelInfos?.[name] || {};
+    const preprocess = info?.ocr_preprocess || {};
+    const shape = Array.isArray(preprocess.image_shape) && preprocess.image_shape.length > 0
+      ? preprocess.image_shape.join(",")
+      : Array.isArray(info.image_shape) && info.image_shape.length > 0
+        ? info.image_shape.join(",")
+        : "-";
+    const charset = String(preprocess.charset || info.charset || "").trim() || "-";
+    const maxTextLength = Number(preprocess.max_text_length || info.max_text_length || 0);
+    const imageTypes = Array.isArray(preprocess.image_types) && preprocess.image_types.length > 0
+      ? preprocess.image_types.join(",")
+      : "-";
+    return `shape=${shape}, charset=${charset}, max_len=${maxTextLength > 0 ? maxTextLength : "-"}, types=${imageTypes}`;
+  }
+
+  function ocrTrainingText(name) {
+    const params = modelInfos?.[name]?.ocr_training_params || {};
+    const epochs = Number(params.epochs || 0);
+    const batchSize = Number(params.batch_size || 0);
+    const lr = Number(params.learning_rate || 0);
+    const lrText = Number.isFinite(lr) && lr > 0 ? lr : "-";
+    return `epochs=${epochs > 0 ? epochs : "-"}, batch=${batchSize > 0 ? batchSize : "-"}, lr=${lrText}`;
+  }
+
+  function ocrAugText(name) {
+    const aug = modelInfos?.[name]?.ocr_augmentation || {};
+    if (aug?.enabled === null || aug?.enabled === undefined) {
+      return "aug=-";
+    }
+    const enabled = Boolean(aug.enabled);
+    const strength = Number(aug.strength || 0);
+    return `aug=${enabled ? "ON" : "OFF"}, strength=${strength > 0 ? strength : "-"}`;
+  }
+
+  function ocrDataText(name) {
+    const counts = modelInfos?.[name]?.ocr_dataset_counts || {};
+    const train = Number(counts.train || 0);
+    const val = Number(counts.val || 0);
+    const test = Number(counts.test || 0);
+    const total = Number(counts.total || 0);
+    if (train > 0 || val > 0 || test > 0) {
+      return `data=${train}/${val}/${test}`;
+    }
+    if (total > 0) {
+      return `data=total ${total}`;
+    }
+    return "data=-";
   }
 
   return (
@@ -178,7 +233,7 @@ export default function ModelsView({ models, modelInfos, latest, onRefresh, onDe
             <th className="px-2 py-3 font-medium">方式</th>
             <th className="px-2 py-3 font-medium">エンジン</th>
             <th className="px-2 py-3 font-medium">作成日</th>
-            <th className="px-2 py-3 font-medium">比率 / 件数(train/val/test)</th>
+            <th className="px-2 py-3 font-medium">{allOcr ? "前処理 / 学習 / Aug / データ" : "比率 / 件数(train/val/test)"}</th>
             <th className="px-2 py-3 font-medium">状態</th>
           </tr>
         </thead>
@@ -188,6 +243,7 @@ export default function ModelsView({ models, modelInfos, latest, onRefresh, onDe
             const checked = selectedModels.includes(name);
             const ratio = ratioText(name);
             const counts = countText(name);
+            const isOcr = trainingFamily(name) === "ocr";
             return (
               <tr key={name} className="border-b border-border/80 transition hover:bg-[#3b444e]/65">
                 <td className="px-2 py-3">
@@ -204,11 +260,21 @@ export default function ModelsView({ models, modelInfos, latest, onRefresh, onDe
                 <td className="px-2 py-3 text-muted">{engineName(name)}</td>
                 <td className="px-2 py-3 text-muted">{formatDateTime(createdAt(name))}</td>
                 <td className="px-2 py-3 text-muted">
-                  <div className="flex items-center gap-2">
-                    <span>{ratio}</span>
-                    <span className="text-text">|</span>
-                    <span>{counts === "-" ? "-" : `${counts} 件`}</span>
-                  </div>
+                  {isOcr ? (
+                    <div className="flex flex-col gap-1">
+                      <span>{ocrPreprocessText(name)}</span>
+                      <span>{ocrTrainingText(name)}</span>
+                      <span>
+                        {ocrAugText(name)} | {ocrDataText(name)}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <span>{ratio}</span>
+                      <span className="text-text">|</span>
+                      <span>{counts === "-" ? "-" : `${counts} 件`}</span>
+                    </div>
+                  )}
                 </td>
                 <td className="px-2 py-3">
                   {isLatest ? (

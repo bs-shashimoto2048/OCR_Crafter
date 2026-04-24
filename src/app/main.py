@@ -6,6 +6,8 @@ import subprocess
 import time
 import io
 import json
+import base64
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -67,7 +69,7 @@ from .services.ocr_pipeline import (
     run_paddleocr_training,
     save_ocr_prediction_log,
 )
-from .services.preprocess import preview_preprocess, run_preprocess
+from .services.preprocess import build_preprocess_config, preview_preprocess, preprocess_image_for_model, run_preprocess
 from .services.training_image_builder import (
     detect_bboxes_with_yolo,
     export_selected_crops,
@@ -198,6 +200,64 @@ def _shutdown_app(frontend_port: Optional[int]) -> None:
 
     time.sleep(0.2)
     _safe_kill(current_pid)
+
+
+def _image_to_data_url(image: Image.Image, max_side: int = 256) -> str:
+    buf = io.BytesIO()
+    preview = image.copy()
+    if max_side > 0:
+        preview.thumbnail((max_side, max_side), Image.LANCZOS)
+    preview.save(buf, format="PNG")
+    encoded = base64.b64encode(buf.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
+def _referenced_ocr_dataset_roots(project_id: str) -> set[Path]:
+    paths = ensure_project_directories(project_id)
+    roots: set[Path] = set()
+    for meta_path in paths.models.glob("*.ocr.json"):
+        if not meta_path.is_file():
+            continue
+        try:
+            payload = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            continue
+        root_raw = str(payload.get("dataset_root") or "").strip()
+        if not root_raw:
+            continue
+        try:
+            roots.add(Path(root_raw).expanduser().resolve())
+        except Exception:  # noqa: BLE001
+            continue
+    return roots
+
+
+def _cleanup_failed_ocr_dataset(project_id: str, dataset_dir: str) -> bool:
+    raw = str(dataset_dir or "").strip()
+    if not raw:
+        return False
+    try:
+        dataset_path = Path(raw).expanduser().resolve()
+    except Exception:  # noqa: BLE001
+        return False
+    if not dataset_path.exists() or not dataset_path.is_dir():
+        return False
+
+    paths = ensure_project_directories(project_id)
+    allowed_roots = {
+        (paths.outputs / "ocr_dataset").resolve(),
+        (paths.outputs / "ocr_dataset_from_logs").resolve(),
+    }
+    # プロジェクト管理下の自動生成データのみ削除対象にする
+    if not any(root == dataset_path or root in dataset_path.parents for root in allowed_roots):
+        return False
+
+    # 既存モデルが参照しているデータは削除しない
+    if dataset_path in _referenced_ocr_dataset_roots(project_id):
+        return False
+
+    shutil.rmtree(dataset_path, ignore_errors=True)
+    return True
 
 
 def _attach_preview_prediction(
@@ -644,11 +704,22 @@ def _run_training_job(job_id: str) -> None:
         )
     except Exception as e:  # noqa: BLE001
         current = fetch_training_job(job_id) or job
+        failed_message = str(e)
+        cleaned = False
+        try:
+            cleaned = _cleanup_failed_ocr_dataset(
+                project_id=str(current.get("project_id") or "default"),
+                dataset_dir=str(current.get("dataset_dir") or ""),
+            )
+        except Exception:  # noqa: BLE001
+            cleaned = False
+        if cleaned:
+            failed_message = f"{failed_message} (failed dataset cleaned)"
         upsert_training_job(
             {
                 **current,
                 "status": "failed",
-                "message": str(e),
+                "message": failed_message,
                 "updated_at": _now_iso(),
             }
         )
@@ -932,6 +1003,17 @@ async def predict(
     try:
         langs = _normalize_easyocr_langs(easyocr_langs)
         overrides = _parse_preprocess_overrides_json(preprocess_overrides_json)
+        preprocess_preview_data_url = ""
+        if bool(apply_preprocess):
+            try:
+                preprocess_cfg = build_preprocess_config(overrides) if overrides else None
+                pre = preprocess_image_for_model(tmp_path, force_image_type=None, config=preprocess_cfg)
+                processed = pre.get("processed")
+                if processed is not None:
+                    processed_img = Image.fromarray(processed).convert("L")
+                    preprocess_preview_data_url = _image_to_data_url(processed_img)
+            except Exception:  # noqa: BLE001
+                preprocess_preview_data_url = ""
         prediction = predict_from_image(
             tmp_path,
             model_type=(model_type or None),
@@ -942,6 +1024,7 @@ async def predict(
             apply_preprocess=bool(apply_preprocess),
             preprocess_overrides=overrides,
         )
+        prediction["preprocess_preview_data_url"] = preprocess_preview_data_url
         save_ocr_prediction_log(
             resolved,
             {

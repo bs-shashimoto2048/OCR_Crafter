@@ -11,6 +11,7 @@ const IMAGE_ZOOM_MIN = 0.1;
 const IMAGE_ZOOM_MAX = 4.0;
 const RESIZE_AXES = ["width", "height"];
 const COPY_PASTE_OFFSET = 12;
+const SERIES_FILTER_ALL = "__all__";
 
 function loadImageBuilderState() {
   const defaults = {
@@ -125,6 +126,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
   const [step3PaneHeight, setStep3PaneHeight] = useState(0);
   const [imageZoom, setImageZoom] = useState(1);
   const [copiedBboxes, setCopiedBboxes] = useState([]);
+  const [seriesFilter, setSeriesFilter] = useState(SERIES_FILTER_ALL);
 
   function cloneDetections(rows) {
     return (rows || []).map((row) => ({ ...row }));
@@ -217,6 +219,21 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
   }, [rawPreviewUrl]);
 
   const selectedCount = useMemo(() => detections.filter((row) => row.selected).length, [detections]);
+  const seriesCounts = useMemo(() => {
+    const counts = new Map();
+    detections.forEach((row) => {
+      const key = String(row.label || "").trim() || "(unlabeled)";
+      counts.set(key, (counts.get(key) || 0) + 1);
+    });
+    return counts;
+  }, [detections]);
+  const seriesOptions = useMemo(() => Array.from(seriesCounts.keys()).sort((a, b) => a.localeCompare(b)), [seriesCounts]);
+  const filteredDetections = useMemo(() => {
+    if (seriesFilter === SERIES_FILTER_ALL) {
+      return detections;
+    }
+    return detections.filter((row) => (String(row.label || "").trim() || "(unlabeled)") === seriesFilter);
+  }, [detections, seriesFilter]);
   const currentImageDataUrl = detectResult?.image_data_url || resizePreview?.image_data_url || rawPreviewUrl || "";
   const currentImageSize = detectResult?.resized_size || resizePreview?.resized_size || null;
   const step1Done = Boolean(file && (!useResize || resizePreview?.resized_size || detectResult || exportResult));
@@ -501,6 +518,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
     setResizePreview(null);
     setDetectResult(null);
     setDetections([]);
+    setSeriesFilter(SERIES_FILTER_ALL);
     setBboxUndoStack([]);
     setEditingBboxId(null);
     setFocusedBboxId(null);
@@ -598,6 +616,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       setResizePreview(data);
       setDetectResult(null);
       setDetections([]);
+      setSeriesFilter(SERIES_FILTER_ALL);
       setExportResult(null);
       setOk(`リサイズ完了: ${data.resized_size?.[0]} x ${data.resized_size?.[1]}`);
       goStep(2);
@@ -644,6 +663,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       const data = await res.json();
       setDetectResult(data);
       setDetections((data.detections || []).map((row) => ({ ...row, selected: row.selected !== false })));
+      setSeriesFilter(SERIES_FILTER_ALL);
       setBboxUndoStack([]);
       setEditingBboxId(null);
       setFocusedBboxId(null);
@@ -951,6 +971,15 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       ? `${Math.max(1, Math.round(Number(currentImageSize[0]) * imageZoom))}px`
       : undefined;
 
+  useEffect(() => {
+    if (seriesFilter === SERIES_FILTER_ALL) {
+      return;
+    }
+    if (!seriesOptions.includes(seriesFilter)) {
+      setSeriesFilter(SERIES_FILTER_ALL);
+    }
+  }, [seriesFilter, seriesOptions]);
+
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_560px] gap-4">
       <div>
@@ -1255,6 +1284,8 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
             >
               <div className="mb-2 flex gap-2">
                 <Button
+                  size="sm"
+                  className="whitespace-nowrap px-2"
                   variant={editMode ? "primary" : "secondary"}
                   onClick={() => {
                     setEditMode((prev) => !prev);
@@ -1263,41 +1294,78 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                     }
                   }}
                 >
-                  {editMode ? "編集モード ON" : "編集モード OFF"}
-                </Button>
-                <Button variant="secondary" onClick={undoDetections} disabled={bboxUndoStack.length === 0}>
-                  Undo
-                </Button>
-                <Button variant="secondary" onClick={copyBboxes} disabled={detections.length === 0}>
-                  コピー
-                </Button>
-                <Button variant="secondary" onClick={pasteBboxes} disabled={copiedBboxes.length === 0}>
-                  貼り付け
+                  {editMode ? "Edit: ON" : "Edit: OFF"}
                 </Button>
                 <Button
+                  size="sm"
+                  className="whitespace-nowrap px-2"
+                  variant="secondary"
+                  onClick={undoDetections}
+                  disabled={bboxUndoStack.length === 0}
+                >
+                  Undo
+                </Button>
+                <Button
+                  size="sm"
+                  className="whitespace-nowrap px-2"
+                  variant="secondary"
+                  onClick={copyBboxes}
+                  disabled={detections.length === 0}
+                >
+                  Copy
+                </Button>
+                <Button
+                  size="sm"
+                  className="whitespace-nowrap px-2"
+                  variant="secondary"
+                  onClick={pasteBboxes}
+                  disabled={copiedBboxes.length === 0}
+                >
+                  Paste
+                </Button>
+                <Button
+                  size="sm"
+                  className="whitespace-nowrap px-2"
                   variant="secondary"
                   onClick={() => setDetections((prev) => prev.map((row) => ({ ...row, selected: true })))}
                   disabled={detections.length === 0}
                 >
-                  全選択
+                  Select All
                 </Button>
                 <Button
+                  size="sm"
+                  className="whitespace-nowrap px-2"
                   variant="secondary"
                   onClick={() => setDetections((prev) => prev.map((row) => ({ ...row, selected: false })))}
                   disabled={detections.length === 0}
                 >
-                  全解除
+                  Clear All
                 </Button>
+              </div>
+              <div className="mb-2 flex items-center gap-2">
+                <label className="text-xs text-muted">Series Filter</label>
+                <select
+                  className="app-select h-8 max-w-[260px] py-0 text-xs"
+                  value={seriesFilter}
+                  onChange={(e) => setSeriesFilter(e.target.value)}
+                >
+                  <option value={SERIES_FILTER_ALL}>All ({detections.length})</option>
+                  {seriesOptions.map((name) => (
+                    <option key={name} value={name}>
+                      {name} ({seriesCounts.get(name) || 0})
+                    </option>
+                  ))}
+                </select>
               </div>
               <p className="mb-2 text-xs text-muted">選択件数: {selectedCount} / {detections.length}</p>
               <p className="mb-2 text-xs text-muted">
                 画像上のクリック/ダブルクリックで選択・編集できます。必要時は編集モードをONにしてください。
               </p>
               <div className="min-h-0 flex-1 space-y-1 overflow-auto rounded-lg border border-border bg-card/45 p-2">
-                {detections.length === 0 ? (
+                {filteredDetections.length === 0 ? (
                   <p className="text-xs text-muted">検出結果がありません</p>
                 ) : (
-                  detections.map((row) => (
+                  filteredDetections.map((row) => (
                     <div
                       key={row.id}
                       ref={(el) => {
@@ -1330,14 +1398,14 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                             focusBboxCard(row.id);
                           }}
                         >
-                          編集
+                          Edit
                         </button>
                         <button
                           type="button"
                           className="rounded border border-danger/50 px-1 text-[10px] text-danger"
                           onClick={() => deleteBbox(row.id)}
                         >
-                          削除
+                          Delete
                         </button>
                         <input type="checkbox" checked={!!row.selected} onChange={() => toggleDetection(row.id)} />
                       </div>
@@ -1360,11 +1428,11 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
               </div>
               <div className="mt-3">
                 <div className="flex items-center justify-between gap-2">
-                  <Button onClick={() => goStep(4)} disabled={!step3Done}>
-                    次へ
+                  <Button size="sm" className="whitespace-nowrap px-2" onClick={() => goStep(4)} disabled={!step3Done}>
+                    Next
                   </Button>
-                  <Button variant="secondary" onClick={() => goStep(2)}>
-                    前へ
+                  <Button size="sm" className="whitespace-nowrap px-2" variant="secondary" onClick={() => goStep(2)}>
+                    Back
                   </Button>
                 </div>
               </div>

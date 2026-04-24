@@ -695,11 +695,22 @@ def _register_ocr_model(
     image_shape: list[int],
     dataset_root: Path,
     job_id: str,
+    epochs: int,
+    batch_size: int,
+    learning_rate: float,
 ) -> str:
     paths = ensure_project_directories(project_id)
     paths.models.mkdir(parents=True, exist_ok=True)
     name = f"ocr_{engine}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     model_meta_path = paths.models / f"{name}.ocr.json"
+    dataset_meta = {}
+    dataset_meta_path = dataset_root / "meta.json"
+    if dataset_meta_path.exists() and dataset_meta_path.is_file():
+        try:
+            dataset_meta = json.loads(dataset_meta_path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            dataset_meta = {}
+    counts = dataset_meta.get("counts") if isinstance(dataset_meta.get("counts"), dict) else {}
     payload = {
         "name": name,
         "training_family": "ocr",
@@ -711,6 +722,32 @@ def _register_ocr_model(
         "image_shape": image_shape,
         "dataset_root": str(dataset_root.resolve()),
         "job_id": job_id,
+        "training_params": {
+            "epochs": int(epochs),
+            "batch_size": int(batch_size),
+            "learning_rate": float(learning_rate),
+        },
+        "dataset_split_ratio": {
+            "train": float(dataset_meta.get("train_ratio", 0.0)) if isinstance(dataset_meta, dict) else 0.0,
+            "val": float(dataset_meta.get("val_ratio", 0.0)) if isinstance(dataset_meta, dict) else 0.0,
+            "test": float(dataset_meta.get("test_ratio", 0.0)) if isinstance(dataset_meta, dict) else 0.0,
+        },
+        "dataset_split_counts": {
+            "train": int(counts.get("train", 0)) if counts else 0,
+            "val": int(counts.get("val", 0)) if counts else 0,
+            "test": int(counts.get("test", 0)) if counts else 0,
+            "total": int(dataset_meta.get("count", 0)) if isinstance(dataset_meta, dict) else 0,
+        },
+        "preprocess": {
+            "image_shape": image_shape,
+            "image_types": dataset_meta.get("image_types", []) if isinstance(dataset_meta.get("image_types"), list) else [],
+            "charset": str(dataset_meta.get("charset") or charset),
+            "max_text_length": int(dataset_meta.get("max_text_length", max_text_length)),
+        },
+        "augmentation": {
+            "enabled": bool(dataset_meta.get("use_augmentation")) if "use_augmentation" in dataset_meta else None,
+            "strength": int(dataset_meta.get("aug_strength", 0)) if "aug_strength" in dataset_meta else None,
+        },
         "created_at": datetime.now().isoformat(),
     }
     model_meta_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -853,6 +890,9 @@ def run_paddleocr_training(
         image_shape=image_shape,
         dataset_root=dataset_root,
         job_id=job_id,
+        epochs=int(epochs),
+        batch_size=int(batch_size),
+        learning_rate=0.0,
     )
     return {
         "model_name": model_name,
