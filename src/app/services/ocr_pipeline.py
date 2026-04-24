@@ -16,6 +16,7 @@ from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
 from ..project_paths import ensure_project_directories
 from .labels import read_labels
+from .model_registry import resolve_ocr_model_meta
 
 OCR_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 CONF_THRESHOLD = 0.9
@@ -857,6 +858,9 @@ def _register_ocr_model(
     epochs: int,
     batch_size: int,
     learning_rate: float,
+    training_mode: str = "scratch",
+    init_source_type: str = "scratch",
+    init_source_value: str = "",
 ) -> str:
     paths = ensure_project_directories(project_id)
     paths.models.mkdir(parents=True, exist_ok=True)
@@ -892,6 +896,9 @@ def _register_ocr_model(
             "epochs": int(epochs),
             "batch_size": int(batch_size),
             "learning_rate": float(learning_rate),
+            "training_mode": str(training_mode or "scratch"),
+            "init_source_type": str(init_source_type or "scratch"),
+            "init_source_value": str(init_source_value or ""),
         },
         "dataset_split_ratio": {
             "train": float(dataset_meta.get("train_ratio", 0.0)) if isinstance(dataset_meta, dict) else 0.0,
@@ -930,6 +937,9 @@ def run_paddleocr_training(
     charset: str,
     max_text_length: int,
     image_shape: list[int],
+    training_mode: str = "scratch",
+    init_source_type: str = "scratch",
+    init_source_value: Optional[str] = None,
     log_path: Path,
 ) -> dict[str, Any]:
     _ensure_paddle_training_dependencies()
@@ -981,6 +991,37 @@ def run_paddleocr_training(
     paths = ensure_project_directories(project_id)
     save_model_dir = paths.models / "ocr_runs" / f"{job_id}"
     save_model_dir.mkdir(parents=True, exist_ok=True)
+    normalized_training_mode = str(training_mode or "scratch").strip().lower()
+    normalized_init_source_type = str(init_source_type or "scratch").strip().lower()
+    resolved_init_source_value = str(init_source_value or "").strip()
+    if normalized_training_mode not in {"scratch", "finetune"}:
+        raise ValueError(f"unsupported training_mode: {training_mode}")
+    if normalized_init_source_type not in {"scratch", "ocr_model"}:
+        raise ValueError(f"unsupported init_source_type: {init_source_type}")
+    if normalized_training_mode == "scratch":
+        normalized_init_source_type = "scratch"
+        resolved_init_source_value = ""
+
+    init_checkpoint_prefix = ""
+    if normalized_training_mode == "finetune":
+        if normalized_init_source_type != "ocr_model":
+            raise ValueError("OCR finetune requires init_source_type=ocr_model")
+        if not resolved_init_source_value:
+            raise ValueError("init_source_value is required for OCR finetune")
+        init_model = resolve_ocr_model_meta(
+            project_id=project_id,
+            model=resolved_init_source_value,
+            engine="paddleocr",
+        )
+        if init_model is None:
+            raise FileNotFoundError(f"OCR model not found for fine-tune: {resolved_init_source_value}")
+        checkpoint_dir_raw = str(init_model.get("checkpoint_dir") or init_model.get("train_dir") or "").strip()
+        if not checkpoint_dir_raw:
+            raise FileNotFoundError(f"checkpoint_dir not found in OCR model metadata: {resolved_init_source_value}")
+        checkpoint_dir = Path(checkpoint_dir_raw).expanduser().resolve()
+        if not checkpoint_dir.exists() or not checkpoint_dir.is_dir():
+            raise FileNotFoundError(f"checkpoint_dir not found: {checkpoint_dir}")
+        init_checkpoint_prefix = str(_resolve_export_model_prefix(checkpoint_dir))
 
     command = [
         sys.executable,
@@ -999,10 +1040,16 @@ def run_paddleocr_training(
         f"Eval.dataset.label_file_list=['{str(val_txt)}']",
         f"Train.loader.batch_size_per_card={effective_train_batch}",
         f"Eval.loader.batch_size_per_card={effective_eval_batch}",
+        "Global.pretrained_model=",
+        (f"Global.checkpoints={init_checkpoint_prefix}" if init_checkpoint_prefix else "Global.checkpoints="),
     ]
 
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("w", encoding="utf-8") as log_file:
+        log_file.write(
+            f"[{datetime.now().isoformat()}] init_mode: mode={normalized_training_mode} "
+            f"type={normalized_init_source_type} value={resolved_init_source_value or '-'}\n"
+        )
         if auto_split_used:
             train_count = len(_read_ocr_label_lines(train_txt))
             val_count = len(_read_ocr_label_lines(val_txt))
@@ -1073,6 +1120,9 @@ def run_paddleocr_training(
         epochs=int(epochs),
         batch_size=int(batch_size),
         learning_rate=0.0,
+        training_mode=normalized_training_mode,
+        init_source_type=normalized_init_source_type,
+        init_source_value=resolved_init_source_value,
     )
     return {
         "model_name": model_name,
@@ -1081,6 +1131,9 @@ def run_paddleocr_training(
         "inference_dir": str(inference_dir),
         "log_path": str(log_path),
         "dataset_dir": str(dataset_root),
+        "training_mode": normalized_training_mode,
+        "init_source_type": normalized_init_source_type,
+        "init_source_value": resolved_init_source_value,
     }
 
 

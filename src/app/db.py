@@ -31,6 +31,11 @@ def init_db() -> None:
                 epochs INTEGER NOT NULL,
                 batch_size INTEGER NOT NULL,
                 learning_rate REAL NOT NULL DEFAULT 0.001,
+                training_mode TEXT NOT NULL DEFAULT 'scratch',
+                init_source_type TEXT,
+                init_source_value TEXT,
+                freeze_backbone_epochs INTEGER NOT NULL DEFAULT 0,
+                backbone_lr_scale REAL NOT NULL DEFAULT 1.0,
                 charset TEXT,
                 max_text_length INTEGER,
                 dataset_dir TEXT,
@@ -55,6 +60,16 @@ def init_db() -> None:
             conn.execute("ALTER TABLE training_jobs ADD COLUMN engine TEXT NOT NULL DEFAULT 'custom'")
         if "learning_rate" not in columns:
             conn.execute("ALTER TABLE training_jobs ADD COLUMN learning_rate REAL NOT NULL DEFAULT 0.001")
+        if "training_mode" not in columns:
+            conn.execute("ALTER TABLE training_jobs ADD COLUMN training_mode TEXT NOT NULL DEFAULT 'scratch'")
+        if "init_source_type" not in columns:
+            conn.execute("ALTER TABLE training_jobs ADD COLUMN init_source_type TEXT")
+        if "init_source_value" not in columns:
+            conn.execute("ALTER TABLE training_jobs ADD COLUMN init_source_value TEXT")
+        if "freeze_backbone_epochs" not in columns:
+            conn.execute("ALTER TABLE training_jobs ADD COLUMN freeze_backbone_epochs INTEGER NOT NULL DEFAULT 0")
+        if "backbone_lr_scale" not in columns:
+            conn.execute("ALTER TABLE training_jobs ADD COLUMN backbone_lr_scale REAL NOT NULL DEFAULT 1.0")
         if "charset" not in columns:
             conn.execute("ALTER TABLE training_jobs ADD COLUMN charset TEXT")
         if "max_text_length" not in columns:
@@ -73,6 +88,11 @@ def init_db() -> None:
 def upsert_training_job(job: dict[str, Any]) -> None:
     training_family = str(job.get("training_family") or "classification")
     engine = str(job.get("engine") or ("custom" if training_family == "classification" else "paddleocr"))
+    training_mode = str(job.get("training_mode") or "scratch")
+    init_source_type = job.get("init_source_type")
+    init_source_value = job.get("init_source_value")
+    freeze_backbone_epochs = int(job.get("freeze_backbone_epochs") or 0)
+    backbone_lr_scale = float(job.get("backbone_lr_scale") or 1.0)
     charset = job.get("charset")
     max_text_length = job.get("max_text_length")
     dataset_dir = job.get("dataset_dir")
@@ -84,8 +104,8 @@ def upsert_training_job(job: dict[str, Any]) -> None:
         conn.execute(
             """
             INSERT INTO training_jobs (
-                id, project_id, training_family, engine, model_type, epochs, batch_size, learning_rate, charset, max_text_length, dataset_dir, paddle_repo_dir, image_shape, status, message, model_path, log_path, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, project_id, training_family, engine, model_type, epochs, batch_size, learning_rate, training_mode, init_source_type, init_source_value, freeze_backbone_epochs, backbone_lr_scale, charset, max_text_length, dataset_dir, paddle_repo_dir, image_shape, status, message, model_path, log_path, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 project_id=excluded.project_id,
                 training_family=excluded.training_family,
@@ -94,6 +114,11 @@ def upsert_training_job(job: dict[str, Any]) -> None:
                 epochs=excluded.epochs,
                 batch_size=excluded.batch_size,
                 learning_rate=excluded.learning_rate,
+                training_mode=excluded.training_mode,
+                init_source_type=excluded.init_source_type,
+                init_source_value=excluded.init_source_value,
+                freeze_backbone_epochs=excluded.freeze_backbone_epochs,
+                backbone_lr_scale=excluded.backbone_lr_scale,
                 charset=excluded.charset,
                 max_text_length=excluded.max_text_length,
                 dataset_dir=excluded.dataset_dir,
@@ -114,6 +139,11 @@ def upsert_training_job(job: dict[str, Any]) -> None:
                 job["epochs"],
                 job["batch_size"],
                 job.get("learning_rate", 1e-3),
+                training_mode,
+                init_source_type,
+                init_source_value,
+                freeze_backbone_epochs,
+                backbone_lr_scale,
                 charset,
                 max_text_length,
                 dataset_dir,
@@ -134,7 +164,7 @@ def fetch_training_job(job_id: str) -> Optional[dict[str, Any]]:
     with get_conn() as conn:
         row = conn.execute(
             """
-            SELECT id, project_id, training_family, engine, model_type, epochs, batch_size, learning_rate, charset, max_text_length, dataset_dir, paddle_repo_dir, image_shape, status, message, model_path, log_path, created_at, updated_at
+            SELECT id, project_id, training_family, engine, model_type, epochs, batch_size, learning_rate, training_mode, init_source_type, init_source_value, freeze_backbone_epochs, backbone_lr_scale, charset, max_text_length, dataset_dir, paddle_repo_dir, image_shape, status, message, model_path, log_path, created_at, updated_at
             FROM training_jobs WHERE id = ?
             """,
             (job_id,),
@@ -152,6 +182,11 @@ def fetch_training_job(job_id: str) -> Optional[dict[str, Any]]:
         "epochs",
         "batch_size",
         "learning_rate",
+        "training_mode",
+        "init_source_type",
+        "init_source_value",
+        "freeze_backbone_epochs",
+        "backbone_lr_scale",
         "charset",
         "max_text_length",
         "dataset_dir",

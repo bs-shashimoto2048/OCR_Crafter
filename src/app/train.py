@@ -2,7 +2,7 @@ import argparse
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Literal, Optional
 
 import torch
 from torch import nn
@@ -24,6 +24,97 @@ def build_model(num_classes: int) -> nn.Module:
     in_features = model.fc.in_features
     model.fc = nn.Linear(in_features, num_classes)
     return model
+
+
+def _load_checkpoint_state(path: Path) -> dict[str, Any]:
+    payload = torch.load(path, map_location="cpu")
+    if not isinstance(payload, dict):
+        raise ValueError(f"invalid checkpoint format: {path}")
+    state_dict = payload.get("state_dict")
+    if not isinstance(state_dict, dict):
+        raise ValueError(f"state_dict not found in checkpoint: {path}")
+    return payload
+
+
+def _resolve_existing_model_path(project_id: Optional[str], model_name: str) -> Path:
+    paths = ensure_project_directories(project_id)
+    safe_name = Path(str(model_name or "").strip()).name
+    if not safe_name:
+        raise ValueError("init_source_value is required when init_source_type=classification_model")
+    candidate = paths.models / safe_name
+    if not candidate.exists() or not candidate.is_file():
+        raise FileNotFoundError(f"classification model not found: {safe_name}")
+    if candidate.suffix.lower() != ".pt":
+        raise ValueError(f"classification model must be .pt: {safe_name}")
+    return candidate
+
+
+def _build_model_with_initializer(
+    num_classes: int,
+    init_source_type: Literal["scratch", "imagenet", "classification_model"],
+    init_source_value: Optional[str],
+    project_id: Optional[str],
+) -> tuple[nn.Module, dict[str, Any]]:
+    init_type = str(init_source_type or "scratch").strip().lower()
+    if init_type not in {"scratch", "imagenet", "classification_model"}:
+        raise ValueError(f"unsupported init_source_type: {init_source_type}")
+
+    init_meta: dict[str, Any] = {
+        "init_source_type": init_type,
+        "init_source_value": str(init_source_value or ""),
+        "loaded_from": "",
+    }
+
+    if init_type == "imagenet":
+        model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
+    else:
+        model = models.resnet18(weights=None)
+
+    in_features = model.fc.in_features
+    model.fc = nn.Linear(in_features, num_classes)
+
+    if init_type == "classification_model":
+        model_path = _resolve_existing_model_path(project_id=project_id, model_name=str(init_source_value or ""))
+        payload = _load_checkpoint_state(model_path)
+        source_state = payload.get("state_dict") if isinstance(payload.get("state_dict"), dict) else {}
+        filtered_state = {k: v for k, v in source_state.items() if not str(k).startswith("fc.")}
+        missing_keys, unexpected_keys = model.load_state_dict(filtered_state, strict=False)
+        unexpected_non_fc = [k for k in unexpected_keys if not str(k).startswith("fc.")]
+        if unexpected_non_fc:
+            raise ValueError(
+                f"unsupported checkpoint keys for fine-tune initialization: {', '.join(unexpected_non_fc[:5])}"
+            )
+        init_meta["loaded_from"] = str(model_path.resolve())
+        init_meta["missing_keys"] = [str(k) for k in missing_keys]
+
+    return model, init_meta
+
+
+def _set_backbone_trainable(model: nn.Module, trainable: bool) -> None:
+    for name, param in model.named_parameters():
+        if name.startswith("fc."):
+            continue
+        param.requires_grad = bool(trainable)
+
+
+def _build_optimizer(
+    model: nn.Module,
+    learning_rate: float,
+    backbone_lr_scale: float,
+    use_scaled_backbone_lr: bool,
+) -> torch.optim.Optimizer:
+    head_params = list(model.fc.parameters())
+    backbone_params = [param for name, param in model.named_parameters() if not name.startswith("fc.")]
+    if use_scaled_backbone_lr:
+        backbone_lr = float(learning_rate) * float(backbone_lr_scale)
+    else:
+        backbone_lr = float(learning_rate)
+    return torch.optim.Adam(
+        [
+            {"params": backbone_params, "lr": float(backbone_lr)},
+            {"params": head_params, "lr": float(learning_rate)},
+        ]
+    )
 
 
 def _image_size_for_model_type(settings: dict[str, Any], model_type: str) -> tuple[int, int]:
@@ -99,6 +190,11 @@ def run_training(
     epochs: int,
     batch_size: int,
     learning_rate: float,
+    training_mode: Literal["scratch", "finetune"] = "scratch",
+    init_source_type: Literal["scratch", "imagenet", "classification_model"] = "scratch",
+    init_source_value: Optional[str] = None,
+    freeze_backbone_epochs: int = 0,
+    backbone_lr_scale: float = 1.0,
     progress_callback: Optional[Callable[[dict[str, Any], int], None]] = None,
 ) -> dict[str, Any]:
     settings = get_settings()
@@ -170,14 +266,40 @@ def run_training(
         else None
     )
 
+    normalized_training_mode = str(training_mode or "scratch").strip().lower()
+    if normalized_training_mode not in {"scratch", "finetune"}:
+        raise ValueError(f"unsupported training_mode: {training_mode}")
+    normalized_init_source_type = str(init_source_type or "scratch").strip().lower()
+    if normalized_training_mode == "scratch":
+        normalized_init_source_type = "scratch"
+        init_source_value = None
+        freeze_backbone_epochs = 0
+        backbone_lr_scale = 1.0
+    elif normalized_init_source_type == "scratch":
+        raise ValueError("finetune mode requires init_source_type other than scratch")
+
     device = detect_device()
-    model = build_model(num_classes=len(train_ds.classes)).to(device)
+    model, init_meta = _build_model_with_initializer(
+        num_classes=len(train_ds.classes),
+        init_source_type=normalized_init_source_type,  # type: ignore[arg-type]
+        init_source_value=init_source_value,
+        project_id=paths.project_id,
+    )
+    model = model.to(device)
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = _build_optimizer(
+        model=model,
+        learning_rate=float(learning_rate),
+        backbone_lr_scale=float(backbone_lr_scale),
+        use_scaled_backbone_lr=(normalized_training_mode == "finetune"),
+    )
 
     history = []
+    freeze_epochs = int(max(0, freeze_backbone_epochs))
     for epoch in range(1, epochs + 1):
+        if normalized_training_mode == "finetune":
+            _set_backbone_trainable(model, trainable=(epoch > freeze_epochs))
         model.train()
         train_loss = 0.0
         train_correct = 0
@@ -200,6 +322,7 @@ def run_training(
             "epoch": epoch,
             "train_loss": train_loss / max(train_total, 1),
             "train_acc": train_correct / max(train_total, 1),
+            "backbone_frozen": bool(normalized_training_mode == "finetune" and epoch <= freeze_epochs),
         }
 
         if val_loader is not None:
@@ -239,6 +362,12 @@ def run_training(
             "image_size": list(image_size),
             "dataset_split_ratio": dataset_split_ratio,
             "dataset_split_counts": dataset_split_counts,
+            "training_mode": normalized_training_mode,
+            "init_source_type": normalized_init_source_type,
+            "init_source_value": str(init_source_value or ""),
+            "freeze_backbone_epochs": int(freeze_epochs),
+            "backbone_lr_scale": float(backbone_lr_scale if normalized_training_mode == "finetune" else 1.0),
+            "init_meta": init_meta,
             "created_at": datetime.now().isoformat(),
         },
         model_path,
@@ -253,6 +382,11 @@ def run_training(
                 "classes": train_ds.classes,
                 "dataset_split_ratio": dataset_split_ratio,
                 "dataset_split_counts": dataset_split_counts,
+                "training_mode": normalized_training_mode,
+                "init_source_type": normalized_init_source_type,
+                "init_source_value": str(init_source_value or ""),
+                "freeze_backbone_epochs": int(freeze_epochs),
+                "backbone_lr_scale": float(backbone_lr_scale if normalized_training_mode == "finetune" else 1.0),
             },
             f,
             ensure_ascii=False,
@@ -269,6 +403,11 @@ def run_training(
         "dataset_val_dir": str(val_dir),
         "dataset_split_ratio": dataset_split_ratio,
         "dataset_split_counts": dataset_split_counts,
+        "training_mode": normalized_training_mode,
+        "init_source_type": normalized_init_source_type,
+        "init_source_value": str(init_source_value or ""),
+        "freeze_backbone_epochs": int(freeze_epochs),
+        "backbone_lr_scale": float(backbone_lr_scale if normalized_training_mode == "finetune" else 1.0),
         "classes": train_ds.classes,
         "history": history,
     }
@@ -284,6 +423,16 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=int(settings.get("training", {}).get("default_epochs", 5)))
     parser.add_argument("--batch-size", type=int, default=int(settings.get("training", {}).get("default_batch_size", 32)))
     parser.add_argument("--learning-rate", type=float, default=float(settings.get("training", {}).get("default_lr", 1e-3)))
+    parser.add_argument("--training-mode", type=str, choices=["scratch", "finetune"], default="scratch")
+    parser.add_argument(
+        "--init-source-type",
+        type=str,
+        choices=["scratch", "imagenet", "classification_model"],
+        default="scratch",
+    )
+    parser.add_argument("--init-source-value", type=str, default="")
+    parser.add_argument("--freeze-backbone-epochs", type=int, default=0)
+    parser.add_argument("--backbone-lr-scale", type=float, default=1.0)
 
     args = parser.parse_args()
     result = run_training(
@@ -293,6 +442,11 @@ def main() -> None:
         epochs=args.epochs,
         batch_size=args.batch_size,
         learning_rate=args.learning_rate,
+        training_mode=args.training_mode,  # type: ignore[arg-type]
+        init_source_type=args.init_source_type,  # type: ignore[arg-type]
+        init_source_value=(args.init_source_value or None),
+        freeze_backbone_epochs=args.freeze_backbone_epochs,
+        backbone_lr_scale=args.backbone_lr_scale,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

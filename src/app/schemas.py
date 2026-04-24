@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -31,6 +31,11 @@ class TrainRequest(BaseModel):
     epochs: int = Field(default=5, ge=1, le=500)
     batch_size: int = Field(default=32, ge=1, le=1024)
     learning_rate: float = Field(default=1e-3, gt=0)
+    training_mode: Literal["scratch", "finetune"] = Field(default="finetune")
+    init_source_type: Literal["scratch", "imagenet", "classification_model"] = Field(default="imagenet")
+    init_source_value: Optional[str] = Field(default=None)
+    freeze_backbone_epochs: int = Field(default=1, ge=0, le=100)
+    backbone_lr_scale: float = Field(default=0.1, gt=0, le=1.0)
 
 
 class ProjectCreateRequest(BaseModel):
@@ -109,6 +114,9 @@ class OcrTrainStartRequest(BaseModel):
     image_shape: list[int] = Field(default_factory=lambda: [3, 48, 320])
     batch_size: int = Field(default=16, ge=1, le=1024)
     epochs: int = Field(default=50, ge=1, le=2000)
+    training_mode: Literal["scratch", "finetune"] = Field(default="scratch")
+    init_source_type: Literal["scratch", "ocr_model"] = Field(default="scratch")
+    init_source_value: Optional[str] = Field(default=None)
 
 
 class OcrLogSaveRequest(BaseModel):

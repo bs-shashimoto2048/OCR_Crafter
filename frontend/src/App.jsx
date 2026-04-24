@@ -212,6 +212,10 @@ export default function App() {
   const [epochs, setEpochs] = useState(50);
   const [batchSize, setBatchSize] = useState(16);
   const [learningRate, setLearningRate] = useState(0.001);
+  const [clsInitSourceType, setClsInitSourceType] = useState("imagenet");
+  const [clsInitSourceValue, setClsInitSourceValue] = useState("latest");
+  const [freezeBackboneEpochs, setFreezeBackboneEpochs] = useState(1);
+  const [backboneLrScale, setBackboneLrScale] = useState(0.1);
   const [jobId, setJobId] = useState("");
   const [jobStatus, setJobStatus] = useState("idle");
   const [jobFamily, setJobFamily] = useState("classification");
@@ -228,6 +232,8 @@ export default function App() {
   const [ocrDatasetInfo, setOcrDatasetInfo] = useState(null);
   const [ocrFromLogsOnlyInvalid, setOcrFromLogsOnlyInvalid] = useState(true);
   const [ocrFromLogsIncludeCorrected, setOcrFromLogsIncludeCorrected] = useState(true);
+  const [ocrInitSourceType, setOcrInitSourceType] = useState("scratch");
+  const [ocrInitSourceValue, setOcrInitSourceValue] = useState("");
 
   const [models, setModels] = useState([]);
   const [modelInfos, setModelInfos] = useState({});
@@ -1098,8 +1104,13 @@ export default function App() {
     [images]
   );
 
+  const clsTrainingMode = clsInitSourceType === "scratch" ? "scratch" : "finetune";
+  const ocrTrainingMode = ocrInitSourceType === "scratch" ? "scratch" : "finetune";
   const canTrain = workflowState.datasetBuilt && savedLabeledCount > 0;
-  const canStartOcrTraining = ocrEngine === "paddleocr" && String(ocrDatasetDir || "").trim() !== "";
+  const canStartOcrTraining =
+    ocrEngine === "paddleocr" &&
+    String(ocrDatasetDir || "").trim() !== "" &&
+    (ocrTrainingMode === "scratch" || String(ocrInitSourceValue || "").trim() !== "");
   const workflowSteps = useMemo(() => {
     const labelDone = images.length > 0 && savedLabeledCount === images.length;
     const defs = [
@@ -1543,6 +1554,12 @@ export default function App() {
       return;
     }
     try {
+      const initType = String(clsInitSourceType || "imagenet").trim();
+      const initValueRaw = String(clsInitSourceValue || "").trim();
+      if (clsTrainingMode === "finetune" && initType === "classification_model" && !initValueRaw) {
+        notify("error", "既存モデルを使う場合は初期モデルを選択してください。");
+        return;
+      }
       const data = await request("/train/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1552,6 +1569,11 @@ export default function App() {
           epochs: Number(epochs),
           batch_size: Number(batchSize),
           learning_rate: Number(learningRate),
+          training_mode: clsTrainingMode,
+          init_source_type: initType,
+          init_source_value: initType === "classification_model" ? initValueRaw : null,
+          freeze_backbone_epochs: Number(freezeBackboneEpochs),
+          backbone_lr_scale: Number(backboneLrScale),
         }),
       });
 
@@ -1585,6 +1607,12 @@ export default function App() {
     }
     try {
       const imageShape = parseOcrImageShape(ocrImageShape);
+      const initType = String(ocrInitSourceType || "scratch").trim();
+      const initValueRaw = String(ocrInitSourceValue || "").trim();
+      if (ocrTrainingMode === "finetune" && !initValueRaw) {
+        notify("error", "OCR Fine-tuneでは初期モデルを選択してください。");
+        return;
+      }
       resetTrainingLog(`OCR学習開始要求: プロジェクト=${projectId}`);
       const payload = {
         project_id: projectId,
@@ -1596,6 +1624,9 @@ export default function App() {
         image_shape: imageShape,
         batch_size: Number(batchSize),
         epochs: Number(epochs),
+        training_mode: ocrTrainingMode,
+        init_source_type: initType,
+        init_source_value: ocrTrainingMode === "finetune" ? initValueRaw : null,
       };
       const data = await request("/api/ocr/train/start", {
         method: "POST",
@@ -1982,6 +2013,16 @@ export default function App() {
         setBatchSize={setBatchSize}
         learningRate={learningRate}
         setLearningRate={setLearningRate}
+        clsInitSourceType={clsInitSourceType}
+        setClsInitSourceType={setClsInitSourceType}
+        clsInitSourceValue={clsInitSourceValue}
+        setClsInitSourceValue={setClsInitSourceValue}
+        freezeBackboneEpochs={freezeBackboneEpochs}
+        setFreezeBackboneEpochs={setFreezeBackboneEpochs}
+        backboneLrScale={backboneLrScale}
+        setBackboneLrScale={setBackboneLrScale}
+        classificationInitModelOptions={classificationModels}
+        savedLabeledCount={savedLabeledCount}
         ocrEngine={ocrEngine}
         setOcrEngine={setOcrEngine}
         ocrCharset={ocrCharset}
@@ -2002,6 +2043,11 @@ export default function App() {
         setOcrFromLogsOnlyInvalid={setOcrFromLogsOnlyInvalid}
         ocrFromLogsIncludeCorrected={ocrFromLogsIncludeCorrected}
         setOcrFromLogsIncludeCorrected={setOcrFromLogsIncludeCorrected}
+        ocrInitSourceType={ocrInitSourceType}
+        setOcrInitSourceType={setOcrInitSourceType}
+        ocrInitSourceValue={ocrInitSourceValue}
+        setOcrInitSourceValue={setOcrInitSourceValue}
+        ocrInitModelOptions={ocrPaddleModels}
         onCreateSelectedOcrDataset={createSelectedOcrDataset}
         onPreprocess={runPreprocess}
         onBuildDataset={buildDataset}

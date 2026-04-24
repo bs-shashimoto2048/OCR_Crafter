@@ -23,6 +23,16 @@ export default function TrainingView({
   setBatchSize,
   learningRate,
   setLearningRate,
+  clsInitSourceType,
+  setClsInitSourceType,
+  clsInitSourceValue,
+  setClsInitSourceValue,
+  freezeBackboneEpochs,
+  setFreezeBackboneEpochs,
+  backboneLrScale,
+  setBackboneLrScale,
+  classificationInitModelOptions,
+  savedLabeledCount,
   ocrEngine,
   setOcrEngine,
   ocrCharset,
@@ -42,6 +52,11 @@ export default function TrainingView({
   setOcrFromLogsOnlyInvalid,
   ocrFromLogsIncludeCorrected,
   setOcrFromLogsIncludeCorrected,
+  ocrInitSourceType,
+  setOcrInitSourceType,
+  ocrInitSourceValue,
+  setOcrInitSourceValue,
+  ocrInitModelOptions,
   ocrDatasetInfo,
   onCreateSelectedOcrDataset,
   onPreprocess,
@@ -158,6 +173,24 @@ export default function TrainingView({
     const valid = train > 0 && val >= 0 && test >= 0 && Math.abs(total - 1.0) < 1e-6;
     return { total: total.toFixed(2), valid };
   }, [trainRatio, valRatio, testRatio]);
+
+  const clsTrainingMode = clsInitSourceType === "scratch" ? "scratch" : "finetune";
+  const clsNeedsInitModel = clsInitSourceType === "classification_model";
+  const clsHasInitModel = !clsNeedsInitModel || String(clsInitSourceValue || "").trim() !== "";
+  const clsFreezeEpochs = Number(freezeBackboneEpochs);
+  const clsBackboneScale = Number(backboneLrScale);
+  const showFreezeWarning = clsTrainingMode === "finetune" && Number.isFinite(clsFreezeEpochs) && clsFreezeEpochs <= 0;
+  const showScratchSmallDataWarning =
+    clsTrainingMode === "scratch" &&
+    Number.isFinite(Number(savedLabeledCount || 0)) &&
+    Number(savedLabeledCount || 0) > 0 &&
+    Number(savedLabeledCount || 0) < 80;
+  const clsNextAction = !preprocessed ? "preprocess" : !datasetBuilt ? "dataset" : "train";
+
+  const ocrTrainingMode = ocrInitSourceType === "scratch" ? "scratch" : "finetune";
+  const ocrHasInitModel = ocrTrainingMode === "scratch" || String(ocrInitSourceValue || "").trim() !== "";
+  const ocrDatasetReady = String(ocrDatasetDir || "").trim() !== "";
+  const ocrNextAction = ocrDatasetReady ? "train" : "dataset";
 
   const trainingFamilyLabel = trainingFamily === "ocr" ? "OCR認識モデル" : "分類モデル";
   const statusText = statusLabel(jobStatus);

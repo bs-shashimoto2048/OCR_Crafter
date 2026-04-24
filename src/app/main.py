@@ -693,6 +693,11 @@ def _run_training_job(job_id: str) -> None:
             epochs=job["epochs"],
             batch_size=job["batch_size"],
             learning_rate=job.get("learning_rate", 1e-3),
+            training_mode=str(job.get("training_mode") or "scratch"),
+            init_source_type=str(job.get("init_source_type") or "scratch"),
+            init_source_value=str(job.get("init_source_value") or "").strip() or None,
+            freeze_backbone_epochs=int(job.get("freeze_backbone_epochs") or 0),
+            backbone_lr_scale=float(job.get("backbone_lr_scale") or 1.0),
             progress_callback=_on_epoch_progress,
         )
 
@@ -769,6 +774,9 @@ def _run_ocr_training_job(job_id: str) -> None:
             charset=charset,
             max_text_length=max_text_length,
             image_shape=image_shape,
+            training_mode=str(job.get("training_mode") or "scratch"),
+            init_source_type=str(job.get("init_source_type") or "scratch"),
+            init_source_value=str(job.get("init_source_value") or "").strip() or None,
             log_path=log_path,
         )
         current = fetch_training_job(job_id) or job
@@ -797,6 +805,27 @@ def _run_ocr_training_job(job_id: str) -> None:
 @app.post("/train/start")
 def train_start(req: TrainRequest, background_tasks: BackgroundTasks) -> dict[str, str]:
     project_id = _resolve_project_id(req.project_id)
+    training_mode = str(req.training_mode or "finetune").strip().lower()
+    init_source_type = str(req.init_source_type or "imagenet").strip().lower()
+    init_source_value = str(req.init_source_value or "").strip()
+    freeze_backbone_epochs = int(req.freeze_backbone_epochs or 0)
+    backbone_lr_scale = float(req.backbone_lr_scale or 1.0)
+
+    if training_mode not in {"scratch", "finetune"}:
+        raise HTTPException(status_code=400, detail=f"unsupported training_mode: {training_mode}")
+    if init_source_type not in {"scratch", "imagenet", "classification_model"}:
+        raise HTTPException(status_code=400, detail=f"unsupported init_source_type: {init_source_type}")
+    if training_mode == "scratch":
+        init_source_type = "scratch"
+        init_source_value = ""
+        freeze_backbone_epochs = 0
+        backbone_lr_scale = 1.0
+    else:
+        if init_source_type == "scratch":
+            raise HTTPException(status_code=400, detail="finetune mode requires init_source_type other than scratch")
+        if init_source_type == "classification_model" and not init_source_value:
+            raise HTTPException(status_code=400, detail="init_source_value is required for classification_model")
+
     job_id = str(uuid.uuid4())
     now = _now_iso()
     upsert_training_job(
@@ -809,6 +838,11 @@ def train_start(req: TrainRequest, background_tasks: BackgroundTasks) -> dict[st
             "epochs": req.epochs,
             "batch_size": req.batch_size,
             "learning_rate": req.learning_rate,
+            "training_mode": training_mode,
+            "init_source_type": init_source_type,
+            "init_source_value": init_source_value,
+            "freeze_backbone_epochs": freeze_backbone_epochs,
+            "backbone_lr_scale": backbone_lr_scale,
             "status": "queued",
             "message": "queued",
             "model_path": None,
@@ -879,6 +913,23 @@ def api_ocr_train_start(req: OcrTrainStartRequest, background_tasks: BackgroundT
     engine = str(req.engine or "").strip().lower()
     if engine != "paddleocr":
         raise HTTPException(status_code=400, detail="Only paddleocr is trainable. EasyOCR is inference-only.")
+    training_mode = str(req.training_mode or "scratch").strip().lower()
+    init_source_type = str(req.init_source_type or "scratch").strip().lower()
+    init_source_value = str(req.init_source_value or "").strip()
+    if training_mode not in {"scratch", "finetune"}:
+        raise HTTPException(status_code=400, detail=f"unsupported training_mode: {training_mode}")
+    if init_source_type not in {"scratch", "ocr_model"}:
+        raise HTTPException(status_code=400, detail=f"unsupported init_source_type: {init_source_type}")
+    if training_mode == "scratch":
+        init_source_type = "scratch"
+        init_source_value = ""
+    else:
+        if init_source_type != "ocr_model":
+            raise HTTPException(status_code=400, detail="OCR finetune requires init_source_type=ocr_model")
+        if not init_source_value:
+            raise HTTPException(status_code=400, detail="init_source_value is required for OCR finetune")
+        if resolve_ocr_model_meta(project_id=project_id, model=init_source_value, engine="paddleocr") is None:
+            raise HTTPException(status_code=404, detail=f"OCR model not found: {init_source_value}")
 
     paddle_repo_dir = str(req.paddle_repo_dir or "").strip() or FIXED_PADDLE_OCR_REPO_DIR
     job_id = str(uuid.uuid4())
@@ -900,6 +951,9 @@ def api_ocr_train_start(req: OcrTrainStartRequest, background_tasks: BackgroundT
             "dataset_dir": req.dataset_dir,
             "paddle_repo_dir": paddle_repo_dir,
             "image_shape": req.image_shape,
+            "training_mode": training_mode,
+            "init_source_type": init_source_type,
+            "init_source_value": init_source_value,
             "status": "queued",
             "message": "queued",
             "model_path": None,
