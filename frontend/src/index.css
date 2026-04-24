@@ -54,6 +54,47 @@
   .preprocess-panel .param-hint {
     @apply text-[11px] leading-4 text-slate-300/70;
   }
+
+  .app-tooltip-label {
+    @apply relative cursor-default;
+  }
+
+  .app-tooltip-label::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    left: 0;
+    top: calc(100% + 6px);
+    z-index: 50;
+    min-width: 24rem;
+    max-width: min(42rem, 90vw);
+    padding: 0.6rem 0.75rem;
+    border: 1px solid rgba(148, 163, 184, 0.45);
+    border-radius: 0.55rem;
+    background: rgba(15, 23, 42, 0.96);
+    color: #f8fafc;
+    font-size: 0.85rem;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    line-height: 1.55;
+    text-transform: none;
+    white-space: pre-line;
+    box-shadow:
+      0 10px 30px rgba(0, 0, 0, 0.35),
+      0 4px 10px rgba(0, 0, 0, 0.25);
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(2px);
+    transition:
+      opacity 0.06s linear,
+      transform 0.06s ease-out;
+  }
+
+  .app-tooltip-label:hover::after,
+  .app-tooltip-label:focus-visible::after,
+  .app-tooltip-label:active::after {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @layer utilities {

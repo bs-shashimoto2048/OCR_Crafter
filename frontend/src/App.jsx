@@ -231,6 +231,7 @@ export default function App() {
 
   const [models, setModels] = useState([]);
   const [modelInfos, setModelInfos] = useState({});
+  const [officialPaddleModels, setOfficialPaddleModels] = useState([]);
   const [latestModels, setLatestModels] = useState({ any: "", byType: {}, ocrPaddle: "" });
   const classificationModels = useMemo(
     () =>
@@ -247,6 +248,10 @@ export default function App() {
         return info.training_family === "ocr" && info.engine === "paddleocr";
       }),
     [models, modelInfos]
+  );
+  const paddleOcrModelOptions = useMemo(
+    () => [...new Set([...ocrPaddleModels, ...officialPaddleModels])],
+    [ocrPaddleModels, officialPaddleModels]
   );
   const ocrModels = useMemo(
     () =>
@@ -519,15 +524,17 @@ export default function App() {
     if (!targetProjectId) {
       setModels([]);
       setModelInfos({});
+      setOfficialPaddleModels([]);
       setLatestModels({ any: "", byType: {}, ocrPaddle: "" });
       setModelTypes([]);
       return;
     }
     const pid = encodeURIComponent(targetProjectId);
-    const [modelsData, typesData, infosData] = await Promise.all([
+    const [modelsData, typesData, infosData, officialData] = await Promise.all([
       request(`/models?project_id=${pid}`),
       request(`/model-types?project_id=${pid}`),
       request(`/models/info?project_id=${pid}`).catch(() => ({ items: [] })),
+      request("/api/ocr/models/official").catch(() => ({ items: [] })),
     ]);
     const modelItems = modelsData.items || [];
     const types = typesData.items || [];
@@ -554,6 +561,7 @@ export default function App() {
     setModels(modelItems);
     setModelInfos(infoMap);
     setModelTypes(mergedTypes);
+    setOfficialPaddleModels(Array.isArray(officialData?.items) ? officialData.items : []);
 
     const latestAny = await request(`/models/latest?project_id=${pid}`)
       .then((r) => r.model || "")
@@ -583,6 +591,7 @@ export default function App() {
       setSelectedIndex(0);
       setModels([]);
       setModelInfos({});
+      setOfficialPaddleModels([]);
       setLatestModels({ any: "", byType: {}, ocrPaddle: "" });
       setModelTypes([]);
       return;
@@ -740,7 +749,7 @@ export default function App() {
     if (inferModel !== "latest" && !classificationModels.includes(inferModel)) {
       setInferModel("latest");
     }
-    if (inferPaddleModel !== "latest" && !ocrPaddleModels.includes(inferPaddleModel)) {
+    if (inferPaddleModel !== "latest" && !paddleOcrModelOptions.includes(inferPaddleModel)) {
       setInferPaddleModel("latest");
     }
     if (evalModel !== "latest" && !classificationModels.includes(evalModel)) {
@@ -749,12 +758,12 @@ export default function App() {
     if (preprocessPredictModel !== "latest" && !classificationModels.includes(preprocessPredictModel)) {
       setPreprocessPredictModel("latest");
     }
-    if (preprocessPredictPaddleModel !== "latest" && !ocrPaddleModels.includes(preprocessPredictPaddleModel)) {
+    if (preprocessPredictPaddleModel !== "latest" && !paddleOcrModelOptions.includes(preprocessPredictPaddleModel)) {
       setPreprocessPredictPaddleModel("latest");
     }
   }, [
     classificationModels,
-    ocrPaddleModels,
+    paddleOcrModelOptions,
     inferModel,
     inferPaddleModel,
     evalModel,
@@ -1903,7 +1912,7 @@ export default function App() {
         easyocrLanguageOptions={EASYOCR_LANGUAGE_OPTIONS}
         modelTypes={modelTypes}
         models={classificationModels}
-        paddleModels={ocrPaddleModels}
+        paddleModels={paddleOcrModelOptions}
         latestModels={latestModels}
         params={preprocessParams}
         onParamsChange={setPreprocessParams}
@@ -2016,6 +2025,7 @@ export default function App() {
         : latestModels;
     view = (
       <ModelsView
+        projectId={projectId}
         models={modelItems}
         modelInfos={modelInfos}
         latest={latestForView}
@@ -2042,7 +2052,7 @@ export default function App() {
         models={inferenceModels}
         paddleModel={inferPaddleModel}
         setPaddleModel={setInferPaddleModel}
-        paddleModels={ocrPaddleModels}
+        paddleModels={paddleOcrModelOptions}
         latestModels={latestModels}
         onFileChange={selectInferenceFile}
         fileName={inferFileName}
@@ -2077,7 +2087,7 @@ export default function App() {
         models={classificationModels}
         paddleModel={inferPaddleModel}
         setPaddleModel={setInferPaddleModel}
-        paddleModels={ocrPaddleModels}
+        paddleModels={paddleOcrModelOptions}
         easyocrLangs={inferEasyOcrLangs}
         setEasyocrLangs={setInferEasyOcrLangs}
         easyocrLanguageOptions={EASYOCR_LANGUAGE_OPTIONS}
@@ -2102,7 +2112,7 @@ export default function App() {
         models={classificationModels}
         paddleModel={inferPaddleModel}
         setPaddleModel={setInferPaddleModel}
-        paddleModels={ocrPaddleModels}
+        paddleModels={paddleOcrModelOptions}
         easyocrLangs={inferEasyOcrLangs}
         setEasyocrLangs={setInferEasyOcrLangs}
         easyocrLanguageOptions={EASYOCR_LANGUAGE_OPTIONS}

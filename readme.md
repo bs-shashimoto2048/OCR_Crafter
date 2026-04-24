@@ -62,6 +62,9 @@ VITE_API_BASE=http://127.0.0.1:8000
 - `POST /api/ocr/train/start` : PaddleOCR 学習ジョブ開始
 - `GET /api/ocr/train/status/{job_id}` : OCR学習状態取得
 - `GET /api/ocr/train/log/{job_id}` : OCR学習ログ取得
+- `POST /api/ocr/models/export-migrate` : 既存OCRモデルを推論用(inference)へ一括変換
+- `GET /api/ocr/models/official` : 選択可能な公式PaddleOCR認識モデル一覧
+- `GET /api/models/download/{model_name}?project_id=...` : モデルダウンロード（`.pt` 直取得 / `.ocr.json` は inference ZIP）
 - `GET /models?project_id=...` : 保存済みモデル一覧
 - `GET /models/latest?project_id=...&model_type=...` : 最新モデル参照（種別指定可）
 - `GET /model-types?project_id=...` : モデル種別一覧
@@ -86,6 +89,11 @@ python3 -m src.app.ocr_tuning --project-id default --engine both --image-types w
 - データは `data/projects/{project_id}/` 配下でプロジェクトごとに分離管理
 
 ## 8. OCRチューニング（EasyOCR / PaddleOCR）
+
+補足:
+- OCR学習完了時に、推論用 `inference` モデルを自動exportします。
+- 推論では export済みモデルのみ使用します（未exportモデルはエラー）。
+- `engine=paddleocr` で学習済みOCRモデルを指定した場合、認識モデルを直接利用します（推論時の追加公式モデル取得に依存しません）。
 
 1. 追加依存をインストール（任意）
 

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import Card from "../components/Card";
 import Button from "../components/Button";
+import { API_BASE } from "../lib/api";
 
 function basename(path) {
   if (!path) return "";
@@ -16,11 +17,43 @@ function formatDateTime(value) {
   return d.toLocaleString("ja-JP", { hour12: false });
 }
 
-export default function ModelsView({ models, modelInfos, latest, onRefresh, onDeleteSelected }) {
+function parseApiErrorText(text, fallback = "ダウンロードに失敗しました") {
+  const raw = String(text || "").trim();
+  if (!raw) return fallback;
+  try {
+    const payload = JSON.parse(raw);
+    const detail = payload?.detail;
+    if (typeof detail === "string" && detail.trim()) return detail;
+    if (Array.isArray(detail)) return detail.map((v) => String(v)).join(", ");
+  } catch {
+    // ignore non-json
+  }
+  return raw;
+}
+
+function parseDownloadFilename(contentDisposition, fallback) {
+  const value = String(contentDisposition || "");
+  const encoded = value.match(/filename\*=UTF-8''([^;]+)/i);
+  if (encoded && encoded[1]) {
+    try {
+      return decodeURIComponent(encoded[1]);
+    } catch {
+      return fallback;
+    }
+  }
+  const plain = value.match(/filename=\"?([^\";]+)\"?/i);
+  if (plain && plain[1]) {
+    return plain[1];
+  }
+  return fallback;
+}
+
+export default function ModelsView({ projectId = "default", models, modelInfos, latest, onRefresh, onDeleteSelected }) {
   const latestAny = basename(latest.any || "");
   const latestByType = latest.byType || {};
   const latestNames = new Set(Object.values(latestByType).map((path) => basename(path)).filter(Boolean));
   const [selectedModels, setSelectedModels] = useState([]);
+  const [downloadingModelName, setDownloadingModelName] = useState("");
   if (latestAny) {
     latestNames.add(latestAny);
   }
@@ -185,6 +218,39 @@ export default function ModelsView({ models, modelInfos, latest, onRefresh, onDe
     return "data=-";
   }
 
+  function ocrExportText(name) {
+    const ready = Boolean(modelInfos?.[name]?.ocr_inference_ready);
+    return `export=${ready ? "ready" : "not_ready"}`;
+  }
+
+  async function handleDownload(name) {
+    setDownloadingModelName(name);
+    try {
+      const response = await fetch(
+        `${API_BASE}/api/models/download/${encodeURIComponent(name)}?project_id=${encodeURIComponent(projectId || "default")}`
+      );
+      if (!response.ok) {
+        throw new Error(parseApiErrorText(await response.text()));
+      }
+      const blob = await response.blob();
+      const fallbackName = name.endsWith(".pt") ? name : `${name.replace(/\.ocr\.json$/i, "")}.inference.zip`;
+      const filename = parseDownloadFilename(response.headers.get("content-disposition"), fallbackName);
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+      const message = parseApiErrorText(error?.message || "");
+      window.alert(message);
+    } finally {
+      setDownloadingModelName("");
+    }
+  }
+
   return (
     <Card
       title="モデル一覧"
@@ -233,7 +299,8 @@ export default function ModelsView({ models, modelInfos, latest, onRefresh, onDe
             <th className="px-2 py-3 font-medium">方式</th>
             <th className="px-2 py-3 font-medium">エンジン</th>
             <th className="px-2 py-3 font-medium">作成日</th>
-            <th className="px-2 py-3 font-medium">{allOcr ? "前処理 / 学習 / Aug / データ" : "比率 / 件数(train/val/test)"}</th>
+            <th className="px-2 py-3 font-medium">{allOcr ? "前処理 / 学習 / Aug / データ / Export" : "比率 / 件数(train/val/test)"}</th>
+            <th className="px-2 py-3 font-medium">取得</th>
             <th className="px-2 py-3 font-medium">状態</th>
           </tr>
         </thead>
@@ -244,6 +311,8 @@ export default function ModelsView({ models, modelInfos, latest, onRefresh, onDe
             const ratio = ratioText(name);
             const counts = countText(name);
             const isOcr = trainingFamily(name) === "ocr";
+            const exportReady = Boolean(modelInfos?.[name]?.ocr_inference_ready);
+            const canDownload = !isOcr || exportReady;
             return (
               <tr key={name} className="border-b border-border/80 transition hover:bg-[#3b444e]/65">
                 <td className="px-2 py-3">
@@ -265,7 +334,7 @@ export default function ModelsView({ models, modelInfos, latest, onRefresh, onDe
                       <span>{ocrPreprocessText(name)}</span>
                       <span>{ocrTrainingText(name)}</span>
                       <span>
-                        {ocrAugText(name)} | {ocrDataText(name)}
+                        {ocrAugText(name)} | {ocrDataText(name)} | {ocrExportText(name)}
                       </span>
                     </div>
                   ) : (
@@ -275,6 +344,17 @@ export default function ModelsView({ models, modelInfos, latest, onRefresh, onDe
                       <span>{counts === "-" ? "-" : `${counts} 件`}</span>
                     </div>
                   )}
+                </td>
+                <td className="px-2 py-3">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={!canDownload || downloadingModelName === name}
+                    onClick={() => handleDownload(name)}
+                    title={!canDownload ? "推論用export後にダウンロード可能です" : "モデルをダウンロード"}
+                  >
+                    {downloadingModelName === name ? "取得中..." : "DL"}
+                  </Button>
                 </td>
                 <td className="px-2 py-3">
                   {isLatest ? (

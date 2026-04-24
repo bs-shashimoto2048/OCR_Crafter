@@ -3,6 +3,7 @@ import ImagePreview from "../components/ImagePreview";
 import PreprocessPanel from "../components/PreprocessPanel";
 import ResultBadge from "../components/ResultBadge";
 import { imageUrl } from "../lib/api";
+import { PADDLEOCR_OFFICIAL_MODELS_TOOLTIP } from "../lib/paddleocrOfficialTooltip";
 
 export default function PreprocessView({
   projectId,
@@ -186,7 +187,9 @@ export default function PreprocessView({
             ) : predictEngine === "paddleocr" ? (
               <div className="col-span-2 grid grid-cols-2 gap-3">
                 <div>
-                  <label className="app-label">PaddleOCRモデル</label>
+                  <label className="app-label app-tooltip-label" data-tooltip={PADDLEOCR_OFFICIAL_MODELS_TOOLTIP}>
+                    PaddleOCRモデル
+                  </label>
                   <select
                     value={predictPaddleModel}
                     onChange={(e) => setPredictPaddleModel(e.target.value)}

@@ -5,11 +5,13 @@ import shutil
 import subprocess
 import sys
 import re
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
+import yaml
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
 from ..project_paths import ensure_project_directories
@@ -19,6 +21,7 @@ OCR_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 CONF_THRESHOLD = 0.9
 DEFAULT_BUSINESS_PATTERN = r"^[A-Z0-9]{8}$"
 BANNED_PATTERNS = {"AAAAAAAA", "00000000"}
+PADDLE_INFERENCE_MARKERS = ("inference.yml", "inference.pdiparams", "inference.pdmodel", "inference.json")
 
 
 def _now_tag() -> str:
@@ -686,10 +689,166 @@ def _ensure_paddle_training_dependencies() -> None:
         )
 
 
+def _is_paddle_inference_dir(path: Path) -> bool:
+    if not path.exists() or not path.is_dir():
+        return False
+    weights = path / "inference.pdiparams"
+    graph_candidates = [path / "inference.pdmodel", path / "inference.json"]
+    has_graph = any(item.exists() and item.is_file() for item in graph_candidates)
+    return weights.exists() and weights.is_file() and has_graph
+
+
+def _resolve_checkpoints_prefix(checkpoint_dir: Path) -> Path:
+    latest = checkpoint_dir / "latest.pdparams"
+    if latest.exists() and latest.is_file():
+        return checkpoint_dir / "latest"
+    candidates = sorted(checkpoint_dir.glob("iter_epoch_*.pdparams"))
+    if not candidates:
+        raise FileNotFoundError(f"checkpoint file not found under: {checkpoint_dir}")
+    picked = candidates[-1]
+    return checkpoint_dir / picked.stem
+
+
+def _resolve_export_model_prefix(model_dir: Path) -> Path:
+    preferred = model_dir / "best_accuracy.pdparams"
+    if preferred.exists() and preferred.is_file():
+        return model_dir / "best_accuracy"
+    return _resolve_checkpoints_prefix(model_dir)
+
+
+def _normalize_exported_inference_yaml(inference_dir: Path) -> None:
+    yml_path = inference_dir / "inference.yml"
+    if not yml_path.exists() or not yml_path.is_file():
+        return
+    payload = yaml.safe_load(yml_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        return
+    preprocess = payload.get("PreProcess")
+    if not isinstance(preprocess, dict):
+        return
+    ops = preprocess.get("transform_ops")
+    if not isinstance(ops, list):
+        return
+    normalized_ops: list[dict[str, Any]] = []
+    for op in ops:
+        if not isinstance(op, dict) or len(op) != 1:
+            continue
+        op_name = str(next(iter(op.keys())))
+        if op_name.endswith("LabelEncode"):
+            continue
+        if op_name == "KeepKeys":
+            normalized_ops.append({"KeepKeys": {"keep_keys": ["image"]}})
+            continue
+        normalized_ops.append(op)
+    preprocess["transform_ops"] = normalized_ops
+    yml_path.write_text(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True), encoding="utf-8")
+
+
+def _export_paddle_inference_model(
+    repo_dir: Path,
+    config_path: Path,
+    model_prefix: Path,
+    save_inference_dir: Path,
+    log_file: Optional[Any] = None,
+) -> Path:
+    export_py = repo_dir / "tools/export_model.py"
+    if not export_py.exists() or not export_py.is_file():
+        raise FileNotFoundError(f"PaddleOCR export script not found: {export_py}")
+    if not config_path.exists() or not config_path.is_file():
+        raise FileNotFoundError(f"config file not found for export: {config_path}")
+    if not (Path(str(model_prefix) + ".pdparams")).exists():
+        raise FileNotFoundError(f"checkpoint params not found: {model_prefix}.pdparams")
+
+    save_inference_dir.mkdir(parents=True, exist_ok=True)
+    export_home = (save_inference_dir / "_home").resolve()
+    export_cache = (save_inference_dir / "_cache").resolve()
+    export_paddle_home = (save_inference_dir / "_paddle_home").resolve()
+    export_home.mkdir(parents=True, exist_ok=True)
+    export_cache.mkdir(parents=True, exist_ok=True)
+    export_paddle_home.mkdir(parents=True, exist_ok=True)
+
+    option_candidates = ["Global.pretrained_model", "Global.checkpoints"]
+    return_code = -1
+    lines: list[str] = []
+    success = False
+    for option_key in option_candidates:
+        command = [
+            sys.executable,
+            str(export_py),
+            "-c",
+            str(config_path),
+            "-o",
+            "Global.use_gpu=False",
+            f"{option_key}={str(model_prefix)}",
+            f"Global.save_inference_dir={str(save_inference_dir)}",
+        ]
+        if log_file is not None:
+            log_file.write(f"[{datetime.now().isoformat()}] export_command: {' '.join(command)}\n")
+            log_file.flush()
+        process = subprocess.Popen(
+            command,
+            cwd=str(repo_dir),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            env={
+                **os.environ,
+                "HOME": str(export_home),
+                "XDG_CACHE_HOME": str(export_cache),
+                "PADDLE_HOME": str(export_paddle_home),
+            },
+        )
+        assert process.stdout is not None
+        lines = []
+        for line in process.stdout:
+            lines.append(line)
+            if log_file is not None:
+                log_file.write(line)
+        return_code = process.wait()
+        if log_file is not None:
+            log_file.write(f"[{datetime.now().isoformat()}] export_return_code={return_code}\n")
+        if return_code == 0:
+            success = True
+            break
+    if not success:
+        tail = "".join(lines[-20:]).strip()
+        raise RuntimeError(f"PaddleOCR export failed with exit code {return_code}. {tail}")
+    _normalize_exported_inference_yaml(save_inference_dir)
+    if not _is_paddle_inference_dir(save_inference_dir):
+        raise RuntimeError(f"PaddleOCR export succeeded but inference files not found: {save_inference_dir}")
+    return save_inference_dir.resolve()
+
+
+def export_paddleocr_model(
+    config_path: str,
+    model_dir: str,
+    export_dir: str,
+    paddle_repo_dir: str,
+    log_file: Optional[Any] = None,
+) -> str:
+    config = Path(config_path).expanduser().resolve()
+    train_dir = Path(model_dir).expanduser().resolve()
+    inference_dir = Path(export_dir).expanduser().resolve()
+    repo_dir = Path(paddle_repo_dir).expanduser().resolve()
+    if not train_dir.exists() or not train_dir.is_dir():
+        raise FileNotFoundError(f"model_dir not found: {train_dir}")
+    model_prefix = _resolve_export_model_prefix(train_dir)
+    exported = _export_paddle_inference_model(
+        repo_dir=repo_dir,
+        config_path=config,
+        model_prefix=model_prefix,
+        save_inference_dir=inference_dir,
+        log_file=log_file,
+    )
+    return str(exported)
+
+
 def _register_ocr_model(
     project_id: str,
     engine: str,
-    model_dir: Path,
+    checkpoint_dir: Path,
+    inference_dir: Path,
     charset: str,
     max_text_length: int,
     image_shape: list[int],
@@ -716,7 +875,14 @@ def _register_ocr_model(
         "training_family": "ocr",
         "engine": engine,
         "model_type": "ocr",
-        "model_dir": str(model_dir.resolve()),
+        "train_dir": str(checkpoint_dir.resolve()),
+        "infer_dir": str(inference_dir.resolve()),
+        "exported": True,
+        "model_dir": str(inference_dir.resolve()),
+        "checkpoint_dir": str(checkpoint_dir.resolve()),
+        "inference_dir": str(inference_dir.resolve()),
+        "export_ready": True,
+        "exported_at": datetime.now().isoformat(),
         "charset": charset,
         "max_text_length": int(max_text_length),
         "image_shape": image_shape,
@@ -881,10 +1047,24 @@ def run_paddleocr_training(
     if return_code != 0 or detected_fatal_error:
         raise RuntimeError(f"PaddleOCR training failed with exit code {return_code}")
 
+    export_config_path = save_model_dir / "config.yml"
+    if not export_config_path.exists() or not export_config_path.is_file():
+        export_config_path = base_config
+    inference_dir = save_model_dir / "inference"
+    with log_path.open("a", encoding="utf-8") as log_file:
+        export_paddleocr_model(
+            config_path=str(export_config_path),
+            model_dir=str(save_model_dir),
+            export_dir=str(inference_dir),
+            paddle_repo_dir=str(repo_dir),
+            log_file=log_file,
+        )
+
     model_name = _register_ocr_model(
         project_id=project_id,
         engine="paddleocr",
-        model_dir=save_model_dir,
+        checkpoint_dir=save_model_dir,
+        inference_dir=inference_dir,
         charset=charset,
         max_text_length=max_text_length,
         image_shape=image_shape,
@@ -896,9 +1076,143 @@ def run_paddleocr_training(
     )
     return {
         "model_name": model_name,
-        "model_dir": str(save_model_dir),
+        "model_dir": str(inference_dir),
+        "checkpoint_dir": str(save_model_dir),
+        "inference_dir": str(inference_dir),
         "log_path": str(log_path),
         "dataset_dir": str(dataset_root),
+    }
+
+
+def migrate_ocr_models_to_inference(
+    project_id: Optional[str],
+    paddle_repo_dir: str,
+    overwrite: bool = False,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    resolved = ensure_project_directories(project_id)
+    repo_dir = Path(str(paddle_repo_dir or "")).expanduser().resolve()
+    if not repo_dir.exists() or not repo_dir.is_dir():
+        raise FileNotFoundError(f"paddle_repo_dir not found: {repo_dir}")
+
+    meta_files = sorted([p for p in resolved.models.glob("*.ocr.json") if p.is_file()])
+    results: list[dict[str, Any]] = []
+    migrated = 0
+    skipped = 0
+    failed = 0
+    for meta_path in meta_files:
+        payload: dict[str, Any]
+        try:
+            payload = json.loads(meta_path.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict):
+                payload = {}
+        except Exception:  # noqa: BLE001
+            failed += 1
+            results.append({"name": meta_path.name, "status": "failed", "reason": "invalid_meta_json"})
+            continue
+
+        engine = str(payload.get("engine") or "paddleocr").strip().lower()
+        if engine != "paddleocr":
+            skipped += 1
+            results.append({"name": meta_path.name, "status": "skipped", "reason": f"unsupported_engine:{engine}"})
+            continue
+
+        model_dir_raw = str(payload.get("model_dir") or "").strip()
+        model_dir = Path(model_dir_raw).expanduser() if model_dir_raw else None
+        inference_dir_raw = str(payload.get("inference_dir") or "").strip()
+        inference_dir = Path(inference_dir_raw).expanduser() if inference_dir_raw else None
+        checkpoint_dir_raw = str(payload.get("checkpoint_dir") or "").strip()
+        checkpoint_dir = Path(checkpoint_dir_raw).expanduser() if checkpoint_dir_raw else None
+
+        if inference_dir is not None and _is_paddle_inference_dir(inference_dir) and not overwrite:
+            skipped += 1
+            results.append({"name": meta_path.name, "status": "skipped", "reason": "already_exported"})
+            continue
+        if (
+            inference_dir is None
+            and model_dir is not None
+            and _is_paddle_inference_dir(model_dir)
+            and not overwrite
+        ):
+            skipped += 1
+            results.append({"name": meta_path.name, "status": "skipped", "reason": "already_exported"})
+            continue
+
+        if checkpoint_dir is None or not checkpoint_dir.exists() or not checkpoint_dir.is_dir():
+            if model_dir is not None and (model_dir / "latest.pdparams").exists():
+                checkpoint_dir = model_dir
+            elif model_dir is not None and model_dir.name == "inference" and model_dir.parent.exists():
+                parent = model_dir.parent
+                if (parent / "latest.pdparams").exists():
+                    checkpoint_dir = parent
+
+        if checkpoint_dir is None or not checkpoint_dir.exists() or not checkpoint_dir.is_dir():
+            failed += 1
+            results.append({"name": meta_path.name, "status": "failed", "reason": "checkpoint_dir_not_found"})
+            continue
+
+        config_path = checkpoint_dir / "config.yml"
+        if not config_path.exists() or not config_path.is_file():
+            failed += 1
+            results.append({"name": meta_path.name, "status": "failed", "reason": "config_not_found"})
+            continue
+
+        target_inference_dir = checkpoint_dir / "inference"
+        if dry_run:
+            migrated += 1
+            results.append(
+                {
+                    "name": meta_path.name,
+                    "status": "dry_run",
+                    "checkpoint_dir": str(checkpoint_dir.resolve()),
+                    "inference_dir": str(target_inference_dir.resolve()),
+                }
+            )
+            continue
+
+        log_path = resolved.logs / f"migrate_export_{meta_path.stem}_{_now_tag()}.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with log_path.open("w", encoding="utf-8") as log_file:
+                export_paddleocr_model(
+                    config_path=str(config_path),
+                    model_dir=str(checkpoint_dir),
+                    export_dir=str(target_inference_dir),
+                    paddle_repo_dir=str(repo_dir),
+                    log_file=log_file,
+                )
+            payload["train_dir"] = str(checkpoint_dir.resolve())
+            payload["infer_dir"] = str(target_inference_dir.resolve())
+            payload["exported"] = True
+            payload["model_dir"] = str(target_inference_dir.resolve())
+            payload["checkpoint_dir"] = str(checkpoint_dir.resolve())
+            payload["inference_dir"] = str(target_inference_dir.resolve())
+            payload["export_ready"] = True
+            payload["exported_at"] = datetime.now().isoformat()
+            payload["export_log_path"] = str(log_path.resolve())
+            meta_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            migrated += 1
+            results.append(
+                {
+                    "name": meta_path.name,
+                    "status": "migrated",
+                    "checkpoint_dir": str(checkpoint_dir.resolve()),
+                    "inference_dir": str(target_inference_dir.resolve()),
+                    "log_path": str(log_path.resolve()),
+                }
+            )
+        except Exception as e:  # noqa: BLE001
+            failed += 1
+            results.append({"name": meta_path.name, "status": "failed", "reason": str(e), "log_path": str(log_path.resolve())})
+
+    return {
+        "project_id": resolved.project_id,
+        "total": len(meta_files),
+        "migrated": migrated,
+        "skipped": skipped,
+        "failed": failed,
+        "dry_run": bool(dry_run),
+        "items": results,
     }
 
 

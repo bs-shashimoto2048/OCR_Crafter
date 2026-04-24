@@ -8,6 +8,7 @@ import io
 import json
 import base64
 import shutil
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -16,11 +17,12 @@ from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from PIL import Image
+from starlette.background import BackgroundTask
 
 from .config import get_settings
 from .db import delete_training_jobs_by_project, fetch_training_job, init_db, upsert_training_job
 from .init_dirs import ensure_directories
-from .predict import predict_from_image
+from .predict import list_paddleocr_official_rec_models, predict_from_image
 from .project_paths import (
     delete_project_directory,
     ensure_project_directories,
@@ -58,12 +60,14 @@ from .services.model_registry import (
     list_model_infos,
     list_model_types,
     list_models,
+    resolve_ocr_model_meta,
 )
 from .services.ocr_tuning import export_ocr_training_data
 from .services.ocr_pipeline import (
     OCR_CHARSET_DEFAULT,
     create_ocr_dataset_from_logs,
     create_ocr_dataset,
+    migrate_ocr_models_to_inference,
     read_latest_rapid_ocr_states,
     read_training_log_lines,
     run_paddleocr_training,
@@ -932,6 +936,33 @@ def api_ocr_train_log(job_id: str, tail: int = Query(default=200, ge=1, le=5000)
     return {"job_id": job_id, "log_path": log_path, "lines": lines}
 
 
+@app.post("/api/ocr/models/export-migrate")
+def api_ocr_models_export_migrate(
+    project_id: Optional[str] = Query(default="default"),
+    overwrite: bool = Query(default=False),
+    dry_run: bool = Query(default=False),
+) -> dict[str, Any]:
+    resolved = _resolve_project_id(project_id)
+    try:
+        return migrate_ocr_models_to_inference(
+            project_id=resolved,
+            paddle_repo_dir=FIXED_PADDLE_OCR_REPO_DIR,
+            overwrite=bool(overwrite),
+            dry_run=bool(dry_run),
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/ocr/models/official")
+def api_ocr_models_official() -> dict[str, Any]:
+    return {"items": list_paddleocr_official_rec_models()}
+
+
 @app.get("/models")
 def models_endpoint(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
     resolved = _resolve_project_id(project_id)
@@ -942,6 +973,74 @@ def models_endpoint(project_id: Optional[str] = Query(default="default")) -> dic
 def model_infos_endpoint(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
     resolved = _resolve_project_id(project_id)
     return {"project_id": resolved, "items": list_model_infos(project_id=resolved)}
+
+
+@app.get("/api/models/download/{model_name}")
+def download_model_endpoint(model_name: str, project_id: Optional[str] = Query(default="default")) -> FileResponse:
+    resolved = _resolve_project_id(project_id)
+    safe_name = Path(model_name).name
+    if safe_name != model_name:
+        raise HTTPException(status_code=400, detail="invalid model name")
+
+    paths = ensure_project_directories(resolved)
+    model_path = paths.models / safe_name
+    if not model_path.exists() or not model_path.is_file():
+        raise HTTPException(status_code=404, detail=f"model not found: {safe_name}")
+
+    if safe_name.endswith(".pt"):
+        return FileResponse(model_path, media_type="application/octet-stream", filename=safe_name)
+
+    if not safe_name.endswith(".ocr.json"):
+        raise HTTPException(status_code=400, detail="only .pt and .ocr.json are downloadable")
+
+    meta = resolve_ocr_model_meta(project_id=resolved, model=safe_name, engine=None)
+    if not isinstance(meta, dict):
+        raise HTTPException(status_code=404, detail=f"ocr model metadata not found: {safe_name}")
+
+    inference_dir_raw = str(meta.get("inference_dir") or meta.get("model_dir") or "").strip()
+    if not inference_dir_raw:
+        raise HTTPException(status_code=400, detail=f"model has no inference_dir: {safe_name}")
+    inference_dir = Path(inference_dir_raw).expanduser()
+    if not inference_dir.exists() or not inference_dir.is_dir():
+        raise HTTPException(status_code=404, detail=f"inference_dir not found: {inference_dir}")
+
+    required_candidates = [
+        ("inference.json", "inference.pdmodel"),
+        ("inference.pdiparams",),
+        ("inference.yml",),
+    ]
+    selected_files: list[Path] = []
+    for candidates in required_candidates:
+        picked: Optional[Path] = None
+        for name in candidates:
+            candidate = inference_dir / name
+            if candidate.exists() and candidate.is_file():
+                picked = candidate
+                break
+        if picked is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"inference file missing under {inference_dir}: one of {', '.join(candidates)}",
+            )
+        selected_files.append(picked)
+
+    export_name = safe_name.replace(".ocr.json", "")
+    tmp_zip = Path(tempfile.NamedTemporaryFile(delete=False, suffix=".zip").name)
+    try:
+        with zipfile.ZipFile(tmp_zip, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+            root = f"{export_name}/"
+            for file_path in selected_files:
+                zf.write(file_path, arcname=f"{root}{file_path.name}")
+            zf.write(model_path, arcname=f"{root}{safe_name}")
+        return FileResponse(
+            tmp_zip,
+            media_type="application/zip",
+            filename=f"{export_name}.inference.zip",
+            background=BackgroundTask(lambda: tmp_zip.unlink(missing_ok=True)),
+        )
+    except Exception as e:  # noqa: BLE001
+        tmp_zip.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.delete("/models/{model_name}")

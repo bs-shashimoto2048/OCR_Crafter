@@ -9,6 +9,8 @@ from ..config import get_settings
 from ..db import fetch_training_job
 from ..project_paths import ensure_project_directories
 
+PADDLE_INFERENCE_MARKERS = ("inference.yml", "inference.pdiparams", "inference.pdmodel", "inference.json")
+
 
 def list_models(project_id: Optional[str] = None) -> list[str]:
     paths = ensure_project_directories(project_id)
@@ -72,6 +74,19 @@ def _read_ocr_dataset_meta(dataset_root_value: str) -> dict:
     if not dataset_root.exists() or not dataset_root.is_dir():
         return {}
     return _safe_load_json(dataset_root / "meta.json")
+
+
+def _is_paddle_inference_dir(path_value: object) -> bool:
+    raw = str(path_value or "").strip()
+    if not raw:
+        return False
+    path = Path(raw).expanduser()
+    if not path.exists() or not path.is_dir():
+        return False
+    weights = path / "inference.pdiparams"
+    graph_candidates = [path / "inference.pdmodel", path / "inference.json"]
+    has_graph = any(item.exists() and item.is_file() for item in graph_candidates)
+    return weights.exists() and weights.is_file() and has_graph
 
 
 def _ocr_counts_from_meta(meta: dict) -> dict[str, int]:
@@ -149,6 +164,9 @@ def list_model_infos(project_id: Optional[str] = None) -> list[dict]:
             augmentation_strength = dataset_meta.get("aug_strength")
             if augmentation_strength is None and "strength" in payload_aug:
                 augmentation_strength = payload_aug.get("strength")
+            inference_dir = str(payload.get("inference_dir") or payload.get("model_dir") or "")
+            checkpoint_dir = str(payload.get("checkpoint_dir") or payload.get("train_dir") or "")
+            inference_ready = _is_paddle_inference_dir(inference_dir)
             items.append(
                 {
                     "name": path.name,
@@ -172,6 +190,12 @@ def list_model_infos(project_id: Optional[str] = None) -> list[dict]:
                     ),
                     "image_shape": image_shape,
                     "model_dir": str(payload.get("model_dir") or ""),
+                    "train_dir": str(payload.get("train_dir") or checkpoint_dir),
+                    "infer_dir": str(payload.get("infer_dir") or inference_dir),
+                    "exported": bool(payload.get("exported", inference_ready)),
+                    "ocr_inference_dir": inference_dir,
+                    "ocr_checkpoint_dir": checkpoint_dir,
+                    "ocr_inference_ready": bool(inference_ready),
                     "ocr_dataset_root": dataset_root,
                     "ocr_dataset_counts": dataset_counts,
                     "ocr_dataset_meta_created_at": str(dataset_meta.get("created_at") or ""),
@@ -309,11 +333,24 @@ def delete_model(project_id: Optional[str], model_name: str) -> str:
     if is_ocr_meta:
         try:
             payload = json.loads(target.read_text(encoding="utf-8"))
-            model_dir = Path(str(payload.get("model_dir") or "")).expanduser()
-            if model_dir.exists() and model_dir.is_dir():
-                import shutil
+            candidate_dirs = [
+                Path(str(payload.get("checkpoint_dir") or "")).expanduser(),
+                Path(str(payload.get("inference_dir") or "")).expanduser(),
+                Path(str(payload.get("model_dir") or "")).expanduser(),
+            ]
+            unique_dirs: list[Path] = []
+            seen: set[str] = set()
+            for item in candidate_dirs:
+                text = str(item).strip()
+                if not text or text in seen:
+                    continue
+                seen.add(text)
+                unique_dirs.append(item)
+            for model_dir in unique_dirs:
+                if model_dir.exists() and model_dir.is_dir():
+                    import shutil
 
-                shutil.rmtree(model_dir, ignore_errors=True)
+                    shutil.rmtree(model_dir, ignore_errors=True)
         except Exception:  # noqa: BLE001
             pass
 

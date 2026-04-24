@@ -1,6 +1,7 @@
 import Card from "../components/Card";
 import Button from "../components/Button";
 import CharHeatmap from "../components/CharHeatmap";
+import { PADDLEOCR_OFFICIAL_MODELS_TOOLTIP } from "../lib/paddleocrOfficialTooltip";
 
 export default function InferenceView({
   engine,
@@ -128,7 +129,9 @@ export default function InferenceView({
           ) : engine === "paddleocr" ? (
             <>
               <div>
-                <label className="app-label">PaddleOCRモデル</label>
+                <label className="app-label app-tooltip-label" data-tooltip={PADDLEOCR_OFFICIAL_MODELS_TOOLTIP}>
+                  PaddleOCRモデル
+                </label>
                 <select
                   value={paddleModel}
                   onChange={(e) => setPaddleModel(e.target.value)}

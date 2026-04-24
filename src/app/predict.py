@@ -1,5 +1,7 @@
 import argparse
 import math
+import os
+import re
 import tempfile
 from collections import Counter
 from pathlib import Path
@@ -23,6 +25,24 @@ from .train import build_model, detect_device
 
 _EASYOCR_READER_CACHE: dict[tuple[tuple[str, ...], bool], Any] = {}
 _PADDLEOCR_READER_CACHE: dict[tuple[str, bool], Any] = {}
+STRICT_OCR_EXPORT_REQUIRED = True
+OFFICIAL_PADDLEOCR_REC_MODELS: tuple[str, ...] = (
+    "en_PP-OCRv5_mobile_rec",
+    "PP-OCRv5_server_rec",
+    "en_PP-OCRv4_mobile_rec",
+    "PP-OCRv4_mobile_rec",
+    "PP-OCRv3_mobile_rec",
+)
+
+
+def _prepare_paddle_runtime_env() -> None:
+    # paddlex のモデル配信元疎通チェックを無効化し、オフライン環境でも
+    # ローカル推論モデルを使えるようにする。
+    os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+
+
+def list_paddleocr_official_rec_models() -> list[str]:
+    return list(OFFICIAL_PADDLEOCR_REC_MODELS)
 
 
 def normalize_confidence(score: float) -> float:
@@ -325,6 +345,7 @@ def _predict_with_easyocr(
 
 
 def _get_paddleocr_reader(language: str, use_angle_cls: bool) -> Any:
+    _prepare_paddle_runtime_env()
     try:
         from paddleocr import PaddleOCR  # type: ignore
     except ImportError as e:
@@ -341,6 +362,46 @@ def _get_paddleocr_reader(language: str, use_angle_cls: bool) -> Any:
             use_angle_cls=bool(use_angle_cls),
         )
     return _PADDLEOCR_READER_CACHE[key]
+
+
+def _get_paddle_text_recognition_reader(model_dir: Optional[Path] = None, model_name: Optional[str] = None) -> Optional[Any]:
+    _prepare_paddle_runtime_env()
+    try:
+        from paddleocr import TextRecognition  # type: ignore
+    except ImportError as e:
+        raise RuntimeError(
+            "paddleocr is not installed. Please run: pip install paddleocr paddlepaddle"
+        ) from e
+    except Exception:
+        # PaddleOCR 2.x では TextRecognition が公開されていないことがある。
+        return None
+
+    if model_dir is None and not str(model_name or "").strip():
+        return None
+    key_source = str(model_dir.resolve()) if model_dir is not None else str(model_name or "").strip()
+    key = (f"text_recognition:{key_source}", False)
+    if key not in _PADDLEOCR_READER_CACHE:
+        try:
+            if model_dir is not None:
+                _PADDLEOCR_READER_CACHE[key] = TextRecognition(model_dir=str(model_dir))
+            else:
+                _PADDLEOCR_READER_CACHE[key] = TextRecognition(model_name=str(model_name))
+        except Exception:
+            return None
+    return _PADDLEOCR_READER_CACHE[key]
+
+
+def _extract_unknown_kwarg(message: str) -> Optional[str]:
+    patterns = [
+        r"Unknown argument:\s*([A-Za-z0-9_]+)",
+        r"unexpected keyword argument ['\"]([A-Za-z0-9_]+)['\"]",
+        r"got an unexpected keyword argument ['\"]([A-Za-z0-9_]+)['\"]",
+    ]
+    for pattern in patterns:
+        matched = re.search(pattern, message)
+        if matched:
+            return str(matched.group(1))
+    return None
 
 
 def _create_paddleocr_instance(paddleocr_cls: Any, **base_kwargs: Any) -> Any:
@@ -370,18 +431,26 @@ def _create_paddleocr_instance(paddleocr_cls: Any, **base_kwargs: Any) -> Any:
 
     last_error: Optional[Exception] = None
     for kwargs in attempts:
-        try:
-            return paddleocr_cls(**kwargs)
-        except Exception as e:  # noqa: BLE001
-            message = str(e)
-            if (
-                "Unknown argument" in message
-                or "unexpected keyword argument" in message
-                or "got an unexpected keyword argument" in message
-            ):
-                last_error = e
-                continue
-            raise
+        candidate_kwargs = dict(kwargs)
+        # バージョン差で未対応引数があっても、その引数だけを落として継続する。
+        while True:
+            try:
+                return paddleocr_cls(**candidate_kwargs)
+            except Exception as e:  # noqa: BLE001
+                message = str(e)
+                if (
+                    "Unknown argument" in message
+                    or "unexpected keyword argument" in message
+                    or "got an unexpected keyword argument" in message
+                ):
+                    unknown_kwarg = _extract_unknown_kwarg(message)
+                    if unknown_kwarg and unknown_kwarg in candidate_kwargs:
+                        candidate_kwargs.pop(unknown_kwarg, None)
+                        last_error = e
+                        continue
+                    last_error = e
+                    break
+                raise
 
     if last_error is not None:
         raise RuntimeError(f"failed to initialize PaddleOCR with compatible args: {last_error}") from last_error
@@ -391,13 +460,10 @@ def _create_paddleocr_instance(paddleocr_cls: Any, **base_kwargs: Any) -> Any:
 def _is_paddle_rec_inference_dir(model_dir: Path) -> bool:
     if not model_dir.exists() or not model_dir.is_dir():
         return False
-    markers = [
-        model_dir / "inference.yml",
-        model_dir / "inference.pdiparams",
-        model_dir / "inference.pdmodel",
-        model_dir / "inference.json",
-    ]
-    return any(marker.exists() and marker.is_file() for marker in markers)
+    weights = model_dir / "inference.pdiparams"
+    graph_candidates = [model_dir / "inference.pdmodel", model_dir / "inference.json"]
+    has_graph = any(item.exists() and item.is_file() for item in graph_candidates)
+    return weights.exists() and weights.is_file() and has_graph
 
 
 def _run_paddleocr(reader: Any, input_path: str, use_angle_cls: bool) -> tuple[str, float, list[dict[str, Any]]]:
@@ -418,13 +484,23 @@ def _run_paddleocr(reader: Any, input_path: str, use_angle_cls: bool) -> tuple[s
 
     parsed_results: list[dict[str, Any]] = []
 
-    # 新しいPaddleOCR(3.x)形式: [{rec_texts:[...], rec_scores:[...], ...}]
+    # 新しいPaddleOCR(3.x)形式:
+    # - OCR pipeline: [{rec_texts:[...], rec_scores:[...], ...}]
+    # - TextRecognition: [{rec_text: "...", rec_score: ... , ...}]
     if isinstance(raw_results, list) and raw_results and isinstance(raw_results[0], dict):
         for block in raw_results:
             if not isinstance(block, dict):
                 continue
             rec_texts = block.get("rec_texts")
             rec_scores = block.get("rec_scores")
+            if "rec_text" in block:
+                text = str(block.get("rec_text") or "").strip()
+                try:
+                    score = float(block.get("rec_score", 0.0))
+                except Exception:  # noqa: BLE001
+                    score = 0.0
+                parsed_results.append({"text": text, "confidence": score})
+                continue
             if isinstance(rec_texts, list):
                 for idx, text in enumerate(rec_texts):
                     score = 0.0
@@ -474,44 +550,79 @@ def _predict_with_paddleocr(
 ) -> dict[str, Any]:
     langs = _normalize_ocr_languages(languages)
     selected_lang = langs[0]
-    use_angle_cls = True
-    model_meta = resolve_ocr_model_meta(project_id=project_id, model=model, engine="paddleocr")
-    if (model or "latest").strip() not in {"", "latest"} and model_meta is None:
-        raise FileNotFoundError(f"paddleocr model not found: {model}")
-
-    effective_charset = str(model_meta.get("charset") or charset) if model_meta else charset
-    effective_max_text_length = int(model_meta.get("max_text_length") or max_text_length) if model_meta else int(max_text_length)
-    if model_meta:
-        shape = _normalize_ocr_shape(model_meta.get("image_shape") or image_shape or [3, 48, 320])
+    # 学習済み認識モデルのみを使う運用では角度分類器を無効化し、
+    # 追加の公式モデル取得を避ける。
+    use_angle_cls = False
+    requested_model = (model or "latest").strip()
+    official_requested = requested_model in OFFICIAL_PADDLEOCR_REC_MODELS
+    model_meta = None if official_requested else resolve_ocr_model_meta(project_id=project_id, model=model, engine="paddleocr")
+    if model_meta is None:
+        if official_requested:
+            shape = _normalize_ocr_shape(image_shape or [3, 48, 320])
+            effective_charset = charset
+            effective_max_text_length = int(max_text_length)
+            model_warning = None
+            requested_model_name = requested_model
+            model_dir = None
+        else:
+            if requested_model in {"", "latest"}:
+                raise FileNotFoundError("No exported PaddleOCR model found. Please train/export OCR model first.")
+            raise FileNotFoundError(f"paddleocr model not found: {model}")
     else:
-        shape = _normalize_ocr_shape(image_shape or [3, 48, 320])
+        effective_charset = str(model_meta.get("charset") or charset)
+        effective_max_text_length = int(model_meta.get("max_text_length") or max_text_length)
+        shape = _normalize_ocr_shape(model_meta.get("image_shape") or image_shape or [3, 48, 320])
+        model_warning: Optional[str] = None
+        requested_model_name = str(model_meta.get("name") or requested_model)
+        exported_flag = model_meta.get("exported")
+        export_ready_flag = model_meta.get("export_ready")
+        if STRICT_OCR_EXPORT_REQUIRED and (exported_flag is False or export_ready_flag is False):
+            raise RuntimeError(
+                f"selected model '{requested_model_name}' is not inference-exported. "
+                "Please run model export first."
+            )
+        model_dir_raw = str(model_meta.get("model_dir") or model_meta.get("inference_dir") or "").strip()
+        if not model_dir_raw:
+            raise RuntimeError(
+                f"selected model '{requested_model_name}' has no inference directory. "
+                "Please run model export first."
+            )
+        model_dir = Path(model_dir_raw)
+        if not _is_paddle_rec_inference_dir(model_dir):
+            raise RuntimeError(
+                f"selected model '{requested_model_name}' is not inference-exported. "
+                "Please run model export first."
+            )
 
-    model_warning: Optional[str] = None
-    if model_meta and str(model_meta.get("model_dir") or "").strip():
-        requested_model_name = str(model_meta.get("name") or "")
-        model_dir = Path(str(model_meta.get("model_dir")))
-        if _is_paddle_rec_inference_dir(model_dir):
-            try:
-                from paddleocr import PaddleOCR  # type: ignore
-            except ImportError as e:
-                raise RuntimeError(
-                    "paddleocr is not installed. Please run: pip install paddleocr paddlepaddle"
-                ) from e
+    reader = _get_paddle_text_recognition_reader(model_dir=model_dir, model_name=(requested_model if official_requested else None))
+    if reader is None:
+        _prepare_paddle_runtime_env()
+        try:
+            from paddleocr import PaddleOCR  # type: ignore
+        except ImportError as e:
+            raise RuntimeError(
+                "paddleocr is not installed. Please run: pip install paddleocr paddlepaddle"
+            ) from e
+        if official_requested:
+            reader = _create_paddleocr_instance(
+                PaddleOCR,
+                lang=selected_lang,
+                use_angle_cls=use_angle_cls,
+                text_recognition_model_name=requested_model,
+                use_doc_orientation_classify=False,
+                use_doc_unwarping=False,
+                use_textline_orientation=False,
+            )
+        else:
             reader = _create_paddleocr_instance(
                 PaddleOCR,
                 lang=selected_lang,
                 use_angle_cls=use_angle_cls,
                 rec_model_dir=str(model_dir),
+                use_doc_orientation_classify=False,
+                use_doc_unwarping=False,
+                use_textline_orientation=False,
             )
-        else:
-            # 学習直後のrunディレクトリは推論用export前だと読み込めないため、標準モデルへフォールバックする。
-            reader = _get_paddleocr_reader(selected_lang, use_angle_cls=use_angle_cls)
-            model_warning = (
-                f"selected model '{requested_model_name}' is not inference-exported. "
-                "fallback to builtin PaddleOCR model."
-            )
-    else:
-        reader = _get_paddleocr_reader(selected_lang, use_angle_cls=use_angle_cls)
 
     def _infer(variant: str) -> dict[str, Any]:
         input_path, temp_path = _prepare_ocr_input_path(image_source, shape, apply_preprocess, variant=variant)
@@ -577,7 +688,7 @@ def _predict_with_paddleocr(
         "model_path": "",
         "project_id": project_id,
         "model_type": "paddleocr",
-        "model_name": str(model_meta.get("name")) if model_meta else "paddleocr",
+        "model_name": requested_model_name,
         "engine": "paddleocr",
         "paddleocr_language": selected_lang,
         "paddleocr_languages": langs,

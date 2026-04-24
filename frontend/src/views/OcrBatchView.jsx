@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Button from "../components/Button";
 import Card from "../components/Card";
 import { API_BASE } from "../lib/api";
+import { PADDLEOCR_OFFICIAL_MODELS_TOOLTIP } from "../lib/paddleocrOfficialTooltip";
 
 const BATCH_TEXT_MIN_LENGTH = 1;
 const BATCH_TEXT_MAX_LENGTH = 12;
@@ -28,6 +29,15 @@ function normalizePredictError(message) {
   }
   if (text.includes("invalid preprocess_overrides_json")) {
     return "前処理設定の送信形式が不正です。前処理設定を確認して再実行してください。";
+  }
+  if (text.includes("not inference-exported")) {
+    return "選択したPaddleOCRモデルは推論用にexportされていません。モデル変換（export）を実行してください。";
+  }
+  if (text.includes("No exported PaddleOCR model found")) {
+    return "利用可能なPaddleOCRモデルがありません。学習完了後にexport済みモデルを用意してください。";
+  }
+  if (text.includes("No available model hosting platforms detected")) {
+    return "公式PaddleOCRモデルの取得先に接続できません。ネットワーク接続を確認するか、事前にモデルキャッシュを配置してください。";
   }
   if (text.includes("unsupported image format")) {
     return "サポート外の画像形式です。png/jpg/webp などで再実行してください。";
@@ -362,7 +372,9 @@ export default function OcrBatchView({
                 </div>
               ) : engine === "paddleocr" ? (
                 <div>
-                  <label className="app-label">PaddleOCRモデル</label>
+                  <label className="app-label app-tooltip-label" data-tooltip={PADDLEOCR_OFFICIAL_MODELS_TOOLTIP}>
+                    PaddleOCRモデル
+                  </label>
                   <select className="app-select" value={paddleModel} onChange={(e) => setPaddleModel(e.target.value)}>
                     <option value="latest">最新</option>
                     {paddleModels.map((item) => (

@@ -154,6 +154,8 @@ Accuracy、クラス別精度、混同行列、誤認識一覧を確認します
 - `GET /api/ocr/train/status/{job_id}`
 - `GET /api/ocr/train/log/{job_id}`
 - `GET /models`
+- `GET /api/models/download/{model_name}`（OCRモデルは inference ZIP で取得）
+- `GET /api/ocr/models/official`（PaddleOCR公式認識モデル一覧）
 - `GET /models/latest`
 - `GET /model-types`
 - `POST /predict`（`engine=custom|easyocr|paddleocr`）
@@ -245,7 +247,12 @@ PY
    - 強度1〜3で適用確率と強さが上がる
 7. `OCRデータ作成` を実行する。
 8. `PaddleOCR リポジトリ` は固定パス（`/Users/hashimoto/vscode/_app/ocr_crafter/external/PaddleOCR`）を使用し、`OCR学習開始` を押す。
-9. 学習ログが `completed` になれば、`モデル作成 > モデル` に OCRモデルが追加される。
+9. 学習ログが `completed` になれば、推論用 `inference` モデルが自動exportされ、`モデル作成 > モデル` に OCRモデルが追加される。
+
+補足:
+- 推論で使用できるのは export済みOCRモデルのみです（未exportはエラー）。
+- 既存モデルを一括変換する場合は `POST /api/ocr/models/export-migrate` を実行します。
+- `engine=paddleocr` で export済みOCRモデルを指定した推論は、学習済み認識モデルを直接使用します（推論時に追加の公式モデル取得は不要）。
 
 ### B. 今日追加した強化機能を使った再学習ループ（推奨）
 

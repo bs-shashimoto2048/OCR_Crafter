@@ -4,6 +4,7 @@ import Button from "../components/Button";
 import Card from "../components/Card";
 import EditableHeatmap from "../components/EditableHeatmap";
 import { API_BASE, imageUrl, request } from "../lib/api";
+import { PADDLEOCR_OFFICIAL_MODELS_TOOLTIP } from "../lib/paddleocrOfficialTooltip";
 
 const BUSINESS_PATTERN = /^[A-Z0-9]{8}$/;
 const FORBIDDEN = new Set(["AAAAAAAA", "00000000"]);
@@ -690,7 +691,9 @@ export default function RapidOCRView({
                 </div>
               ) : engine === "paddleocr" ? (
                 <div>
-                  <label className="app-label">PaddleOCRモデル</label>
+                  <label className="app-label app-tooltip-label" data-tooltip={PADDLEOCR_OFFICIAL_MODELS_TOOLTIP}>
+                    PaddleOCRモデル
+                  </label>
                   <select className="app-select" value={paddleModel} onChange={(e) => setPaddleModel(e.target.value)}>
                     <option value="latest">最新</option>
                     {paddleModels.map((item) => (
