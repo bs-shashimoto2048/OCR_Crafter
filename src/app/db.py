@@ -44,6 +44,7 @@ def init_db() -> None:
                 status TEXT NOT NULL,
                 message TEXT,
                 model_path TEXT,
+                worker_pid INTEGER,
                 log_path TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
@@ -82,6 +83,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE training_jobs ADD COLUMN image_shape TEXT")
         if "log_path" not in columns:
             conn.execute("ALTER TABLE training_jobs ADD COLUMN log_path TEXT")
+        if "worker_pid" not in columns:
+            conn.execute("ALTER TABLE training_jobs ADD COLUMN worker_pid INTEGER")
         conn.commit()
 
 
@@ -97,6 +100,7 @@ def upsert_training_job(job: dict[str, Any]) -> None:
     max_text_length = job.get("max_text_length")
     dataset_dir = job.get("dataset_dir")
     paddle_repo_dir = job.get("paddle_repo_dir")
+    worker_pid = job.get("worker_pid")
     image_shape = job.get("image_shape")
     if isinstance(image_shape, (list, tuple, dict)):
         image_shape = json.dumps(image_shape, ensure_ascii=False)
@@ -104,8 +108,8 @@ def upsert_training_job(job: dict[str, Any]) -> None:
         conn.execute(
             """
             INSERT INTO training_jobs (
-                id, project_id, training_family, engine, model_type, epochs, batch_size, learning_rate, training_mode, init_source_type, init_source_value, freeze_backbone_epochs, backbone_lr_scale, charset, max_text_length, dataset_dir, paddle_repo_dir, image_shape, status, message, model_path, log_path, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, project_id, training_family, engine, model_type, epochs, batch_size, learning_rate, training_mode, init_source_type, init_source_value, freeze_backbone_epochs, backbone_lr_scale, charset, max_text_length, dataset_dir, paddle_repo_dir, image_shape, status, message, model_path, worker_pid, log_path, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 project_id=excluded.project_id,
                 training_family=excluded.training_family,
@@ -127,6 +131,7 @@ def upsert_training_job(job: dict[str, Any]) -> None:
                 status=excluded.status,
                 message=excluded.message,
                 model_path=excluded.model_path,
+                worker_pid=excluded.worker_pid,
                 log_path=excluded.log_path,
                 updated_at=excluded.updated_at
             """,
@@ -152,6 +157,7 @@ def upsert_training_job(job: dict[str, Any]) -> None:
                 job["status"],
                 job.get("message"),
                 job.get("model_path"),
+                worker_pid,
                 job.get("log_path"),
                 job["created_at"],
                 job["updated_at"],
@@ -164,7 +170,7 @@ def fetch_training_job(job_id: str) -> Optional[dict[str, Any]]:
     with get_conn() as conn:
         row = conn.execute(
             """
-            SELECT id, project_id, training_family, engine, model_type, epochs, batch_size, learning_rate, training_mode, init_source_type, init_source_value, freeze_backbone_epochs, backbone_lr_scale, charset, max_text_length, dataset_dir, paddle_repo_dir, image_shape, status, message, model_path, log_path, created_at, updated_at
+            SELECT id, project_id, training_family, engine, model_type, epochs, batch_size, learning_rate, training_mode, init_source_type, init_source_value, freeze_backbone_epochs, backbone_lr_scale, charset, max_text_length, dataset_dir, paddle_repo_dir, image_shape, status, message, model_path, worker_pid, log_path, created_at, updated_at
             FROM training_jobs WHERE id = ?
             """,
             (job_id,),
@@ -195,6 +201,7 @@ def fetch_training_job(job_id: str) -> Optional[dict[str, Any]]:
         "status",
         "message",
         "model_path",
+        "worker_pid",
         "log_path",
         "created_at",
         "updated_at",

@@ -411,23 +411,34 @@ def _create_paddleocr_instance(paddleocr_cls: Any, **base_kwargs: Any) -> Any:
     """
     attempts: list[dict[str, Any]] = []
     include_det_off = "rec_model_dir" in base_kwargs
+    normalized_base_kwargs = dict(base_kwargs)
+    # PaddleOCR 3.x 系では False を明示しただけでも排他引数エラーになることがある。
+    # 既定値と同じ False は渡さず、互換性を優先する。
+    for optional_false_flag in (
+        "use_angle_cls",
+        "use_textline_orientation",
+        "use_doc_orientation_classify",
+        "use_doc_unwarping",
+    ):
+        if normalized_base_kwargs.get(optional_false_flag) is False:
+            normalized_base_kwargs.pop(optional_false_flag, None)
 
-    kwargs = dict(base_kwargs)
+    kwargs = dict(normalized_base_kwargs)
     kwargs["show_log"] = False
     if include_det_off:
         kwargs["det"] = False
     attempts.append(kwargs)
 
-    kwargs = dict(base_kwargs)
+    kwargs = dict(normalized_base_kwargs)
     if include_det_off:
         kwargs["det"] = False
     attempts.append(kwargs)
 
-    kwargs = dict(base_kwargs)
+    kwargs = dict(normalized_base_kwargs)
     kwargs["show_log"] = False
     attempts.append(kwargs)
 
-    attempts.append(dict(base_kwargs))
+    attempts.append(dict(normalized_base_kwargs))
 
     last_error: Optional[Exception] = None
     for kwargs in attempts:
@@ -450,6 +461,15 @@ def _create_paddleocr_instance(paddleocr_cls: Any, **base_kwargs: Any) -> Any:
                         continue
                     last_error = e
                     break
+                if "mutually exclusive" in message:
+                    if "use_angle_cls" in candidate_kwargs:
+                        candidate_kwargs.pop("use_angle_cls", None)
+                        last_error = e
+                        continue
+                    if "use_textline_orientation" in candidate_kwargs:
+                        candidate_kwargs.pop("use_textline_orientation", None)
+                        last_error = e
+                        continue
                 raise
 
     if last_error is not None:
@@ -555,7 +575,12 @@ def _predict_with_paddleocr(
     use_angle_cls = False
     requested_model = (model or "latest").strip()
     official_requested = requested_model in OFFICIAL_PADDLEOCR_REC_MODELS
-    model_meta = None if official_requested else resolve_ocr_model_meta(project_id=project_id, model=model, engine="paddleocr")
+    model_meta = None if official_requested else resolve_ocr_model_meta(
+        project_id=project_id,
+        model=model,
+        engine="paddleocr",
+        inference_ready_only=True,
+    )
     if model_meta is None:
         if official_requested:
             shape = _normalize_ocr_shape(image_shape or [3, 48, 320])

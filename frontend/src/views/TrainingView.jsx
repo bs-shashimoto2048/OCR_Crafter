@@ -65,6 +65,8 @@ export default function TrainingView({
   onBuildDataset,
   onStartTraining,
   onStartOcrTraining,
+  onStopTraining,
+  onStopTrainingAndDelete,
   canTrain,
   canStartOcrTraining,
   jobId,
@@ -82,7 +84,8 @@ export default function TrainingView({
   const isRunning = jobStatus === "queued" || jobStatus === "running";
   const isCompleted = jobStatus === "completed";
   const isFailed = jobStatus === "failed";
-  const canToggleParams = trainingStarted || isRunning || isCompleted || isFailed;
+  const isStopped = jobStatus === "stopped";
+  const canToggleParams = trainingStarted || isRunning || isCompleted || isFailed || isStopped;
 
   let trainingVariant = "secondary";
   let trainingClassName = "";
@@ -102,6 +105,7 @@ export default function TrainingView({
     if (value === "running") return "実行中";
     if (value === "completed") return "完了";
     if (value === "failed") return "失敗";
+    if (value === "stopped") return "停止";
     if (value === "idle") return "未実行";
     return value || "-";
   }
@@ -128,14 +132,49 @@ export default function TrainingView({
   }, [logs, showImportantOnly]);
 
   const latestEta = useMemo(() => {
+    function parseTimestamp(value) {
+      const match = String(value || "").match(/\[(\d{4})\/(\d{2})\/(\d{2}) (\d{2}):(\d{2}):(\d{2})\]/);
+      if (!match) return null;
+      const [, y, m, d, hh, mm, ss] = match;
+      const parsed = new Date(`${y}-${m}-${d}T${hh}:${mm}:${ss}`);
+      return Number.isFinite(parsed.getTime()) ? parsed : null;
+    }
+
+    const progressRows = [];
+    let rawEta = "-";
     for (let i = logs.length - 1; i >= 0; i -= 1) {
       const line = String(logs[i] || "");
+      const progress = line.match(/epoch:\s*\[(\d+)\/(\d+)\].*global_step:\s*(\d+)/i);
+      if (progress) {
+        const ts = parseTimestamp(line);
+        const currentEpoch = Number(progress[1]);
+        const totalEpochs = Number(progress[2]);
+        const globalStep = Number(progress[3]);
+        if (ts && Number.isFinite(currentEpoch) && Number.isFinite(totalEpochs) && Number.isFinite(globalStep)) {
+          progressRows.push({ ts, currentEpoch, totalEpochs, globalStep });
+        }
+      }
       const jp = line.match(/残り\s*([0-9:]+)/);
-      if (jp?.[1]) return jp[1];
+      if (jp?.[1] && rawEta === "-") rawEta = jp[1];
       const en = line.match(/eta:\s*([0-9:]+)/i);
-      if (en?.[1]) return en[1];
+      if (en?.[1] && rawEta === "-") rawEta = en[1];
     }
-    return "-";
+
+    if (progressRows.length >= 2) {
+      const latest = progressRows[0];
+      const earliest = progressRows[progressRows.length - 1];
+      const elapsedSec = Math.max(1, Math.round((latest.ts.getTime() - earliest.ts.getTime()) / 1000));
+      const completedSteps = Math.max(1, latest.globalStep - earliest.globalStep);
+      const inferredStepsPerEpoch = Math.max(1, Math.round(latest.globalStep / Math.max(latest.currentEpoch, 1)));
+      const totalSteps = Math.max(latest.globalStep, inferredStepsPerEpoch * latest.totalEpochs);
+      const remainingSteps = Math.max(0, totalSteps - latest.globalStep);
+      const remainingSec = Math.round((elapsedSec / completedSteps) * remainingSteps);
+      const hours = Math.floor(remainingSec / 3600);
+      const minutes = Math.floor((remainingSec % 3600) / 60);
+      const seconds = remainingSec % 60;
+      return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    }
+    return rawEta;
   }, [logs]);
 
   const [ocrChannel, ocrHeight, ocrWidth] = useMemo(() => {
@@ -201,6 +240,8 @@ export default function TrainingView({
       ? "border-success/60 bg-success/15 text-emerald-100"
       : isFailed
         ? "border-danger/60 bg-danger/15 text-red-100"
+        : isStopped
+          ? "border-amber-300/40 bg-amber-300/10 text-amber-100"
         : "border-border bg-card/70 text-muted";
 
   function logRowClass(level) {
@@ -459,6 +500,16 @@ export default function TrainingView({
                     <p className="text-xs text-amber-100">既存モデルFine-tuneを選択中です。初期モデルを指定してください。</p>
                   ) : null}
                   <div className="space-y-2">
+                    {isRunning ? (
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button variant="danger" className="w-full" onClick={onStopTraining}>
+                          学習停止
+                        </Button>
+                        <Button variant="danger" className="w-full" onClick={onStopTrainingAndDelete}>
+                          停止して削除
+                        </Button>
+                      </div>
+                    ) : null}
                     {clsNextAction !== "preprocess" ? (
                       <Button variant="secondary" className="w-full" onClick={onPreprocess}>
                         前処理のみ実行
@@ -677,6 +728,16 @@ export default function TrainingView({
                       {!ocrHasInitModel ? (
                         <p className="text-xs text-amber-100">OCR Fine-tuneを選択中です。初期モデルを指定してください。</p>
                       ) : null}
+                      {isRunning ? (
+                        <div className="grid grid-cols-2 gap-2">
+                          <Button variant="danger" className="w-full" onClick={onStopTraining}>
+                            学習停止
+                          </Button>
+                          <Button variant="danger" className="w-full" onClick={onStopTrainingAndDelete}>
+                            停止して削除
+                          </Button>
+                        </div>
+                      ) : null}
                       {ocrDatasetReady ? (
                         <Button variant="secondary" className="w-full" onClick={onCreateSelectedOcrDataset}>
                           データを再作成
@@ -714,6 +775,16 @@ export default function TrainingView({
             <span className="rounded-md border border-border bg-card/60 px-2 py-1 text-xs text-muted">
               残り時間: <span className="font-semibold text-text">{latestEta}</span>
             </span>
+            {isRunning ? (
+              <>
+                <Button size="sm" variant="danger" onClick={onStopTraining}>
+                  学習停止
+                </Button>
+                <Button size="sm" variant="danger" onClick={onStopTrainingAndDelete}>
+                  停止して削除
+                </Button>
+              </>
+            ) : null}
             {canToggleParams ? (
               <Button
                 size="sm"

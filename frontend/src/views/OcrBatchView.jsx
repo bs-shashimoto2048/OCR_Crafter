@@ -3,7 +3,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Button from "../components/Button";
 import Card from "../components/Card";
 import { API_BASE } from "../lib/api";
-import { PADDLEOCR_OFFICIAL_MODELS_TOOLTIP } from "../lib/paddleocrOfficialTooltip";
 
 const BATCH_TEXT_MIN_LENGTH = 1;
 const BATCH_TEXT_MAX_LENGTH = 12;
@@ -372,9 +371,7 @@ export default function OcrBatchView({
                 </div>
               ) : engine === "paddleocr" ? (
                 <div>
-                  <label className="app-label app-tooltip-label" data-tooltip={PADDLEOCR_OFFICIAL_MODELS_TOOLTIP}>
-                    PaddleOCRモデル
-                  </label>
+                  <label className="app-label">PaddleOCRモデル</label>
                   <select className="app-select" value={paddleModel} onChange={(e) => setPaddleModel(e.target.value)}>
                     <option value="latest">最新</option>
                     {paddleModels.map((item) => (

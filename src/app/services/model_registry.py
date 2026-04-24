@@ -384,17 +384,34 @@ def list_ocr_model_meta_files(project_id: Optional[str], engine: Optional[str] =
     return sorted(files)
 
 
-def latest_ocr_model_meta(project_id: Optional[str], engine: Optional[str] = None) -> Optional[Path]:
+def latest_ocr_model_meta(
+    project_id: Optional[str],
+    engine: Optional[str] = None,
+    inference_ready_only: bool = False,
+) -> Optional[Path]:
     files = list_ocr_model_meta_files(project_id=project_id, engine=engine)
+    if inference_ready_only:
+        ready_files: list[Path] = []
+        for path in files:
+            payload = _safe_load_json(path)
+            inference_dir = str(payload.get("inference_dir") or payload.get("model_dir") or "")
+            if _is_paddle_inference_dir(inference_dir):
+                ready_files.append(path)
+        files = ready_files
     if not files:
         return None
     return max(files, key=lambda p: p.stat().st_mtime)
 
 
-def resolve_ocr_model_meta(project_id: Optional[str], model: str = "latest", engine: Optional[str] = None) -> Optional[dict]:
+def resolve_ocr_model_meta(
+    project_id: Optional[str],
+    model: str = "latest",
+    engine: Optional[str] = None,
+    inference_ready_only: bool = False,
+) -> Optional[dict]:
     normalized_model = (model or "latest").strip()
     if normalized_model in {"", "latest"}:
-        meta_file = latest_ocr_model_meta(project_id=project_id, engine=engine)
+        meta_file = latest_ocr_model_meta(project_id=project_id, engine=engine, inference_ready_only=inference_ready_only)
     else:
         paths = ensure_project_directories(project_id)
         candidate = paths.models / Path(normalized_model).name
@@ -406,6 +423,10 @@ def resolve_ocr_model_meta(project_id: Optional[str], model: str = "latest", eng
     try:
         payload = json.loads(meta_file.read_text(encoding="utf-8"))
         if isinstance(payload, dict):
+            if inference_ready_only:
+                inference_dir = str(payload.get("inference_dir") or payload.get("model_dir") or "")
+                if not _is_paddle_inference_dir(inference_dir):
+                    return None
             payload["meta_file"] = str(meta_file)
             return payload
     except Exception:  # noqa: BLE001

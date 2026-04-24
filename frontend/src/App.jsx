@@ -42,6 +42,8 @@ const viewMeta = {
 
 const PRESET_STORAGE_KEY = "ocr_preprocess_presets_v1";
 const PREPROCESS_PARAMS_BY_PROJECT_STORAGE_KEY = "ocr_preprocess_params_by_project_v1";
+const TRAINING_SESSION_BY_PROJECT_STORAGE_KEY = "ocr_training_session_by_project_v1";
+const LAST_PROJECT_STORAGE_KEY = "ocr_last_project_v1";
 const NOTICE_AUTO_HIDE_MS = 4500;
 const EASYOCR_LANGUAGE_OPTIONS = [
   "en",
@@ -180,6 +182,35 @@ function modelTypeFromModelName(modelName) {
   return stem.split("_", 1)[0];
 }
 
+function loadSessionStorageJson(key) {
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    if (!raw) {
+      return {};
+    }
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveSessionStorageJson(key, value) {
+  try {
+    window.sessionStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // ignore session storage write error
+  }
+}
+
+function loadLastProjectId() {
+  try {
+    return window.sessionStorage.getItem(LAST_PROJECT_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
 export default function App() {
   const [activeView, setActiveView] = useState("dashboard");
   const [notice, setNotice] = useState(null);
@@ -251,7 +282,7 @@ export default function App() {
     () =>
       models.filter((name) => {
         const info = modelInfos[name] || {};
-        return info.training_family === "ocr" && info.engine === "paddleocr";
+        return info.training_family === "ocr" && info.engine === "paddleocr" && Boolean(info.ocr_inference_ready);
       }),
     [models, modelInfos]
   );
@@ -263,7 +294,7 @@ export default function App() {
     () =>
       models.filter((name) => {
         const info = modelInfos[name] || {};
-        return info.training_family === "ocr";
+        return info.training_family === "ocr" && (info.engine !== "paddleocr" || Boolean(info.ocr_inference_ready));
       }),
     [models, modelInfos]
   );
@@ -309,6 +340,7 @@ export default function App() {
   const preprocessParamsByProjectRef = useRef({});
   const skipPreprocessPersistRef = useRef(false);
   const noticeTimerRef = useRef(null);
+  const trainingSessionByProjectRef = useRef(loadSessionStorageJson(TRAINING_SESSION_BY_PROJECT_STORAGE_KEY));
 
   function pushLog(line) {
     setLogs((prev) => [...prev.slice(-120), `[${nowLabel()}] ${line}`]);
@@ -365,6 +397,22 @@ export default function App() {
       return;
     }
     setLogs([]);
+  }
+
+  function persistTrainingSession(targetProjectId, nextSession) {
+    const normalizedProjectId = String(targetProjectId || "");
+    const nextMap = { ...trainingSessionByProjectRef.current };
+    if (!normalizedProjectId) {
+      trainingSessionByProjectRef.current = nextMap;
+      return;
+    }
+    if (nextSession) {
+      nextMap[normalizedProjectId] = nextSession;
+    } else {
+      delete nextMap[normalizedProjectId];
+    }
+    trainingSessionByProjectRef.current = nextMap;
+    saveSessionStorageJson(TRAINING_SESSION_BY_PROJECT_STORAGE_KEY, nextMap);
   }
 
   async function exitApplication() {
@@ -472,7 +520,7 @@ export default function App() {
     localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(next));
   }
 
-  async function loadProjects(preferredProjectId = projectId) {
+  async function loadProjects(preferredProjectId = projectId || loadLastProjectId()) {
     const data = await request("/projects");
     const items = data.items || [];
     const summaries = Array.isArray(data.summaries) ? data.summaries : [];
@@ -722,8 +770,50 @@ export default function App() {
       datasetBuilt: false,
       trainingStarted: false,
     });
+    const savedSession = projectId ? trainingSessionByProjectRef.current[projectId] : null;
+    if (
+      savedSession &&
+      typeof savedSession === "object" &&
+      (savedSession.jobId || (Array.isArray(savedSession.logs) && savedSession.logs.length > 0))
+    ) {
+      stopPollingRef.current = false;
+      setJobId(String(savedSession.jobId || ""));
+      setJobStatus(String(savedSession.jobStatus || "idle"));
+      setJobFamily(String(savedSession.jobFamily || "classification"));
+      setLogs(Array.isArray(savedSession.logs) ? savedSession.logs : []);
+      lastStatusRef.current = String(savedSession.jobStatus || "");
+      lastMessageRef.current = "";
+      return;
+    }
     resetTrainingLog();
   }, [projectId]);
+
+  useEffect(() => {
+    if (!projectId) {
+      return;
+    }
+    try {
+      window.sessionStorage.setItem(LAST_PROJECT_STORAGE_KEY, projectId);
+    } catch {
+      // ignore session storage write error
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!projectId) {
+      return;
+    }
+    if (!jobId && jobStatus === "idle" && logs.length === 0) {
+      persistTrainingSession(projectId, null);
+      return;
+    }
+    persistTrainingSession(projectId, {
+      jobId,
+      jobStatus,
+      jobFamily,
+      logs: Array.isArray(logs) ? logs.slice(-300) : [],
+    });
+  }, [projectId, jobId, jobStatus, jobFamily, logs]);
 
   useEffect(() => {
     setImageShapes({});
@@ -959,6 +1049,9 @@ export default function App() {
       try {
         const statusPath = jobFamily === "ocr" ? `/api/ocr/train/status/${jobId}` : `/train/${jobId}`;
         const data = await request(statusPath);
+        if (stopPollingRef.current) {
+          return;
+        }
         setJobStatus(data.status || "unknown");
 
         if (data.status && data.status !== lastStatusRef.current) {
@@ -973,6 +1066,9 @@ export default function App() {
 
         if (jobFamily === "ocr") {
           const logData = await request(`/api/ocr/train/log/${jobId}?tail=300`).catch(() => ({ lines: [] }));
+          if (stopPollingRef.current) {
+            return;
+          }
           if (Array.isArray(logData?.lines)) {
             setLogs(logData.lines.slice(-300).map((line) => summarizePpocrLogLine(line)));
           }
@@ -986,6 +1082,11 @@ export default function App() {
 
         if (data.status === "failed") {
           notify("error", "学習に失敗しました");
+          stopPollingRef.current = true;
+        }
+
+        if (data.status === "stopped") {
+          notify("info", "学習を停止しました");
           stopPollingRef.current = true;
         }
       } catch (error) {
@@ -1190,6 +1291,14 @@ export default function App() {
       const data = await request(`/projects/${encodeURIComponent(deletingProjectId)}`, {
         method: "DELETE",
       });
+      persistTrainingSession(deletingProjectId, null);
+      if (deletingProjectId === projectId) {
+        try {
+          window.sessionStorage.removeItem(LAST_PROJECT_STORAGE_KEY);
+        } catch {
+          // ignore session storage write error
+        }
+      }
       notify("success", `プロジェクトを削除しました: ${data.project_id}`);
       pushLog(`プロジェクト削除: ${data.project_id}（削除ジョブ数=${data.deleted_jobs ?? 0}）`);
       const result = await loadProjects();
@@ -1577,6 +1686,7 @@ export default function App() {
         }),
       });
 
+      resetTrainingLog(`学習開始要求: プロジェクト=${projectId}`);
       setJobId(data.job_id);
       setJobStatus(data.status || "queued");
       setJobFamily("classification");
@@ -1613,7 +1723,6 @@ export default function App() {
         notify("error", "OCR Fine-tuneでは初期モデルを選択してください。");
         return;
       }
-      resetTrainingLog(`OCR学習開始要求: プロジェクト=${projectId}`);
       const payload = {
         project_id: projectId,
         engine: "paddleocr",
@@ -1633,6 +1742,7 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
+      resetTrainingLog(`OCR学習開始要求: プロジェクト=${projectId}`);
       setJobId(data.job_id);
       setJobStatus(data.status || "queued");
       setJobFamily("ocr");
@@ -1645,6 +1755,30 @@ export default function App() {
       pushLog(`OCR学習開始要求: プロジェクト=${projectId} / ジョブ=${data.job_id}`);
       notify("info", `OCR学習キューに追加しました (${data.job_id})`);
       setActiveView("ocr-training");
+    } catch (error) {
+      notify("error", error.message);
+    }
+  }
+
+  async function stopTraining(deleteArtifacts = false) {
+    if (!jobId) {
+      notify("error", "停止対象の学習ジョブがありません");
+      return;
+    }
+    const confirmMessage = deleteArtifacts
+      ? "現在の学習を停止し、このジョブの関連データを削除します。続行しますか？"
+      : "現在の学習を停止します。続行しますか？";
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+    try {
+      const suffix = deleteArtifacts ? "?delete_artifacts=true" : "";
+      const path = jobFamily === "ocr" ? `/api/ocr/train/stop/${jobId}${suffix}` : `/train/stop/${jobId}${suffix}`;
+      const data = await request(path, { method: "POST" });
+      setJobStatus(data.status || "stopped");
+      stopPollingRef.current = true;
+      pushLog(deleteArtifacts ? `学習停止と関連データ削除: ジョブ=${jobId}` : `学習停止要求: ジョブ=${jobId}`);
+      notify("info", deleteArtifacts ? "学習を停止し、関連データを削除しました" : "学習を停止しました");
     } catch (error) {
       notify("error", error.message);
     }
@@ -2054,6 +2188,8 @@ export default function App() {
         onBuildDataset={buildDataset}
         onStartTraining={startTraining}
         onStartOcrTraining={startOcrTraining}
+        onStopTraining={() => stopTraining(false)}
+        onStopTrainingAndDelete={() => stopTraining(true)}
         canTrain={canTrain}
         canStartOcrTraining={canStartOcrTraining}
         jobId={jobId}

@@ -972,6 +972,42 @@ def _register_ocr_model(
     return model_meta_path.name
 
 
+def register_exported_ocr_model(
+    project_id: str,
+    engine: str,
+    checkpoint_dir: Path,
+    inference_dir: Path,
+    charset: str,
+    max_text_length: int,
+    image_shape: list[int],
+    dataset_root: Path,
+    job_id: str,
+    epochs: int,
+    batch_size: int,
+    learning_rate: float,
+    training_mode: str = "scratch",
+    init_source_type: str = "scratch",
+    init_source_value: str = "",
+) -> str:
+    return _register_ocr_model(
+        project_id=project_id,
+        engine=engine,
+        checkpoint_dir=checkpoint_dir,
+        inference_dir=inference_dir,
+        charset=charset,
+        max_text_length=max_text_length,
+        image_shape=image_shape,
+        dataset_root=dataset_root,
+        job_id=job_id,
+        epochs=epochs,
+        batch_size=batch_size,
+        learning_rate=learning_rate,
+        training_mode=training_mode,
+        init_source_type=init_source_type,
+        init_source_value=init_source_value,
+    )
+
+
 def run_paddleocr_training(
     project_id: str,
     job_id: str,
@@ -1096,6 +1132,7 @@ def run_paddleocr_training(
         f"Eval.dataset.label_file_list=['{str(val_txt)}']",
         f"Train.loader.batch_size_per_card={effective_train_batch}",
         f"Eval.loader.batch_size_per_card={effective_eval_batch}",
+        "Global.print_batch_step=1",
         (f"Global.pretrained_model={init_pretrained_url}" if init_pretrained_url else "Global.pretrained_model="),
         (f"Global.checkpoints={init_checkpoint_prefix}" if init_checkpoint_prefix else "Global.checkpoints="),
     ]
@@ -1132,6 +1169,11 @@ def run_paddleocr_training(
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
+            env={
+                **os.environ,
+                "PYTHONUNBUFFERED": "1",
+                "PYTHONIOENCODING": "utf-8",
+            },
         )
         assert process.stdout is not None
         detected_fatal_error = False
@@ -1142,10 +1184,12 @@ def run_paddleocr_training(
         )
         for line in process.stdout:
             log_file.write(line)
+            log_file.flush()
             if any(marker in line for marker in fatal_markers):
                 detected_fatal_error = True
         return_code = process.wait()
         log_file.write(f"[{datetime.now().isoformat()}] return_code={return_code}\n")
+        log_file.flush()
 
     if return_code != 0 or detected_fatal_error:
         raise RuntimeError(f"PaddleOCR training failed with exit code {return_code}")

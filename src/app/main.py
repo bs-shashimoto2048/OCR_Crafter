@@ -1,6 +1,7 @@
 import tempfile
 import uuid
 import os
+import sys
 import signal
 import subprocess
 import time
@@ -68,8 +69,10 @@ from .services.ocr_pipeline import (
     create_ocr_dataset_from_logs,
     create_ocr_dataset,
     migrate_ocr_models_to_inference,
+    PADDLE_INFERENCE_MARKERS,
     read_latest_rapid_ocr_states,
     read_training_log_lines,
+    register_exported_ocr_model,
     resolve_official_paddleocr_rec_spec,
     run_paddleocr_training,
     save_ocr_prediction_log,
@@ -263,6 +266,267 @@ def _cleanup_failed_ocr_dataset(project_id: str, dataset_dir: str) -> bool:
 
     shutil.rmtree(dataset_path, ignore_errors=True)
     return True
+
+
+def _is_pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _ocr_run_dir_for_job(job_id: str, project_id: str) -> Path:
+    paths = ensure_project_directories(project_id)
+    return paths.models / "ocr_runs" / job_id
+
+
+def _is_paddle_inference_dir(path: Path) -> bool:
+    if not path.exists() or not path.is_dir():
+        return False
+    if not (path / "inference.yml").exists():
+        return False
+    if not (path / "inference.pdiparams").exists():
+        return False
+    return (path / "inference.pdmodel").exists() or (path / "inference.json").exists()
+
+
+def _find_ocr_meta_by_job_id(project_id: str, job_id: str) -> Optional[Path]:
+    paths = ensure_project_directories(project_id)
+    for meta_path in paths.models.glob("*.ocr.json"):
+        if not meta_path.is_file():
+            continue
+        try:
+            payload = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            continue
+        if str(payload.get("job_id") or "").strip() == job_id:
+            return meta_path
+    return None
+
+
+def _recover_exported_ocr_runs(project_id: str) -> int:
+    paths = ensure_project_directories(project_id)
+    ocr_runs_root = paths.models / "ocr_runs"
+    if not ocr_runs_root.exists() or not ocr_runs_root.is_dir():
+        return 0
+
+    recovered = 0
+    for run_dir in sorted(ocr_runs_root.iterdir()):
+        if not run_dir.is_dir():
+            continue
+        inference_dir = run_dir / "inference"
+        if not _is_paddle_inference_dir(inference_dir):
+            continue
+
+        job_id = run_dir.name
+        job = fetch_training_job(job_id)
+        if not job or str(job.get("training_family") or "") != "ocr":
+            continue
+
+        meta_path = _find_ocr_meta_by_job_id(project_id, job_id)
+        try:
+            if meta_path is None:
+                register_exported_ocr_model(
+                    project_id=project_id,
+                    engine="paddleocr",
+                    checkpoint_dir=run_dir,
+                    inference_dir=inference_dir,
+                    charset=str(job.get("charset") or OCR_CHARSET_DEFAULT),
+                    max_text_length=int(job.get("max_text_length") or 8),
+                    image_shape=[int(x) for x in (job.get("image_shape") or [3, 48, 320])],
+                    dataset_root=Path(str(job.get("dataset_dir") or "")).expanduser(),
+                    job_id=job_id,
+                    epochs=int(job.get("epochs") or 0),
+                    batch_size=int(job.get("batch_size") or 0),
+                    learning_rate=float(job.get("learning_rate") or 0.0),
+                    training_mode=str(job.get("training_mode") or "scratch"),
+                    init_source_type=str(job.get("init_source_type") or "scratch"),
+                    init_source_value=str(job.get("init_source_value") or ""),
+                )
+            upsert_training_job(
+                {
+                    **job,
+                    "status": "completed",
+                    "message": "ocr training completed",
+                    "model_path": str(inference_dir.resolve()),
+                    "updated_at": _now_iso(),
+                }
+            )
+            recovered += 1
+        except Exception:  # noqa: BLE001
+            continue
+    return recovered
+
+
+def _reconcile_ocr_training_job(job_id: str) -> Optional[dict[str, Any]]:
+    job = fetch_training_job(job_id)
+    if not job or str(job.get("training_family") or "") != "ocr":
+        return job
+
+    project_id = str(job.get("project_id") or "default")
+    _recover_exported_ocr_runs(project_id)
+    current = fetch_training_job(job_id) or job
+
+    run_dir = _ocr_run_dir_for_job(job_id, project_id)
+    inference_dir = run_dir / "inference"
+    if _is_paddle_inference_dir(inference_dir):
+        upsert_training_job(
+            {
+                **current,
+                "status": "completed",
+                "message": "ocr training completed",
+                "model_path": str(inference_dir.resolve()),
+                "updated_at": _now_iso(),
+            }
+        )
+        return fetch_training_job(job_id)
+
+    if str(current.get("status") or "") not in {"queued", "running"}:
+        return current
+
+    worker_pid = int(current.get("worker_pid") or 0)
+    if worker_pid and _is_pid_alive(worker_pid):
+        return current
+
+    latest_checkpoint = run_dir / "latest.pdparams"
+    if latest_checkpoint.exists():
+        upsert_training_job(
+            {
+                **current,
+                "status": "failed",
+                "message": "ocr training process ended before export/registration completed",
+                "updated_at": _now_iso(),
+            }
+        )
+        return fetch_training_job(job_id)
+    return current
+
+
+def _spawn_training_runner(job_type: str, job_id: str) -> int:
+    repo_root = Path(__file__).resolve().parents[2]
+    process = subprocess.Popen(
+        [sys.executable, "-m", "src.app.job_runner", job_type, job_id],
+        cwd=str(repo_root),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+        close_fds=True,
+    )
+    return int(process.pid)
+
+
+def _delete_training_artifacts(job: dict[str, Any]) -> dict[str, Any]:
+    project_id = str(job.get("project_id") or "default")
+    training_family = str(job.get("training_family") or "classification")
+    paths = ensure_project_directories(project_id)
+    removed: dict[str, Any] = {
+        "run_dir_removed": False,
+        "model_removed": False,
+        "log_removed": False,
+    }
+
+    if training_family == "ocr":
+        run_dir = paths.models / "ocr_runs" / str(job.get("id") or "")
+        if run_dir.exists() and run_dir.is_dir() and not run_dir.is_symlink():
+            shutil.rmtree(run_dir)
+            removed["run_dir_removed"] = True
+
+    model_path_raw = str(job.get("model_path") or "").strip()
+    if model_path_raw:
+        try:
+            model_path = Path(model_path_raw)
+            resolved_model_path = model_path.resolve()
+            if resolved_model_path.exists() and resolved_model_path.is_file():
+                resolved_model_path.relative_to(paths.models.resolve())
+                resolved_model_path.unlink()
+                removed["model_removed"] = True
+        except Exception:
+            pass
+
+    log_path_raw = str(job.get("log_path") or "").strip()
+    if log_path_raw:
+        try:
+            log_path = Path(log_path_raw)
+            resolved_log_path = log_path.resolve()
+            if resolved_log_path.exists() and resolved_log_path.is_file():
+                resolved_log_path.relative_to(paths.logs.resolve())
+                resolved_log_path.unlink()
+                removed["log_removed"] = True
+        except Exception:
+            pass
+
+    return removed
+
+
+def _stop_training_worker(
+    job_id: str,
+    expected_family: Optional[str] = None,
+    delete_artifacts: bool = False,
+) -> dict[str, Any]:
+    job = fetch_training_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+
+    training_family = str(job.get("training_family") or "classification")
+    if expected_family and training_family != expected_family:
+        raise HTTPException(status_code=400, detail=f"not a {expected_family} training job")
+
+    status = str(job.get("status") or "")
+    if status not in {"queued", "running"}:
+        raise HTTPException(status_code=400, detail=f"job is not stoppable: {status or 'unknown'}")
+
+    worker_pid = int(job.get("worker_pid") or 0)
+    if worker_pid <= 0:
+        raise HTTPException(status_code=409, detail="worker pid is missing")
+
+    stopped = False
+    try:
+        os.killpg(worker_pid, signal.SIGTERM)
+        stopped = True
+    except ProcessLookupError:
+        stopped = False
+    except Exception:
+        try:
+            os.kill(worker_pid, signal.SIGTERM)
+            stopped = True
+        except ProcessLookupError:
+            stopped = False
+
+    current = fetch_training_job(job_id) or job
+    removed = {"run_dir_removed": False, "model_removed": False, "log_removed": False}
+    message = "training stopped by user"
+    next_model_path = current.get("model_path")
+    next_log_path = current.get("log_path")
+    if delete_artifacts:
+        removed = _delete_training_artifacts(current)
+        message = "training stopped by user and artifacts deleted"
+        next_model_path = None
+        next_log_path = None
+    upsert_training_job(
+        {
+            **current,
+            "status": "stopped",
+            "message": message,
+            "model_path": next_model_path,
+            "worker_pid": None,
+            "log_path": next_log_path,
+            "updated_at": _now_iso(),
+        }
+    )
+    return {
+        "job_id": job_id,
+        "project_id": str(current.get("project_id") or "default"),
+        "training_family": training_family,
+        "status": "stopped",
+        "stopped": stopped,
+        "artifacts_deleted": bool(delete_artifacts),
+        "removed": removed,
+    }
 
 
 def _attach_preview_prediction(
@@ -709,6 +973,7 @@ def _run_training_job(job_id: str) -> None:
                 "status": "completed",
                 "message": "training completed",
                 "model_path": result["model_path"],
+                "worker_pid": None,
                 "updated_at": _now_iso(),
             }
         )
@@ -730,6 +995,7 @@ def _run_training_job(job_id: str) -> None:
                 **current,
                 "status": "failed",
                 "message": failed_message,
+                "worker_pid": None,
                 "updated_at": _now_iso(),
             }
         )
@@ -787,6 +1053,7 @@ def _run_ocr_training_job(job_id: str) -> None:
                 "status": "completed",
                 "message": "ocr training completed",
                 "model_path": result.get("model_dir"),
+                "worker_pid": None,
                 "log_path": result.get("log_path"),
                 "updated_at": _now_iso(),
             }
@@ -798,6 +1065,7 @@ def _run_ocr_training_job(job_id: str) -> None:
                 **current,
                 "status": "failed",
                 "message": str(e),
+                "worker_pid": None,
                 "updated_at": _now_iso(),
             }
         )
@@ -829,29 +1097,36 @@ def train_start(req: TrainRequest, background_tasks: BackgroundTasks) -> dict[st
 
     job_id = str(uuid.uuid4())
     now = _now_iso()
+    job_payload = {
+        "id": job_id,
+        "project_id": project_id,
+        "training_family": "classification",
+        "engine": "custom",
+        "model_type": req.model_type,
+        "epochs": req.epochs,
+        "batch_size": req.batch_size,
+        "learning_rate": req.learning_rate,
+        "training_mode": training_mode,
+        "init_source_type": init_source_type,
+        "init_source_value": init_source_value,
+        "freeze_backbone_epochs": freeze_backbone_epochs,
+        "backbone_lr_scale": backbone_lr_scale,
+        "status": "queued",
+        "message": "queued",
+        "model_path": None,
+        "worker_pid": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+    upsert_training_job(job_payload)
+    worker_pid = _spawn_training_runner("classification", job_id)
     upsert_training_job(
         {
-            "id": job_id,
-            "project_id": project_id,
-            "training_family": "classification",
-            "engine": "custom",
-            "model_type": req.model_type,
-            "epochs": req.epochs,
-            "batch_size": req.batch_size,
-            "learning_rate": req.learning_rate,
-            "training_mode": training_mode,
-            "init_source_type": init_source_type,
-            "init_source_value": init_source_value,
-            "freeze_backbone_epochs": freeze_backbone_epochs,
-            "backbone_lr_scale": backbone_lr_scale,
-            "status": "queued",
-            "message": "queued",
-            "model_path": None,
-            "created_at": now,
-            "updated_at": now,
+            **job_payload,
+            "worker_pid": worker_pid,
+            "updated_at": _now_iso(),
         }
     )
-    background_tasks.add_task(_run_training_job, job_id)
     return {"job_id": job_id, "project_id": project_id, "status": "queued"}
 
 
@@ -861,6 +1136,11 @@ def train_status(job_id: str) -> dict[str, Any]:
     if not job:
         raise HTTPException(status_code=404, detail="job not found")
     return job
+
+
+@app.post("/train/stop/{job_id}")
+def train_stop(job_id: str, delete_artifacts: bool = Query(default=False)) -> dict[str, Any]:
+    return _stop_training_worker(job_id, expected_family="classification", delete_artifacts=delete_artifacts)
 
 
 @app.post("/api/ocr/dataset/create")
@@ -940,44 +1220,56 @@ def api_ocr_train_start(req: OcrTrainStartRequest, background_tasks: BackgroundT
     now = _now_iso()
     paths = ensure_project_directories(project_id)
     log_path = paths.logs / f"train_ocr_{job_id}.log"
+    job_payload = {
+        "id": job_id,
+        "project_id": project_id,
+        "training_family": "ocr",
+        "engine": "paddleocr",
+        "model_type": "ocr",
+        "epochs": req.epochs,
+        "batch_size": req.batch_size,
+        "learning_rate": 0.0,
+        "charset": req.charset,
+        "max_text_length": req.max_text_length,
+        "dataset_dir": req.dataset_dir,
+        "paddle_repo_dir": paddle_repo_dir,
+        "image_shape": req.image_shape,
+        "training_mode": training_mode,
+        "init_source_type": init_source_type,
+        "init_source_value": init_source_value,
+        "status": "queued",
+        "message": "queued",
+        "model_path": None,
+        "worker_pid": None,
+        "log_path": str(log_path),
+        "created_at": now,
+        "updated_at": now,
+    }
+    upsert_training_job(job_payload)
+    worker_pid = _spawn_training_runner("ocr", job_id)
     upsert_training_job(
         {
-            "id": job_id,
-            "project_id": project_id,
-            "training_family": "ocr",
-            "engine": "paddleocr",
-            "model_type": "ocr",
-            "epochs": req.epochs,
-            "batch_size": req.batch_size,
-            "learning_rate": 0.0,
-            "charset": req.charset,
-            "max_text_length": req.max_text_length,
-            "dataset_dir": req.dataset_dir,
-            "paddle_repo_dir": paddle_repo_dir,
-            "image_shape": req.image_shape,
-            "training_mode": training_mode,
-            "init_source_type": init_source_type,
-            "init_source_value": init_source_value,
-            "status": "queued",
-            "message": "queued",
-            "model_path": None,
-            "log_path": str(log_path),
-            "created_at": now,
-            "updated_at": now,
+            **job_payload,
+            "worker_pid": worker_pid,
+            "updated_at": _now_iso(),
         }
     )
-    background_tasks.add_task(_run_ocr_training_job, job_id)
     return {"job_id": job_id, "project_id": project_id, "status": "queued", "training_family": "ocr", "engine": "paddleocr"}
 
 
 @app.get("/api/ocr/train/status/{job_id}")
 def api_ocr_train_status(job_id: str) -> dict[str, Any]:
-    job = fetch_training_job(job_id)
+    job = _reconcile_ocr_training_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="job not found")
     if str(job.get("training_family") or "") != "ocr":
         raise HTTPException(status_code=400, detail="not an OCR training job")
     return job
+
+
+@app.post("/api/ocr/train/stop/{job_id}")
+def api_ocr_train_stop(job_id: str, delete_artifacts: bool = Query(default=False)) -> dict[str, Any]:
+    return _stop_training_worker(job_id, expected_family="ocr", delete_artifacts=delete_artifacts)
 
 
 @app.get("/api/ocr/train/log/{job_id}")
@@ -1024,12 +1316,14 @@ def api_ocr_models_official() -> dict[str, Any]:
 @app.get("/models")
 def models_endpoint(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
     resolved = _resolve_project_id(project_id)
+    _recover_exported_ocr_runs(resolved)
     return {"project_id": resolved, "items": list_models(project_id=resolved)}
 
 
 @app.get("/models/info")
 def model_infos_endpoint(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
     resolved = _resolve_project_id(project_id)
+    _recover_exported_ocr_runs(resolved)
     return {"project_id": resolved, "items": list_model_infos(project_id=resolved)}
 
 
@@ -1122,7 +1416,8 @@ def model_latest(
 ) -> dict[str, str]:
     resolved = _resolve_project_id(project_id)
     if str(training_family).strip().lower() == "ocr":
-        model = latest_ocr_model_meta(project_id=resolved, engine=engine)
+        _recover_exported_ocr_runs(resolved)
+        model = latest_ocr_model_meta(project_id=resolved, engine=engine, inference_ready_only=True)
         if model is None:
             return {"project_id": resolved, "model": ""}
         return {"project_id": resolved, "model": str(model)}
