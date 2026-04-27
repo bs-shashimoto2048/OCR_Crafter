@@ -87,7 +87,7 @@ from .services.training_image_builder import (
 from .train import run_training
 
 app = FastAPI(title="OCR Crafter API", version="0.2.0")
-FIXED_PADDLE_OCR_REPO_DIR = str((Path(__file__).resolve().parents[2] / "external" / "PaddleOCR").resolve())
+DEFAULT_PADDLEOCR_REPO_RELATIVE = "external/PaddleOCR"
 IMAGE_BUILDER_ALLOWED_EXTENSIONS = {
     ".jpg",
     ".jpeg",
@@ -111,6 +111,91 @@ app.add_middleware(
 
 def _now_iso() -> str:
     return datetime.now().isoformat()
+
+
+def _os_family() -> str:
+    if sys.platform.startswith("darwin"):
+        return "macos"
+    if sys.platform.startswith("win"):
+        return "windows"
+    if sys.platform.startswith("linux"):
+        return "linux"
+    return "unknown"
+
+
+def _resolve_default_paddleocr_repo_dir() -> str:
+    env_raw = str(os.getenv("PADDLEOCR_PATH") or "").strip()
+    if env_raw:
+        return str(Path(env_raw).expanduser().resolve())
+
+    settings = get_settings()
+    raw = str(settings.get("ocr_training", {}).get("paddleocr_repo_dir") or "").strip()
+    if not raw:
+        raw = DEFAULT_PADDLEOCR_REPO_RELATIVE
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = Path(__file__).resolve().parents[2] / path
+    return str(path.resolve())
+
+
+def _resolve_paddleocr_repo_dir(requested: Optional[str]) -> str:
+    raw = str(requested or "").strip()
+    if raw:
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            path = (Path(__file__).resolve().parents[2] / path).resolve()
+        else:
+            path = path.resolve()
+        return str(path)
+    return _resolve_default_paddleocr_repo_dir()
+
+
+def _is_valid_paddleocr_repo_dir(path: Path) -> bool:
+    if not path.exists() or not path.is_dir():
+        return False
+    train_py = path / "tools/train.py"
+    export_py = path / "tools/export_model.py"
+    return train_py.exists() and train_py.is_file() and export_py.exists() and export_py.is_file()
+
+
+def _system_check_snapshot() -> dict[str, Any]:
+    from .services.ocr_pipeline import detect_paddle_gpu_available, detect_torch_cuda_available, get_gpu_name, get_vram_gb
+
+    settings = get_settings()
+    ocr_cfg = settings.get("ocr_training", {}) if isinstance(settings.get("ocr_training"), dict) else {}
+    resolved_repo = _resolve_default_paddleocr_repo_dir()
+    paddle_repo_path = Path(resolved_repo).expanduser()
+    paddle_gpu_available = bool(detect_paddle_gpu_available())
+    torch_cuda_available = bool(detect_torch_cuda_available())
+    gpu_available = bool(paddle_gpu_available and torch_cuda_available)
+    gpu_name = str(get_gpu_name() or "")
+    vram_gb = float(get_vram_gb() or 0.0)
+    recommended_profile = "RTX Train" if gpu_available else "Mac Safe"
+    presets = ocr_cfg.get("presets", {}) if isinstance(ocr_cfg.get("presets"), dict) else {}
+    recommended_preset_key = "rtx_train" if gpu_available else "mac_safe"
+    recommended_preset = presets.get(recommended_preset_key) if isinstance(presets.get(recommended_preset_key), dict) else {}
+    return {
+        "os_family": _os_family(),
+        "gpu_available": gpu_available,
+        "paddle_gpu_available": paddle_gpu_available,
+        "torch_cuda_available": torch_cuda_available,
+        "gpu_name": gpu_name,
+        "vram_gb": round(vram_gb, 2),
+        "paddleocr_path": str(paddle_repo_path),
+        "paddleocr_path_valid": _is_valid_paddleocr_repo_dir(paddle_repo_path),
+        "recommended_profile": recommended_profile,
+        "recommended_preset_key": recommended_preset_key,
+        "recommended_preset": recommended_preset,
+        "default_device": str(ocr_cfg.get("default_device") or "auto"),
+        "default_auto_batch_size": bool(ocr_cfg.get("default_auto_batch_size", False)),
+        "default_train_num_workers": int(ocr_cfg.get("default_train_num_workers") or 0),
+        "default_eval_num_workers": int(ocr_cfg.get("default_eval_num_workers") or 0),
+        "default_save_epoch_step": int(ocr_cfg.get("default_save_epoch_step") or 10),
+        "default_use_amp": bool(ocr_cfg.get("default_use_amp", False)),
+        "default_pin_memory": bool(ocr_cfg.get("default_pin_memory", False)),
+        "default_persistent_workers": bool(ocr_cfg.get("default_persistent_workers", False)),
+        "presets": presets,
+    }
 
 
 def _resolve_project_id(project_id: Optional[str]) -> str:
@@ -347,6 +432,19 @@ def _recover_exported_ocr_runs(project_id: str) -> int:
                     training_mode=str(job.get("training_mode") or "scratch"),
                     init_source_type=str(job.get("init_source_type") or "scratch"),
                     init_source_value=str(job.get("init_source_value") or ""),
+                    device=str(job.get("device") or "auto"),
+                    resolved_device=str(job.get("resolved_device") or "cpu"),
+                    train_num_workers=int(job.get("train_num_workers") or 0),
+                    eval_num_workers=int(job.get("eval_num_workers") or 0),
+                    save_epoch_step=int(job.get("save_epoch_step") or 10),
+                    auto_batch_size_enabled=bool(job.get("auto_batch_size", False)),
+                    use_amp=bool(job.get("use_amp", False)),
+                    pin_memory=bool(job.get("pin_memory", False)),
+                    persistent_workers=bool(job.get("persistent_workers", False)),
+                    vram_gb=float(job.get("vram_gb") or 0.0),
+                    effective_train_batch=int(job.get("effective_train_batch") or 0),
+                    effective_eval_batch=int(job.get("effective_eval_batch") or 0),
+                    oom_retry_count=int(job.get("oom_retry_count") or 0),
                 )
             upsert_training_job(
                 {
@@ -644,6 +742,11 @@ def on_startup() -> None:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/system/check")
+def system_check() -> dict[str, Any]:
+    return _system_check_snapshot()
 
 
 @app.post("/system/shutdown")
@@ -1018,7 +1121,7 @@ def _run_ocr_training_job(job_id: str) -> None:
     try:
         project_id = str(job.get("project_id") or "default")
         dataset_dir = str(job.get("dataset_dir") or "")
-        paddle_repo_dir = str(job.get("paddle_repo_dir") or "").strip() or FIXED_PADDLE_OCR_REPO_DIR
+        paddle_repo_dir = _resolve_paddleocr_repo_dir(str(job.get("paddle_repo_dir") or "").strip())
         charset = str(job.get("charset") or OCR_CHARSET_DEFAULT)
         max_text_length = int(job.get("max_text_length") or 8)
         image_shape = job.get("image_shape") or [3, 48, 320]
@@ -1041,18 +1144,47 @@ def _run_ocr_training_job(job_id: str) -> None:
             charset=charset,
             max_text_length=max_text_length,
             image_shape=image_shape,
+            device=str(job.get("device") or "auto"),
+            auto_batch_size_enabled=bool(job.get("auto_batch_size", False)),
+            train_num_workers=int(job.get("train_num_workers") or 0),
+            eval_num_workers=int(job.get("eval_num_workers") or 0),
+            save_epoch_step=int(job.get("save_epoch_step") or 10),
+            use_amp=bool(job.get("use_amp", False)),
+            pin_memory=bool(job.get("pin_memory", False)),
+            persistent_workers=bool(job.get("persistent_workers", False)),
             training_mode=str(job.get("training_mode") or "scratch"),
             init_source_type=str(job.get("init_source_type") or "scratch"),
             init_source_value=str(job.get("init_source_value") or "").strip() or None,
             log_path=log_path,
         )
         current = fetch_training_job(job_id) or job
+        def _value(key: str, current_key: Optional[str] = None, default: Any = None) -> Any:
+            if key in result and result.get(key) is not None:
+                return result.get(key)
+            ref_key = current_key if current_key is not None else key
+            if ref_key in current and current.get(ref_key) is not None:
+                return current.get(ref_key)
+            return default
+
         upsert_training_job(
             {
                 **current,
                 "status": "completed",
                 "message": "ocr training completed",
                 "model_path": result.get("model_dir"),
+                "resolved_device": str(_value("resolved_device", default="cpu")),
+                "device": str(_value("device", default="auto")),
+                "train_num_workers": int(_value("train_num_workers", default=0)),
+                "eval_num_workers": int(_value("eval_num_workers", default=0)),
+                "save_epoch_step": int(_value("save_epoch_step", default=10)),
+                "auto_batch_size": bool(_value("auto_batch_size_enabled", "auto_batch_size", False)),
+                "use_amp": bool(_value("use_amp", default=False)),
+                "pin_memory": bool(_value("pin_memory", default=False)),
+                "persistent_workers": bool(_value("persistent_workers", default=False)),
+                "vram_gb": float(_value("vram_gb", default=0.0)),
+                "effective_train_batch": int(_value("effective_train_batch", default=0)),
+                "effective_eval_batch": int(_value("effective_eval_batch", default=0)),
+                "oom_retry_count": int(_value("oom_retry_count", default=0)),
                 "worker_pid": None,
                 "log_path": result.get("log_path"),
                 "updated_at": _now_iso(),
@@ -1194,6 +1326,58 @@ def api_ocr_train_start(req: OcrTrainStartRequest, background_tasks: BackgroundT
     engine = str(req.engine or "").strip().lower()
     if engine != "paddleocr":
         raise HTTPException(status_code=400, detail="Only paddleocr is trainable. EasyOCR is inference-only.")
+    settings = get_settings()
+    ocr_cfg = settings.get("ocr_training", {}) if isinstance(settings.get("ocr_training"), dict) else {}
+    system_info = _system_check_snapshot()
+    resolved_device = str(req.device or ocr_cfg.get("default_device") or "auto").strip().lower()
+    if resolved_device not in {"auto", "cpu", "gpu"}:
+        raise HTTPException(status_code=400, detail=f"unsupported device: {resolved_device}")
+    if resolved_device == "gpu" and not bool(system_info.get("paddle_gpu_available")):
+        raise HTTPException(status_code=400, detail="device=gpu was requested, but CUDA GPU is not available for PaddlePaddle.")
+    if resolved_device == "gpu" and not bool(system_info.get("torch_cuda_available")):
+        raise HTTPException(status_code=400, detail="GPU指定ですがCUDAが利用できません (torch.cuda.is_available=False)")
+    will_use_gpu = resolved_device == "gpu" or (resolved_device == "auto" and bool(system_info.get("gpu_available")))
+    resolved_auto_batch_size = (
+        bool(req.auto_batch_size)
+        if req.auto_batch_size is not None
+        else bool(ocr_cfg.get("default_auto_batch_size", False))
+    )
+    if not will_use_gpu:
+        resolved_auto_batch_size = False
+    resolved_train_num_workers = (
+        int(req.train_num_workers)
+        if req.train_num_workers is not None
+        else int(ocr_cfg.get("default_train_num_workers") or 0)
+    )
+    resolved_eval_num_workers = (
+        int(req.eval_num_workers)
+        if req.eval_num_workers is not None
+        else int(ocr_cfg.get("default_eval_num_workers") or 0)
+    )
+    resolved_save_epoch_step = (
+        int(req.save_epoch_step)
+        if req.save_epoch_step is not None
+        else int(ocr_cfg.get("default_save_epoch_step") or 10)
+    )
+    resolved_use_amp = bool(req.use_amp) if req.use_amp is not None else bool(ocr_cfg.get("default_use_amp", False))
+    resolved_pin_memory = (
+        bool(req.pin_memory) if req.pin_memory is not None else bool(ocr_cfg.get("default_pin_memory", False))
+    )
+    resolved_persistent_workers = (
+        bool(req.persistent_workers)
+        if req.persistent_workers is not None
+        else bool(ocr_cfg.get("default_persistent_workers", False))
+    )
+    if not will_use_gpu:
+        resolved_use_amp = False
+        resolved_pin_memory = False
+        resolved_persistent_workers = False
+    if resolved_train_num_workers <= 0:
+        resolved_persistent_workers = False
+    if resolved_eval_num_workers < 0 or resolved_train_num_workers < 0:
+        raise HTTPException(status_code=400, detail="num_workers must be >= 0")
+    if resolved_save_epoch_step <= 0:
+        raise HTTPException(status_code=400, detail="save_epoch_step must be >= 1")
     training_mode = str(req.training_mode or "scratch").strip().lower()
     init_source_type = str(req.init_source_type or "scratch").strip().lower()
     init_source_value = str(req.init_source_value or "").strip()
@@ -1215,7 +1399,7 @@ def api_ocr_train_start(req: OcrTrainStartRequest, background_tasks: BackgroundT
         ):
             raise HTTPException(status_code=404, detail=f"OCR model not found: {init_source_value}")
 
-    paddle_repo_dir = str(req.paddle_repo_dir or "").strip() or FIXED_PADDLE_OCR_REPO_DIR
+    paddle_repo_dir = _resolve_paddleocr_repo_dir(req.paddle_repo_dir)
     job_id = str(uuid.uuid4())
     now = _now_iso()
     paths = ensure_project_directories(project_id)
@@ -1228,6 +1412,14 @@ def api_ocr_train_start(req: OcrTrainStartRequest, background_tasks: BackgroundT
         "model_type": "ocr",
         "epochs": req.epochs,
         "batch_size": req.batch_size,
+        "device": resolved_device,
+        "auto_batch_size": resolved_auto_batch_size,
+        "train_num_workers": resolved_train_num_workers,
+        "eval_num_workers": resolved_eval_num_workers,
+        "save_epoch_step": resolved_save_epoch_step,
+        "use_amp": resolved_use_amp,
+        "pin_memory": resolved_pin_memory,
+        "persistent_workers": resolved_persistent_workers,
         "learning_rate": 0.0,
         "charset": req.charset,
         "max_text_length": req.max_text_length,
@@ -1296,7 +1488,7 @@ def api_ocr_models_export_migrate(
     try:
         return migrate_ocr_models_to_inference(
             project_id=resolved,
-            paddle_repo_dir=FIXED_PADDLE_OCR_REPO_DIR,
+            paddle_repo_dir=_resolve_default_paddleocr_repo_dir(),
             overwrite=bool(overwrite),
             dry_run=bool(dry_run),
         )

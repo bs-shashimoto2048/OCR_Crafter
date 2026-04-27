@@ -6,6 +6,7 @@ import subprocess
 import sys
 import re
 import os
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -45,6 +46,142 @@ OFFICIAL_PADDLEOCR_REC_SPECS: dict[str, dict[str, str]] = {
         "pretrained_url": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_pretrained_model/PP-OCRv3_mobile_rec_pretrained.pdparams",
     },
 }
+
+
+def _load_torch_module() -> Optional[Any]:
+    if importlib.util.find_spec("torch") is None:
+        return None
+    try:
+        import torch  # type: ignore
+    except Exception:  # noqa: BLE001
+        return None
+    return torch
+
+
+def detect_torch_cuda_available() -> bool:
+    torch = _load_torch_module()
+    if torch is None:
+        return False
+    try:
+        return bool(torch.cuda.is_available())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def get_vram_gb() -> float:
+    torch = _load_torch_module()
+    if torch is None:
+        return 0.0
+    try:
+        if not torch.cuda.is_available():
+            return 0.0
+        return float(torch.cuda.get_device_properties(0).total_memory) / float(1024**3)
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
+def auto_batch_size(vram_gb: float) -> int:
+    if float(vram_gb) >= 12.0:
+        return 128
+    if float(vram_gb) >= 8.0:
+        return 64
+    if float(vram_gb) >= 6.0:
+        return 32
+    return 16
+
+
+def get_gpu_name() -> str:
+    torch = _load_torch_module()
+    if torch is None:
+        return ""
+    try:
+        if not torch.cuda.is_available():
+            return ""
+        return str(torch.cuda.get_device_name(0))
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _read_nvidia_smi_metrics() -> Optional[dict[str, float]]:
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=utilization.gpu,memory.used",
+                "--format=csv,noheader,nounits",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    if int(result.returncode) != 0:
+        return None
+    line = ""
+    for row in str(result.stdout or "").splitlines():
+        row = row.strip()
+        if row:
+            line = row
+            break
+    if not line:
+        return None
+    parts = [segment.strip() for segment in line.split(",")]
+    if len(parts) < 2:
+        return None
+    try:
+        gpu_usage = float(parts[0])
+        memory_used_mb = float(parts[1])
+    except Exception:  # noqa: BLE001
+        return None
+    return {
+        "gpu_usage": float(gpu_usage),
+        "vram_usage": float(memory_used_mb) / float(1024.0),
+    }
+
+
+def _extract_avg_step_time(line: str) -> Optional[float]:
+    matched = re.search(r"avg_batch_cost:\s*([0-9.eE+-]+)\s*s", str(line or ""))
+    if not matched:
+        return None
+    try:
+        return float(matched.group(1))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def detect_paddle_gpu_available() -> bool:
+    if importlib.util.find_spec("paddle") is None:
+        return False
+    try:
+        import paddle  # type: ignore
+    except Exception:  # noqa: BLE001
+        return False
+    try:
+        if not bool(paddle.device.is_compiled_with_cuda()):
+            return False
+        return int(paddle.device.cuda.device_count()) > 0
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _resolve_paddle_use_gpu(device: str) -> tuple[bool, str]:
+    normalized = str(device or "auto").strip().lower()
+    if normalized not in {"auto", "cpu", "gpu"}:
+        raise ValueError(f"unsupported device: {device}")
+    gpu_available = detect_paddle_gpu_available()
+    if normalized == "cpu":
+        return False, "cpu"
+    if normalized == "gpu":
+        if not gpu_available:
+            raise RuntimeError("device=gpu was requested, but CUDA GPU is not available for PaddlePaddle.")
+        # strict mode: torch が導入済みなのに CUDA を見失っている場合はフォールバックしない
+        if importlib.util.find_spec("torch") is not None and not detect_torch_cuda_available():
+            raise RuntimeError("GPU指定ですがCUDAが利用できません (torch.cuda.is_available=False)")
+        return True, "gpu"
+    if gpu_available:
+        return True, "gpu"
+    return False, "cpu"
 
 
 def _now_tag() -> str:
@@ -651,8 +788,11 @@ def _resolve_paddle_base_config(repo_dir: Path, official_model_name: Optional[st
         raise FileNotFoundError(f"official PaddleOCR config not found: {official_candidate}")
 
     candidates = [
-        repo_dir / "configs/rec/PP-OCRv3/en_PP-OCRv3_rec.yml",
-        repo_dir / "configs/rec/PP-OCRv4/en_PP-OCRv4_rec.yml",
+        repo_dir / "configs/rec/PP-OCRv5/multi_language/en_PP-OCRv5_mobile_rec.yaml",
+        repo_dir / "configs/rec/PP-OCRv5/PP-OCRv5_mobile_rec.yml",
+        repo_dir / "configs/rec/PP-OCRv4/en_PP-OCRv4_mobile_rec.yml",
+        repo_dir / "configs/rec/PP-OCRv3/en_PP-OCRv3_mobile_rec.yml",
+        repo_dir / "configs/rec/PP-OCRv3/PP-OCRv3_mobile_rec.yml",
         repo_dir / "configs/rec/rec_icdar15_train.yml",
     ]
     for candidate in candidates:
@@ -906,6 +1046,23 @@ def _register_ocr_model(
     training_mode: str = "scratch",
     init_source_type: str = "scratch",
     init_source_value: str = "",
+    device: str = "auto",
+    resolved_device: str = "cpu",
+    train_num_workers: int = 0,
+    eval_num_workers: int = 0,
+    save_epoch_step: int = 10,
+    auto_batch_size_enabled: bool = False,
+    use_amp: bool = False,
+    pin_memory: bool = False,
+    persistent_workers: bool = False,
+    vram_gb: float = 0.0,
+    effective_train_batch: int = 0,
+    effective_eval_batch: int = 0,
+    oom_retry_count: int = 0,
+    avg_step_time: float = 0.0,
+    peak_gpu_usage: float = 0.0,
+    peak_vram_usage: float = 0.0,
+    metrics_samples: int = 0,
 ) -> str:
     paths = ensure_project_directories(project_id)
     paths.models.mkdir(parents=True, exist_ok=True)
@@ -944,6 +1101,23 @@ def _register_ocr_model(
             "training_mode": str(training_mode or "scratch"),
             "init_source_type": str(init_source_type or "scratch"),
             "init_source_value": str(init_source_value or ""),
+            "device": str(device or "auto"),
+            "resolved_device": str(resolved_device or "cpu"),
+            "train_num_workers": int(train_num_workers),
+            "eval_num_workers": int(eval_num_workers),
+            "save_epoch_step": int(save_epoch_step),
+            "auto_batch_size": bool(auto_batch_size_enabled),
+            "use_amp": bool(use_amp),
+            "pin_memory": bool(pin_memory),
+            "persistent_workers": bool(persistent_workers),
+            "vram_gb": float(vram_gb),
+            "effective_train_batch": int(effective_train_batch),
+            "effective_eval_batch": int(effective_eval_batch),
+            "oom_retry_count": int(oom_retry_count),
+            "avg_step_time": float(avg_step_time),
+            "peak_gpu_usage": float(peak_gpu_usage),
+            "peak_vram_usage": float(peak_vram_usage),
+            "metrics_samples": int(metrics_samples),
         },
         "dataset_split_ratio": {
             "train": float(dataset_meta.get("train_ratio", 0.0)) if isinstance(dataset_meta, dict) else 0.0,
@@ -988,6 +1162,23 @@ def register_exported_ocr_model(
     training_mode: str = "scratch",
     init_source_type: str = "scratch",
     init_source_value: str = "",
+    device: str = "auto",
+    resolved_device: str = "cpu",
+    train_num_workers: int = 0,
+    eval_num_workers: int = 0,
+    save_epoch_step: int = 10,
+    auto_batch_size_enabled: bool = False,
+    use_amp: bool = False,
+    pin_memory: bool = False,
+    persistent_workers: bool = False,
+    vram_gb: float = 0.0,
+    effective_train_batch: int = 0,
+    effective_eval_batch: int = 0,
+    oom_retry_count: int = 0,
+    avg_step_time: float = 0.0,
+    peak_gpu_usage: float = 0.0,
+    peak_vram_usage: float = 0.0,
+    metrics_samples: int = 0,
 ) -> str:
     return _register_ocr_model(
         project_id=project_id,
@@ -1005,6 +1196,23 @@ def register_exported_ocr_model(
         training_mode=training_mode,
         init_source_type=init_source_type,
         init_source_value=init_source_value,
+        device=device,
+        resolved_device=resolved_device,
+        train_num_workers=train_num_workers,
+        eval_num_workers=eval_num_workers,
+        save_epoch_step=save_epoch_step,
+        auto_batch_size_enabled=auto_batch_size_enabled,
+        use_amp=use_amp,
+        pin_memory=pin_memory,
+        persistent_workers=persistent_workers,
+        vram_gb=vram_gb,
+        effective_train_batch=effective_train_batch,
+        effective_eval_batch=effective_eval_batch,
+        oom_retry_count=oom_retry_count,
+        avg_step_time=avg_step_time,
+        peak_gpu_usage=peak_gpu_usage,
+        peak_vram_usage=peak_vram_usage,
+        metrics_samples=metrics_samples,
     )
 
 
@@ -1019,6 +1227,14 @@ def run_paddleocr_training(
     max_text_length: int,
     image_shape: list[int],
     log_path: Path,
+    device: str = "auto",
+    auto_batch_size_enabled: bool = False,
+    train_num_workers: int = 0,
+    eval_num_workers: int = 0,
+    save_epoch_step: int = 10,
+    use_amp: bool = False,
+    pin_memory: bool = False,
+    persistent_workers: bool = False,
     training_mode: str = "scratch",
     init_source_type: str = "scratch",
     init_source_value: Optional[str] = None,
@@ -1061,8 +1277,23 @@ def run_paddleocr_training(
         val_lines = [train_lines[0]]
         _write_ocr_label_lines(val_txt, val_lines)
         val_filled_from_train = True
-    effective_train_batch = max(1, min(int(batch_size), len(train_lines)))
-    effective_eval_batch = max(1, min(int(batch_size), len(val_lines)))
+    requested_batch_size = max(1, int(batch_size))
+    normalized_train_workers = max(0, int(train_num_workers))
+    normalized_eval_workers = max(0, int(eval_num_workers))
+    normalized_save_epoch_step = max(1, int(save_epoch_step))
+    use_gpu, resolved_device = _resolve_paddle_use_gpu(device)
+    normalized_auto_batch_size_enabled = bool(auto_batch_size_enabled)
+    normalized_use_amp = bool(use_amp and use_gpu)
+    normalized_pin_memory = bool(pin_memory and use_gpu)
+    normalized_persistent_workers = bool(persistent_workers and use_gpu and normalized_train_workers > 0)
+    gpu_vram_gb = get_vram_gb() if use_gpu else 0.0
+    resolved_batch_size = requested_batch_size
+    auto_batch_applied = False
+    if use_gpu and normalized_auto_batch_size_enabled:
+        resolved_batch_size = auto_batch_size(gpu_vram_gb)
+        auto_batch_applied = True
+    effective_train_batch = max(1, min(int(resolved_batch_size), len(train_lines)))
+    effective_eval_batch = max(1, min(int(resolved_batch_size), len(val_lines)))
     charset_path = dataset_root / "charset.txt"
     if not charset_path.exists():
         charset_path.write_text("\n".join(list(charset)) + "\n", encoding="utf-8")
@@ -1115,27 +1346,39 @@ def run_paddleocr_training(
         official_model_name=(resolved_init_source_value if official_init_spec is not None else None),
     )
 
-    command = [
-        sys.executable,
-        str(train_py),
-        "-c",
-        str(base_config),
-        "-o",
-        "Global.use_gpu=False",
-        f"Global.epoch_num={int(epochs)}",
-        f"Global.save_model_dir={str(save_model_dir)}",
-        f"Global.character_dict_path={str(charset_path)}",
-        f"Global.max_text_length={int(max_text_length)}",
-        f"Train.dataset.data_dir={str(dataset_root)}",
-        f"Train.dataset.label_file_list=['{str(train_txt)}']",
-        f"Eval.dataset.data_dir={str(dataset_root)}",
-        f"Eval.dataset.label_file_list=['{str(val_txt)}']",
-        f"Train.loader.batch_size_per_card={effective_train_batch}",
-        f"Eval.loader.batch_size_per_card={effective_eval_batch}",
-        "Global.print_batch_step=1",
-        (f"Global.pretrained_model={init_pretrained_url}" if init_pretrained_url else "Global.pretrained_model="),
-        (f"Global.checkpoints={init_checkpoint_prefix}" if init_checkpoint_prefix else "Global.checkpoints="),
-    ]
+    def _build_train_command(train_batch: int, eval_batch: int) -> list[str]:
+        override_args: list[str] = [
+            f"Global.use_gpu={'True' if use_gpu else 'False'}",
+            f"Global.use_amp={'True' if normalized_use_amp else 'False'}",
+            f"Global.epoch_num={int(epochs)}",
+            f"Global.save_epoch_step={normalized_save_epoch_step}",
+            f"Global.save_model_dir={str(save_model_dir)}",
+            f"Global.character_dict_path={str(charset_path)}",
+            f"Global.max_text_length={int(max_text_length)}",
+            f"Train.dataset.data_dir={str(dataset_root)}",
+            f"Train.dataset.label_file_list=['{str(train_txt)}']",
+            f"Eval.dataset.data_dir={str(dataset_root)}",
+            f"Eval.dataset.label_file_list=['{str(val_txt)}']",
+            f"Train.loader.batch_size_per_card={int(train_batch)}",
+            f"Train.loader.num_workers={normalized_train_workers}",
+            "Train.loader.use_shared_memory=False",
+            f"Eval.loader.batch_size_per_card={int(eval_batch)}",
+            f"Eval.loader.num_workers={normalized_eval_workers}",
+            "Eval.loader.use_shared_memory=False",
+            "Global.print_batch_step=1",
+            (f"Global.pretrained_model={init_pretrained_url}" if init_pretrained_url else "Global.pretrained_model="),
+            (f"Global.checkpoints={init_checkpoint_prefix}" if init_checkpoint_prefix else "Global.checkpoints="),
+        ]
+        if use_gpu:
+            override_args.extend(
+                [
+                    f"Train.loader.pin_memory={'True' if normalized_pin_memory else 'False'}",
+                    f"Train.loader.persistent_workers={'True' if normalized_persistent_workers else 'False'}",
+                    f"Eval.loader.pin_memory={'True' if normalized_pin_memory else 'False'}",
+                    f"Eval.loader.persistent_workers={'True' if normalized_persistent_workers else 'False'}",
+                ]
+            )
+        return [sys.executable, str(train_py), "-c", str(base_config), "-o", *override_args]
 
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("w", encoding="utf-8") as log_file:
@@ -1143,6 +1386,28 @@ def run_paddleocr_training(
             f"[{datetime.now().isoformat()}] init_mode: mode={normalized_training_mode} "
             f"type={normalized_init_source_type} value={resolved_init_source_value or '-'}\n"
         )
+        log_file.write(
+            f"[{datetime.now().isoformat()}] runtime: requested_device={str(device or 'auto').strip().lower()} "
+            f"resolved_device={resolved_device} use_gpu={use_gpu} "
+            f"train_num_workers={normalized_train_workers} eval_num_workers={normalized_eval_workers} "
+            f"save_epoch_step={normalized_save_epoch_step} use_amp={normalized_use_amp} "
+            f"pin_memory={normalized_pin_memory} persistent_workers={normalized_persistent_workers}\n"
+        )
+        perf_log = {
+            "device": str(device or "auto").strip().lower(),
+            "resolved_device": resolved_device,
+            "vram_gb": round(float(gpu_vram_gb), 2),
+            "batch_size_requested": int(requested_batch_size),
+            "batch_size_resolved": int(resolved_batch_size),
+            "auto_batch_size_enabled": bool(normalized_auto_batch_size_enabled),
+            "auto_batch_applied": bool(auto_batch_applied),
+            "train_num_workers": int(normalized_train_workers),
+            "eval_num_workers": int(normalized_eval_workers),
+            "use_amp": bool(normalized_use_amp),
+            "pin_memory": bool(normalized_pin_memory),
+            "persistent_workers": bool(normalized_persistent_workers),
+        }
+        log_file.write(f"[{datetime.now().isoformat()}] perf: {json.dumps(perf_log, ensure_ascii=False)}\n")
         if auto_split_used:
             train_count = len(_read_ocr_label_lines(train_txt))
             val_count = len(_read_ocr_label_lines(val_txt))
@@ -1155,43 +1420,131 @@ def run_paddleocr_training(
                 f"[{datetime.now().isoformat()}] val_fallback: val.txt was empty, "
                 "copied first sample from train.txt\n"
             )
-        if effective_train_batch != int(batch_size) or effective_eval_batch != int(batch_size):
+        if effective_train_batch != int(requested_batch_size) or effective_eval_batch != int(requested_batch_size):
             log_file.write(
-                f"[{datetime.now().isoformat()}] batch_adjust: requested={int(batch_size)} "
+                f"[{datetime.now().isoformat()}] batch_adjust: requested={int(requested_batch_size)} "
                 f"train={effective_train_batch} eval={effective_eval_batch}\n"
             )
-        log_file.write(f"[{datetime.now().isoformat()}] command: {' '.join(command)}\n")
-        log_file.flush()
-        process = subprocess.Popen(
-            command,
-            cwd=str(repo_dir),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            env={
-                **os.environ,
-                "PYTHONUNBUFFERED": "1",
-                "PYTHONIOENCODING": "utf-8",
-            },
-        )
-        assert process.stdout is not None
+        current_train_batch = int(effective_train_batch)
+        current_eval_batch = int(effective_eval_batch)
+        oom_retry_count = 0
+        max_oom_retry = 1
+        return_code = -1
         detected_fatal_error = False
-        fatal_markers = (
-            "ppocr ERROR: No Images in train dataset",
-            "Traceback (most recent call last):",
-            "ModuleNotFoundError:",
-        )
-        for line in process.stdout:
-            log_file.write(line)
+        training_succeeded = False
+        latest_step_time = 0.0
+        peak_gpu_usage = 0.0
+        peak_vram_usage = 0.0
+        metrics_samples = 0
+        metrics_log_interval_sec = 20.0
+        last_metrics_logged_at = 0.0
+        while True:
+            command = _build_train_command(current_train_batch, current_eval_batch)
+            log_file.write(
+                f"[{datetime.now().isoformat()}] command: {' '.join(command)} "
+                f"(attempt={oom_retry_count + 1}, train_batch={current_train_batch}, eval_batch={current_eval_batch})\n"
+            )
             log_file.flush()
-            if any(marker in line for marker in fatal_markers):
-                detected_fatal_error = True
-        return_code = process.wait()
-        log_file.write(f"[{datetime.now().isoformat()}] return_code={return_code}\n")
-        log_file.flush()
+            process = subprocess.Popen(
+                command,
+                cwd=str(repo_dir),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                env={
+                    **os.environ,
+                    "PYTHONUNBUFFERED": "1",
+                    "PYTHONIOENCODING": "utf-8",
+                },
+            )
+            assert process.stdout is not None
+            detected_fatal_error = False
+            detected_oom = False
+            fatal_markers = (
+                "ppocr ERROR: No Images in train dataset",
+                "ModuleNotFoundError:",
+            )
+            oom_markers = (
+                "out of memory",
+                "resourceexhaustederror",
+                "cuda out of memory",
+                "cudnn_status_alloc_failed",
+            )
+            for line in process.stdout:
+                log_file.write(line)
+                log_file.flush()
+                if any(marker in line for marker in fatal_markers):
+                    detected_fatal_error = True
+                line_lower = str(line).lower()
+                if any(marker in line_lower for marker in oom_markers):
+                    detected_oom = True
+                step_time = _extract_avg_step_time(line)
+                if step_time is not None:
+                    latest_step_time = float(step_time)
+                if use_gpu:
+                    now_monotonic = time.monotonic()
+                    if now_monotonic - last_metrics_logged_at >= metrics_log_interval_sec:
+                        metrics = _read_nvidia_smi_metrics()
+                        if metrics is not None:
+                            gpu_usage = float(metrics.get("gpu_usage") or 0.0)
+                            vram_usage = float(metrics.get("vram_usage") or 0.0)
+                            peak_gpu_usage = max(peak_gpu_usage, gpu_usage)
+                            peak_vram_usage = max(peak_vram_usage, vram_usage)
+                            metrics_samples += 1
+                            metrics_payload = {
+                                "batch_size": int(current_train_batch),
+                                "step_time": round(float(latest_step_time), 4) if latest_step_time > 0 else None,
+                                "gpu_usage": round(gpu_usage, 2),
+                                "vram_usage": round(vram_usage, 3),
+                            }
+                            log_file.write(
+                                f"[{datetime.now().isoformat()}] metrics: "
+                                f"{json.dumps(metrics_payload, ensure_ascii=False)}\n"
+                            )
+                            log_file.flush()
+                        last_metrics_logged_at = now_monotonic
+            return_code = process.wait()
+            if use_gpu:
+                final_metrics = _read_nvidia_smi_metrics()
+                if final_metrics is not None:
+                    gpu_usage = float(final_metrics.get("gpu_usage") or 0.0)
+                    vram_usage = float(final_metrics.get("vram_usage") or 0.0)
+                    peak_gpu_usage = max(peak_gpu_usage, gpu_usage)
+                    peak_vram_usage = max(peak_vram_usage, vram_usage)
+                    metrics_samples += 1
+                    metrics_payload = {
+                        "batch_size": int(current_train_batch),
+                        "step_time": round(float(latest_step_time), 4) if latest_step_time > 0 else None,
+                        "gpu_usage": round(gpu_usage, 2),
+                        "vram_usage": round(vram_usage, 3),
+                    }
+                    log_file.write(
+                        f"[{datetime.now().isoformat()}] metrics: "
+                        f"{json.dumps(metrics_payload, ensure_ascii=False)}\n"
+                    )
+            log_file.write(f"[{datetime.now().isoformat()}] return_code={return_code}\n")
+            log_file.flush()
+            if return_code == 0 and not detected_fatal_error:
+                training_succeeded = True
+                break
+            if detected_oom and oom_retry_count < max_oom_retry and current_train_batch > 8:
+                next_train_batch = max(8, current_train_batch // 2)
+                if next_train_batch >= current_train_batch:
+                    next_train_batch = max(8, current_train_batch - 1)
+                next_eval_batch = max(1, min(current_eval_batch, next_train_batch))
+                oom_retry_count += 1
+                log_file.write(
+                    f"[{datetime.now().isoformat()}] warning: OOM detected. retry with "
+                    f"train_batch={next_train_batch}, eval_batch={next_eval_batch}\n"
+                )
+                log_file.flush()
+                current_train_batch = int(next_train_batch)
+                current_eval_batch = int(next_eval_batch)
+                continue
+            break
 
-    if return_code != 0 or detected_fatal_error:
+    if not training_succeeded:
         raise RuntimeError(f"PaddleOCR training failed with exit code {return_code}")
 
     export_config_path = save_model_dir / "config.yml"
@@ -1218,11 +1571,28 @@ def run_paddleocr_training(
         dataset_root=dataset_root,
         job_id=job_id,
         epochs=int(epochs),
-        batch_size=int(batch_size),
+        batch_size=int(resolved_batch_size),
         learning_rate=0.0,
         training_mode=normalized_training_mode,
         init_source_type=normalized_init_source_type,
         init_source_value=resolved_init_source_value,
+        device=str(device or "auto").strip().lower(),
+        resolved_device=resolved_device,
+        train_num_workers=normalized_train_workers,
+        eval_num_workers=normalized_eval_workers,
+        save_epoch_step=normalized_save_epoch_step,
+        auto_batch_size_enabled=normalized_auto_batch_size_enabled,
+        use_amp=normalized_use_amp,
+        pin_memory=normalized_pin_memory,
+        persistent_workers=normalized_persistent_workers,
+        vram_gb=float(gpu_vram_gb),
+        effective_train_batch=int(current_train_batch),
+        effective_eval_batch=int(current_eval_batch),
+        oom_retry_count=int(oom_retry_count),
+        avg_step_time=float(latest_step_time),
+        peak_gpu_usage=float(peak_gpu_usage),
+        peak_vram_usage=float(peak_vram_usage),
+        metrics_samples=int(metrics_samples),
     )
     return {
         "model_name": model_name,
@@ -1234,6 +1604,23 @@ def run_paddleocr_training(
         "training_mode": normalized_training_mode,
         "init_source_type": normalized_init_source_type,
         "init_source_value": resolved_init_source_value,
+        "device": str(device or "auto").strip().lower(),
+        "resolved_device": resolved_device,
+        "train_num_workers": normalized_train_workers,
+        "eval_num_workers": normalized_eval_workers,
+        "save_epoch_step": normalized_save_epoch_step,
+        "auto_batch_size_enabled": normalized_auto_batch_size_enabled,
+        "use_amp": normalized_use_amp,
+        "pin_memory": normalized_pin_memory,
+        "persistent_workers": normalized_persistent_workers,
+        "vram_gb": float(gpu_vram_gb),
+        "effective_train_batch": int(current_train_batch),
+        "effective_eval_batch": int(current_eval_batch),
+        "oom_retry_count": int(oom_retry_count),
+        "avg_step_time": float(latest_step_time),
+        "peak_gpu_usage": float(peak_gpu_usage),
+        "peak_vram_usage": float(peak_vram_usage),
+        "metrics_samples": int(metrics_samples),
     }
 
 

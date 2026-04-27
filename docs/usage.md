@@ -12,7 +12,7 @@
 
 ```bash
 python3.11 --version
-node --version新選択時の種別
+node --version
 npm --version
 ```
 
@@ -84,6 +84,10 @@ UIのプレビューは前処理後画像を表示します。
 - 学習方式 `classification` / `ocr` を選択可能
 - `ocr` では `PaddleOCR` のみ学習可能
 - `EasyOCR` は推論専用（学習UIは非表示）
+- OCR学習は `Mac Safe` / `RTX Train` プリセットを使用可能
+- `device=auto` でもGPU検出時はGPU設定（auto batch/AMP/pin_memory/persistent_workers）を有効化
+- OOM検出時は batch を半減して1回自動リトライ
+- 学習ログに `metrics`（`batch_size`, `step_time`, `gpu_usage`, `vram_usage`）を定期記録
 
 7. 評価（Evaluation）  
 `val` または `test` に対して評価を実行。  
@@ -132,6 +136,7 @@ Accuracy、クラス別精度、混同行列、誤認識一覧を確認します
 ## 7. API一覧（主要）
 
 - `GET /health`
+- `GET /api/system/check`（GPU可否 / PaddleGPU可否 / torch CUDA可否 / PaddleOCRパス / 推奨プロファイル）
 - `GET /projects`
 - `POST /projects`
 - `DELETE /projects/{project_id}`
@@ -246,8 +251,17 @@ PY
    - 適用処理（ランダム）: コントラスト変化、軽微ガウシアンブラー、ガウシアンノイズ、微小回転（±1〜2度）
    - 強度1〜3で適用確率と強さが上がる
 7. `OCRデータ作成` を実行する。
-8. `PaddleOCR リポジトリ` は固定パス（`/Users/hashimoto/vscode/_app/ocr_crafter/external/PaddleOCR`）を使用し、`OCR学習開始` を押す。
+8. `PaddleOCR リポジトリ` は `PADDLEOCR_PATH` または `config/settings.yaml` の `ocr_training.paddleocr_repo_dir` を使って解決されます。設定を確認して `OCR学習開始` を押す。
 9. 学習ログが `completed` になれば、推論用 `inference` モデルが自動exportされ、`モデル作成 > モデル` に OCRモデルが追加される。
+10. `3. 学習パラメータ` の `実行環境` 表示で、学習時設定を確認できる。
+    - `GPU: <name> (<vram_gb>GB)`
+    - `Batch: <size>（自動/手動）`
+    - `Workers: train <n> / eval <n>`
+    - `AMP: ON/OFF`
+
+   - 補足: PaddleOCRパスは `PADDLEOCR_PATH`（環境変数）または `config/settings.yaml` の
+     `ocr_training.paddleocr_repo_dir` で解決されます。
+   - 学習前に `GET /api/system/check` を呼ぶと、`recommended_profile`（`Mac Safe` / `RTX Train`）を確認できます。
 
 補足:
 - 推論で使用できるのは export済みOCRモデルのみです（未exportはエラー）。
@@ -270,3 +284,5 @@ PY
 - 結果に `char_scores` と `char_confidence_normalized` が付き、文字単位の怪しさを可視化。
 - 業務ルール（`^[A-Z0-9]{8}$`、禁止パターン）で `valid/invalid` 判定。
 - `image_shape` は `1,48,320`（グレースケール）または `3,48,320`（RGB）を使用可能。
+- OCR学習パラメータに `device(auto/cpu/gpu)`, `train_num_workers`, `eval_num_workers`, `save_epoch_step` を追加。
+- Mac では `num_workers` が高いとメモリ逼迫しやすいため、`Mac Safe` プリセット（`cpu`, workers `0/0`）推奨。

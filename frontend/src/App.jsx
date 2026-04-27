@@ -58,7 +58,8 @@ const EASYOCR_LANGUAGE_OPTIONS = [
   "pt",
   "ru",
 ];
-const FIXED_PADDLE_OCR_REPO_DIR = "/Users/hashimoto/vscode/_app/ocr_crafter/external/PaddleOCR";
+const OCR_TRAINING_PRESET_MAC_SAFE = "mac_safe";
+const OCR_TRAINING_PRESET_RTX_TRAIN = "rtx_train";
 const DEFAULT_PREPROCESS_PARAMS = {
   ratio_threshold: 1.6,
   single_size: 64,
@@ -265,6 +266,15 @@ export default function App() {
   const [ocrFromLogsIncludeCorrected, setOcrFromLogsIncludeCorrected] = useState(true);
   const [ocrInitSourceType, setOcrInitSourceType] = useState("scratch");
   const [ocrInitSourceValue, setOcrInitSourceValue] = useState("");
+  const [ocrTrainDevice, setOcrTrainDevice] = useState("auto");
+  const [ocrTrainNumWorkers, setOcrTrainNumWorkers] = useState(0);
+  const [ocrEvalNumWorkers, setOcrEvalNumWorkers] = useState(0);
+  const [ocrSaveEpochStep, setOcrSaveEpochStep] = useState(10);
+  const [ocrAutoBatchSize, setOcrAutoBatchSize] = useState(false);
+  const [ocrUseAmp, setOcrUseAmp] = useState(false);
+  const [ocrPinMemory, setOcrPinMemory] = useState(false);
+  const [ocrPersistentWorkers, setOcrPersistentWorkers] = useState(false);
+  const [systemCheck, setSystemCheck] = useState(null);
 
   const [models, setModels] = useState([]);
   const [modelInfos, setModelInfos] = useState({});
@@ -341,6 +351,7 @@ export default function App() {
   const skipPreprocessPersistRef = useRef(false);
   const noticeTimerRef = useRef(null);
   const trainingSessionByProjectRef = useRef(loadSessionStorageJson(TRAINING_SESSION_BY_PROJECT_STORAGE_KEY));
+  const ocrRuntimeDefaultsAppliedRef = useRef(false);
 
   function pushLog(line) {
     setLogs((prev) => [...prev.slice(-120), `[${nowLabel()}] ${line}`]);
@@ -548,6 +559,33 @@ export default function App() {
     return { items, nextProjectId };
   }
 
+  async function loadSystemCheck() {
+    const data = await request("/api/system/check");
+    setSystemCheck(data || null);
+    if (!ocrRuntimeDefaultsAppliedRef.current && data && typeof data === "object") {
+      const preset = data.recommended_preset && typeof data.recommended_preset === "object" ? data.recommended_preset : {};
+      const nextDevice = String(preset.device || data.default_device || "auto").trim().toLowerCase();
+      const toInt = (value, fallback) => {
+        const parsed = Number.parseInt(String(value), 10);
+        if (!Number.isFinite(parsed)) return fallback;
+        return parsed;
+      };
+      setOcrTrainDevice(nextDevice === "gpu" ? "gpu" : nextDevice === "cpu" ? "cpu" : "auto");
+      setOcrAutoBatchSize(Boolean(preset.auto_batch_size ?? data.default_auto_batch_size ?? false));
+      setOcrTrainNumWorkers(Math.max(0, toInt(preset.train_num_workers ?? data.default_train_num_workers, 0)));
+      setOcrEvalNumWorkers(Math.max(0, toInt(preset.eval_num_workers ?? data.default_eval_num_workers, 0)));
+      setOcrSaveEpochStep(Math.max(1, toInt(preset.save_epoch_step ?? data.default_save_epoch_step, 10)));
+      setOcrUseAmp(Boolean(preset.use_amp ?? data.default_use_amp ?? false));
+      setOcrPinMemory(Boolean(preset.pin_memory ?? data.default_pin_memory ?? false));
+      setOcrPersistentWorkers(Boolean(preset.persistent_workers ?? data.default_persistent_workers ?? false));
+      if (preset.batch_size != null) {
+        setBatchSize(Math.max(1, toInt(preset.batch_size, 16)));
+      }
+      ocrRuntimeDefaultsAppliedRef.current = true;
+    }
+    return data || null;
+  }
+
   async function loadImages(targetProjectId = projectId) {
     if (!targetProjectId) {
       setImages([]);
@@ -700,6 +738,7 @@ export default function App() {
 
   useEffect(() => {
     loadProjects().catch((error) => notify("error", error.message));
+    loadSystemCheck().catch(() => null);
   }, []);
 
   useEffect(() => {
@@ -1716,23 +1755,75 @@ export default function App() {
       return;
     }
     try {
+      const latestSystemCheck = (await loadSystemCheck().catch(() => null)) || systemCheck || {};
       const imageShape = parseOcrImageShape(ocrImageShape);
       const initType = String(ocrInitSourceType || "scratch").trim();
       const initValueRaw = String(ocrInitSourceValue || "").trim();
+      const osFamily = String(latestSystemCheck?.os_family || "").trim().toLowerCase();
+      const recommendedProfile = String(latestSystemCheck?.recommended_profile || "").trim();
+      const gpuAvailable = Boolean(latestSystemCheck?.gpu_available);
+      const paddlePathValid = Boolean(latestSystemCheck?.paddleocr_path_valid);
+      const requestedDevice = String(ocrTrainDevice || "auto").trim().toLowerCase();
+      if (requestedDevice === "gpu" && !gpuAvailable) {
+        notify("error", "GPUが利用できない環境です。device を auto または cpu に変更してください。");
+        return;
+      }
+      if (!paddlePathValid) {
+        notify("error", "PaddleOCR のパスが無効です。設定または PADDLEOCR_PATH を確認してください。");
+        return;
+      }
       if (ocrTrainingMode === "finetune" && !initValueRaw) {
         notify("error", "OCR Fine-tuneでは初期モデルを選択してください。");
         return;
+      }
+      const toNonNegativeInt = (value, fallback = 0) => {
+        const parsed = Number.parseInt(String(value), 10);
+        if (!Number.isFinite(parsed)) return fallback;
+        return Math.max(0, parsed);
+      };
+      let trainWorkers = toNonNegativeInt(ocrTrainNumWorkers, 0);
+      let evalWorkers = toNonNegativeInt(ocrEvalNumWorkers, 0);
+      const saveEpochStep = Math.max(1, toNonNegativeInt(ocrSaveEpochStep, 10));
+
+      if ((osFamily === "macos" || recommendedProfile === "Mac Safe") && trainWorkers > 1) {
+        trainWorkers = 1;
+        setOcrTrainNumWorkers(1);
+        notify("warning", "Mac環境では train_num_workers を 1 に補正しました。");
+      }
+      if ((osFamily === "macos" || recommendedProfile === "Mac Safe") && evalWorkers > 1) {
+        evalWorkers = 1;
+        setOcrEvalNumWorkers(1);
+      }
+      const batch = Math.max(1, Number(batchSize));
+      const likelyMemoryRisk =
+        (osFamily === "macos" || recommendedProfile === "Mac Safe") &&
+        (trainWorkers > 1 || evalWorkers > 1 || batch > 8 || imageShape[2] > 320);
+      if (likelyMemoryRisk) {
+        const confirmed = window.confirm(
+          "現在の設定はメモリ不足の可能性があります（Mac Safe推奨より重い設定）。このまま学習を開始しますか？"
+        );
+        if (!confirmed) {
+          return;
+        }
       }
       const payload = {
         project_id: projectId,
         engine: "paddleocr",
         dataset_dir: ocrDatasetDir,
-        paddle_repo_dir: FIXED_PADDLE_OCR_REPO_DIR,
+        paddle_repo_dir: null,
         charset: (ocrCharset || OCR_CHARSET_DEFAULT).toUpperCase(),
         max_text_length: Number(ocrMaxTextLength),
         image_shape: imageShape,
-        batch_size: Number(batchSize),
+        batch_size: batch,
         epochs: Number(epochs),
+        device: requestedDevice === "gpu" ? "gpu" : requestedDevice === "cpu" ? "cpu" : "auto",
+        auto_batch_size: Boolean(ocrAutoBatchSize),
+        train_num_workers: trainWorkers,
+        eval_num_workers: evalWorkers,
+        save_epoch_step: saveEpochStep,
+        use_amp: Boolean(ocrUseAmp),
+        pin_memory: Boolean(ocrPinMemory),
+        persistent_workers: Boolean(ocrPersistentWorkers),
         training_mode: ocrTrainingMode,
         init_source_type: initType,
         init_source_value: ocrTrainingMode === "finetune" ? initValueRaw : null,
@@ -1753,10 +1844,42 @@ export default function App() {
       lastStatusRef.current = "";
       lastMessageRef.current = "";
       pushLog(`OCR学習開始要求: プロジェクト=${projectId} / ジョブ=${data.job_id}`);
+      pushLog(
+        `OCR学習設定: device=${payload.device}, batch=${batch}(${payload.auto_batch_size ? "自動" : "手動"}), workers(train/eval)=${trainWorkers}/${evalWorkers}, AMP=${payload.use_amp ? "ON" : "OFF"}, save_epoch_step=${saveEpochStep}`
+      );
       notify("info", `OCR学習キューに追加しました (${data.job_id})`);
       setActiveView("ocr-training");
     } catch (error) {
       notify("error", error.message);
+    }
+  }
+
+  function applyOcrTrainingPreset(presetName) {
+    const key = String(presetName || "").trim().toLowerCase();
+    if (key === OCR_TRAINING_PRESET_MAC_SAFE) {
+      setOcrTrainDevice("cpu");
+      setOcrAutoBatchSize(false);
+      setOcrTrainNumWorkers(0);
+      setOcrEvalNumWorkers(0);
+      setOcrSaveEpochStep(10);
+      setOcrUseAmp(false);
+      setOcrPinMemory(false);
+      setOcrPersistentWorkers(false);
+      setBatchSize(8);
+      notify("info", "Mac Safe プリセットを適用しました");
+      return;
+    }
+    if (key === OCR_TRAINING_PRESET_RTX_TRAIN) {
+      setOcrTrainDevice("gpu");
+      setOcrAutoBatchSize(true);
+      setOcrTrainNumWorkers(4);
+      setOcrEvalNumWorkers(2);
+      setOcrSaveEpochStep(5);
+      setOcrUseAmp(true);
+      setOcrPinMemory(true);
+      setOcrPersistentWorkers(true);
+      setBatchSize(64);
+      notify("info", "RTX Train プリセットを適用しました");
     }
   }
 
@@ -2183,6 +2306,24 @@ export default function App() {
         setOcrInitSourceValue={setOcrInitSourceValue}
         ocrInitModelOptions={ocrPaddleModels}
         ocrOfficialInitModelOptions={officialPaddleModels}
+        ocrTrainDevice={ocrTrainDevice}
+        setOcrTrainDevice={setOcrTrainDevice}
+        ocrTrainNumWorkers={ocrTrainNumWorkers}
+        setOcrTrainNumWorkers={setOcrTrainNumWorkers}
+        ocrEvalNumWorkers={ocrEvalNumWorkers}
+        setOcrEvalNumWorkers={setOcrEvalNumWorkers}
+        ocrSaveEpochStep={ocrSaveEpochStep}
+        setOcrSaveEpochStep={setOcrSaveEpochStep}
+        ocrAutoBatchSize={ocrAutoBatchSize}
+        setOcrAutoBatchSize={setOcrAutoBatchSize}
+        ocrUseAmp={ocrUseAmp}
+        setOcrUseAmp={setOcrUseAmp}
+        ocrPinMemory={ocrPinMemory}
+        setOcrPinMemory={setOcrPinMemory}
+        ocrPersistentWorkers={ocrPersistentWorkers}
+        setOcrPersistentWorkers={setOcrPersistentWorkers}
+        systemCheck={systemCheck}
+        onApplyOcrTrainingPreset={applyOcrTrainingPreset}
         onCreateSelectedOcrDataset={createSelectedOcrDataset}
         onPreprocess={runPreprocess}
         onBuildDataset={buildDataset}

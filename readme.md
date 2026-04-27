@@ -43,6 +43,7 @@ VITE_API_BASE=http://127.0.0.1:8000
 ## 5. エンドポイント一覧
 
 - `GET /health` : ヘルスチェック
+- `GET /api/system/check` : 実行環境チェック（GPU可否 / PaddleOCRパス / 推奨プロファイル）
 - `GET /projects` : プロジェクト一覧
 - `POST /projects` : プロジェクト作成
 - `DELETE /projects/{project_id}` : プロジェクト削除
@@ -86,6 +87,9 @@ python3 -m src.app.ocr_tuning --project-id default --engine both --image-types w
 
 - `config/settings.yaml` で前処理・分割比率・学習デフォルト値を管理
 - device は `mps` 利用可能なら自動で `mps`、不可なら `cpu`
+- OCR学習は `ocr_training` を参照（`default_device`, `default_auto_batch_size`, `*_num_workers`, `default_save_epoch_step`, `default_use_amp`, `default_pin_memory`, `default_persistent_workers`）
+- PaddleOCR の場所は `PADDLEOCR_PATH`（環境変数）または `ocr_training.paddleocr_repo_dir` で指定
+- `ocr_training.presets` の `mac_safe` / `rtx_train` をUIから適用可能
 - データは `data/projects/{project_id}/` 配下でプロジェクトごとに分離管理
 
 ## 8. OCRチューニング（EasyOCR / PaddleOCR）
@@ -94,6 +98,9 @@ python3 -m src.app.ocr_tuning --project-id default --engine both --image-types w
 - OCR学習完了時に、推論用 `inference` モデルを自動exportします。
 - 推論では export済みモデルのみ使用します（未exportモデルはエラー）。
 - `engine=paddleocr` で学習済みOCRモデルを指定した場合、認識モデルを直接利用します（推論時の追加公式モデル取得に依存しません）。
+- `device=auto` でもGPU検出時はGPU設定（auto batch/AMP/pin_memory/persistent_workers）を有効化します。
+- OOM検出時は batch を半減して1回だけ自動リトライします。
+- 学習ログに `metrics` 行（`batch_size`, `step_time`, `gpu_usage`, `vram_usage`）を定期出力します。
 
 1. 追加依存をインストール（任意）
 

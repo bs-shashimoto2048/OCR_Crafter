@@ -59,6 +59,24 @@ export default function TrainingView({
   setOcrInitSourceValue,
   ocrInitModelOptions,
   ocrOfficialInitModelOptions,
+  ocrTrainDevice,
+  setOcrTrainDevice,
+  ocrTrainNumWorkers,
+  setOcrTrainNumWorkers,
+  ocrEvalNumWorkers,
+  setOcrEvalNumWorkers,
+  ocrSaveEpochStep,
+  setOcrSaveEpochStep,
+  ocrAutoBatchSize,
+  setOcrAutoBatchSize,
+  ocrUseAmp,
+  setOcrUseAmp,
+  ocrPinMemory,
+  setOcrPinMemory,
+  ocrPersistentWorkers,
+  setOcrPersistentWorkers,
+  systemCheck,
+  onApplyOcrTrainingPreset,
   ocrDatasetInfo,
   onCreateSelectedOcrDataset,
   onPreprocess,
@@ -231,6 +249,22 @@ export default function TrainingView({
   const ocrHasInitModel = ocrInitSourceType === "scratch" || String(ocrInitSourceValue || "").trim() !== "";
   const ocrDatasetReady = String(ocrDatasetDir || "").trim() !== "";
   const ocrNextAction = ocrDatasetReady ? "train" : "dataset";
+  const osFamily = String(systemCheck?.os_family || "").trim().toLowerCase();
+  const recommendedProfile = String(systemCheck?.recommended_profile || "").trim();
+  const gpuAvailable = Boolean(systemCheck?.gpu_available);
+  const paddlePathValid = Boolean(systemCheck?.paddleocr_path_valid);
+  const trainWorkersNum = Number.parseInt(String(ocrTrainNumWorkers || 0), 10) || 0;
+  const evalWorkersNum = Number.parseInt(String(ocrEvalNumWorkers || 0), 10) || 0;
+  const batchNum = Number.parseInt(String(batchSize || 0), 10) || 0;
+  const isMacSafe = osFamily === "macos" || recommendedProfile === "Mac Safe";
+  const gpuName = String(systemCheck?.gpu_name || "").trim();
+  const vramValue = Number(systemCheck?.vram_gb || 0);
+  const vramLabel = Number.isFinite(vramValue) && vramValue > 0 ? `${vramValue.toFixed(1)}GB` : "";
+  const gpuCapableMode = ocrTrainDevice === "gpu" || (ocrTrainDevice === "auto" && gpuAvailable);
+  const ampEnabled = Boolean(ocrUseAmp) && gpuCapableMode;
+  const batchModeLabel = Boolean(ocrAutoBatchSize) && gpuCapableMode ? "自動" : "手動";
+  const showMacWorkerWarning = isMacSafe && (trainWorkersNum > 1 || evalWorkersNum > 1);
+  const showMemoryRiskWarning = isMacSafe && (batchNum > 8 || trainWorkersNum > 1 || evalWorkersNum > 1);
 
   const trainingFamilyLabel = trainingFamily === "ocr" ? "OCR認識モデル" : "分類モデル";
   const statusText = statusLabel(jobStatus);
@@ -636,6 +670,131 @@ export default function TrainingView({
 
                     <div className="space-y-3 rounded-xl border border-border/80 bg-card/45 p-4">
                       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">3. 学習パラメータ</p>
+                      <div className="space-y-2 rounded-lg border border-border/80 bg-card/55 p-3">
+                        <p className="text-xs font-semibold text-slate-100">実行プロファイル</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <Button variant="secondary" className="w-full" onClick={() => onApplyOcrTrainingPreset("mac_safe")}>
+                            Mac Safe
+                          </Button>
+                          <Button variant="secondary" className="w-full" onClick={() => onApplyOcrTrainingPreset("rtx_train")}>
+                            RTX Train
+                          </Button>
+                        </div>
+                        {recommendedProfile ? (
+                          <p className="text-xs text-muted">
+                            推奨: <span className="font-semibold text-text">{recommendedProfile}</span>
+                            {" / "}GPU利用可否: {gpuAvailable ? "利用可能" : "利用不可"}
+                          </p>
+                        ) : null}
+                        {!paddlePathValid ? (
+                          <p className="text-xs text-red-200">
+                            PaddleOCR パスを確認してください（`PADDLEOCR_PATH` または settings.yaml）。
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="app-label">学習デバイス</label>
+                          <select className="app-select" value={ocrTrainDevice} onChange={(e) => setOcrTrainDevice(e.target.value)}>
+                            <option value="auto">auto</option>
+                            <option value="cpu">cpu</option>
+                            <option value="gpu">gpu</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="app-label">保存間隔（epoch）</label>
+                          <input
+                            type="number"
+                            min="1"
+                            className="app-input"
+                            value={ocrSaveEpochStep}
+                            onChange={(e) => setOcrSaveEpochStep(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="app-label">Train num_workers</label>
+                          <input
+                            type="number"
+                            min="0"
+                            className="app-input"
+                            value={ocrTrainNumWorkers}
+                            onChange={(e) => setOcrTrainNumWorkers(e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <label className="app-label">Eval num_workers</label>
+                          <input
+                            type="number"
+                            min="0"
+                            className="app-input"
+                            value={ocrEvalNumWorkers}
+                            onChange={(e) => setOcrEvalNumWorkers(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <label className="inline-flex items-center gap-2 rounded-lg border border-border/70 bg-card/55 px-3 py-2 text-sm text-text">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(ocrAutoBatchSize)}
+                            onChange={(e) => setOcrAutoBatchSize(e.target.checked)}
+                            disabled={ocrTrainDevice === "cpu"}
+                          />
+                          Batch自動最適化（VRAM基準）
+                        </label>
+                        <label className="inline-flex items-center gap-2 rounded-lg border border-border/70 bg-card/55 px-3 py-2 text-sm text-text">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(ocrUseAmp)}
+                            onChange={(e) => setOcrUseAmp(e.target.checked)}
+                            disabled={ocrTrainDevice === "cpu"}
+                          />
+                          AMP（混合精度）
+                        </label>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <label className="inline-flex items-center gap-2 rounded-lg border border-border/70 bg-card/55 px-3 py-2 text-sm text-text">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(ocrPinMemory)}
+                            onChange={(e) => setOcrPinMemory(e.target.checked)}
+                            disabled={ocrTrainDevice === "cpu"}
+                          />
+                          pin_memory
+                        </label>
+                        <label className="inline-flex items-center gap-2 rounded-lg border border-border/70 bg-card/55 px-3 py-2 text-sm text-text">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(ocrPersistentWorkers)}
+                            onChange={(e) => setOcrPersistentWorkers(e.target.checked)}
+                            disabled={ocrTrainDevice === "cpu" || trainWorkersNum <= 0}
+                          />
+                          persistent_workers
+                        </label>
+                      </div>
+                      <div className="rounded-lg border border-border/80 bg-card/55 px-3 py-3 text-sm leading-6 text-slate-100">
+                        <p>
+                          GPU: {gpuAvailable ? (gpuName || "CUDA GPU") : "利用不可"}
+                          {gpuAvailable && vramLabel ? ` (${vramLabel})` : ""}
+                        </p>
+                        <p>Batch: {batchNum > 0 ? `${batchNum}（${batchModeLabel}）` : "-"}</p>
+                        <p>
+                          Workers: train {trainWorkersNum} / eval {evalWorkersNum}
+                        </p>
+                        <p>AMP: {ampEnabled ? "ON" : "OFF"}</p>
+                      </div>
+                      {showMacWorkerWarning ? (
+                        <p className="text-xs text-amber-100">
+                          Mac環境では num_workers を 0〜1 推奨です。高すぎるとメモリ不足の原因になります。
+                        </p>
+                      ) : null}
+                      {showMemoryRiskWarning ? (
+                        <p className="text-xs text-amber-100">
+                          現在設定はメモリ不足の可能性があります。Mac Safe プリセットへの切替を推奨します。
+                        </p>
+                      ) : null}
                       <div>
                         <label className="app-label">文字セット（charset）</label>
                         <input

@@ -30,6 +30,15 @@ def init_db() -> None:
                 model_type TEXT NOT NULL,
                 epochs INTEGER NOT NULL,
                 batch_size INTEGER NOT NULL,
+                device TEXT NOT NULL DEFAULT 'auto',
+                auto_batch_size INTEGER NOT NULL DEFAULT 0,
+                train_num_workers INTEGER NOT NULL DEFAULT 0,
+                eval_num_workers INTEGER NOT NULL DEFAULT 0,
+                save_epoch_step INTEGER NOT NULL DEFAULT 10,
+                use_amp INTEGER NOT NULL DEFAULT 0,
+                pin_memory INTEGER NOT NULL DEFAULT 0,
+                persistent_workers INTEGER NOT NULL DEFAULT 0,
+                resolved_device TEXT,
                 learning_rate REAL NOT NULL DEFAULT 0.001,
                 training_mode TEXT NOT NULL DEFAULT 'scratch',
                 init_source_type TEXT,
@@ -61,6 +70,24 @@ def init_db() -> None:
             conn.execute("ALTER TABLE training_jobs ADD COLUMN engine TEXT NOT NULL DEFAULT 'custom'")
         if "learning_rate" not in columns:
             conn.execute("ALTER TABLE training_jobs ADD COLUMN learning_rate REAL NOT NULL DEFAULT 0.001")
+        if "device" not in columns:
+            conn.execute("ALTER TABLE training_jobs ADD COLUMN device TEXT NOT NULL DEFAULT 'auto'")
+        if "auto_batch_size" not in columns:
+            conn.execute("ALTER TABLE training_jobs ADD COLUMN auto_batch_size INTEGER NOT NULL DEFAULT 0")
+        if "train_num_workers" not in columns:
+            conn.execute("ALTER TABLE training_jobs ADD COLUMN train_num_workers INTEGER NOT NULL DEFAULT 0")
+        if "eval_num_workers" not in columns:
+            conn.execute("ALTER TABLE training_jobs ADD COLUMN eval_num_workers INTEGER NOT NULL DEFAULT 0")
+        if "save_epoch_step" not in columns:
+            conn.execute("ALTER TABLE training_jobs ADD COLUMN save_epoch_step INTEGER NOT NULL DEFAULT 10")
+        if "use_amp" not in columns:
+            conn.execute("ALTER TABLE training_jobs ADD COLUMN use_amp INTEGER NOT NULL DEFAULT 0")
+        if "pin_memory" not in columns:
+            conn.execute("ALTER TABLE training_jobs ADD COLUMN pin_memory INTEGER NOT NULL DEFAULT 0")
+        if "persistent_workers" not in columns:
+            conn.execute("ALTER TABLE training_jobs ADD COLUMN persistent_workers INTEGER NOT NULL DEFAULT 0")
+        if "resolved_device" not in columns:
+            conn.execute("ALTER TABLE training_jobs ADD COLUMN resolved_device TEXT")
         if "training_mode" not in columns:
             conn.execute("ALTER TABLE training_jobs ADD COLUMN training_mode TEXT NOT NULL DEFAULT 'scratch'")
         if "init_source_type" not in columns:
@@ -91,6 +118,15 @@ def init_db() -> None:
 def upsert_training_job(job: dict[str, Any]) -> None:
     training_family = str(job.get("training_family") or "classification")
     engine = str(job.get("engine") or ("custom" if training_family == "classification" else "paddleocr"))
+    device = str(job.get("device") or "auto")
+    auto_batch_size = 1 if bool(job.get("auto_batch_size", False)) else 0
+    train_num_workers = int(job.get("train_num_workers") or 0)
+    eval_num_workers = int(job.get("eval_num_workers") or 0)
+    save_epoch_step = int(job.get("save_epoch_step") or 10)
+    use_amp = 1 if bool(job.get("use_amp", False)) else 0
+    pin_memory = 1 if bool(job.get("pin_memory", False)) else 0
+    persistent_workers = 1 if bool(job.get("persistent_workers", False)) else 0
+    resolved_device = str(job.get("resolved_device") or "")
     training_mode = str(job.get("training_mode") or "scratch")
     init_source_type = job.get("init_source_type")
     init_source_value = job.get("init_source_value")
@@ -108,8 +144,8 @@ def upsert_training_job(job: dict[str, Any]) -> None:
         conn.execute(
             """
             INSERT INTO training_jobs (
-                id, project_id, training_family, engine, model_type, epochs, batch_size, learning_rate, training_mode, init_source_type, init_source_value, freeze_backbone_epochs, backbone_lr_scale, charset, max_text_length, dataset_dir, paddle_repo_dir, image_shape, status, message, model_path, worker_pid, log_path, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, project_id, training_family, engine, model_type, epochs, batch_size, device, auto_batch_size, train_num_workers, eval_num_workers, save_epoch_step, use_amp, pin_memory, persistent_workers, resolved_device, learning_rate, training_mode, init_source_type, init_source_value, freeze_backbone_epochs, backbone_lr_scale, charset, max_text_length, dataset_dir, paddle_repo_dir, image_shape, status, message, model_path, worker_pid, log_path, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 project_id=excluded.project_id,
                 training_family=excluded.training_family,
@@ -117,6 +153,15 @@ def upsert_training_job(job: dict[str, Any]) -> None:
                 model_type=excluded.model_type,
                 epochs=excluded.epochs,
                 batch_size=excluded.batch_size,
+                device=excluded.device,
+                auto_batch_size=excluded.auto_batch_size,
+                train_num_workers=excluded.train_num_workers,
+                eval_num_workers=excluded.eval_num_workers,
+                save_epoch_step=excluded.save_epoch_step,
+                use_amp=excluded.use_amp,
+                pin_memory=excluded.pin_memory,
+                persistent_workers=excluded.persistent_workers,
+                resolved_device=excluded.resolved_device,
                 learning_rate=excluded.learning_rate,
                 training_mode=excluded.training_mode,
                 init_source_type=excluded.init_source_type,
@@ -143,6 +188,15 @@ def upsert_training_job(job: dict[str, Any]) -> None:
                 job["model_type"],
                 job["epochs"],
                 job["batch_size"],
+                device,
+                auto_batch_size,
+                train_num_workers,
+                eval_num_workers,
+                save_epoch_step,
+                use_amp,
+                pin_memory,
+                persistent_workers,
+                resolved_device,
                 job.get("learning_rate", 1e-3),
                 training_mode,
                 init_source_type,
@@ -170,7 +224,7 @@ def fetch_training_job(job_id: str) -> Optional[dict[str, Any]]:
     with get_conn() as conn:
         row = conn.execute(
             """
-            SELECT id, project_id, training_family, engine, model_type, epochs, batch_size, learning_rate, training_mode, init_source_type, init_source_value, freeze_backbone_epochs, backbone_lr_scale, charset, max_text_length, dataset_dir, paddle_repo_dir, image_shape, status, message, model_path, worker_pid, log_path, created_at, updated_at
+            SELECT id, project_id, training_family, engine, model_type, epochs, batch_size, device, auto_batch_size, train_num_workers, eval_num_workers, save_epoch_step, use_amp, pin_memory, persistent_workers, resolved_device, learning_rate, training_mode, init_source_type, init_source_value, freeze_backbone_epochs, backbone_lr_scale, charset, max_text_length, dataset_dir, paddle_repo_dir, image_shape, status, message, model_path, worker_pid, log_path, created_at, updated_at
             FROM training_jobs WHERE id = ?
             """,
             (job_id,),
@@ -187,6 +241,15 @@ def fetch_training_job(job_id: str) -> Optional[dict[str, Any]]:
         "model_type",
         "epochs",
         "batch_size",
+        "device",
+        "auto_batch_size",
+        "train_num_workers",
+        "eval_num_workers",
+        "save_epoch_step",
+        "use_amp",
+        "pin_memory",
+        "persistent_workers",
+        "resolved_device",
         "learning_rate",
         "training_mode",
         "init_source_type",
@@ -207,6 +270,10 @@ def fetch_training_job(job_id: str) -> Optional[dict[str, Any]]:
         "updated_at",
     ]
     payload = dict(zip(keys, row))
+    payload["auto_batch_size"] = bool(payload.get("auto_batch_size", 0))
+    payload["use_amp"] = bool(payload.get("use_amp", 0))
+    payload["pin_memory"] = bool(payload.get("pin_memory", 0))
+    payload["persistent_workers"] = bool(payload.get("persistent_workers", 0))
     image_shape_raw = payload.get("image_shape")
     if isinstance(image_shape_raw, str) and image_shape_raw.strip():
         try:

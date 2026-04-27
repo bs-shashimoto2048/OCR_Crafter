@@ -128,3 +128,35 @@ training:
       image_size: [64, 64]
     wide:
       image_size: [96, 48]
+
+ocr_training:
+  paddleocr_repo_dir: external/PaddleOCR
+  default_device: auto
+  default_auto_batch_size: false
+  default_train_num_workers: 0
+  default_eval_num_workers: 0
+  default_save_epoch_step: 10
+  default_use_amp: false
+  default_pin_memory: false
+  default_persistent_workers: false
+  presets:
+    mac_safe:
+      device: cpu
+      auto_batch_size: false
+      train_num_workers: 0
+      eval_num_workers: 0
+      batch_size: 8
+      save_epoch_step: 10
+      use_amp: false
+      pin_memory: false
+      persistent_workers: false
+    rtx_train:
+      device: gpu
+      auto_batch_size: true
+      train_num_workers: 4
+      eval_num_workers: 2
+      batch_size: 64
+      save_epoch_step: 5
+      use_amp: true
+      pin_memory: true
+      persistent_workers: true

@@ -217,6 +217,47 @@ def list_model_infos(project_id: Optional[str] = None) -> list[dict]:
                         "training_mode": str((job or {}).get("training_mode", payload_training.get("training_mode", "scratch"))),
                         "init_source_type": str((job or {}).get("init_source_type", payload_training.get("init_source_type", "scratch"))),
                         "init_source_value": str((job or {}).get("init_source_value", payload_training.get("init_source_value", ""))),
+                        "device": str((job or {}).get("device", payload_training.get("device", "auto"))),
+                        "resolved_device": str((job or {}).get("resolved_device", payload_training.get("resolved_device", ""))),
+                        "train_num_workers": _safe_int(
+                            (job or {}).get("train_num_workers", payload_training.get("train_num_workers", 0))
+                        ),
+                        "eval_num_workers": _safe_int(
+                            (job or {}).get("eval_num_workers", payload_training.get("eval_num_workers", 0))
+                        ),
+                        "save_epoch_step": _safe_int(
+                            (job or {}).get("save_epoch_step", payload_training.get("save_epoch_step", 10))
+                        ),
+                        "auto_batch_size": bool(
+                            (job or {}).get("auto_batch_size", payload_training.get("auto_batch_size", False))
+                        ),
+                        "use_amp": bool((job or {}).get("use_amp", payload_training.get("use_amp", False))),
+                        "pin_memory": bool((job or {}).get("pin_memory", payload_training.get("pin_memory", False))),
+                        "persistent_workers": bool(
+                            (job or {}).get("persistent_workers", payload_training.get("persistent_workers", False))
+                        ),
+                        "vram_gb": _safe_float((job or {}).get("vram_gb", payload_training.get("vram_gb", 0.0))),
+                        "effective_train_batch": _safe_int(
+                            (job or {}).get("effective_train_batch", payload_training.get("effective_train_batch", 0))
+                        ),
+                        "effective_eval_batch": _safe_int(
+                            (job or {}).get("effective_eval_batch", payload_training.get("effective_eval_batch", 0))
+                        ),
+                        "oom_retry_count": _safe_int(
+                            (job or {}).get("oom_retry_count", payload_training.get("oom_retry_count", 0))
+                        ),
+                        "avg_step_time": _safe_float(
+                            (job or {}).get("avg_step_time", payload_training.get("avg_step_time", 0.0))
+                        ),
+                        "peak_gpu_usage": _safe_float(
+                            (job or {}).get("peak_gpu_usage", payload_training.get("peak_gpu_usage", 0.0))
+                        ),
+                        "peak_vram_usage": _safe_float(
+                            (job or {}).get("peak_vram_usage", payload_training.get("peak_vram_usage", 0.0))
+                        ),
+                        "metrics_samples": _safe_int(
+                            (job or {}).get("metrics_samples", payload_training.get("metrics_samples", 0))
+                        ),
                     },
                     "ocr_augmentation": {
                         "enabled": bool(augmentation_enabled) if isinstance(augmentation_enabled, bool) else None,
