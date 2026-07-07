@@ -1,0 +1,56 @@
+# === Python ===
+.venv/
+.venv_*/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# === Node / Vite ===
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+node_modules/
+dist/
+
+# === OCR / ML large artifacts ===
+data/
+models/
+outputs/
+runs/
+logs/
+*.pt
+*.pth
+*.onnx
+*.traineddata
+*.lstmf
+*.checkpoint
+*.ckpt
+*.tess.json
+
+# === External dependencies ===
+external/
+
+# === Local/recovery artifacts ===
+task.md
+scratchpad/
+COVERY*/
+recovery*/
+recovery_ocr/
+ocr_crafter_salvage_*/
+ocr_crafter_recovery_backup_*/
+.venv_broken_*/
+lost-found/
+
+# === Local secrets ===
+.env
+.env.*
+!.env.example
+
+# === OS / editor ===
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+pj
