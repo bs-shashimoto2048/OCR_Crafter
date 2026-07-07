@@ -8,7 +8,7 @@ from typing import Any, Optional
 
 import yaml
 
-from ..project_paths import ensure_project_directories
+from ..project_paths import ensure_project_directories, safe_rmtree
 from ..paths import IMAGE_EXTENSIONS
 from .labels import read_labels
 
@@ -305,7 +305,8 @@ def export_ocr_training_data(
     if export_root.exists():
         if not overwrite:
             raise ValueError(f"output_dir already exists: {export_root}")
-        shutil.rmtree(export_root)
+        # overwrite=true でも削除はプロジェクトの outputs 配下に限定（API入力パスの封じ込め）
+        safe_rmtree(export_root, [paths.outputs], label="ocr_tuning export overwrite")
     export_root.mkdir(parents=True, exist_ok=True)
 
     split_records = _split_records(records, train_ratio, val_ratio, test_ratio, seed)

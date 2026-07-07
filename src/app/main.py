@@ -561,10 +561,13 @@ def _delete_training_artifacts(job: dict[str, Any]) -> dict[str, Any]:
     }
 
     if training_family == "ocr":
-        run_dir = paths.models / "ocr_runs" / str(job.get("id") or "")
-        if run_dir.exists() and run_dir.is_dir() and not run_dir.is_symlink():
-            shutil.rmtree(run_dir)
-            removed["run_dir_removed"] = True
+        job_id_str = str(job.get("id") or "").strip()
+        # 空idだと Path結合で ocr_runs ルート自体を指してしまうため必ず除外する
+        if job_id_str:
+            run_dir = paths.models / "ocr_runs" / job_id_str
+            if run_dir.exists() and run_dir.is_dir() and not run_dir.is_symlink():
+                shutil.rmtree(run_dir)
+                removed["run_dir_removed"] = True
 
     model_path_raw = str(job.get("model_path") or "").strip()
     if model_path_raw:

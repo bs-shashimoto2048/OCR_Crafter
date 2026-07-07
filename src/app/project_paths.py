@@ -1,12 +1,46 @@
+import logging
 import shutil
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional, Union
 
 from .paths import PROJECTS_DIR
 
 DEFAULT_PROJECT_ID = "default"
+
+logger = logging.getLogger(__name__)
+
+
+def is_within_directory(candidate: Path, root: Path) -> bool:
+    """candidate が root の真の配下か（root 自身は含まない）。両者 resolve 済み前提。"""
+    return candidate != root and root in candidate.parents
+
+
+def safe_rmtree(target: Union[str, Path], allowed_roots: Iterable[Path], label: str = "") -> Path:
+    """許可ルート配下のみ再帰削除を許す共有ガード（delete_model と同じ安全思想）。
+
+    空文字・"."・CWD・許可ルート自身・許可ルート外（プロジェクトルート/親ディレクトリ等）は
+    ValueError で中止する。API入力由来のパスを rmtree する箇所は必ずこれを経由すること
+    （空パスが Path('.')=CWD 化してプロジェクト全体を削除した事故の再発防止）。
+    """
+    raw = str(target or "").strip()
+    if not raw or raw == ".":
+        raise ValueError("deletion target path is empty; refusing to delete")
+    try:
+        resolved = Path(raw).expanduser().resolve()
+    except (OSError, ValueError, RuntimeError) as e:
+        raise ValueError(f"invalid deletion target path: {raw!r}") from e
+    for root in allowed_roots:
+        try:
+            root_resolved = Path(root).expanduser().resolve()
+        except (OSError, ValueError, RuntimeError):
+            continue
+        if is_within_directory(resolved, root_resolved):
+            logger.info("safe_rmtree: removing %s (%s)", resolved, label or "unlabeled")
+            shutil.rmtree(resolved, ignore_errors=True)
+            return resolved
+    raise ValueError(f"deletion outside allowed directories is not permitted: {resolved}")
 
 
 @dataclass(frozen=True)

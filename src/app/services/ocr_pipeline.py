@@ -15,7 +15,7 @@ import numpy as np
 import yaml
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
-from ..project_paths import ensure_project_directories
+from ..project_paths import ensure_project_directories, safe_rmtree
 from .labels import read_labels
 from .model_registry import resolve_ocr_model_meta
 
@@ -629,7 +629,8 @@ def create_ocr_dataset_from_logs(
     if dataset_root.exists():
         if not overwrite:
             raise ValueError(f"output_dir already exists: {dataset_root}")
-        shutil.rmtree(dataset_root)
+        # overwrite=true でも削除はプロジェクトの outputs 配下に限定（API入力パスの封じ込め）
+        safe_rmtree(dataset_root, [paths.outputs], label="ocr_dataset_from_logs overwrite")
     images_dir = dataset_root / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
 
@@ -764,7 +765,8 @@ def create_ocr_dataset(
     if dataset_root.exists():
         if not overwrite:
             raise ValueError(f"output_dir already exists: {dataset_root}")
-        shutil.rmtree(dataset_root)
+        # overwrite=true でも削除はプロジェクトの outputs 配下に限定（API入力パスの封じ込め）
+        safe_rmtree(dataset_root, [paths.outputs], label="ocr_dataset overwrite")
     dataset_root.mkdir(parents=True, exist_ok=True)
 
     label_lines: dict[str, list[str]] = {"train": [], "val": [], "test": []}

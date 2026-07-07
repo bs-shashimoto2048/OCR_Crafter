@@ -388,7 +388,11 @@ def run_tesseract_training(
     _append_log(log_path, f"学習サンプル train={counts['train']} / eval={counts['val']}")
 
     paths = ensure_project_directories(project_id)
-    work_dir = paths.models / "tesseract_runs" / job_id
+    job_id_str = str(job_id or "").strip()
+    if not job_id_str:
+        # 空idだと Path結合で tesseract_runs ルート自体を指してしまうため中止する
+        raise ValueError("job_id is required for tesseract training")
+    work_dir = paths.models / "tesseract_runs" / job_id_str
     if work_dir.exists():
         shutil.rmtree(work_dir, ignore_errors=True)
     work_dir.mkdir(parents=True, exist_ok=True)
