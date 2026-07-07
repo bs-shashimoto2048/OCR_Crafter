@@ -439,7 +439,8 @@ def _resolve_safe_model_dirs(payload: dict, models_root: Path) -> list[Path]:
             continue
         try:
             resolved = Path(raw).expanduser().resolve()
-        except OSError:
+        except (OSError, ValueError, RuntimeError):
+            # ValueError: NULバイト等の不正文字 / RuntimeError: expanduser失敗
             logger.warning("delete_model: パス解決に失敗したためスキップ: %s=%r", key, raw)
             continue
         text = str(resolved)
