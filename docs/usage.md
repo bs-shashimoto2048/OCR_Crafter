@@ -159,7 +159,7 @@ Accuracy、クラス別精度、混同行列、誤認識一覧を確認します
 - `GET /api/ocr/train/status/{job_id}`
 - `GET /api/ocr/train/log/{job_id}`
 - `GET /models`
-- `GET /api/models/download/{model_name}`（OCRモデルは inference ZIP で取得）
+- `GET /api/models/download/{model_name}`（`.pt`=直接 / `.ocr.json`=inference ZIP / `.tess.json`=`.traineddata` を直接取得）
 - `GET /api/ocr/models/official`（PaddleOCR公式認識モデル一覧）
 - `GET /models/latest`
 - `GET /model-types`
@@ -340,6 +340,12 @@ python3 -m src.app.predict path/to/image.png --project-id default --engine tesse
 ```
 
 ### 12.4 補足・制約
+
+- `学習 > OCR認識モデル` 配下の各画面（モデル管理 / 推論 / OCR修正 / バッチ推論 / モデル評価）でTesseractを選択できます。
+  - **モデル管理**: `.tess.json`（Tesseractモデル）を一覧表示（traineddataパス・charset・学習条件）。削除、`.traineddata` のダウンロードに対応。最新表示は PaddleOCR / Tesseract を並記。
+  - **バッチ推論 / OCR修正**: エンジンに `Tesseract` を追加。モデルは「最新（学習済み）」「Tesseract標準英語モデル eng.traineddata」「学習済みTesseractモデル一覧」から選択（学習済みが無い場合は eng.traineddata を選択）。推論時 whitelist は既定 `A-Z / 0-9 / 小文字筆記体 k,l,t`（学習済みモデルはメタの charset を継承）。
+  - **バッチ推論の結果CSV出力**: 各行に engine / model を記録。Tesseract結果は大小文字を保持して出力。
+- モデル削除は安全ガードつきです: 削除対象は `models` ディレクトリ配下に限定され、メタの関連パスが models 外・空の場合は実体を削除せずスキップ（警告ログ）または中止します。破損（JSONパース不能）メタはメタファイルのみ削除されます。
 
 - 学習ジョブは `training_family=ocr, engine=tesseract` として既存のOCR学習の状態/ログ/停止APIを共用します。
 - `新規作成（ラベルデータから）` `再学習作成（OCRログから）` の両方に対応します。Tesseract選択時はどちらも `text_case=keep`（大小変換なし）で、ラベルの表記をそのまま保持します（例: `CHYBkt` は `CHYBkt` のまま。`kt` が `KT` に改変されない）。charset外の文字を含むラベルは文字削除ではなくサンプルごと除外され、skipped として集計されます。
