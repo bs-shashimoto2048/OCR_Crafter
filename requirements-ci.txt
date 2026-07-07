@@ -1,0 +1,14 @@
+# CI用の最小依存（import src.app.main と pytest tests に必要なもののみ）。
+# requirements.txt はローカル環境の全量スナップショット（GPU版paddle等の巨大依存を含む）のため
+# CI では使用しない。paddle/easyocr/cv2/ultralytics は遅延importのためCIでは不要。
+--extra-index-url https://download.pytorch.org/whl/cpu
+fastapi
+python-multipart
+pydantic
+numpy
+pillow
+matplotlib
+scikit-learn
+PyYAML
+torch
+torchvision
