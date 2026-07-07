@@ -448,7 +448,13 @@ def _resolve_safe_model_dirs(payload: dict, models_root: Path) -> list[Path]:
             continue
         seen.add(text)
         if not _is_safe_model_artifact_dir(resolved, models_root):
-            logger.warning("delete_model: models配下ではないため削除をスキップ: %s=%s", key, resolved)
+            logger.warning(
+                "delete_model: %s=%s は models ディレクトリ（%s）配下ではないため削除をスキップします。"
+                "実体ディレクトリは残るため、不要な場合は手動で削除してください",
+                key,
+                resolved,
+                models_root,
+            )
             continue
         dirs.append(resolved)
     return dirs
@@ -479,9 +485,16 @@ def delete_model(project_id: Optional[str], model_name: str) -> str:
             payload = None
 
         if is_tess_meta:
-            related = [str((payload or {}).get(key) or "").strip() for key in ("tessdata_dir", "model_dir")]
-            if payload is None or not any(related):
-                # 関連パスが欠落したメタは削除対象を特定できないため中止する
+            if payload is None:
+                # JSONパース不能な破損メタ: 関連ディレクトリを特定できないため
+                # .traineddata 等の実体には一切触れず、メタファイルのみ削除する
+                logger.warning("delete_model: 破損メタのため .tess.json のみ削除します（実体は削除しません）: %s", target)
+                logger.info("delete_model: removing model meta: %s", target)
+                target.unlink()
+                return safe_name
+            related = [str(payload.get(key) or "").strip() for key in ("tessdata_dir", "model_dir")]
+            if not any(related):
+                # 読み込めるが関連パスが欠落しているメタは削除対象を特定できないため中止する
                 raise ValueError(
                     f"tesseract model meta is incomplete (missing tessdata_dir/model_dir); delete aborted: {safe_name}"
                 )

@@ -2282,21 +2282,35 @@ export default function App() {
       return;
     }
 
+    const pid = encodeURIComponent(projectId);
+    // 1件の失敗で他の削除結果が失われないよう allSettled で全件を待つ
+    const results = await Promise.allSettled(
+      names.map((name) =>
+        request(`/models/${encodeURIComponent(name)}?project_id=${pid}`, {
+          method: "DELETE",
+        })
+      )
+    );
+    const failed = results
+      .map((result, idx) => ({ result, name: names[idx] }))
+      .filter(({ result }) => result.status === "rejected")
+      .map(({ result, name }) => ({ name, reason: String(result.reason?.message || result.reason || "unknown") }));
+    const okCount = names.length - failed.length;
+
     try {
-      const pid = encodeURIComponent(projectId);
-      await Promise.all(
-        names.map((name) =>
-          request(`/models/${encodeURIComponent(name)}?project_id=${pid}`, {
-            method: "DELETE",
-          })
-        )
-      );
       await loadModels(projectId);
-      notify("success", `${names.length} 件のモデルを削除しました`);
-      pushLog(`モデル削除: ${names.join(", ")}`);
-    } catch (error) {
-      notify("error", error.message);
+    } catch {
+      // 一覧更新失敗は通知に影響させない（手動更新で回復可能）
     }
+
+    if (failed.length === 0) {
+      notify("success", `${okCount} 件のモデルを削除しました`);
+      pushLog(`モデル削除: ${names.join(", ")}`);
+      return;
+    }
+    const failedDetail = failed.map((f) => `${f.name}: ${f.reason}`).join(" / ");
+    notify("error", `モデル削除: 成功 ${okCount} 件 / 失敗 ${failed.length} 件 — ${failedDetail}`);
+    pushLog(`モデル削除(一部失敗): 成功=${okCount}件, 失敗=${failed.map((f) => f.name).join(", ")}`);
   }
 
   async function runEvaluation() {
