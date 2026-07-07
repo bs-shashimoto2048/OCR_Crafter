@@ -341,7 +341,7 @@ export default function TrainingView({
 
   return (
     <div
-      className={`grid h-[calc(100vh-260px)] min-h-[560px] items-stretch gap-6 ${
+      className={`grid h-[calc(100vh-175px)] min-h-[560px] items-stretch gap-4 ${
         paramsCollapsed ? "grid-cols-1" : "grid-cols-[3fr_7fr]"
       }`}
     >
@@ -355,8 +355,9 @@ export default function TrainingView({
                 ? "分割学習モデルの学習を実行します"
                 : "分類モデルとOCRモデルを切り替えて学習できます"
           }
+          className="flex min-h-0 flex-col"
         >
-          <div className="space-y-2.5">
+          <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto pr-1">
             <div className="relative overflow-hidden rounded-xl border border-border/80 bg-gradient-to-br from-[#4a5d73]/45 via-[#394553]/70 to-[#2f3943]/90 p-3 shadow-card">
               <div className="pointer-events-none absolute -right-10 -top-10 h-28 w-28 rounded-full bg-accent/20 blur-2xl" />
               <div className="relative">
@@ -1042,35 +1043,34 @@ export default function TrainingView({
           </div>
         }
       >
-        <div className="mb-3 grid grid-cols-2 gap-2 text-xs xl:grid-cols-4">
-          <div className="rounded-lg border border-border/80 bg-card/55 px-2.5 py-2">
-            <p className="text-[10px] uppercase tracking-wide text-muted/80">Status</p>
-            <p className="mt-1 font-semibold text-text">{statusText}</p>
-          </div>
-          <div className="rounded-lg border border-border/80 bg-card/55 px-2.5 py-2">
-            <p className="text-[10px] uppercase tracking-wide text-muted/80">Job ID</p>
-            <p className="mt-1 truncate font-semibold text-text">{jobId || "-"}</p>
-          </div>
-          <div className="rounded-lg border border-border/80 bg-card/55 px-2.5 py-2">
-            <p className="text-[10px] uppercase tracking-wide text-muted/80">ETA</p>
-            <p className="mt-1 font-semibold text-text">{latestEta}</p>
-          </div>
-          <div className="rounded-lg border border-border/80 bg-card/55 px-2.5 py-2">
-            <p className="text-[10px] uppercase tracking-wide text-muted/80">Visible Logs</p>
-            <p className="mt-1 font-semibold text-text">{filteredLogs.length}</p>
-          </div>
-        </div>
-
-        <div className="mb-3 flex items-center justify-between text-xs">
-          <label className="inline-flex items-center gap-2 rounded-md border border-border/80 bg-card/55 px-2 py-1 text-muted">
-            <input
-              type="checkbox"
-              checked={showImportantOnly}
-              onChange={(e) => setShowImportantOnly(e.target.checked)}
-            />
-            重要イベントのみ表示
-          </label>
-          <span className="text-muted">総ログ: {logs.length}件</span>
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+          <span className="flex items-baseline gap-1.5 rounded-md border border-border/80 bg-card/55 px-2 py-1">
+            <span className="text-[10px] uppercase tracking-wide text-muted/80">Status</span>
+            <span className="font-semibold text-text">{statusText}</span>
+          </span>
+          <span className="flex min-w-0 items-baseline gap-1.5 rounded-md border border-border/80 bg-card/55 px-2 py-1">
+            <span className="text-[10px] uppercase tracking-wide text-muted/80">Job ID</span>
+            <span className="max-w-[180px] truncate font-semibold text-text">{jobId || "-"}</span>
+          </span>
+          <span className="flex items-baseline gap-1.5 rounded-md border border-border/80 bg-card/55 px-2 py-1">
+            <span className="text-[10px] uppercase tracking-wide text-muted/80">ETA</span>
+            <span className="font-semibold text-text">{latestEta}</span>
+          </span>
+          <span className="flex items-baseline gap-1.5 rounded-md border border-border/80 bg-card/55 px-2 py-1">
+            <span className="text-[10px] uppercase tracking-wide text-muted/80">Visible</span>
+            <span className="font-semibold text-text">{filteredLogs.length}</span>
+          </span>
+          <span className="ml-auto flex items-center gap-2">
+            <label className="inline-flex items-center gap-2 rounded-md border border-border/80 bg-card/55 px-2 py-1 text-muted">
+              <input
+                type="checkbox"
+                checked={showImportantOnly}
+                onChange={(e) => setShowImportantOnly(e.target.checked)}
+              />
+              重要イベントのみ表示
+            </label>
+            <span className="text-muted">総ログ: {logs.length}件</span>
+          </span>
         </div>
 
         <div
