@@ -17,6 +17,9 @@ export default function InferenceView({
   paddleModel,
   setPaddleModel,
   paddleModels,
+  tesseractModel,
+  setTesseractModel,
+  tesseractModels,
   latestModels,
   onFileChange,
   fileName,
@@ -39,6 +42,7 @@ export default function InferenceView({
   function engineLabel(value) {
     if (value === "easyocr") return "EasyOCR";
     if (value === "paddleocr") return "PaddleOCR";
+    if (value === "tesseract") return "Tesseract";
     return "カスタムモデル";
   }
 
@@ -61,7 +65,11 @@ export default function InferenceView({
         ? paddleModel === "latest"
           ? basename(latestModels?.ocrPaddle || "") || "PaddleOCR既定モデル"
           : paddleModel
-        : "EasyOCR";
+        : engine === "tesseract"
+          ? tesseractModel === "latest"
+            ? "Tesseract最新モデル"
+            : tesseractModel
+          : "EasyOCR";
   const confidenceValue = Number(result?.confidence || 0);
   const confidencePercent = (confidenceValue * 100).toFixed(1);
   const isLowConfidence = confidenceValue < 0.9;
@@ -82,6 +90,7 @@ export default function InferenceView({
               <option value="custom">カスタムモデル</option>
               <option value="easyocr">EasyOCR</option>
               <option value="paddleocr">PaddleOCR</option>
+              <option value="tesseract">Tesseract</option>
             </select>
           </div>
 
@@ -157,6 +166,29 @@ export default function InferenceView({
                   ))}
                 </div>
               </div>
+            </>
+          ) : engine === "tesseract" ? (
+            <>
+              <div>
+                <label className="app-label">Tesseractモデル</label>
+                <select
+                  value={tesseractModel}
+                  onChange={(e) => setTesseractModel(e.target.value)}
+                  className="app-select"
+                >
+                  <option value="latest">最新</option>
+                  {(tesseractModels || []).map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {(tesseractModels || []).length === 0 ? (
+                <p className="text-xs text-amber-200">
+                  学習済みTesseractモデルがありません。学習画面でTesseract学習を完了後に推論できます。
+                </p>
+              ) : null}
             </>
           ) : (
             <div>

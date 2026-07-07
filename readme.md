@@ -134,3 +134,23 @@ python3 -m src.app.ocr_tuning \
 ```bash
 python3 -m src.app.migrate_legacy_data --project-id default
 ```
+
+---
+
+## Quick Start
+
+ 1. バックエンド起動（FastAPI / Windows PowerShell）
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+uvicorn src.app.main:app --reload --port 8000
+````
+
+2. フロントエンド起動（React + Vite / Windows PowerShell）
+
+```powershell
+cd frontend
+npm run dev
+```
+
+---

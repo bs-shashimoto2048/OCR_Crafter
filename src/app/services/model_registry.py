@@ -17,6 +17,7 @@ def list_models(project_id: Optional[str] = None) -> list[str]:
     paths.models.mkdir(parents=True, exist_ok=True)
     files = [p.name for p in paths.models.glob("*.pt") if p.is_file()]
     files += [p.name for p in paths.models.glob("*.ocr.json") if p.is_file()]
+    files += [p.name for p in paths.models.glob("*.tess.json") if p.is_file()]
     return sorted(files)
 
 
@@ -118,10 +119,47 @@ def list_model_infos(project_id: Optional[str] = None) -> list[dict]:
     paths.models.mkdir(parents=True, exist_ok=True)
     files = [p for p in paths.models.glob("*.pt") if p.is_file()]
     files += [p for p in paths.models.glob("*.ocr.json") if p.is_file()]
+    files += [p for p in paths.models.glob("*.tess.json") if p.is_file()]
     items: list[dict] = []
     for path in sorted(files):
         st = path.stat()
-        if path.name.endswith(".ocr.json"):
+        if path.name.endswith(".tess.json"):
+            payload = _safe_load_json(path)
+            traineddata_path = str(payload.get("traineddata_path") or "")
+            inference_ready = bool(traineddata_path) and Path(traineddata_path).expanduser().is_file()
+            counts = payload.get("counts") if isinstance(payload.get("counts"), dict) else {}
+            items.append(
+                {
+                    "name": path.name,
+                    "model_type": "ocr",
+                    "training_family": "tesseract",
+                    "engine": "tesseract",
+                    "created_at": str(payload.get("created_at") or ""),
+                    "modified_at": datetime.fromtimestamp(st.st_mtime).isoformat(),
+                    "charset": str(payload.get("charset") or ""),
+                    "max_text_length": 0,
+                    "model_dir": str(payload.get("model_dir") or payload.get("tessdata_dir") or ""),
+                    "tessdata_dir": str(payload.get("tessdata_dir") or ""),
+                    "traineddata_path": traineddata_path,
+                    "lang": str(payload.get("lang") or ""),
+                    "base_lang": str(payload.get("base_lang") or ""),
+                    "ocr_inference_ready": bool(inference_ready),
+                    "exported": bool(inference_ready),
+                    "dataset_split_counts": {
+                        "train": _safe_int(counts.get("train", 0)),
+                        "val": _safe_int(counts.get("val", 0)),
+                        "test": _safe_int(counts.get("test", 0)),
+                    },
+                    "ocr_dataset_root": str(payload.get("dataset_root") or ""),
+                    "ocr_training_params": {
+                        "max_iterations": _safe_int(payload.get("max_iterations", 0)),
+                        "training_mode": "finetune",
+                        "init_source_type": "tesseract_base",
+                        "init_source_value": str(payload.get("base_lang") or ""),
+                    },
+                }
+            )
+        elif path.name.endswith(".ocr.json"):
             payload = _safe_load_json(path)
             job_id = str(payload.get("job_id") or "").strip()
             job = fetch_training_job(job_id) if job_id else None
@@ -372,19 +410,21 @@ def delete_model(project_id: Optional[str], model_name: str) -> str:
     suffixes = Path(safe_name).suffixes
     is_pt = Path(safe_name).suffix.lower() == ".pt"
     is_ocr_meta = len(suffixes) >= 2 and suffixes[-2:] == [".ocr", ".json"]
-    if not is_pt and not is_ocr_meta:
-        raise ValueError("only .pt and .ocr.json model files can be deleted")
+    is_tess_meta = len(suffixes) >= 2 and suffixes[-2:] == [".tess", ".json"]
+    if not is_pt and not is_ocr_meta and not is_tess_meta:
+        raise ValueError("only .pt, .ocr.json and .tess.json model files can be deleted")
 
     target = paths.models / safe_name
     if not target.exists() or not target.is_file():
         raise FileNotFoundError(f"model not found: {safe_name}")
 
-    if is_ocr_meta:
+    if is_ocr_meta or is_tess_meta:
         try:
             payload = json.loads(target.read_text(encoding="utf-8"))
             candidate_dirs = [
                 Path(str(payload.get("checkpoint_dir") or "")).expanduser(),
                 Path(str(payload.get("inference_dir") or "")).expanduser(),
+                Path(str(payload.get("tessdata_dir") or "")).expanduser(),
                 Path(str(payload.get("model_dir") or "")).expanduser(),
             ]
             unique_dirs: list[Path] = []
@@ -473,3 +513,50 @@ def resolve_ocr_model_meta(
     except Exception:  # noqa: BLE001
         return None
     return None
+
+
+def _is_tesseract_model_ready(payload: dict) -> bool:
+    traineddata = str(payload.get("traineddata_path") or "").strip()
+    if not traineddata:
+        return False
+    return Path(traineddata).expanduser().is_file()
+
+
+def list_tesseract_model_meta_files(project_id: Optional[str]) -> list[Path]:
+    paths = ensure_project_directories(project_id)
+    paths.models.mkdir(parents=True, exist_ok=True)
+    return sorted([p for p in paths.models.glob("*.tess.json") if p.is_file()])
+
+
+def latest_tesseract_model_meta(project_id: Optional[str], ready_only: bool = True) -> Optional[Path]:
+    files = list_tesseract_model_meta_files(project_id)
+    if ready_only:
+        files = [p for p in files if _is_tesseract_model_ready(_safe_load_json(p))]
+    if not files:
+        return None
+    return max(files, key=lambda p: p.stat().st_mtime)
+
+
+def resolve_tesseract_model_meta(
+    project_id: Optional[str],
+    model: str = "latest",
+    ready_only: bool = True,
+) -> Optional[dict]:
+    normalized_model = (model or "latest").strip()
+    if normalized_model in {"", "latest"}:
+        meta_file = latest_tesseract_model_meta(project_id=project_id, ready_only=ready_only)
+    else:
+        paths = ensure_project_directories(project_id)
+        candidate = paths.models / Path(normalized_model).name
+        if not candidate.exists() or not candidate.is_file() or not str(candidate.name).endswith(".tess.json"):
+            return None
+        meta_file = candidate
+    if meta_file is None:
+        return None
+    payload = _safe_load_json(meta_file)
+    if not payload:
+        return None
+    if ready_only and not _is_tesseract_model_ready(payload):
+        return None
+    payload["meta_file"] = str(meta_file)
+    return payload

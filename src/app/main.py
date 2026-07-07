@@ -40,6 +40,7 @@ from .schemas import (
     LabelUpdateRequest,
     OcrDatasetCreateRequest,
     OcrDatasetFromLogsRequest,
+    OcrEvaluateRequest,
     OcrLogSaveRequest,
     OcrTrainStartRequest,
     OcrTuningExportRequest,
@@ -47,17 +48,20 @@ from .schemas import (
     PreprocessRequest,
     ProjectCreateRequest,
     RotateImageRequest,
+    TesseractTrainStartRequest,
     TrainRequest,
 )
 from .services.data_manager import import_images_from_directory, list_raw_images, rotate_project_image
 from .services.dataset_builder import build_dataset, read_dataset_meta
 from .services.dialogs import select_directory_path, select_file_path
 from .services.evaluation import evaluate_dataset
+from .services.ocr_evaluation import evaluate_ocr
 from .services.labels import ensure_master_csv, read_labels, upsert_label
 from .services.model_registry import (
     delete_model,
     latest_model,
     latest_ocr_model_meta,
+    latest_tesseract_model_meta,
     list_model_infos,
     list_model_types,
     list_models,
@@ -78,6 +82,11 @@ from .services.ocr_pipeline import (
     save_ocr_prediction_log,
 )
 from .services.preprocess import build_preprocess_config, preview_preprocess, preprocess_image_for_model, run_preprocess
+from .services.tesseract_pipeline import (
+    TESSERACT_TARGET_CHARSET,
+    ensure_tesseract_training_tools,
+    run_tesseract_training,
+)
 from .services.training_image_builder import (
     detect_bboxes_with_yolo,
     export_selected_crops,
@@ -167,7 +176,7 @@ def _system_check_snapshot() -> dict[str, Any]:
     paddle_repo_path = Path(resolved_repo).expanduser()
     paddle_gpu_available = bool(detect_paddle_gpu_available())
     torch_cuda_available = bool(detect_torch_cuda_available())
-    gpu_available = bool(paddle_gpu_available and torch_cuda_available)
+    gpu_available = bool(paddle_gpu_available)
     gpu_name = str(get_gpu_name() or "")
     vram_gb = float(get_vram_gb() or 0.0)
     recommended_profile = "RTX Train" if gpu_available else "Mac Safe"
@@ -362,6 +371,24 @@ def _is_pid_alive(pid: int) -> bool:
         return False
     except PermissionError:
         return True
+    except OSError:
+        if not sys.platform.startswith("win"):
+            return False
+        try:
+            import ctypes
+
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            handle = ctypes.windll.kernel32.OpenProcess(  # type: ignore[attr-defined]
+                PROCESS_QUERY_LIMITED_INFORMATION,
+                False,
+                int(pid),
+            )
+            if not handle:
+                return False
+            ctypes.windll.kernel32.CloseHandle(handle)  # type: ignore[attr-defined]
+            return True
+        except Exception:
+            return False
     return True
 
 
@@ -464,6 +491,10 @@ def _recover_exported_ocr_runs(project_id: str) -> int:
 def _reconcile_ocr_training_job(job_id: str) -> Optional[dict[str, Any]]:
     job = fetch_training_job(job_id)
     if not job or str(job.get("training_family") or "") != "ocr":
+        return job
+
+    # Tesseract ジョブは PaddleOCR の inference 復旧ロジックの対象外
+    if str(job.get("engine") or "").strip().lower() == "tesseract":
         return job
 
     project_id = str(job.get("project_id") or "default")
@@ -818,7 +849,7 @@ def select_directory(req: DirectorySelectRequest) -> dict[str, str]:
 @app.post("/dialogs/select-file")
 def select_file(req: FileSelectRequest) -> dict[str, str]:
     try:
-        path = select_file_path(req.initial_dir, extensions=["pt"])
+        path = select_file_path(req.initial_dir, extensions=req.extensions or ["pt"])
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
     except Exception as e:  # noqa: BLE001
@@ -1203,6 +1234,69 @@ def _run_ocr_training_job(job_id: str) -> None:
         )
 
 
+def _run_tesseract_training_job(job_id: str) -> None:
+    job = fetch_training_job(job_id)
+    if not job:
+        return
+
+    upsert_training_job(
+        {
+            **job,
+            "status": "running",
+            "message": "tesseract training started",
+            "updated_at": _now_iso(),
+        }
+    )
+
+    try:
+        project_id = str(job.get("project_id") or "default")
+        dataset_dir = str(job.get("dataset_dir") or "")
+        # Tesseractジョブでは epochs=max_iterations / init_source_value=base_lang / max_text_length=psm を流用
+        max_iterations = int(job.get("epochs") or 1000)
+        base_lang = str(job.get("init_source_value") or "eng").strip() or "eng"
+        psm = int(job.get("max_text_length") or 7)
+        charset = str(job.get("charset") or TESSERACT_TARGET_CHARSET)
+
+        log_path = Path(str(job.get("log_path") or ""))
+        if not str(log_path):
+            paths = ensure_project_directories(project_id)
+            log_path = paths.logs / f"train_tesseract_{job_id}.log"
+
+        result = run_tesseract_training(
+            project_id=project_id,
+            job_id=job_id,
+            dataset_dir=dataset_dir,
+            charset=charset,
+            max_iterations=max_iterations,
+            base_lang=base_lang,
+            psm=psm,
+            log_path=log_path,
+        )
+        current = fetch_training_job(job_id) or job
+        upsert_training_job(
+            {
+                **current,
+                "status": "completed",
+                "message": "tesseract training completed",
+                "model_path": result.get("traineddata_path"),
+                "worker_pid": None,
+                "log_path": result.get("log_path") or str(log_path),
+                "updated_at": _now_iso(),
+            }
+        )
+    except Exception as e:  # noqa: BLE001
+        current = fetch_training_job(job_id) or job
+        upsert_training_job(
+            {
+                **current,
+                "status": "failed",
+                "message": str(e),
+                "worker_pid": None,
+                "updated_at": _now_iso(),
+            }
+        )
+
+
 @app.post("/train/start")
 def train_start(req: TrainRequest, background_tasks: BackgroundTasks) -> dict[str, str]:
     project_id = _resolve_project_id(req.project_id)
@@ -1293,6 +1387,7 @@ def api_ocr_dataset_create(req: OcrDatasetCreateRequest) -> dict[str, Any]:
             seed=req.seed,
             output_dir=req.output_dir,
             overwrite=req.overwrite,
+            text_case=req.text_case,
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
@@ -1313,6 +1408,7 @@ def api_ocr_dataset_from_logs(req: OcrDatasetFromLogsRequest) -> dict[str, Any]:
             image_shape=req.image_shape,
             output_dir=req.output_dir,
             overwrite=req.overwrite,
+            text_case=req.text_case,
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
@@ -1334,8 +1430,6 @@ def api_ocr_train_start(req: OcrTrainStartRequest, background_tasks: BackgroundT
         raise HTTPException(status_code=400, detail=f"unsupported device: {resolved_device}")
     if resolved_device == "gpu" and not bool(system_info.get("paddle_gpu_available")):
         raise HTTPException(status_code=400, detail="device=gpu was requested, but CUDA GPU is not available for PaddlePaddle.")
-    if resolved_device == "gpu" and not bool(system_info.get("torch_cuda_available")):
-        raise HTTPException(status_code=400, detail="GPU指定ですがCUDAが利用できません (torch.cuda.is_available=False)")
     will_use_gpu = resolved_device == "gpu" or (resolved_device == "auto" and bool(system_info.get("gpu_available")))
     resolved_auto_batch_size = (
         bool(req.auto_batch_size)
@@ -1447,6 +1541,63 @@ def api_ocr_train_start(req: OcrTrainStartRequest, background_tasks: BackgroundT
         }
     )
     return {"job_id": job_id, "project_id": project_id, "status": "queued", "training_family": "ocr", "engine": "paddleocr"}
+
+
+@app.post("/api/tesseract/train/start")
+def api_tesseract_train_start(req: TesseractTrainStartRequest) -> dict[str, Any]:
+    project_id = _resolve_project_id(req.project_id)
+    dataset_dir = str(req.dataset_dir or "").strip()
+    if not dataset_dir:
+        raise HTTPException(status_code=400, detail="dataset_dir is required")
+    # 学習ツール未導入なら着手前に導入手順つきで失敗させる
+    try:
+        ensure_tesseract_training_tools()
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    # 学習対象文字セット。大小文字を区別するため大小変換はしない（重複除去のみ）
+    charset = "".join(dict.fromkeys(str(req.charset or TESSERACT_TARGET_CHARSET)))
+    if not charset:
+        charset = TESSERACT_TARGET_CHARSET
+
+    job_id = str(uuid.uuid4())
+    now = _now_iso()
+    paths = ensure_project_directories(project_id)
+    log_path = paths.logs / f"train_tesseract_{job_id}.log"
+    job_payload = {
+        "id": job_id,
+        "project_id": project_id,
+        "training_family": "ocr",
+        "engine": "tesseract",
+        "model_type": "ocr",
+        "epochs": int(req.max_iterations),
+        "batch_size": 1,
+        "learning_rate": 0.0,
+        "charset": charset,
+        "max_text_length": int(req.psm),
+        "dataset_dir": dataset_dir,
+        "image_shape": None,
+        "training_mode": "finetune",
+        "init_source_type": "tesseract_base",
+        "init_source_value": str(req.base_lang or "eng"),
+        "status": "queued",
+        "message": "queued",
+        "model_path": None,
+        "worker_pid": None,
+        "log_path": str(log_path),
+        "created_at": now,
+        "updated_at": now,
+    }
+    upsert_training_job(job_payload)
+    worker_pid = _spawn_training_runner("tesseract", job_id)
+    upsert_training_job(
+        {
+            **job_payload,
+            "worker_pid": worker_pid,
+            "updated_at": _now_iso(),
+        }
+    )
+    return {"job_id": job_id, "project_id": project_id, "status": "queued", "training_family": "ocr", "engine": "tesseract"}
 
 
 @app.get("/api/ocr/train/status/{job_id}")
@@ -1607,7 +1758,14 @@ def model_latest(
     engine: Optional[str] = Query(default=None),
 ) -> dict[str, str]:
     resolved = _resolve_project_id(project_id)
-    if str(training_family).strip().lower() == "ocr":
+    normalized_family = str(training_family).strip().lower()
+    normalized_engine = str(engine or "").strip().lower()
+    if normalized_family == "tesseract" or normalized_engine == "tesseract":
+        meta_file = latest_tesseract_model_meta(project_id=resolved, ready_only=True)
+        if meta_file is None:
+            return {"project_id": resolved, "model": ""}
+        return {"project_id": resolved, "model": Path(str(meta_file)).name}
+    if normalized_family == "ocr":
         _recover_exported_ocr_runs(resolved)
         model = latest_ocr_model_meta(project_id=resolved, engine=engine, inference_ready_only=True)
         if model is None:
@@ -2015,6 +2173,26 @@ def evaluate(req: EvaluateRequest) -> dict[str, Any]:
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/api/ocr/evaluate")
+def api_ocr_evaluate(req: OcrEvaluateRequest) -> dict[str, Any]:
+    project_id = _resolve_project_id(req.project_id)
+    try:
+        return evaluate_ocr(
+            project_id=project_id,
+            image_dir=req.image_dir,
+            gt_csv=req.gt_csv,
+            targets=[t.model_dump() for t in req.targets],
+            charset=req.charset,
+            psm=req.psm,
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 

@@ -48,6 +48,24 @@ OFFICIAL_PADDLEOCR_REC_SPECS: dict[str, dict[str, str]] = {
 }
 
 
+def _ensure_paddle_runtime_env() -> None:
+    # Keep Paddle cache/home inside workspace to avoid permission issues on locked profiles.
+    workspace_root = Path(__file__).resolve().parents[3]
+    runtime_home = workspace_root / ".runtime_home"
+    cache_home = workspace_root / ".cache"
+    paddle_home = cache_home / "paddle"
+    data_home = paddle_home / "dataset"
+    runtime_home.mkdir(parents=True, exist_ok=True)
+    cache_home.mkdir(parents=True, exist_ok=True)
+    paddle_home.mkdir(parents=True, exist_ok=True)
+    data_home.mkdir(parents=True, exist_ok=True)
+    os.environ["HOME"] = str(runtime_home)
+    os.environ["USERPROFILE"] = str(runtime_home)
+    os.environ["XDG_CACHE_HOME"] = str(cache_home)
+    os.environ["PADDLE_HOME"] = str(paddle_home)
+    os.environ["DATA_HOME"] = str(data_home)
+
+
 def _load_torch_module() -> Optional[Any]:
     if importlib.util.find_spec("torch") is None:
         return None
@@ -68,38 +86,76 @@ def detect_torch_cuda_available() -> bool:
         return False
 
 
+def _read_nvidia_smi_device_info() -> Optional[dict[str, Any]]:
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=name,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    if int(result.returncode) != 0:
+        return None
+    for row in str(result.stdout or "").splitlines():
+        line = row.strip()
+        if not line:
+            continue
+        parts = [segment.strip() for segment in line.split(",")]
+        if len(parts) < 2:
+            continue
+        name = str(parts[0] or "").strip()
+        try:
+            memory_total_mb = float(parts[1])
+        except Exception:  # noqa: BLE001
+            memory_total_mb = 0.0
+        return {"name": name, "memory_total_mb": float(memory_total_mb)}
+    return None
+
+
 def get_vram_gb() -> float:
     torch = _load_torch_module()
-    if torch is None:
+    if torch is not None:
+        try:
+            if torch.cuda.is_available():
+                return float(torch.cuda.get_device_properties(0).total_memory) / float(1024**3)
+        except Exception:  # noqa: BLE001
+            pass
+    info = _read_nvidia_smi_device_info()
+    if info is None:
         return 0.0
-    try:
-        if not torch.cuda.is_available():
-            return 0.0
-        return float(torch.cuda.get_device_properties(0).total_memory) / float(1024**3)
-    except Exception:  # noqa: BLE001
-        return 0.0
+    return float(info.get("memory_total_mb") or 0.0) / float(1024.0)
 
 
 def auto_batch_size(vram_gb: float) -> int:
-    if float(vram_gb) >= 12.0:
-        return 128
-    if float(vram_gb) >= 8.0:
+    if float(vram_gb) >= 16.0:
         return 64
+    if float(vram_gb) >= 12.0:
+        return 48
+    if float(vram_gb) >= 8.0:
+        return 24
     if float(vram_gb) >= 6.0:
-        return 32
-    return 16
+        return 16
+    return 8
 
 
 def get_gpu_name() -> str:
     torch = _load_torch_module()
-    if torch is None:
+    if torch is not None:
+        try:
+            if torch.cuda.is_available():
+                return str(torch.cuda.get_device_name(0))
+        except Exception:  # noqa: BLE001
+            pass
+    info = _read_nvidia_smi_device_info()
+    if info is None:
         return ""
-    try:
-        if not torch.cuda.is_available():
-            return ""
-        return str(torch.cuda.get_device_name(0))
-    except Exception:  # noqa: BLE001
-        return ""
+    return str(info.get("name") or "").strip()
 
 
 def _read_nvidia_smi_metrics() -> Optional[dict[str, float]]:
@@ -151,6 +207,7 @@ def _extract_avg_step_time(line: str) -> Optional[float]:
 
 
 def detect_paddle_gpu_available() -> bool:
+    _ensure_paddle_runtime_env()
     if importlib.util.find_spec("paddle") is None:
         return False
     try:
@@ -175,9 +232,6 @@ def _resolve_paddle_use_gpu(device: str) -> tuple[bool, str]:
     if normalized == "gpu":
         if not gpu_available:
             raise RuntimeError("device=gpu was requested, but CUDA GPU is not available for PaddlePaddle.")
-        # strict mode: torch が導入済みなのに CUDA を見失っている場合はフォールバックしない
-        if importlib.util.find_spec("torch") is not None and not detect_torch_cuda_available():
-            raise RuntimeError("GPU指定ですがCUDAが利用できません (torch.cuda.is_available=False)")
         return True, "gpu"
     if gpu_available:
         return True, "gpu"
@@ -188,10 +242,20 @@ def _now_tag() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
-def _normalize_charset(charset: Optional[str]) -> str:
-    normalized = "".join(dict.fromkeys((charset or OCR_CHARSET_DEFAULT).strip().upper()))
+def _apply_text_case(value: str, text_case: str = "upper") -> str:
+    mode = str(text_case or "upper").strip().lower()
+    if mode == "lower":
+        return value.lower()
+    if mode == "keep":
+        return value
+    return value.upper()
+
+
+def _normalize_charset(charset: Optional[str], text_case: str = "upper") -> str:
+    cased = _apply_text_case((charset or OCR_CHARSET_DEFAULT).strip(), text_case)
+    normalized = "".join(dict.fromkeys(cased))
     if not normalized:
-        normalized = OCR_CHARSET_DEFAULT
+        normalized = _apply_text_case(OCR_CHARSET_DEFAULT, text_case)
     return normalized
 
 
@@ -224,8 +288,8 @@ def _resolve_source_image(project_root: Path, image_name: str, image_type: str) 
     return None
 
 
-def _sanitize_text(raw: str, charset: str, max_text_length: int) -> str:
-    value = str(raw or "").strip().upper()
+def _sanitize_text(raw: str, charset: str, max_text_length: int, text_case: str = "upper") -> str:
+    value = _apply_text_case(str(raw or "").strip(), text_case)
     if not value:
         return ""
     if any(ch not in charset for ch in value):
@@ -488,10 +552,11 @@ def create_ocr_dataset_from_logs(
     image_shape: Optional[list[int]] = None,
     output_dir: Optional[str] = None,
     overwrite: bool = False,
+    text_case: str = "upper",
 ) -> dict[str, Any]:
     if int(max_text_length) <= 0:
         raise ValueError("max_text_length must be > 0")
-    normalized_charset = _normalize_charset(charset)
+    normalized_charset = _normalize_charset(charset, text_case)
     shape = _normalize_image_shape(image_shape)
     paths = ensure_project_directories(project_id)
     logs_dir = paths.outputs / "ocr_logs"
@@ -529,8 +594,8 @@ def create_ocr_dataset_from_logs(
         if only_invalid and bool(payload.get("is_valid", True)):
             skipped_invalid_filter += 1
             continue
-        corrected = str(payload.get("corrected_text") or "").strip().upper()
-        predicted = str(payload.get("predicted_text") or payload.get("prediction") or "").strip().upper()
+        corrected = _apply_text_case(str(payload.get("corrected_text") or "").strip(), text_case)
+        predicted = _apply_text_case(str(payload.get("predicted_text") or payload.get("prediction") or "").strip(), text_case)
         selected = corrected if (include_corrected and corrected) else predicted
         if not selected:
             skipped_empty_text += 1
@@ -590,6 +655,7 @@ def create_ocr_dataset_from_logs(
         "include_corrected": bool(include_corrected),
         "max_text_length": int(max_text_length),
         "charset": normalized_charset,
+        "text_case": str(text_case or "upper").strip().lower(),
         "image_shape": shape,
         "skipped": {
             "invalid_filter": skipped_invalid_filter,
@@ -619,6 +685,7 @@ def create_ocr_dataset(
     seed: int = 42,
     output_dir: Optional[str] = None,
     overwrite: bool = False,
+    text_case: str = "upper",
 ) -> dict[str, Any]:
     selected_types = [str(x).strip().lower() for x in (image_types or ["wide"]) if str(x).strip()]
     if any(x not in {"single", "wide"} for x in selected_types):
@@ -627,7 +694,7 @@ def create_ocr_dataset(
         selected_types = ["wide"]
 
     shape = _normalize_image_shape(image_shape)
-    normalized_charset = _normalize_charset(charset)
+    normalized_charset = _normalize_charset(charset, text_case)
     if max_text_length <= 0:
         raise ValueError("max_text_length must be > 0")
     if int(aug_strength) < 1 or int(aug_strength) > 3:
@@ -651,7 +718,7 @@ def create_ocr_dataset(
         if image_type not in selected_types:
             skipped_type += 1
             continue
-        text = _sanitize_text(str(row.get("label") or ""), normalized_charset, int(max_text_length))
+        text = _sanitize_text(str(row.get("label") or ""), normalized_charset, int(max_text_length), text_case)
         if not text:
             skipped_invalid_label += 1
             continue
@@ -735,6 +802,7 @@ def create_ocr_dataset(
         "dataset_root": str(dataset_root),
         "image_types": selected_types,
         "charset": normalized_charset,
+        "text_case": str(text_case or "upper").strip().lower(),
         "max_text_length": int(max_text_length),
         "image_shape": shape,
         "use_augmentation": bool(use_augmentation),
@@ -1240,6 +1308,7 @@ def run_paddleocr_training(
     init_source_value: Optional[str] = None,
 ) -> dict[str, Any]:
     _ensure_paddle_training_dependencies()
+    _ensure_paddle_runtime_env()
     dataset_root = Path(dataset_dir).expanduser().resolve()
     repo_dir = Path(paddle_repo_dir).expanduser().resolve()
     if not dataset_root.exists():

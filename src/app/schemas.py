@@ -48,6 +48,7 @@ class DirectorySelectRequest(BaseModel):
 
 class FileSelectRequest(BaseModel):
     initial_dir: Optional[str] = Field(default=None, description="初期表示ディレクトリ")
+    extensions: Optional[list[str]] = Field(default=None, description="許可拡張子（未指定時は pt）")
 
 
 class RotateImageRequest(BaseModel):
@@ -58,8 +59,8 @@ class PreprocessPreviewRequest(BaseModel):
     image: str = Field(..., description="プレビュー対象の画像ファイル名")
     project_id: Optional[str] = Field(default="default", description="プロジェクトID")
     overrides: Optional[dict[str, Any]] = Field(default=None, description="前処理設定の上書き")
-    engine: str = Field(default="custom", description="推論エンジン: custom/easyocr/paddleocr")
-    model: str = Field(default="latest", description="custom時のモデル指定")
+    engine: str = Field(default="custom", description="推論エンジン: custom/easyocr/paddleocr/tesseract")
+    model: str = Field(default="latest", description="custom/paddleocr/tesseract時のモデル指定 (tesseractはengでベースモデル指定可)")
     model_type: Optional[str] = Field(default=None, description="custom+latest時のモデル種別")
     easyocr_langs: str = Field(default="en", description="OCR使用言語 (comma separated)")
 
@@ -102,6 +103,40 @@ class OcrDatasetCreateRequest(BaseModel):
     seed: int = Field(default=42)
     output_dir: Optional[str] = Field(default=None)
     overwrite: bool = Field(default=False)
+    text_case: Literal["upper", "lower", "keep"] = Field(
+        default="upper", description="ラベル/文字セットの大小文字処理（Tesseractの小文字学習はlower）"
+    )
+
+
+class OcrEvalTarget(BaseModel):
+    engine: str = Field(default="tesseract", description="評価エンジン（現状 tesseract）")
+    model: str = Field(default="latest", description="'eng'（学習前）/ '<name>.tess.json' / 'latest'")
+
+
+class OcrEvaluateRequest(BaseModel):
+    project_id: Optional[str] = Field(default="default")
+    image_dir: str = Field(..., description="評価用画像フォルダ")
+    gt_csv: str = Field(..., description="正解CSV（画像名,正解文字列）")
+    targets: list[OcrEvalTarget] = Field(
+        default_factory=lambda: [OcrEvalTarget(engine="tesseract", model="eng"), OcrEvalTarget(engine="tesseract", model="latest")]
+    )
+    charset: str = Field(
+        default="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt",
+        description="評価時whitelist。既定=実運用(A-Z/0-9/klt)、空文字=whitelistなし、任意文字列=カスタム",
+    )
+    psm: int = Field(default=7, ge=0, le=13)
+
+
+class TesseractTrainStartRequest(BaseModel):
+    project_id: Optional[str] = Field(default="default")
+    dataset_dir: str = Field(..., description="OCRデータ作成で生成したデータセットディレクトリ")
+    charset: str = Field(
+        default="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt",
+        description="学習対象文字セット（A-Z / 0-9 / 小文字筆記体 k,l,t）。whitelistとは別概念",
+    )
+    max_iterations: int = Field(default=1000, ge=1, le=100000, description="LSTM fine-tuneの最大イテレーション")
+    base_lang: str = Field(default="eng", description="fine-tuneのベース言語(traineddata)")
+    psm: int = Field(default=7, ge=0, le=13, description="単一行認識用のPage Segmentation Mode")
 
 
 class OcrTrainStartRequest(BaseModel):
@@ -113,7 +148,7 @@ class OcrTrainStartRequest(BaseModel):
     max_text_length: int = Field(default=8, ge=1, le=64)
     image_shape: list[int] = Field(default_factory=lambda: [3, 48, 320])
     batch_size: int = Field(default=16, ge=1, le=1024)
-    epochs: int = Field(default=50, ge=1, le=2000)
+    epochs: int = Field(default=30, ge=1, le=2000)
     device: Literal["auto", "cpu", "gpu"] = Field(default="auto")
     auto_batch_size: Optional[bool] = Field(default=None)
     train_num_workers: Optional[int] = Field(default=None, ge=0, le=32)
@@ -152,3 +187,6 @@ class OcrDatasetFromLogsRequest(BaseModel):
     image_shape: list[int] = Field(default_factory=lambda: [3, 48, 320])
     output_dir: Optional[str] = Field(default=None)
     overwrite: bool = Field(default=False)
+    text_case: Literal["upper", "lower", "keep"] = Field(
+        default="upper", description="ログ由来テキストの大小文字処理（Tesseractの小文字学習はlower）"
+    )

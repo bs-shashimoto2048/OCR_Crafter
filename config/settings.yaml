@@ -114,7 +114,7 @@ dataset:
   seed: 42
 
 training:
-  default_epochs: 50
+  default_epochs: 30
   default_batch_size: 16
   default_lr: 0.001
   default_image_size: [64, 64]
@@ -155,8 +155,25 @@ ocr_training:
       auto_batch_size: true
       train_num_workers: 4
       eval_num_workers: 2
-      batch_size: 64
+      batch_size: 24
       save_epoch_step: 5
       use_amp: true
       pin_memory: true
       persistent_workers: true
+
+tesseract:
+  # 学習/推論に使う実行ファイルの場所。空の場合は PATH から解決する
+  tesseract_cmd: "C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
+  lstmtraining_cmd: "C:\\Program Files\\Tesseract-OCR\\lstmtraining.exe"
+  combine_tessdata_cmd: "C:\\Program Files\\Tesseract-OCR\\combine_tessdata.exe"
+  # ベース traineddata の格納フォルダ（tessdata_best 推奨）。空なら TESSDATA_PREFIX / models 配下を探索
+  tessdata_dir: "C:/Users/shashimoto/project/workspace_codex/ocr_crafter/models/tessdata_best"
+  # fine-tune のベース言語（英語筆記体の小文字学習は eng を使用）
+  base_lang: eng
+  # 学習対象文字セット（英大文字A-Z / 数字0-9 / 小文字筆記体 k,l,t）
+  # ※whitelist（推論時の探索制約）は別概念。既定はこの値と同じだが独立に変更可
+  default_charset: ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt
+  # LSTM fine-tune の最大イテレーション数
+  default_max_iterations: 1000
+  # 単一行認識用の Page Segmentation Mode
+  default_psm: 7

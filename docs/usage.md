@@ -286,3 +286,144 @@ PY
 - `image_shape` は `1,48,320`（グレースケール）または `3,48,320`（RGB）を使用可能。
 - OCR学習パラメータに `device(auto/cpu/gpu)`, `train_num_workers`, `eval_num_workers`, `save_epoch_step` を追加。
 - Mac では `num_workers` が高いとメモリ逼迫しやすいため、`Mac Safe` プリセット（`cpu`, workers `0/0`）推奨。
+
+
+## 12. Tesseract 学習（A-Z / 0-9 / 小文字筆記体 k,l,t）
+
+OCRタイプに `Tesseract` を追加しました。公式 `eng.traineddata` をベースに LSTM を
+fine-tune します。学習対象文字は `A-Z / 0-9 / 小文字筆記体 k,l,t`
+（`ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt`）で、主な改善対象は筆記体の
+`k/l/t` と `kt`/`lt` の組み合わせです。
+
+> charset（学習対象文字セット）と whitelist（推論時の探索制約）は別概念です。
+> whitelist は学習処理には結び付けず、推論・評価時のみ適用します（既定は学習対象と同値）。
+
+### 12.1 前提ツール（重要）
+
+Tesseract の学習は pip では完結しません。以下の外部ツールが必要です。
+
+- `tesseract`（推論・lstmf生成に使用）
+- `lstmtraining`（LSTM fine-tune 本体）
+- `combine_tessdata`（ベースモデルからLSTM抽出）
+- ベース `eng.traineddata`（tessdata_best 推奨）
+
+Windows では通常インストーラに学習ツールが含まれないため、学習ツール入りビルドを導入してください。
+`config/settings.yaml` の `tesseract` セクションで実行ファイルや `tessdata_dir` を指定できます（PATH 解決も可）。
+
+```yaml
+tesseract:
+  tesseract_cmd: ""          # 空ならPATHから解決
+  lstmtraining_cmd: ""
+  combine_tessdata_cmd: ""
+  tessdata_dir: ""           # eng.traineddata の格納フォルダ
+  base_lang: eng
+  default_charset: ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt
+  default_max_iterations: 1000
+  default_psm: 7
+```
+
+ツール未導入のまま学習を開始すると、導入手順つきのエラーになります（データは壊れません）。
+
+### 12.2 手順（UI）
+
+1. `モデル作成 > 学習` で `学習方式 = ocr`、`OCRタイプ = Tesseract` を選ぶ。
+2. 学習対象文字セットは既定で `ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt`（A-Z / 0-9 / 筆記体klt）。
+3. `OCRデータ作成` を実行（ラベルは大小変換せずそのまま使用。charset外の文字を含むラベルはサンプル除外）。
+4. `最大イテレーション` を設定し `OCR学習開始`。
+5. 完了すると `models/tesseract/<name>/<name>.traineddata` が作られ、`<name>.tess.json` がモデル一覧に追加される。
+6. `推論` 画面で `Tesseract` を選び、学習済みモデルで推論できる（whitelist 既定 `A-Z0-9klt`、単一行 `--psm 7`）。
+
+### 12.3 CLI 推論
+
+```bash
+python3 -m src.app.predict path/to/image.png --project-id default --engine tesseract
+```
+
+### 12.4 補足・制約
+
+- 学習ジョブは `training_family=ocr, engine=tesseract` として既存のOCR学習の状態/ログ/停止APIを共用します。
+- `新規作成（ラベルデータから）` `再学習作成（OCRログから）` の両方に対応します。Tesseract選択時はどちらも `text_case=keep`（大小変換なし）で、ラベルの表記をそのまま保持します（例: `CHYBkt` は `CHYBkt` のまま。`kt` が `KT` に改変されない）。charset外の文字を含むラベルは文字削除ではなくサンプルごと除外され、skipped として集計されます。
+- 学習用の行画像は OCRデータ作成の出力（`image_shape` で高さ正規化・レターボックス）を使用します。
+- この環境には学習ツールが未導入のため、エンドツーエンドの学習実行は未検証です（配線・事前チェック・小文字データ生成・推論経路は検証済み）。
+
+### 12.5 モデル評価（学習前後の比較）
+
+UI: `モデル作成 > 学習 > 6. モデル評価`（`ocr-eval`）。学習前モデル（`eng.traineddata`）と学習後モデルを
+同一データで推論し、認識率・増減・改善率・誤認識一覧を表示する（API: `POST /api/ocr/evaluate`）。
+
+- **学習前モデル (eng.traineddata)**: Tesseract 標準の英語モデル（未学習のベースライン）。
+- **学習後モデル**: 本アプリで学習した `.tess.json`（`latest` または個別選択）。
+- 表示項目: 認識率 / 増減（学習後−学習前）/ 改善率（増減÷学習前）/ 誤認識一覧 / CSV出力。
+
+#### 正解CSVの形式
+
+```csv
+filename,text
+sample_001.png,kt
+sample_002.png,lt
+sample_003.png,ct
+```
+
+- `filename` は評価用画像フォルダ内のファイル名と一致させる。
+- `text` は実運用の表記どおりに記載する（例: `CHYBkt`）。比較は case-sensitive の完全一致で、`KT` と `kt` は別物として評価される。
+- 評価時 whitelist は既定 `ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt`（UIで「なし」「カスタム」へ切替可。APIでは `charset=""` が whitelist なし）。
+- ヘッダ行あり推奨（先頭が `filename`/`image` 等なら自動スキップ）。
+- 文字コードは UTF-8 推奨。
+
+#### 評価結果CSV（CSV出力）
+
+明細（1行＝画像×モデル）:
+
+| 列 | 内容 |
+|---|---|
+| `filename` | 画像ファイル名 |
+| `ground_truth` | 正解文字列（CSVの text） |
+| `prediction` | モデルの認識結果 |
+| `match` | 一致=`1` / 不一致=`0` |
+| `model` | モデル表示名（例 `eng.traineddata（学習前）`） |
+
+末尾にモデル別サマリ（accuracy summary）:
+
+| 列 | 内容 |
+|---|---|
+| `model` | モデル表示名 |
+| `total` | 評価画像数 |
+| `correct` | 正解数 |
+| `accuracy_percent` | 認識率(%) |
+| `mismatch_count` | 誤認識数 |
+
+#### エラー時の案内
+
+| 症状 | 主なメッセージ / 原因 | 対処 |
+|---|---|---|
+| Tesseract 本体が未導入 | `tesseract 実行ファイルが見つかりません...` | Tesseract を導入し `tesseract.tesseract_cmd`/PATH を設定 |
+| eng.traineddata が無い | `ベース traineddata (eng.traineddata) が見つかりません...` | tessdata_best を配置し `tessdata_dir` 指定（§12.1〜12.3） |
+| 学習後モデルが未学習/未選択 | `学習後モデルが見つかりません（未学習、または選択したモデルが存在しません）...` | 先に学習を完了、または学習後モデルを選択 |
+| 正解CSVが不正 | `正解CSVが見つかりません` / `正解CSVに有効な行がありません（形式: 画像名,正解文字列）` | パス・形式（filename,text）を確認 |
+| 画像が見つからない | `評価対象の画像が見つかりませんでした...` | `filename` と画像フォルダ内のファイル名（拡張子含む）の一致を確認 |
+| 一部画像のみ欠落 | 結果ヘッダの「画像未検出 N 件」に計上 | 欠落ファイル名を確認して補完 |
+
+### Quick Start
+
+>Backend
+
+```bash
+.\.venv\Scripts\Activate.ps1
+uvicorn src.app.main:app --reload --port 8000
+```
+
+**Debug**
+
+```bash
+uvicorn src.app.main:app --reload --port 8000 --log-level debug
+```
+
+
+>Frontend
+```bash
+cd .\frontend
+echo 'VITE_API_BASE=http://127.0.0.1:8000' > .env
+npm run dev
+```
+
+---

@@ -17,6 +17,8 @@ export default function PreprocessView({
   setPredictModel,
   predictPaddleModel,
   setPredictPaddleModel,
+  predictTesseractModel,
+  setPredictTesseractModel,
   predictModelType,
   setPredictModelType,
   predictEasyOcrLangs,
@@ -25,6 +27,7 @@ export default function PreprocessView({
   modelTypes,
   models,
   paddleModels,
+  tesseractModels,
   latestModels,
   params,
   onParamsChange,
@@ -67,7 +70,13 @@ export default function PreprocessView({
         ? predictPaddleModel === "latest"
           ? basename(latestModels?.ocrPaddle || "") || "PaddleOCR既定モデル"
           : predictPaddleModel
-        : "EasyOCR";
+        : predictEngine === "tesseract"
+          ? predictTesseractModel === "latest"
+            ? "Tesseract最新モデル"
+            : predictTesseractModel === "eng"
+              ? "eng.traineddata（標準英語モデル）"
+              : predictTesseractModel
+          : "EasyOCR";
 
   return (
     <div className="grid grid-cols-[220px_minmax(0,1fr)_360px] gap-4">
@@ -128,6 +137,7 @@ export default function PreprocessView({
           modelName={preview?.predict_model_name}
           engine={preview?.predict_engine}
           error={error || preview?.predict_error || ""}
+          warning={preview?.predict_model_warning || ""}
         />
 
         <Card title="推論設定" subtitle="前処理プレビューで使う推論設定">
@@ -138,6 +148,7 @@ export default function PreprocessView({
                 <option value="custom">カスタムモデル</option>
                 <option value="easyocr">EasyOCR</option>
                 <option value="paddleocr">PaddleOCR</option>
+                <option value="tesseract">Tesseract</option>
               </select>
             </div>
             {predictEngine === "custom" ? (
@@ -215,6 +226,39 @@ export default function PreprocessView({
                     ))}
                   </div>
                 </div>
+              </div>
+            ) : predictEngine === "tesseract" ? (
+              <div className="col-span-2 space-y-2">
+                <div>
+                  <label className="app-label">Tesseractモデル</label>
+                  <select
+                    value={predictTesseractModel}
+                    onChange={(e) => setPredictTesseractModel(e.target.value)}
+                    className="app-select"
+                  >
+                    <option value="latest">最新（学習済み）</option>
+                    <option value="eng">eng.traineddata（標準英語モデル）</option>
+                    {(tesseractModels || []).map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <p className="text-xs text-muted">
+                  eng.traineddata は Tesseract 標準の英語モデル（学習前ベースライン）です。推論時 whitelist は
+                  実運用で出現する文字に合わせて設定します（既定: A-Z + 0-9 + k,l,t）・単一行想定（--psm 7）。
+                </p>
+                <p className="text-xs text-muted">
+                  推論には Tesseract 本体のインストールが必要です（学習には lstmtraining / combine_tessdata
+                  なども必要）。導入手順は docs/11_TESSERACT_CHECKLIST.md を参照してください。
+                </p>
+                {(tesseractModels || []).length === 0 ? (
+                  <p className="text-xs text-amber-200">
+                    学習済みTesseractモデルがありません。eng.traineddata（標準英語モデル）を選択するか、学習画面で
+                    Tesseract学習を完了してください。
+                  </p>
+                ) : null}
               </div>
             ) : (
               <div className="col-span-2">

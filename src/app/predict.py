@@ -12,7 +12,13 @@ from PIL import Image, ImageEnhance, ImageFilter
 from torchvision import transforms
 
 from .config import get_settings
-from .services.model_registry import resolve_model_path, resolve_ocr_model_meta
+from .services.model_registry import resolve_model_path, resolve_ocr_model_meta, resolve_tesseract_model_meta
+from .services.tesseract_pipeline import (
+    TESSERACT_WHITELIST_DEFAULT,
+    ensure_tesseract_inference_tool,
+    recognize_line,
+    resolve_base_traineddata,
+)
 from .services.ocr_pipeline import (
     CONF_THRESHOLD,
     OCR_CHARSET_DEFAULT,
@@ -575,29 +581,33 @@ def _predict_with_paddleocr(
     use_angle_cls = False
     requested_model = (model or "latest").strip()
     official_requested = requested_model in OFFICIAL_PADDLEOCR_REC_MODELS
+    model_warning: Optional[str] = None
     model_meta = None if official_requested else resolve_ocr_model_meta(
         project_id=project_id,
         model=model,
         engine="paddleocr",
         inference_ready_only=True,
     )
-    if model_meta is None:
-        if official_requested:
-            shape = _normalize_ocr_shape(image_shape or [3, 48, 320])
-            effective_charset = charset
-            effective_max_text_length = int(max_text_length)
-            model_warning = None
-            requested_model_name = requested_model
-            model_dir = None
-        else:
-            if requested_model in {"", "latest"}:
-                raise FileNotFoundError("No exported PaddleOCR model found. Please train/export OCR model first.")
+    if model_meta is None and not official_requested:
+        if requested_model not in {"", "latest"}:
             raise FileNotFoundError(f"paddleocr model not found: {model}")
+        # 学習済み(エクスポート済み)モデルが無い環境でも latest 指定で
+        # プレビューできるよう、公式認識モデルへフォールバックする。
+        requested_model = OFFICIAL_PADDLEOCR_REC_MODELS[0]
+        official_requested = True
+        model_warning = (
+            f"最新の学習済みモデルがないため、公式モデル {requested_model} で推論しました。"
+        )
+    if model_meta is None:
+        shape = _normalize_ocr_shape(image_shape or [3, 48, 320])
+        effective_charset = charset
+        effective_max_text_length = int(max_text_length)
+        requested_model_name = requested_model
+        model_dir = None
     else:
         effective_charset = str(model_meta.get("charset") or charset)
         effective_max_text_length = int(model_meta.get("max_text_length") or max_text_length)
         shape = _normalize_ocr_shape(model_meta.get("image_shape") or image_shape or [3, 48, 320])
-        model_warning: Optional[str] = None
         requested_model_name = str(model_meta.get("name") or requested_model)
         exported_flag = model_meta.get("exported")
         export_ready_flag = model_meta.get("export_ready")
@@ -753,6 +763,92 @@ def _image_type_for_model_type(model_type: Optional[str]) -> Optional[str]:
     return None
 
 
+# 学習前の標準英語モデル(eng.traineddata)をベースラインとして指定するための別名
+TESSERACT_BASE_MODEL_ALIASES = {"eng", "base", "eng.traineddata", "base:eng", "eng.tess"}
+
+
+def _predict_with_tesseract(
+    image_source: Any,
+    project_id: Optional[str] = None,
+    model: str = "latest",
+    apply_preprocess: bool = True,
+) -> dict[str, Any]:
+    tesseract_cmd = ensure_tesseract_inference_tool()
+    normalized_model = (model or "latest").strip()
+    if normalized_model.lower() in TESSERACT_BASE_MODEL_ALIASES:
+        tessdata_dir_path, _ = resolve_base_traineddata("eng", tesseract_cmd=tesseract_cmd)
+        tessdata_dir = str(tessdata_dir_path)
+        lang = "eng"
+        charset = TESSERACT_WHITELIST_DEFAULT
+        model_name = "eng.traineddata"
+    else:
+        meta = resolve_tesseract_model_meta(project_id=project_id, model=normalized_model, ready_only=True)
+        if not isinstance(meta, dict):
+            raise FileNotFoundError(
+                "学習済みTesseractモデルが見つかりません。先にTesseractでOCR学習を実行するか、"
+                "ベースモデル eng.traineddata を選択してください。"
+            )
+        tessdata_dir = str(meta.get("tessdata_dir") or meta.get("model_dir") or "")
+        lang = str(meta.get("lang") or "")
+        # 旧モデル互換: メタに記録された charset をそのまま whitelist 既定として継承する
+        charset = str(meta.get("charset") or TESSERACT_WHITELIST_DEFAULT)
+        model_name = Path(str(meta.get("meta_file") or "")).name or f"{lang}.tess.json"
+        if not tessdata_dir or not lang:
+            raise FileNotFoundError("Tesseractモデルのメタ情報が不完全です（tessdata_dir/lang）。")
+
+    tmp_path: Optional[Path] = None
+    try:
+        if apply_preprocess:
+            processed = preprocess_ocr_image(image_source, image_shape=[1, 48, 320], strong=False)
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+            tmp_path = Path(tmp.name)
+            tmp.close()
+            processed.save(tmp_path)
+            input_path = str(tmp_path)
+        elif isinstance(image_source, (str, Path)):
+            input_path = str(image_source)
+        else:
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+            tmp_path = Path(tmp.name)
+            tmp.close()
+            if isinstance(image_source, Image.Image):
+                image_source.save(tmp_path)
+            else:
+                Image.fromarray(image_source).save(tmp_path)  # type: ignore[arg-type]
+            input_path = str(tmp_path)
+
+        predicted, confidence = recognize_line(
+            tesseract_cmd, input_path, tessdata_dir, lang, charset, psm=7
+        )
+    finally:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
+
+    allowed = set(charset)
+    cleaned = "".join(ch for ch in predicted if ch in allowed)
+    valid = bool(cleaned) and cleaned == predicted
+    validation = {
+        "valid": bool(valid),
+        "reason": None if valid else ("empty_text" if not cleaned else "invalid_character_removed"),
+        "charset": charset,
+    }
+    char_scores = _build_char_scores(predicted, None, confidence)
+    normalized_char_scores = _normalize_char_confidence(char_scores)
+    return {
+        "text": predicted,
+        "prediction": predicted,
+        "confidence": float(confidence),
+        "engine": "tesseract",
+        "model_name": model_name,
+        "model_type": "ocr",
+        "lang": lang,
+        "valid": bool(valid),
+        "validation": validation,
+        "char_scores": char_scores,
+        "char_confidence_normalized": normalized_char_scores,
+    }
+
+
 def predict_from_image(
     image_path: str,
     model_type: Optional[str] = None,
@@ -794,6 +890,17 @@ def predict_from_image(
             ocr_input_source,
             project_id=project_id,
             languages=easyocr_languages,
+            model=model,
+            apply_preprocess=(apply_preprocess and not preprocess_overrides),
+        )
+        result["preprocess_applied"] = preprocess_meta["applied"]
+        result["preprocess_image_type"] = preprocess_meta["image_type"]
+        result["preprocess_pipeline"] = preprocess_meta["pipeline"]
+        return result
+    if engine_name == "tesseract":
+        result = _predict_with_tesseract(
+            ocr_input_source,
+            project_id=project_id,
             model=model,
             apply_preprocess=(apply_preprocess and not preprocess_overrides),
         )
@@ -881,7 +988,7 @@ def main() -> None:
     parser.add_argument("--project-id", type=str, default="default")
     parser.add_argument("--model-type", type=str, default="")
     parser.add_argument("--model", type=str, default="latest")
-    parser.add_argument("--engine", type=str, default="custom", choices=["custom", "easyocr", "paddleocr"])
+    parser.add_argument("--engine", type=str, default="custom", choices=["custom", "easyocr", "paddleocr", "tesseract"])
     parser.add_argument("--easyocr-langs", type=str, default="en")
     args = parser.parse_args()
 

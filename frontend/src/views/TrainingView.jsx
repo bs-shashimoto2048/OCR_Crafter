@@ -4,6 +4,8 @@ import Button from "../components/Button";
 import { PADDLEOCR_OFFICIAL_MODELS_TOOLTIP } from "../lib/paddleocrOfficialTooltip";
 
 const OCR_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+// Tesseract学習対象文字セット（A-Z / 0-9 / 小文字筆記体 k,l,t）
+const TESSERACT_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt";
 
 export default function TrainingView({
   trainingMode = "all",
@@ -260,12 +262,57 @@ export default function TrainingView({
   const gpuName = String(systemCheck?.gpu_name || "").trim();
   const vramValue = Number(systemCheck?.vram_gb || 0);
   const vramLabel = Number.isFinite(vramValue) && vramValue > 0 ? `${vramValue.toFixed(1)}GB` : "";
+  const selectedRuntimePresetKey = useMemo(() => {
+    const presets = systemCheck?.presets;
+    if (!presets || typeof presets !== "object") {
+      return "";
+    }
+    const normalizedDevice = String(ocrTrainDevice || "").trim().toLowerCase();
+    const normalizedBatch = Number.parseInt(String(batchSize || 0), 10) || 0;
+    const normalizedTrainWorkers = Number.parseInt(String(ocrTrainNumWorkers || 0), 10) || 0;
+    const normalizedEvalWorkers = Number.parseInt(String(ocrEvalNumWorkers || 0), 10) || 0;
+    const normalizedSaveEpochStep = Number.parseInt(String(ocrSaveEpochStep || 0), 10) || 0;
+
+    const matches = (key) => {
+      const preset = presets?.[key];
+      if (!preset || typeof preset !== "object") {
+        return false;
+      }
+      return (
+        normalizedDevice === String(preset.device || "").trim().toLowerCase() &&
+        Boolean(ocrAutoBatchSize) === Boolean(preset.auto_batch_size) &&
+        normalizedTrainWorkers === (Number.parseInt(String(preset.train_num_workers || 0), 10) || 0) &&
+        normalizedEvalWorkers === (Number.parseInt(String(preset.eval_num_workers || 0), 10) || 0) &&
+        normalizedBatch === (Number.parseInt(String(preset.batch_size || 0), 10) || 0) &&
+        normalizedSaveEpochStep === (Number.parseInt(String(preset.save_epoch_step || 0), 10) || 0) &&
+        Boolean(ocrUseAmp) === Boolean(preset.use_amp) &&
+        Boolean(ocrPinMemory) === Boolean(preset.pin_memory) &&
+        Boolean(ocrPersistentWorkers) === Boolean(preset.persistent_workers)
+      );
+    };
+
+    if (matches("mac_safe")) return "mac_safe";
+    if (matches("rtx_train")) return "rtx_train";
+    return "";
+  }, [
+    systemCheck,
+    ocrTrainDevice,
+    batchSize,
+    ocrTrainNumWorkers,
+    ocrEvalNumWorkers,
+    ocrSaveEpochStep,
+    ocrAutoBatchSize,
+    ocrUseAmp,
+    ocrPinMemory,
+    ocrPersistentWorkers,
+  ]);
   const gpuCapableMode = ocrTrainDevice === "gpu" || (ocrTrainDevice === "auto" && gpuAvailable);
   const ampEnabled = Boolean(ocrUseAmp) && gpuCapableMode;
   const batchModeLabel = Boolean(ocrAutoBatchSize) && gpuCapableMode ? "自動" : "手動";
   const showMacWorkerWarning = isMacSafe && (trainWorkersNum > 1 || evalWorkersNum > 1);
   const showMemoryRiskWarning = isMacSafe && (batchNum > 8 || trainWorkersNum > 1 || evalWorkersNum > 1);
 
+  const isTesseractEngine = ocrEngine === "tesseract";
   const trainingFamilyLabel = trainingFamily === "ocr" ? "OCR認識モデル" : "分類モデル";
   const statusText = statusLabel(jobStatus);
   const statusToneClass = isRunning
@@ -566,6 +613,7 @@ export default function TrainingView({
                       <label className="app-label">OCRタイプ</label>
                       <select value={ocrEngine} onChange={(e) => setOcrEngine(e.target.value)} className="app-select">
                         <option value="paddleocr">PaddleOCR（学習可）</option>
+                        <option value="tesseract">Tesseract（学習可 / A-Z・0-9・筆記体klt）</option>
                         <option value="easyocr">EasyOCR（推論専用）</option>
                       </select>
                     </div>
@@ -576,7 +624,7 @@ export default function TrainingView({
                         className="app-input"
                         value={ocrMaxTextLength}
                         onChange={(e) => setOcrMaxTextLength(e.target.value)}
-                        disabled={ocrEngine === "easyocr"}
+                        disabled={ocrEngine === "easyocr" || isTesseractEngine}
                       />
                     </div>
                   </div>
@@ -619,6 +667,19 @@ export default function TrainingView({
                   </div>
                 ) : (
                   <>
+                    {isTesseractEngine ? (
+                      <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-4">
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">2. 初期重み</p>
+                        <div className="rounded-lg border border-accent/30 bg-accent/10 px-3 py-2 text-xs text-blue-100">
+                          公式 <span className="font-semibold">eng.traineddata</span> をベースに LSTM を fine-tune します。
+                          学習対象文字: A-Z / 0-9 / 小文字筆記体 k,l,t
+                        </div>
+                        <p className="text-xs text-muted">
+                          学習には外部ツール（tesseract / lstmtraining / combine_tessdata）と eng.traineddata が必要です。
+                          未導入の場合は学習開始時に導入手順つきでエラーになります。
+                        </p>
+                      </div>
+                    ) : (
                     <div className="space-y-3 rounded-xl border border-border/80 bg-card/45 p-4">
                       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">2. 初期重み</p>
                       <div>
@@ -667,16 +728,27 @@ export default function TrainingView({
                         </div>
                       ) : null}
                     </div>
+                    )}
 
                     <div className="space-y-3 rounded-xl border border-border/80 bg-card/45 p-4">
                       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">3. 学習パラメータ</p>
+                      {!isTesseractEngine && (
+                      <>
                       <div className="space-y-2 rounded-lg border border-border/80 bg-card/55 p-3">
                         <p className="text-xs font-semibold text-slate-100">実行プロファイル</p>
                         <div className="grid grid-cols-2 gap-2">
-                          <Button variant="secondary" className="w-full" onClick={() => onApplyOcrTrainingPreset("mac_safe")}>
+                          <Button
+                            variant={selectedRuntimePresetKey === "mac_safe" ? "primary" : "secondary"}
+                            className="w-full"
+                            onClick={() => onApplyOcrTrainingPreset("mac_safe")}
+                          >
                             Mac Safe
                           </Button>
-                          <Button variant="secondary" className="w-full" onClick={() => onApplyOcrTrainingPreset("rtx_train")}>
+                          <Button
+                            variant={selectedRuntimePresetKey === "rtx_train" ? "primary" : "secondary"}
+                            className="w-full"
+                            onClick={() => onApplyOcrTrainingPreset("rtx_train")}
+                          >
                             RTX Train
                           </Button>
                         </div>
@@ -795,14 +867,26 @@ export default function TrainingView({
                           現在設定はメモリ不足の可能性があります。Mac Safe プリセットへの切替を推奨します。
                         </p>
                       ) : null}
+                      </>
+                      )}
                       <div>
-                        <label className="app-label">文字セット（charset）</label>
+                        <label className="app-label">
+                          {isTesseractEngine ? "学習対象文字セット（charset）" : "文字セット（charset）"}
+                        </label>
                         <input
                           className="app-input"
                           value={ocrCharset}
-                          onChange={(e) => setOcrCharset(e.target.value.toUpperCase())}
-                          placeholder={OCR_CHARSET_DEFAULT}
+                          onChange={(e) =>
+                            // Tesseractは大文字と小文字筆記体(k/l/t)を区別するため大小変換しない
+                            setOcrCharset(isTesseractEngine ? e.target.value : e.target.value.toUpperCase())
+                          }
+                          placeholder={isTesseractEngine ? TESSERACT_CHARSET_DEFAULT : OCR_CHARSET_DEFAULT}
                         />
+                        {isTesseractEngine ? (
+                          <p className="mt-1 text-xs text-muted">
+                            既定: A-Z / 0-9 / 小文字筆記体 k,l,t。charset外の文字を含むラベルは学習から除外されます（文字削除はしません）。
+                          </p>
+                        ) : null}
                       </div>
                       <div>
                         <label className="app-label">画像形状</label>
@@ -858,15 +942,17 @@ export default function TrainingView({
                           />
                         </div>
                       </div>
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className={isTesseractEngine ? "" : "grid grid-cols-2 gap-2"}>
                         <div>
-                          <label className="app-label">エポック数</label>
+                          <label className="app-label">{isTesseractEngine ? "最大イテレーション" : "エポック数"}</label>
                           <input type="number" className="app-input" value={epochs} onChange={(e) => setEpochs(e.target.value)} />
                         </div>
-                        <div>
-                          <label className="app-label">バッチサイズ</label>
-                          <input type="number" className="app-input" value={batchSize} onChange={(e) => setBatchSize(e.target.value)} />
-                        </div>
+                        {!isTesseractEngine && (
+                          <div>
+                            <label className="app-label">バッチサイズ</label>
+                            <input type="number" className="app-input" value={batchSize} onChange={(e) => setBatchSize(e.target.value)} />
+                          </div>
+                        )}
                       </div>
                     </div>
 

@@ -17,6 +17,7 @@ const modelCreationItems = [
       { id: "ocr-inference", label: "3. 推論" },
       { id: "rapid-ocr", label: "4. OCR修正" },
       { id: "ocr-batch", label: "5. バッチ推論" },
+      { id: "ocr-eval", label: "6. モデル評価" },
     ],
   },
   {

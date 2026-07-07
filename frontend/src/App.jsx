@@ -11,6 +11,7 @@ import ModelsView from "./views/ModelsView";
 import InferenceView from "./views/InferenceView";
 import PreprocessView from "./views/PreprocessView";
 import EvaluationView from "./views/EvaluationView";
+import OcrEvaluationView from "./views/OcrEvaluationView";
 import TrainingImageBuilderView from "./views/TrainingImageBuilderView";
 import RapidOCRView from "./views/RapidOCRView";
 import OcrBatchView from "./views/OcrBatchView";
@@ -34,6 +35,7 @@ const viewMeta = {
   "cls-evaluation": { title: "評価", subtitle: "分割学習モデルの精度評価" },
   "rapid-ocr": { title: "OCR修正", subtitle: "キーボード中心でOCR結果を素早く修正" },
   "ocr-batch": { title: "バッチ推論", subtitle: "OCR認識モデルで複数画像を一括推論" },
+  "ocr-eval": { title: "モデル評価", subtitle: "学習前後のOCRモデルを同一データで比較評価" },
   "image-builder-step1": { title: "学習画像作成", subtitle: "Step1: 画像指定とリサイズ" },
   "image-builder-step2": { title: "学習画像作成", subtitle: "Step2: YOLO検出" },
   "image-builder-step3": { title: "学習画像作成", subtitle: "Step3: Bounding Box選択" },
@@ -102,6 +104,10 @@ const DEFAULT_PREPROCESS_PARAMS = {
   deskew_enabled: true,
 };
 const OCR_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+// Tesseract学習対象文字セット: A-Z / 0-9 / 小文字筆記体 k,l,t
+const TESSERACT_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt";
+// 推論・評価時whitelist既定（実運用で出現しうる文字。学習対象とは別概念）
+const TESSERACT_WHITELIST_DEFAULT = TESSERACT_CHARSET_DEFAULT;
 
 function nowLabel() {
   return new Date().toLocaleTimeString("ja-JP", { hour12: false });
@@ -241,7 +247,7 @@ export default function App() {
   const [trainRatio, setTrainRatio] = useState(0.7);
   const [valRatio, setValRatio] = useState(0.2);
   const [testRatio, setTestRatio] = useState(0.1);
-  const [epochs, setEpochs] = useState(50);
+  const [epochs, setEpochs] = useState(30);
   const [batchSize, setBatchSize] = useState(16);
   const [learningRate, setLearningRate] = useState(0.001);
   const [clsInitSourceType, setClsInitSourceType] = useState("imagenet");
@@ -308,12 +314,29 @@ export default function App() {
       }),
     [models, modelInfos]
   );
+  const tesseractModels = useMemo(
+    () =>
+      models.filter((name) => {
+        const info = modelInfos[name] || {};
+        return info.engine === "tesseract" && Boolean(info.ocr_inference_ready);
+      }),
+    [models, modelInfos]
+  );
 
   const [inferModelType, setInferModelType] = useState("square");
   const [inferModel, setInferModel] = useState("latest");
   const [inferEngine, setInferEngine] = useState("custom");
   const [inferEasyOcrLangs, setInferEasyOcrLangs] = useState(["en"]);
   const [inferPaddleModel, setInferPaddleModel] = useState("latest");
+  const [inferTesseractModel, setInferTesseractModel] = useState("latest");
+  const [ocrEvalImageDir, setOcrEvalImageDir] = useState("");
+  const [ocrEvalGtCsv, setOcrEvalGtCsv] = useState("");
+  const [ocrEvalTrainedModel, setOcrEvalTrainedModel] = useState("latest");
+  const [ocrEvalIncludeBase, setOcrEvalIncludeBase] = useState(true);
+  const [ocrEvalWhitelistMode, setOcrEvalWhitelistMode] = useState("default"); // default | none | custom
+  const [ocrEvalWhitelistCustom, setOcrEvalWhitelistCustom] = useState(TESSERACT_WHITELIST_DEFAULT);
+  const [ocrEvalLoading, setOcrEvalLoading] = useState(false);
+  const [ocrEvalResult, setOcrEvalResult] = useState(null);
   const [inferFile, setInferFile] = useState(null);
   const [inferFileName, setInferFileName] = useState("");
   const [inferPreviewUrl, setInferPreviewUrl] = useState("");
@@ -334,6 +357,7 @@ export default function App() {
   const [preprocessPredictEngine, setPreprocessPredictEngine] = useState("easyocr");
   const [preprocessPredictModel, setPreprocessPredictModel] = useState("latest");
   const [preprocessPredictPaddleModel, setPreprocessPredictPaddleModel] = useState("latest");
+  const [preprocessPredictTesseractModel, setPreprocessPredictTesseractModel] = useState("latest");
   const [preprocessPredictModelType, setPreprocessPredictModelType] = useState("square");
   const [preprocessPredictEasyOcrLangs, setPreprocessPredictEasyOcrLangs] = useState(["en"]);
   const [preprocessPreview, setPreprocessPreview] = useState(null);
@@ -970,6 +994,15 @@ export default function App() {
     }
   }, [activeView, trainingFamily]);
 
+  // OCRタイプ切替時に文字セット既定を切替（Paddle/EasyOCR: A-Z0-9 / Tesseract: A-Z0-9+筆記体klt）
+  useEffect(() => {
+    if (ocrEngine === "tesseract") {
+      setOcrCharset((prev) => (prev === OCR_CHARSET_DEFAULT ? TESSERACT_CHARSET_DEFAULT : prev));
+    } else {
+      setOcrCharset((prev) => (prev === TESSERACT_CHARSET_DEFAULT ? OCR_CHARSET_DEFAULT : prev));
+    }
+  }, [ocrEngine]);
+
   useEffect(() => {
     if (activeView === "ocr-inference" && inferEngine === "custom") {
       setInferEngine("paddleocr");
@@ -1011,7 +1044,9 @@ export default function App() {
                 ? preprocessPredictModel
                 : preprocessPredictEngine === "paddleocr"
                   ? preprocessPredictPaddleModel
-                  : "latest",
+                  : preprocessPredictEngine === "tesseract"
+                    ? preprocessPredictTesseractModel
+                    : "latest",
             model_type:
               preprocessPredictEngine === "custom" && preprocessPredictModel === "latest"
                 ? preprocessPredictModelType
@@ -1042,6 +1077,7 @@ export default function App() {
     preprocessPredictEngine,
     preprocessPredictModel,
     preprocessPredictPaddleModel,
+    preprocessPredictTesseractModel,
     preprocessPredictModelType,
     preprocessPredictEasyOcrLangs,
   ]);
@@ -1248,9 +1284,11 @@ export default function App() {
   const ocrTrainingMode = ocrInitSourceType === "scratch" ? "scratch" : "finetune";
   const canTrain = workflowState.datasetBuilt && savedLabeledCount > 0;
   const canStartOcrTraining =
-    ocrEngine === "paddleocr" &&
+    (ocrEngine === "paddleocr" || ocrEngine === "tesseract") &&
     String(ocrDatasetDir || "").trim() !== "" &&
-    (ocrTrainingMode === "scratch" || String(ocrInitSourceValue || "").trim() !== "");
+    (ocrEngine === "tesseract" ||
+      ocrTrainingMode === "scratch" ||
+      String(ocrInitSourceValue || "").trim() !== "");
   const workflowSteps = useMemo(() => {
     const labelDone = images.length > 0 && savedLabeledCount === images.length;
     const defs = [
@@ -1616,12 +1654,16 @@ export default function App() {
       return;
     }
     try {
+      const isTesseract = ocrEngine === "tesseract";
       const imageShape = parseOcrImageShape(ocrImageShape);
       const payload = {
         project_id: projectId,
         image_types: ["wide"],
-        charset: (ocrCharset || OCR_CHARSET_DEFAULT).toUpperCase(),
-        max_text_length: Number(ocrMaxTextLength),
+        charset: isTesseract
+          ? ocrCharset || TESSERACT_CHARSET_DEFAULT
+          : (ocrCharset || OCR_CHARSET_DEFAULT).toUpperCase(),
+        text_case: isTesseract ? "keep" : "upper",
+        max_text_length: isTesseract ? 64 : Number(ocrMaxTextLength),
         image_shape: imageShape,
         use_augmentation: Boolean(ocrUseAugmentation),
         aug_strength: Number(ocrAugStrength),
@@ -1654,13 +1696,17 @@ export default function App() {
       return;
     }
     try {
+      const isTesseract = ocrEngine === "tesseract";
       const imageShape = parseOcrImageShape(ocrImageShape);
       const payload = {
         project_id: projectId,
         only_invalid: Boolean(ocrFromLogsOnlyInvalid),
         include_corrected: Boolean(ocrFromLogsIncludeCorrected),
-        max_text_length: Number(ocrMaxTextLength),
-        charset: (ocrCharset || OCR_CHARSET_DEFAULT).toUpperCase(),
+        max_text_length: isTesseract ? 64 : Number(ocrMaxTextLength),
+        charset: isTesseract
+          ? ocrCharset || TESSERACT_CHARSET_DEFAULT
+          : (ocrCharset || OCR_CHARSET_DEFAULT).toUpperCase(),
+        text_case: isTesseract ? "keep" : "upper",
         image_shape: imageShape,
       };
       const data = await request("/api/ocr/dataset/from_logs", {
@@ -1745,13 +1791,57 @@ export default function App() {
     }
   }
 
+  async function startTesseractTraining() {
+    if (!projectId) {
+      notify("error", "プロジェクトを作成または選択してください");
+      return;
+    }
+    if (!String(ocrDatasetDir || "").trim()) {
+      notify("error", "先にOCRデータ作成を実行してください");
+      return;
+    }
+    try {
+      const maxIterations = Math.max(1, Number.parseInt(String(epochs), 10) || 1000);
+      const payload = {
+        project_id: projectId,
+        dataset_dir: ocrDatasetDir,
+        charset: ocrCharset || TESSERACT_CHARSET_DEFAULT,
+        max_iterations: maxIterations,
+        base_lang: "eng",
+        psm: 7,
+      };
+      const data = await request("/api/tesseract/train/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      resetTrainingLog(`Tesseract学習開始要求: プロジェクト=${projectId}`);
+      setJobId(data.job_id);
+      setJobStatus(data.status || "queued");
+      setJobFamily("ocr");
+      setWorkflowState((prev) => ({ ...prev, trainingStarted: true }));
+      lastStatusRef.current = "";
+      lastMessageRef.current = "";
+      pushLog(`Tesseract学習開始要求: プロジェクト=${projectId} / ジョブ=${data.job_id}`);
+      pushLog(`Tesseract学習設定: base=eng, charset=${payload.charset}, max_iterations=${maxIterations}`);
+      notify("info", `Tesseract学習キューに追加しました (${data.job_id})`);
+      setActiveView("ocr-training");
+    } catch (error) {
+      notify("error", error.message);
+    }
+  }
+
   async function startOcrTraining() {
     if (!projectId) {
       notify("error", "プロジェクトを作成または選択してください");
       return;
     }
+    if (ocrEngine === "tesseract") {
+      await startTesseractTraining();
+      return;
+    }
     if (ocrEngine !== "paddleocr") {
-      notify("error", "EasyOCR は学習対象外です。PaddleOCRを選択してください。");
+      notify("error", "EasyOCR は学習対象外です。PaddleOCR または Tesseract を選択してください。");
       return;
     }
     try {
@@ -2034,6 +2124,8 @@ export default function App() {
       } else if (inferEngine === "paddleocr") {
         formData.append("model", inferPaddleModel || "latest");
         formData.append("easyocr_langs", inferEasyOcrLangs.length > 0 ? inferEasyOcrLangs.join(",") : "en");
+      } else if (inferEngine === "tesseract") {
+        formData.append("model", inferTesseractModel || "latest");
       } else if (inferEngine === "easyocr") {
         formData.append("easyocr_langs", inferEasyOcrLangs.length > 0 ? inferEasyOcrLangs.join(",") : "en");
       }
@@ -2057,6 +2149,118 @@ export default function App() {
     } finally {
       setInferLoading(false);
     }
+  }
+
+  async function browseOcrEvalImageDir() {
+    try {
+      const data = await request("/dialogs/select-directory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initial_dir: ocrEvalImageDir || null }),
+      });
+      if (data.path) setOcrEvalImageDir(data.path);
+    } catch (error) {
+      notify("error", error.message);
+    }
+  }
+
+  async function browseOcrEvalGtCsv() {
+    try {
+      const data = await request("/dialogs/select-file", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initial_dir: ocrEvalImageDir || null, extensions: ["csv"] }),
+      });
+      if (data.path) setOcrEvalGtCsv(data.path);
+    } catch (error) {
+      notify("error", error.message);
+    }
+  }
+
+  async function runOcrEvaluation() {
+    if (!projectId) {
+      notify("error", "プロジェクトを作成または選択してください");
+      return;
+    }
+    if (!String(ocrEvalImageDir || "").trim() || !String(ocrEvalGtCsv || "").trim()) {
+      notify("error", "評価用画像フォルダと正解CSVを指定してください");
+      return;
+    }
+    const targets = [];
+    if (ocrEvalIncludeBase) {
+      targets.push({ engine: "tesseract", model: "eng" });
+    }
+    targets.push({ engine: "tesseract", model: ocrEvalTrainedModel || "latest" });
+
+    setOcrEvalLoading(true);
+    try {
+      const payload = {
+        project_id: projectId,
+        image_dir: ocrEvalImageDir,
+        gt_csv: ocrEvalGtCsv,
+        targets,
+        // 空文字 = whitelistなし
+        charset:
+          ocrEvalWhitelistMode === "none"
+            ? ""
+            : ocrEvalWhitelistMode === "custom"
+              ? ocrEvalWhitelistCustom
+              : TESSERACT_WHITELIST_DEFAULT,
+        psm: 7,
+      };
+      const data = await request("/api/ocr/evaluate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      setOcrEvalResult(data);
+      const acc = data?.comparison
+        ? `学習前 ${(data.comparison.base_accuracy * 100).toFixed(1)}% → 学習後 ${(data.comparison.trained_accuracy * 100).toFixed(1)}%`
+        : `対象 ${(data?.targets || []).length} 件`;
+      notify("success", `評価完了: ${acc}`);
+    } catch (error) {
+      notify("error", error.message);
+    } finally {
+      setOcrEvalLoading(false);
+    }
+  }
+
+  function exportOcrEvalCsv() {
+    if (!ocrEvalResult) {
+      notify("error", "評価結果がありません");
+      return;
+    }
+    const targets = Array.isArray(ocrEvalResult.targets) ? ocrEvalResult.targets : [];
+    const rows = Array.isArray(ocrEvalResult.rows) ? ocrEvalResult.rows : [];
+    const escape = (value) => {
+      const text = String(value ?? "");
+      return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    };
+    // 明細: 1行=画像×モデル（filename, ground_truth, prediction, match, model）
+    const lines = [["filename", "ground_truth", "prediction", "match", "model"].map(escape).join(",")];
+    rows.forEach((row) => {
+      (row.results || []).forEach((r) => {
+        lines.push(
+          [row.image, row.expected, r.prediction ?? "", r.match ? "1" : "0", r.model_label].map(escape).join(",")
+        );
+      });
+    });
+    // サマリ: モデル別の集計（accuracy summary）
+    lines.push("");
+    lines.push(["model", "total", "correct", "accuracy_percent", "mismatch_count"].map(escape).join(","));
+    targets.forEach((t) => {
+      lines.push([t.label, t.total, t.correct, t.accuracy_percent, t.mismatch_count].map(escape).join(","));
+    });
+
+    const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `ocr_eval_${projectId || "default"}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   async function deleteSelectedModels(modelNames) {
@@ -2193,6 +2397,8 @@ export default function App() {
         setPredictModel={setPreprocessPredictModel}
         predictPaddleModel={preprocessPredictPaddleModel}
         setPredictPaddleModel={setPreprocessPredictPaddleModel}
+        predictTesseractModel={preprocessPredictTesseractModel}
+        setPredictTesseractModel={setPreprocessPredictTesseractModel}
         predictModelType={preprocessPredictModelType}
         setPredictModelType={setPreprocessPredictModelType}
         predictEasyOcrLangs={preprocessPredictEasyOcrLangs}
@@ -2201,6 +2407,7 @@ export default function App() {
         modelTypes={modelTypes}
         models={classificationModels}
         paddleModels={paddleOcrModelOptions}
+        tesseractModels={tesseractModels}
         latestModels={latestModels}
         params={preprocessParams}
         onParamsChange={setPreprocessParams}
@@ -2377,6 +2584,9 @@ export default function App() {
         paddleModel={inferPaddleModel}
         setPaddleModel={setInferPaddleModel}
         paddleModels={paddleOcrModelOptions}
+        tesseractModel={inferTesseractModel}
+        setTesseractModel={setInferTesseractModel}
+        tesseractModels={tesseractModels}
         latestModels={latestModels}
         onFileChange={selectInferenceFile}
         fileName={inferFileName}
@@ -2469,6 +2679,33 @@ export default function App() {
     );
   }
 
+  if (activeView === "ocr-eval") {
+    view = (
+      <OcrEvaluationView
+        imageDir={ocrEvalImageDir}
+        setImageDir={setOcrEvalImageDir}
+        onBrowseImageDir={browseOcrEvalImageDir}
+        gtCsv={ocrEvalGtCsv}
+        setGtCsv={setOcrEvalGtCsv}
+        onBrowseGtCsv={browseOcrEvalGtCsv}
+        includeBase={ocrEvalIncludeBase}
+        setIncludeBase={setOcrEvalIncludeBase}
+        trainedModel={ocrEvalTrainedModel}
+        setTrainedModel={setOcrEvalTrainedModel}
+        tesseractModels={tesseractModels}
+        whitelistMode={ocrEvalWhitelistMode}
+        setWhitelistMode={setOcrEvalWhitelistMode}
+        whitelistCustom={ocrEvalWhitelistCustom}
+        setWhitelistCustom={setOcrEvalWhitelistCustom}
+        whitelistDefault={TESSERACT_WHITELIST_DEFAULT}
+        onRun={runOcrEvaluation}
+        loading={ocrEvalLoading}
+        result={ocrEvalResult}
+        onExportCsv={exportOcrEvalCsv}
+      />
+    );
+  }
+
   const imageBuilderStepMap = {
     "image-builder-step1": 1,
     "image-builder-step2": 2,
@@ -2506,6 +2743,7 @@ export default function App() {
     "cls-inference",
     "rapid-ocr",
     "ocr-batch",
+    "ocr-eval",
     "evaluation",
     "cls-evaluation",
   ].includes(activeView);
