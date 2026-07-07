@@ -130,7 +130,11 @@ export default function OcrBatchView({
   const [batchFilterInvalid, setBatchFilterInvalid] = useState(false);
   const [batchSearch, setBatchSearch] = useState("");
   const [langPanelOpen, setLangPanelOpen] = useState(false);
+  // 推論前の向き補正（index -> 0/90/180/270）。推論時に実画像へ適用される
+  const [rotations, setRotations] = useState({});
+  const [filePreviews, setFilePreviews] = useState([]);
   const previewUrlsRef = useRef([]);
+  const filePreviewUrlsRef = useRef([]);
   const folderInputRef = useRef(null);
 
   const allowedExtensions = useMemo(
@@ -155,6 +159,85 @@ export default function OcrBatchView({
       .filter(Boolean)
       .filter((file) => isImageFile(file))
       .sort((a, b) => relativeName(a).localeCompare(relativeName(b), "en"));
+  }
+
+  function revokeFilePreviews() {
+    for (const url of filePreviewUrlsRef.current) {
+      try {
+        URL.revokeObjectURL(url);
+      } catch {
+        // noop
+      }
+    }
+    filePreviewUrlsRef.current = [];
+  }
+
+  function loadFiles(rawFiles) {
+    const files = normalizeFolderFiles(rawFiles);
+    if (files.length === 0) {
+      revokeFilePreviews();
+      setBatchFiles([]);
+      setBatchFolderName("");
+      setFilePreviews([]);
+      setRotations({});
+      return;
+    }
+    const firstPath = String(files[0]?.webkitRelativePath || "");
+    const folderName = firstPath.includes("/") ? firstPath.split("/")[0] : "";
+    revokeFilePreviews();
+    const urls = files.map((file) => URL.createObjectURL(file));
+    filePreviewUrlsRef.current = urls;
+    setFilePreviews(urls);
+    setRotations({});
+    setBatchFolderName(folderName);
+    setBatchFiles(files);
+    setNotice(`${files.length}件を読み込みました。必要なら向きを回転してから、バッチ推論実行を押してください。`);
+  }
+
+  function rotateOne(idx, delta) {
+    setRotations((prev) => {
+      const next = { ...prev };
+      const deg = (((Number(prev[idx]) || 0) + delta) % 360 + 360) % 360;
+      if (deg === 0) {
+        delete next[idx];
+      } else {
+        next[idx] = deg;
+      }
+      return next;
+    });
+  }
+
+  function rotateAll(delta) {
+    setRotations((prev) => {
+      const next = {};
+      batchFiles.forEach((_, idx) => {
+        const deg = (((Number(prev[idx]) || 0) + delta) % 360 + 360) % 360;
+        if (deg !== 0) {
+          next[idx] = deg;
+        }
+      });
+      return next;
+    });
+  }
+
+  async function rotateFileToBlob(file, degrees) {
+    // 90度単位のクライアント側回転。推論に送る実画像へ適用する
+    const bitmap = await createImageBitmap(file);
+    try {
+      const swap = degrees % 180 !== 0;
+      const canvas = document.createElement("canvas");
+      canvas.width = swap ? bitmap.height : bitmap.width;
+      canvas.height = swap ? bitmap.width : bitmap.height;
+      const ctx = canvas.getContext("2d");
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate((degrees * Math.PI) / 180);
+      ctx.drawImage(bitmap, -bitmap.width / 2, -bitmap.height / 2);
+      return await new Promise((resolve, reject) => {
+        canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("回転画像の生成に失敗しました"))), "image/png");
+      });
+    } finally {
+      bitmap.close();
+    }
   }
 
   function toggleEasyOcrLang(lang) {
@@ -228,8 +311,29 @@ export default function OcrBatchView({
       let successCount = 0;
       for (let idx = 0; idx < files.length; idx += 1) {
         const file = files[idx];
+        const rotation = Number(rotations[idx]) || 0;
+        let uploadBlob = file;
+        if (rotation !== 0) {
+          try {
+            // 指定された向き補正を実画像へ適用してから推論する
+            uploadBlob = await rotateFileToBlob(file, rotation);
+            const rotatedUrl = URL.createObjectURL(uploadBlob);
+            previewUrlsRef.current.push(rotatedUrl);
+            setBatchRows((prev) => prev.map((row, i) => (i === idx ? { ...row, preview_url: rotatedUrl } : row)));
+          } catch (e) {
+            setBatchRows((prev) =>
+              prev.map((row, i) =>
+                i === idx
+                  ? { ...row, prediction: "", corrected: "", is_valid: false, status: "error", error: `画像の回転に失敗しました: ${e.message}` }
+                  : row
+              )
+            );
+            setNotice(`バッチ推論中: ${idx + 1}/${files.length}`);
+            continue;
+          }
+        }
         const formData = new FormData();
-        formData.append("file", file);
+        formData.append("file", uploadBlob, relativeName(file) || file.name);
         formData.append("project_id", projectId);
         formData.append("engine", engine);
         formData.append("apply_preprocess", preprocessEnabled ? "true" : "false");
@@ -361,11 +465,14 @@ export default function OcrBatchView({
       }
     }
     previewUrlsRef.current = [];
+    revokeFilePreviews();
     setBatchFiles([]);
     setBatchFolderName("");
     setBatchRows([]);
     setBatchSearch("");
     setBatchFilterInvalid(false);
+    setRotations({});
+    setFilePreviews([]);
     if (folderInputRef.current) {
       folderInputRef.current.value = "";
     }
@@ -373,7 +480,7 @@ export default function OcrBatchView({
 
   useEffect(() => {
     return () => {
-      for (const url of previewUrlsRef.current) {
+      for (const url of [...previewUrlsRef.current, ...filePreviewUrlsRef.current]) {
         try {
           URL.revokeObjectURL(url);
         } catch {
@@ -381,6 +488,7 @@ export default function OcrBatchView({
         }
       }
       previewUrlsRef.current = [];
+      filePreviewUrlsRef.current = [];
     };
   }, []);
 
@@ -388,11 +496,7 @@ export default function OcrBatchView({
     event.preventDefault();
     const files = normalizeFolderFiles(event.dataTransfer?.files || []);
     if (files.length === 0) return;
-    const firstPath = String(files[0]?.webkitRelativePath || "");
-    const folderName = firstPath.includes("/") ? firstPath.split("/")[0] : "";
-    setBatchFolderName(folderName);
-    setBatchFiles(files);
-    setNotice(`${files.length}件を読み込みました。バッチ推論実行を押してください。`);
+    loadFiles(files);
   }
 
   return (
@@ -537,19 +641,7 @@ export default function OcrBatchView({
                 directory=""
                 className="hidden"
                 disabled={batchLoading}
-                onChange={(e) => {
-                  const files = normalizeFolderFiles(e.target.files || []);
-                  if (files.length === 0) {
-                    setBatchFiles([]);
-                    setBatchFolderName("");
-                    return;
-                  }
-                  const firstPath = String(files[0]?.webkitRelativePath || "");
-                  const folderName = firstPath.includes("/") ? firstPath.split("/")[0] : "";
-                  setBatchFolderName(folderName);
-                  setBatchFiles(files);
-                  setNotice(`${files.length}件を読み込みました。バッチ推論実行を押してください。`);
-                }}
+                onChange={(e) => loadFiles(e.target.files || [])}
               />
               <Button
                 variant="secondary"
@@ -565,13 +657,70 @@ export default function OcrBatchView({
             <p>選択フォルダ: {batchFolderName || "-"}</p>
             <p className="mt-1">選択画像: {batchFiles.length}件</p>
             {batchFiles.length > 0 ? (
-              <div className="mt-2 max-h-28 space-y-1 overflow-auto pr-1">
-                {batchFiles.map((file, idx) => (
-                  <p key={`${relativeName(file)}-${idx}`} className="truncate">
-                    {idx + 1}. {relativeName(file)}
-                  </p>
-                ))}
-              </div>
+              <>
+                <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-border/70 bg-card/60 px-2 py-1.5">
+                  <span className="text-[11px]">
+                    向きの補正（推論時に適用）
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <Button size="sm" variant="secondary" onClick={() => rotateAll(-90)} disabled={batchLoading} title="全画像を左90°回転">
+                      ⟲ 全画像
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={() => rotateAll(90)} disabled={batchLoading} title="全画像を右90°回転">
+                      ⟳ 全画像
+                    </Button>
+                  </span>
+                </div>
+                <div className="mt-2 max-h-64 space-y-1 overflow-auto pr-1">
+                  {batchFiles.map((file, idx) => {
+                    const deg = Number(rotations[idx]) || 0;
+                    return (
+                      <div
+                        key={`${relativeName(file)}-${idx}`}
+                        className="flex items-center gap-2 rounded-md border border-border/60 bg-card/60 px-2 py-1"
+                      >
+                        <div className="flex h-12 w-16 shrink-0 items-center justify-center overflow-hidden rounded border border-border/60 bg-[#3b444f]/70">
+                          {filePreviews[idx] ? (
+                            <img
+                              src={filePreviews[idx]}
+                              alt={relativeName(file)}
+                              className="max-h-full max-w-full object-contain"
+                              style={deg ? { transform: `rotate(${deg}deg)` } : undefined}
+                              loading="lazy"
+                            />
+                          ) : (
+                            <span className="text-[10px]">-</span>
+                          )}
+                        </div>
+                        <span className="min-w-0 flex-1 truncate" title={relativeName(file)}>
+                          {idx + 1}. {relativeName(file)}
+                        </span>
+                        <span className={`w-9 shrink-0 text-right text-[10px] ${deg ? "text-amber-300" : "text-muted/60"}`}>
+                          {deg}°
+                        </span>
+                        <button
+                          type="button"
+                          className="shrink-0 rounded border border-border/70 px-1.5 py-0.5 text-sm hover:bg-card/80 disabled:opacity-40"
+                          onClick={() => rotateOne(idx, -90)}
+                          disabled={batchLoading}
+                          title="左90°回転"
+                        >
+                          ⟲
+                        </button>
+                        <button
+                          type="button"
+                          className="shrink-0 rounded border border-border/70 px-1.5 py-0.5 text-sm hover:bg-card/80 disabled:opacity-40"
+                          onClick={() => rotateOne(idx, 90)}
+                          disabled={batchLoading}
+                          title="右90°回転"
+                        >
+                          ⟳
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
             ) : (
               <p className="mt-1">フォルダを選択してください</p>
             )}
