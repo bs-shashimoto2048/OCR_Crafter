@@ -36,18 +36,18 @@ function StatusIndicator({ status }) {
 
 export default function Header({ title, subtitle, status, labelProgress }) {
   return (
-    <header className="flex items-start justify-between border-b border-border pb-5">
-      <div>
-        <h2 className="text-2xl font-semibold text-text">{title}</h2>
-        <p className="mt-1 text-sm text-muted">{subtitle}</p>
+    <header className="flex items-center justify-between gap-4 border-b border-border pb-2.5">
+      <div className="flex min-w-0 flex-wrap items-baseline gap-x-3">
+        <h2 className="text-lg font-semibold text-text">{title}</h2>
+        <p className="truncate text-xs text-muted">{subtitle}</p>
       </div>
-      <div className="flex flex-col items-end gap-2">
-        <StatusIndicator status={status} />
+      <div className="flex shrink-0 items-center gap-3">
         {labelProgress ? (
           <p className="text-sm font-medium text-lime-300">
             {labelProgress.labeled} / {labelProgress.total}
           </p>
         ) : null}
+        <StatusIndicator status={status} />
       </div>
     </header>
   );

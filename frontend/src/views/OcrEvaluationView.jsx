@@ -35,9 +35,9 @@ export default function OcrEvaluationView({
   const mismatchRows = rows.filter((row) => (row.results || []).some((r) => !r.match));
 
   return (
-    <div className="grid grid-cols-[4fr_6fr] gap-6">
+    <div className="grid grid-cols-[4fr_6fr] gap-4">
       <Card title="評価設定" subtitle="学習前後のモデルを同一データで比較評価します">
-        <div className="space-y-4">
+        <div className="space-y-3">
           <div>
             <label className="app-label">評価用画像フォルダ</label>
             <div className="flex gap-2">
@@ -66,22 +66,27 @@ export default function OcrEvaluationView({
                 参照
               </Button>
             </div>
-            <div className="mt-1 space-y-1 text-xs text-muted">
-              <p>形式: 1列目 <code>filename</code>（画像ファイル名）、2列目 <code>text</code>（正解文字列）。</p>
-              <pre className="overflow-x-auto rounded-md border border-border/70 bg-black/25 px-2 py-1 text-[11px] leading-5 text-slate-200">{`filename,text
+            <details className="mt-1 text-xs text-muted">
+              <summary className="cursor-pointer select-none text-muted/90 hover:text-text">
+                CSVの形式・記載ルールを表示（filename,text / 大文字小文字は区別）
+              </summary>
+              <div className="mt-1 space-y-1">
+                <p>形式: 1列目 <code>filename</code>（画像ファイル名）、2列目 <code>text</code>（正解文字列）。</p>
+                <pre className="overflow-x-auto rounded-md border border-border/70 bg-black/25 px-2 py-1 text-[11px] leading-5 text-slate-200">{`filename,text
 sample_001.png,kt
 sample_002.png,lt
 sample_003.png,CHYBkt`}</pre>
-              <ul className="list-disc pl-4">
-                <li>画像フォルダ内のファイル名と <code>filename</code> が一致すること</li>
-                <li>
-                  <code>text</code> は実運用の表記どおりに記載（例: <code>CHYBkt</code>）。
-                  大文字と小文字は区別して評価されます（<code>KT</code> と <code>kt</code> は別物）
-                </li>
-                <li>ヘッダ行あり推奨（先頭が <code>filename</code>/<code>image</code> 等なら自動スキップ）</li>
-                <li>UTF-8 推奨</li>
-              </ul>
-            </div>
+                <ul className="list-disc pl-4">
+                  <li>画像フォルダ内のファイル名と <code>filename</code> が一致すること</li>
+                  <li>
+                    <code>text</code> は実運用の表記どおりに記載（例: <code>CHYBkt</code>）。
+                    大文字と小文字は区別して評価されます（<code>KT</code> と <code>kt</code> は別物）
+                  </li>
+                  <li>ヘッダ行あり推奨（先頭が <code>filename</code>/<code>image</code> 等なら自動スキップ）</li>
+                  <li>UTF-8 推奨</li>
+                </ul>
+              </div>
+            </details>
           </div>
 
           <div className="space-y-3 rounded-xl border border-border/80 bg-card/45 p-4">

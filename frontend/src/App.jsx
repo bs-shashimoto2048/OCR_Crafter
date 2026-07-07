@@ -2789,7 +2789,7 @@ export default function App() {
     <div className="min-h-screen bg-transparent text-text">
       <Sidebar active={activeView} onChange={setActiveView} onExitApp={exitApplication} />
 
-      <main className="ml-64 min-h-screen px-8 py-6">
+      <main className="ml-64 min-h-screen px-6 py-4">
         <Header
           title={currentMeta.title}
           subtitle={`${currentMeta.subtitle} / プロジェクト: ${projectId}`}

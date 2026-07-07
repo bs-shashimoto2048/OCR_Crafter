@@ -356,12 +356,12 @@ export default function TrainingView({
                 : "分類モデルとOCRモデルを切り替えて学習できます"
           }
         >
-          <div className="space-y-4">
-            <div className="relative overflow-hidden rounded-xl border border-border/80 bg-gradient-to-br from-[#4a5d73]/45 via-[#394553]/70 to-[#2f3943]/90 p-4 shadow-card">
+          <div className="space-y-2.5">
+            <div className="relative overflow-hidden rounded-xl border border-border/80 bg-gradient-to-br from-[#4a5d73]/45 via-[#394553]/70 to-[#2f3943]/90 p-3 shadow-card">
               <div className="pointer-events-none absolute -right-10 -top-10 h-28 w-28 rounded-full bg-accent/20 blur-2xl" />
               <div className="relative">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-200/90">Model Build Dashboard</p>
-                <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
                   <div className="rounded-lg border border-white/10 bg-black/15 px-2 py-2">
                     <p className="text-[10px] uppercase tracking-wide text-slate-300/80">方式</p>
                     <p className="mt-1 text-sm font-semibold text-slate-100">{trainingFamilyLabel}</p>
@@ -397,7 +397,7 @@ export default function TrainingView({
 
             {trainingFamily === "classification" ? (
               <>
-                <div className="space-y-3 rounded-xl border border-border/80 bg-card/45 p-4">
+                <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">1. データ準備</p>
                   <div className="grid grid-cols-3 gap-2">
                     <div>
@@ -454,7 +454,7 @@ export default function TrainingView({
                   </div>
                 </div>
 
-                <div className="space-y-3 rounded-xl border border-border/80 bg-card/45 p-4">
+                <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">2. 初期重み</p>
                   <div>
                     <label className="app-label">初期化方式</label>
@@ -497,7 +497,7 @@ export default function TrainingView({
                   ) : null}
                 </div>
 
-                <div className="space-y-3 rounded-xl border border-border/80 bg-card/45 p-4">
+                <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">3. 学習パラメータ</p>
                   <div>
                     <label className="app-label">モデル種別</label>
@@ -563,7 +563,7 @@ export default function TrainingView({
                   ) : null}
                 </div>
 
-                <div className="space-y-3 rounded-xl border border-border/80 bg-card/45 p-4">
+                <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">4. 実行</p>
                   <Button
                     variant={clsNextAction === "train" ? trainingVariant : "secondary"}
@@ -606,7 +606,7 @@ export default function TrainingView({
               </>
             ) : (
               <>
-                <div className="space-y-3 rounded-xl border border-border/80 bg-card/45 p-4">
+                <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">1. データ準備</p>
                   <div className="grid grid-cols-[7fr_3fr] gap-2">
                     <div>
@@ -668,7 +668,7 @@ export default function TrainingView({
                 ) : (
                   <>
                     {isTesseractEngine ? (
-                      <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-4">
+                      <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
                         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">2. 初期重み</p>
                         <div className="rounded-lg border border-accent/30 bg-accent/10 px-3 py-2 text-xs text-blue-100">
                           公式 <span className="font-semibold">eng.traineddata</span> をベースに LSTM を fine-tune します。
@@ -680,7 +680,7 @@ export default function TrainingView({
                         </p>
                       </div>
                     ) : (
-                    <div className="space-y-3 rounded-xl border border-border/80 bg-card/45 p-4">
+                    <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
                       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">2. 初期重み</p>
                       <div>
                         <label className="app-label">初期化方式</label>
@@ -730,7 +730,7 @@ export default function TrainingView({
                     </div>
                     )}
 
-                    <div className="space-y-3 rounded-xl border border-border/80 bg-card/45 p-4">
+                    <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
                       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">3. 学習パラメータ</p>
                       {!isTesseractEngine && (
                       <>
@@ -956,7 +956,7 @@ export default function TrainingView({
                       </div>
                     </div>
 
-                    <div className="space-y-3 rounded-xl border border-border/80 bg-card/45 p-4">
+                    <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
                       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">4. 実行</p>
                       <Button
                         variant={ocrNextAction === "train" ? trainingVariant : "secondary"}

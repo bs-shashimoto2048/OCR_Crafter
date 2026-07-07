@@ -81,9 +81,9 @@ export default function InferenceView({
     : result?.char_scores;
 
   return (
-    <div className="grid grid-cols-[4fr_6fr] gap-6">
+    <div className="grid grid-cols-[4fr_6fr] gap-4">
       <Card title="画像アップロード" subtitle="1枚画像を選択して推論します">
-        <div className="space-y-4">
+        <div className="space-y-3">
           <div>
             <label className="app-label">推論エンジン</label>
             <select value={engine} onChange={(e) => setEngine(e.target.value)} className="app-select">
@@ -241,7 +241,7 @@ export default function InferenceView({
 
       <Card title="推論結果" subtitle="推論結果を大きく表示します">
         {result ? (
-          <div className="space-y-6">
+          <div className="space-y-4">
             <div className="rounded-xl border border-border bg-card/60 backdrop-blur-md p-8 text-center">
               <p className="text-xs uppercase tracking-[0.18em] text-muted">予測結果</p>
               <p className="mt-3 text-7xl font-semibold tracking-[0.08em] text-text">{resultText}</p>

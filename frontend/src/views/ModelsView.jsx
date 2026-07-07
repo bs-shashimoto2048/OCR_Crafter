@@ -295,21 +295,22 @@ export default function ModelsView({ projectId = "default", models, modelInfos, 
         </div>
       }
     >
-      <div className="mb-4 grid grid-cols-3 gap-3 text-sm">
-        <div className="rounded-lg border border-border bg-card/60 backdrop-blur-md p-3">
-          <p className="text-muted">最新（全体）</p>
-          <p className="mt-1 truncate text-text">{latestAny || "-"}</p>
+      <div className="mb-3 flex flex-wrap gap-2 text-xs">
+        <div className="flex min-w-0 items-baseline gap-2 rounded-lg border border-border bg-card/60 px-3 py-1.5 backdrop-blur-md">
+          <span className="shrink-0 text-muted">最新（全体）</span>
+          <span className="truncate text-text">{latestAny || "-"}</span>
         </div>
         {Object.entries(latestByType).map(([type, value]) => (
-          <div key={type} className="rounded-lg border border-border bg-card/60 backdrop-blur-md p-3">
-            <p className="text-muted">最新 {type}</p>
-            <p className="mt-1 truncate text-text">{basename(value) || "-"}</p>
+          <div key={type} className="flex min-w-0 items-baseline gap-2 rounded-lg border border-border bg-card/60 px-3 py-1.5 backdrop-blur-md">
+            <span className="shrink-0 text-muted">最新 {type}</span>
+            <span className="truncate text-text">{basename(value) || "-"}</span>
           </div>
         ))}
       </div>
 
+      <div className="max-h-[calc(100vh-230px)] overflow-auto rounded-lg border border-border/60">
       <table className="w-full text-sm">
-        <thead>
+        <thead className="sticky top-0 z-10 bg-[#2f3841]/95 backdrop-blur">
           <tr className="border-b border-border text-left text-muted">
             <th className="w-10 px-2 py-3 font-medium">
               <input
@@ -404,6 +405,7 @@ export default function ModelsView({ projectId = "default", models, modelInfos, 
           })}
         </tbody>
       </table>
+      </div>
     </Card>
   );
 }

@@ -737,7 +737,8 @@ export default function OcrBatchView({
               クリア
             </Button>
           </div>
-          {notice ? <p className="text-xs text-muted">{notice}</p> : null}
+          {/* 高さを常に確保してボタン行が上下に揺れないようにする */}
+          <p className="min-h-[1.25rem] text-xs text-muted">{notice || " "}</p>
         </div>
 
         <div className="col-span-8">

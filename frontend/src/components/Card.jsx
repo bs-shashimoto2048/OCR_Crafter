@@ -2,10 +2,10 @@ export default function Card({ title, subtitle, actions, hover = false, classNam
   return (
     <section className={`surface-card animate-fade-in ${hover ? "surface-card-hover" : ""} ${className}`}>
       {(title || subtitle || actions) && (
-        <div className="mb-4 flex items-start justify-between gap-3">
-          <div>
-            {title && <h3 className="text-base font-semibold text-text">{title}</h3>}
-            {subtitle && <p className="mt-1 text-sm text-muted">{subtitle}</p>}
+        <div className="mb-2.5 flex items-start justify-between gap-3">
+          <div className="flex flex-wrap items-baseline gap-x-2">
+            {title && <h3 className="text-sm font-semibold text-text">{title}</h3>}
+            {subtitle && <p className="text-xs text-muted">{subtitle}</p>}
           </div>
           {actions ? <div className="shrink-0">{actions}</div> : null}
         </div>

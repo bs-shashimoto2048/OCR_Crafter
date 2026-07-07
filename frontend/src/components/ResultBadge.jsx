@@ -13,7 +13,7 @@ export default function ResultBadge({ loading, prediction, confidence, modelType
   if (error) {
     return (
       <Card title="推論結果" subtitle="プレビュー推論">
-        <div className="whitespace-pre-line rounded-lg border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger">
+        <div className="min-h-[64px] whitespace-pre-line rounded-lg border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger">
           {error}
         </div>
       </Card>
@@ -21,7 +21,7 @@ export default function ResultBadge({ loading, prediction, confidence, modelType
   }
 
   return (
-    <Card title="推論結果" subtitle="プレビュー推論">
+    <Card title="推論結果" subtitle="プレビュー推論" className="min-h-[112px]">
       {loading ? (
         <div className="text-sm text-muted">プレビュー推論を実行中...</div>
       ) : prediction ? (

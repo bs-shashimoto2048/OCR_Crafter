@@ -8,9 +8,9 @@ const variants = {
 };
 
 const sizes = {
-  sm: "h-8 px-3 text-xs",
-  md: "h-10 px-4 text-sm",
-  lg: "h-11 px-5 text-sm",
+  sm: "h-7 px-2.5 text-xs",
+  md: "h-8 px-3.5 text-sm",
+  lg: "h-9 px-4 text-sm",
 };
 
 const Button = forwardRef(function Button(

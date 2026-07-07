@@ -633,7 +633,7 @@ export default function RapidOCRView({
 
   return (
     <div className="space-y-6">
-      <div className="grid h-[calc(100vh-240px)] min-h-[640px] grid-cols-[1.5fr_1fr] gap-6">
+      <div className="grid h-[calc(100vh-175px)] min-h-[640px] grid-cols-[1.5fr_1fr] gap-4">
         <Card title="作業画像 / OCR結果入力" subtitle="" className="flex min-h-0 flex-col">
           <div className="flex min-h-0 flex-1 flex-col space-y-4 overflow-hidden">
             <div className="grid grid-cols-2 gap-2">
