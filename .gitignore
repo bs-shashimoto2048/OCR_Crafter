@@ -33,6 +33,7 @@ logs/
 external/
 
 # === Local/recovery artifacts ===
+.runtime_home/
 task.md
 scratchpad/
 COVERY*/
