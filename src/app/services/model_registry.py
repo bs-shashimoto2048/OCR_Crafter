@@ -3,11 +3,16 @@ from pathlib import Path
 from typing import Optional
 
 import json
+import logging
+import shutil
+
 import torch
 
 from ..config import get_settings
 from ..db import fetch_training_job
 from ..project_paths import ensure_project_directories
+
+logger = logging.getLogger(__name__)
 
 PADDLE_INFERENCE_MARKERS = ("inference.yml", "inference.pdiparams", "inference.pdmodel", "inference.json")
 
@@ -402,6 +407,52 @@ def resolve_model_path(
     return candidate
 
 
+_MODEL_DIR_META_KEYS = ("checkpoint_dir", "inference_dir", "tessdata_dir", "model_dir")
+
+
+def _is_safe_model_artifact_dir(resolved: Path, models_root: Path) -> bool:
+    """モデル削除で rmtree してよいディレクトリか検証する。
+
+    許可するのは「models ディレクトリ配下の実在ディレクトリ」のみ。
+    models ルート自身・CWD・プロジェクトルート・親ディレクトリ等は拒否する
+    （空パスが Path(".") 化して CWD を再帰削除した事故の再発防止）。
+    """
+    try:
+        root = models_root.resolve()
+    except OSError:
+        return False
+    if resolved == root:
+        return False
+    if root not in resolved.parents:
+        return False
+    return resolved.exists() and resolved.is_dir()
+
+
+def _resolve_safe_model_dirs(payload: dict, models_root: Path) -> list[Path]:
+    """メタ情報から削除対象ディレクトリを抽出する。安全検証を通ったものだけ返す。"""
+    dirs: list[Path] = []
+    seen: set[str] = set()
+    for key in _MODEL_DIR_META_KEYS:
+        raw = str(payload.get(key) or "").strip()
+        if not raw:
+            # 空文字は Path("")（= CWD扱い）を生成する前に除外する
+            continue
+        try:
+            resolved = Path(raw).expanduser().resolve()
+        except OSError:
+            logger.warning("delete_model: パス解決に失敗したためスキップ: %s=%r", key, raw)
+            continue
+        text = str(resolved)
+        if text in seen:
+            continue
+        seen.add(text)
+        if not _is_safe_model_artifact_dir(resolved, models_root):
+            logger.warning("delete_model: models配下ではないため削除をスキップ: %s=%s", key, resolved)
+            continue
+        dirs.append(resolved)
+    return dirs
+
+
 def delete_model(project_id: Optional[str], model_name: str) -> str:
     paths = ensure_project_directories(project_id)
     safe_name = Path(model_name).name
@@ -421,28 +472,25 @@ def delete_model(project_id: Optional[str], model_name: str) -> str:
     if is_ocr_meta or is_tess_meta:
         try:
             payload = json.loads(target.read_text(encoding="utf-8"))
-            candidate_dirs = [
-                Path(str(payload.get("checkpoint_dir") or "")).expanduser(),
-                Path(str(payload.get("inference_dir") or "")).expanduser(),
-                Path(str(payload.get("tessdata_dir") or "")).expanduser(),
-                Path(str(payload.get("model_dir") or "")).expanduser(),
-            ]
-            unique_dirs: list[Path] = []
-            seen: set[str] = set()
-            for item in candidate_dirs:
-                text = str(item).strip()
-                if not text or text in seen:
-                    continue
-                seen.add(text)
-                unique_dirs.append(item)
-            for model_dir in unique_dirs:
-                if model_dir.exists() and model_dir.is_dir():
-                    import shutil
-
-                    shutil.rmtree(model_dir, ignore_errors=True)
+            if not isinstance(payload, dict):
+                payload = None
         except Exception:  # noqa: BLE001
-            pass
+            payload = None
 
+        if is_tess_meta:
+            related = [str((payload or {}).get(key) or "").strip() for key in ("tessdata_dir", "model_dir")]
+            if payload is None or not any(related):
+                # 関連パスが欠落したメタは削除対象を特定できないため中止する
+                raise ValueError(
+                    f"tesseract model meta is incomplete (missing tessdata_dir/model_dir); delete aborted: {safe_name}"
+                )
+
+        if payload:
+            for model_dir in _resolve_safe_model_dirs(payload, paths.models):
+                logger.info("delete_model: removing model dir: %s", model_dir)
+                shutil.rmtree(model_dir, ignore_errors=True)
+
+    logger.info("delete_model: removing model meta: %s", target)
     target.unlink()
     return safe_name
 
