@@ -122,6 +122,11 @@ export default function ModelsView({ projectId = "default", models, modelInfos, 
     return modelInfos?.[name]?.training_family || "classification";
   }
 
+  // OCR認識モデル（PaddleOCR: training_family=ocr / Tesseract: training_family=tesseract）
+  function isOcrFamily(name) {
+    return ["ocr", "tesseract"].includes(trainingFamily(name));
+  }
+
   function engineName(name) {
     return modelInfos?.[name]?.engine || "custom";
   }
@@ -131,7 +136,7 @@ export default function ModelsView({ projectId = "default", models, modelInfos, 
   }
 
   const allOcr = useMemo(
-    () => models.length > 0 && models.every((name) => trainingFamily(name) === "ocr"),
+    () => models.length > 0 && models.every((name) => isOcrFamily(name)),
     [models, modelInfos]
   );
 
@@ -223,6 +228,22 @@ export default function ModelsView({ projectId = "default", models, modelInfos, 
     return `export=${ready ? "ready" : "not_ready"}`;
   }
 
+  function tesseractDetailLines(name) {
+    const info = modelInfos?.[name] || {};
+    const params = info.ocr_training_params || {};
+    const counts = info.dataset_split_counts || {};
+    const maxIter = Number(params.max_iterations || 0);
+    // 旧a-z学習モデルも .tess.json の meta.charset をそのまま表示（継承）
+    const charset = String(info.charset || "").trim() || "-";
+    const train = Number(counts.train || 0);
+    const val = Number(counts.val || 0);
+    return [
+      `traineddata=${info.traineddata_path || "-"}`,
+      `charset=${charset}`,
+      `base=${info.base_lang || "-"}, max_iter=${maxIter > 0 ? maxIter : "-"}, data=${train}/${val} | ${ocrExportText(name)}`,
+    ];
+  }
+
   async function handleDownload(name) {
     setDownloadingModelName(name);
     try {
@@ -233,7 +254,11 @@ export default function ModelsView({ projectId = "default", models, modelInfos, 
         throw new Error(parseApiErrorText(await response.text()));
       }
       const blob = await response.blob();
-      const fallbackName = name.endsWith(".pt") ? name : `${name.replace(/\.ocr\.json$/i, "")}.inference.zip`;
+      const fallbackName = name.endsWith(".pt")
+        ? name
+        : name.endsWith(".tess.json")
+          ? `${name.replace(/\.tess\.json$/i, "")}.traineddata`
+          : `${name.replace(/\.ocr\.json$/i, "")}.inference.zip`;
       const filename = parseDownloadFilename(response.headers.get("content-disposition"), fallbackName);
       const objectUrl = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -310,7 +335,8 @@ export default function ModelsView({ projectId = "default", models, modelInfos, 
             const checked = selectedModels.includes(name);
             const ratio = ratioText(name);
             const counts = countText(name);
-            const isOcr = trainingFamily(name) === "ocr";
+            const isOcr = isOcrFamily(name);
+            const isTesseract = engineName(name) === "tesseract";
             const exportReady = Boolean(modelInfos?.[name]?.ocr_inference_ready);
             const canDownload = !isOcr || exportReady;
             return (
@@ -329,7 +355,15 @@ export default function ModelsView({ projectId = "default", models, modelInfos, 
                 <td className="px-2 py-3 text-muted">{engineName(name)}</td>
                 <td className="px-2 py-3 text-muted">{formatDateTime(createdAt(name))}</td>
                 <td className="px-2 py-3 text-muted">
-                  {isOcr ? (
+                  {isTesseract ? (
+                    <div className="flex flex-col gap-1">
+                      {tesseractDetailLines(name).map((line, lineIdx) => (
+                        <span key={lineIdx} className="break-all">
+                          {line}
+                        </span>
+                      ))}
+                    </div>
+                  ) : isOcr ? (
                     <div className="flex flex-col gap-1">
                       <span>{ocrPreprocessText(name)}</span>
                       <span>{ocrTrainingText(name)}</span>

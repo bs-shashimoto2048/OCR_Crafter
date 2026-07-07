@@ -44,11 +44,13 @@ function normalizePredictError(message) {
   return text || "バッチ推論に失敗しました";
 }
 
-function toHalfWidthAlnum(value) {
-  return String(value || "")
-    .normalize("NFKC")
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, "");
+function toHalfWidthAlnum(value, { keepCase = false } = {}) {
+  const normalized = String(value || "").normalize("NFKC");
+  if (keepCase) {
+    // Tesseract: 大文字(A-Z)と小文字筆記体(k/l/t)を区別するため大小変換しない
+    return normalized.replace(/[^A-Za-z0-9]/g, "");
+  }
+  return normalized.toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
 function classifyDraftState(value) {
@@ -110,6 +112,9 @@ export default function OcrBatchView({
   paddleModel,
   setPaddleModel,
   paddleModels,
+  tesseractModel,
+  setTesseractModel,
+  tesseractModels,
   easyocrLangs,
   setEasyocrLangs,
   easyocrLanguageOptions,
@@ -237,6 +242,8 @@ export default function OcrBatchView({
         } else if (engine === "paddleocr") {
           formData.append("model", paddleModel || "latest");
           formData.append("easyocr_langs", (easyocrLangs || []).join(",") || "en");
+        } else if (engine === "tesseract") {
+          formData.append("model", tesseractModel || "latest");
         } else {
           formData.append("easyocr_langs", (easyocrLangs || []).join(",") || "en");
         }
@@ -248,7 +255,9 @@ export default function OcrBatchView({
             throw new Error(normalizePredictError(message));
           }
           const result = await response.json();
-          const prediction = toHalfWidthAlnum(result.prediction || result.text || "");
+          const prediction = toHalfWidthAlnum(result.prediction || result.text || "", {
+            keepCase: engine === "tesseract",
+          });
           const corrected = prediction;
           const expected_length = resolveBatchExpectedLength({ ...result, prediction });
           const is_valid = resolveBatchValid({ ...result, prediction, corrected, expected_length });
@@ -296,6 +305,51 @@ export default function OcrBatchView({
     } finally {
       setBatchLoading(false);
     }
+  }
+
+  function exportBatchCsv() {
+    if (batchRows.length === 0) return;
+    const escapeCsv = (value) => {
+      const s = String(value ?? "");
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const selectedModelLabel =
+      engine === "custom"
+        ? model || "latest"
+        : engine === "paddleocr"
+          ? paddleModel || "latest"
+          : engine === "tesseract"
+            ? tesseractModel || "latest"
+            : "";
+    const header = ["file_name", "engine", "model", "prediction", "corrected", "confidence", "valid", "status", "error"];
+    const lines = [header.join(",")];
+    for (const row of batchRows) {
+      lines.push(
+        [
+          row.file_name,
+          row.engine || engine,
+          row.model_name || selectedModelLabel,
+          row.prediction,
+          row.corrected,
+          row.confidence ?? "",
+          row.status === "done" ? (row.is_valid ? "true" : "false") : "",
+          row.status,
+          row.error,
+        ]
+          .map(escapeCsv)
+          .join(",")
+      );
+    }
+    const bom = String.fromCharCode(0xfeff);
+    const blob = new Blob([bom + lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `batch_results_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   }
 
   function clearBatch() {
@@ -354,6 +408,7 @@ export default function OcrBatchView({
                   <option value="custom">カスタム</option>
                   <option value="easyocr">EasyOCR</option>
                   <option value="paddleocr">PaddleOCR</option>
+                  <option value="tesseract">Tesseract</option>
                 </select>
               </div>
 
@@ -381,6 +436,31 @@ export default function OcrBatchView({
                     ))}
                   </select>
                 </div>
+              ) : engine === "tesseract" ? (
+                <div>
+                  <label className="app-label">Tesseractモデル（.traineddata）</label>
+                  <select
+                    className="app-select"
+                    value={tesseractModel}
+                    onChange={(e) => setTesseractModel(e.target.value)}
+                  >
+                    <option value="latest">最新（学習済み）</option>
+                    <option value="eng">eng.traineddata（標準英語モデル）</option>
+                    {(tesseractModels || []).map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-muted">
+                    推論時 whitelist: A-Z / 0-9 / 小文字筆記体 k,l,t（学習済みモデルはメタの charset を継承）
+                  </p>
+                  {(tesseractModels || []).length === 0 ? (
+                    <p className="mt-1 text-xs text-amber-200">
+                      学習済みTesseractモデルがありません。「Tesseract標準英語モデル eng.traineddata」を選択してください。
+                    </p>
+                  ) : null}
+                </div>
               ) : null}
 
               {engine === "custom" && model === "latest" ? (
@@ -396,7 +476,7 @@ export default function OcrBatchView({
                 </div>
               ) : null}
 
-              {engine !== "custom" ? (
+              {engine !== "custom" && engine !== "tesseract" ? (
                 <div className="rounded-lg border border-border bg-card/50 p-2">
                   <button
                     type="button"
@@ -500,6 +580,9 @@ export default function OcrBatchView({
           <div className="flex flex-wrap gap-2">
             <Button onClick={() => runBatch(batchFiles)} disabled={batchLoading || batchFiles.length === 0}>
               {batchLoading ? "バッチ推論実行中..." : "バッチ推論実行"}
+            </Button>
+            <Button variant="secondary" onClick={exportBatchCsv} disabled={batchLoading || batchRows.length === 0}>
+              結果CSV出力
             </Button>
             <Button variant="secondary" onClick={clearBatch} disabled={batchLoading && batchRows.length === 0}>
               クリア

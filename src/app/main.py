@@ -66,6 +66,7 @@ from .services.model_registry import (
     list_model_types,
     list_models,
     resolve_ocr_model_meta,
+    resolve_tesseract_model_meta,
 )
 from .services.ocr_tuning import export_ocr_training_data
 from .services.ocr_pipeline import (
@@ -1685,8 +1686,18 @@ def download_model_endpoint(model_name: str, project_id: Optional[str] = Query(d
     if safe_name.endswith(".pt"):
         return FileResponse(model_path, media_type="application/octet-stream", filename=safe_name)
 
+    if safe_name.endswith(".tess.json"):
+        meta = resolve_tesseract_model_meta(project_id=resolved, model=safe_name, ready_only=True)
+        if not isinstance(meta, dict):
+            raise HTTPException(status_code=404, detail=f"tesseract model metadata not found: {safe_name}")
+        traineddata_raw = str(meta.get("traineddata_path") or "").strip()
+        traineddata = Path(traineddata_raw).expanduser() if traineddata_raw else None
+        if traineddata is None or not traineddata.exists() or not traineddata.is_file():
+            raise HTTPException(status_code=404, detail=f"traineddata not found: {traineddata_raw}")
+        return FileResponse(traineddata, media_type="application/octet-stream", filename=traineddata.name)
+
     if not safe_name.endswith(".ocr.json"):
-        raise HTTPException(status_code=400, detail="only .pt and .ocr.json are downloadable")
+        raise HTTPException(status_code=400, detail="only .pt, .ocr.json and .tess.json are downloadable")
 
     meta = resolve_ocr_model_meta(project_id=resolved, model=safe_name, engine=None)
     if not isinstance(meta, dict):

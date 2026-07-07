@@ -120,6 +120,9 @@ export default function RapidOCRView({
   paddleModel,
   setPaddleModel,
   paddleModels,
+  tesseractModel,
+  setTesseractModel,
+  tesseractModels,
   easyocrLangs,
   setEasyocrLangs,
   easyocrLanguageOptions,
@@ -408,6 +411,8 @@ export default function RapidOCRView({
         } else if (engine === "paddleocr") {
           formData.append("model", paddleModel || "latest");
           formData.append("easyocr_langs", (easyocrLangs || []).join(",") || "en");
+        } else if (engine === "tesseract") {
+          formData.append("model", tesseractModel || "latest");
         } else {
           formData.append("easyocr_langs", (easyocrLangs || []).join(",") || "en");
         }
@@ -674,6 +679,7 @@ export default function RapidOCRView({
                   <option value="custom">カスタム</option>
                   <option value="easyocr">EasyOCR</option>
                   <option value="paddleocr">PaddleOCR</option>
+                  <option value="tesseract">Tesseract</option>
                 </select>
               </div>
               {engine === "custom" ? (
@@ -700,6 +706,23 @@ export default function RapidOCRView({
                     ))}
                   </select>
                 </div>
+              ) : engine === "tesseract" ? (
+                <div>
+                  <label className="app-label">Tesseractモデル（.traineddata）</label>
+                  <select
+                    className="app-select"
+                    value={tesseractModel}
+                    onChange={(e) => setTesseractModel(e.target.value)}
+                  >
+                    <option value="latest">最新（学習済み）</option>
+                    <option value="eng">eng.traineddata（標準英語モデル）</option>
+                    {(tesseractModels || []).map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               ) : (
                 <div />
               )}
@@ -718,7 +741,7 @@ export default function RapidOCRView({
               </div>
             ) : null}
 
-            {engine !== "custom" ? (
+            {engine !== "custom" && engine !== "tesseract" ? (
               <div className="rounded-lg border border-border bg-card/50 p-2">
                 <button
                   type="button"

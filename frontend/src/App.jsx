@@ -285,7 +285,7 @@ export default function App() {
   const [models, setModels] = useState([]);
   const [modelInfos, setModelInfos] = useState({});
   const [officialPaddleModels, setOfficialPaddleModels] = useState([]);
-  const [latestModels, setLatestModels] = useState({ any: "", byType: {}, ocrPaddle: "" });
+  const [latestModels, setLatestModels] = useState({ any: "", byType: {}, ocrPaddle: "", ocrTesseract: "" });
   const classificationModels = useMemo(
     () =>
       models.filter((name) => {
@@ -310,6 +310,10 @@ export default function App() {
     () =>
       models.filter((name) => {
         const info = modelInfos[name] || {};
+        // OCR認識モデル一覧: PaddleOCR(.ocr.json, export済み) と Tesseract(.tess.json) を含む
+        if (info.training_family === "tesseract") {
+          return true;
+        }
         return info.training_family === "ocr" && (info.engine !== "paddleocr" || Boolean(info.ocr_inference_ready));
       }),
     [models, modelInfos]
@@ -641,7 +645,7 @@ export default function App() {
       setModels([]);
       setModelInfos({});
       setOfficialPaddleModels([]);
-      setLatestModels({ any: "", byType: {}, ocrPaddle: "" });
+      setLatestModels({ any: "", byType: {}, ocrPaddle: "", ocrTesseract: "" });
       setModelTypes([]);
       return;
     }
@@ -697,7 +701,12 @@ export default function App() {
     )
       .then((r) => r.model || "")
       .catch(() => "");
-    setLatestModels({ any: latestAny, byType, ocrPaddle: latestOcrPaddle });
+    const latestOcrTesseract = await request(
+      `/models/latest?project_id=${pid}&training_family=tesseract`
+    )
+      .then((r) => r.model || "")
+      .catch(() => "");
+    setLatestModels({ any: latestAny, byType, ocrPaddle: latestOcrPaddle, ocrTesseract: latestOcrTesseract });
   }
 
   async function refreshAll(targetProjectId = projectId) {
@@ -708,7 +717,7 @@ export default function App() {
       setModels([]);
       setModelInfos({});
       setOfficialPaddleModels([]);
-      setLatestModels({ any: "", byType: {}, ocrPaddle: "" });
+      setLatestModels({ any: "", byType: {}, ocrPaddle: "", ocrTesseract: "" });
       setModelTypes([]);
       return;
     }
@@ -2552,7 +2561,13 @@ export default function App() {
     const modelItems = activeView === "ocr-models" ? ocrModels : activeView === "cls-models" ? classificationModels : models;
     const latestForView =
       activeView === "ocr-models"
-        ? { any: latestModels.ocrPaddle || "", byType: { ocr: latestModels.ocrPaddle || "" } }
+        ? {
+            any: latestModels.ocrPaddle || latestModels.ocrTesseract || "",
+            byType: {
+              PaddleOCR: latestModels.ocrPaddle || "",
+              Tesseract: latestModels.ocrTesseract || "",
+            },
+          }
         : latestModels;
     view = (
       <ModelsView
@@ -2622,6 +2637,9 @@ export default function App() {
         paddleModel={inferPaddleModel}
         setPaddleModel={setInferPaddleModel}
         paddleModels={paddleOcrModelOptions}
+        tesseractModel={inferTesseractModel}
+        setTesseractModel={setInferTesseractModel}
+        tesseractModels={tesseractModels}
         easyocrLangs={inferEasyOcrLangs}
         setEasyocrLangs={setInferEasyOcrLangs}
         easyocrLanguageOptions={EASYOCR_LANGUAGE_OPTIONS}
@@ -2647,6 +2665,9 @@ export default function App() {
         paddleModel={inferPaddleModel}
         setPaddleModel={setInferPaddleModel}
         paddleModels={paddleOcrModelOptions}
+        tesseractModel={inferTesseractModel}
+        setTesseractModel={setInferTesseractModel}
+        tesseractModels={tesseractModels}
         easyocrLangs={inferEasyOcrLangs}
         setEasyocrLangs={setInferEasyOcrLangs}
         easyocrLanguageOptions={EASYOCR_LANGUAGE_OPTIONS}
