@@ -695,22 +695,62 @@ export default function TrainingView({
                         演算デバイス
                         <InfoHint text="学習に使用する演算デバイスです。auto はGPUが利用可能な場合にGPUを使用します。TesseractはCPUのみ対応しています。" />
                       </label>
-                      {isTesseractEngine ? (
-                        <select className="app-select" value="cpu" disabled>
-                          <option value="cpu">CPU（固定）</option>
-                        </select>
-                      ) : (
-                        <select
-                          className="app-select"
-                          value={ocrTrainDevice}
-                          onChange={(e) => setOcrTrainDevice(e.target.value)}
-                          disabled={ocrEngine === "easyocr"}
-                        >
-                          <option value="auto">auto</option>
-                          <option value="cpu">cpu</option>
-                          <option value="gpu">gpu</option>
-                        </select>
-                      )}
+                      <div className="grid h-8 grid-cols-3 gap-1.5">
+                        {[
+                          {
+                            value: "auto",
+                            label: "Auto",
+                            // 選択可能なボタンは色付きで発光させる（Auto=青）
+                            glow: "border-accent/80 bg-card/60 text-blue-200 shadow-[0_0_10px_rgba(88,166,255,0.55)] hover:bg-accent/20",
+                            selectedClass: "border-accent bg-accent text-white shadow-[0_0_14px_rgba(88,166,255,0.75)]",
+                            selectable: !isTesseractEngine && ocrEngine !== "easyocr",
+                            hint: "GPUが利用可能ならGPUを使用します",
+                          },
+                          {
+                            value: "cpu",
+                            label: "CPU",
+                            glow: "border-cyan-400/80 bg-card/60 text-cyan-100 shadow-[0_0_10px_rgba(34,211,238,0.55)] hover:bg-cyan-400/15",
+                            selectedClass: "border-cyan-300 bg-cyan-500/80 text-white shadow-[0_0_14px_rgba(34,211,238,0.75)]",
+                            selectable: ocrEngine !== "easyocr",
+                            hint: "CPUで学習します",
+                          },
+                          {
+                            value: "gpu",
+                            label: "GPU",
+                            glow: "border-emerald-400/80 bg-card/60 text-emerald-100 shadow-[0_0_10px_rgba(52,211,153,0.6)] hover:bg-emerald-400/15",
+                            selectedClass: "border-emerald-300 bg-emerald-500/80 text-white shadow-[0_0_14px_rgba(52,211,153,0.8)]",
+                            selectable:
+                              !isTesseractEngine && ocrEngine !== "easyocr" && Boolean(systemCheck?.gpu_available),
+                            hint: systemCheck?.gpu_available
+                              ? `GPUで学習します（${systemCheck?.gpu_name || "GPU"}）`
+                              : "GPUが検出されていません",
+                          },
+                        ].map((opt) => {
+                          // Tesseract は CPU 固定（CPUのみ点灯・選択表示、クリック不可）
+                          const fixedCpu = isTesseractEngine && opt.value === "cpu";
+                          const selected = isTesseractEngine ? opt.value === "cpu" : ocrTrainDevice === opt.value;
+                          const clickable = opt.selectable && !isTesseractEngine;
+                          const lit = opt.selectable || fixedCpu;
+                          return (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              title={isTesseractEngine && opt.value !== "cpu" ? "TesseractはCPUのみ対応しています" : opt.hint}
+                              disabled={!clickable}
+                              onClick={() => clickable && setOcrTrainDevice(opt.value)}
+                              className={`rounded-lg border text-xs font-semibold transition ${
+                                selected
+                                  ? opt.selectedClass
+                                  : lit
+                                    ? opt.glow
+                                    : "cursor-not-allowed border-border/50 bg-card/40 text-muted/40"
+                              } ${!clickable && lit ? "cursor-default" : ""}`}
+                            >
+                              {opt.label}
+                            </button>
+                          );
+                        })}
+                      </div>
                       {isTesseractEngine ? (
                         <p className="mt-1 text-[11px] text-muted">TesseractはCPUのみ対応しています。</p>
                       ) : null}
