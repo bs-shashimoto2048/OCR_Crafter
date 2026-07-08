@@ -692,6 +692,34 @@ export default function TrainingView({
                     </div>
                     <div>
                       <label className="app-label">
+                        出力先
+                        <InfoHint text="学習済みモデルの保存先です（変更不可）。" />
+                      </label>
+                      <input className="app-input" value={`data/projects/${projectId || "<project>"}/models/`} readOnly />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">1. データ準備</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="app-label">OCRタイプ</label>
+                      <select value={ocrEngine} onChange={(e) => setOcrEngine(e.target.value)} className="app-select">
+                        <option value="paddleocr">PaddleOCR（学習可）</option>
+                        <option value="tesseract">Tesseract（学習可 / A-Z・0-9・筆記体klt）</option>
+                        <option value="easyocr">EasyOCR（推論専用）</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="app-label">学習データ作成方法</label>
+                      <select value={ocrDatasetCreateMode} onChange={(e) => setOcrDatasetCreateMode(e.target.value)} className="app-select">
+                        <option value="new">新規作成（ラベルデータから）</option>
+                        <option value="from_logs">再学習作成（OCRログから）</option>
+                      </select>
+                    </div>
+                    <div className="col-span-2">
+                      <label className="app-label">
                         演算デバイス
                         <InfoHint text="学習に使用する演算デバイスです。auto はGPUが利用可能な場合にGPUを使用します。TesseractはCPUのみ対応しています。" />
                       </label>
@@ -719,11 +747,17 @@ export default function TrainingView({
                             label: "GPU",
                             glow: "border-emerald-400/80 bg-card/60 text-emerald-100 shadow-[0_0_10px_rgba(52,211,153,0.6)] hover:bg-emerald-400/15",
                             selectedClass: "border-emerald-300 bg-emerald-500/80 text-white shadow-[0_0_14px_rgba(52,211,153,0.8)]",
+                            // GPUハードが検出されていれば選択可能として点灯する
+                            // （torch/paddleのCUDA対応状況は実行時に解決されるためUIではブロックしない）
                             selectable:
-                              !isTesseractEngine && ocrEngine !== "easyocr" && Boolean(systemCheck?.gpu_available),
-                            hint: systemCheck?.gpu_available
-                              ? `GPUで学習します（${systemCheck?.gpu_name || "GPU"}）`
-                              : "GPUが検出されていません",
+                              !isTesseractEngine &&
+                              ocrEngine !== "easyocr" &&
+                              Boolean(systemCheck?.gpu_available || systemCheck?.gpu_name),
+                            hint: systemCheck?.gpu_name
+                              ? `GPUで学習します（${systemCheck.gpu_name}）`
+                              : systemCheck?.gpu_available
+                                ? "GPUで学習します"
+                                : "GPUが検出されていません",
                           },
                         ].map((opt) => {
                           // Tesseract は CPU 固定（CPUのみ点灯・選択表示、クリック不可）
@@ -754,34 +788,6 @@ export default function TrainingView({
                       {isTesseractEngine ? (
                         <p className="mt-1 text-[11px] text-muted">TesseractはCPUのみ対応しています。</p>
                       ) : null}
-                    </div>
-                    <div>
-                      <label className="app-label">
-                        出力先
-                        <InfoHint text="学習済みモデルの保存先です（変更不可）。" />
-                      </label>
-                      <input className="app-input" value={`data/projects/${projectId || "<project>"}/models/`} readOnly />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">1. データ準備</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="app-label">OCRタイプ</label>
-                      <select value={ocrEngine} onChange={(e) => setOcrEngine(e.target.value)} className="app-select">
-                        <option value="paddleocr">PaddleOCR（学習可）</option>
-                        <option value="tesseract">Tesseract（学習可 / A-Z・0-9・筆記体klt）</option>
-                        <option value="easyocr">EasyOCR（推論専用）</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="app-label">学習データ作成方法</label>
-                      <select value={ocrDatasetCreateMode} onChange={(e) => setOcrDatasetCreateMode(e.target.value)} className="app-select">
-                        <option value="new">新規作成（ラベルデータから）</option>
-                        <option value="from_logs">再学習作成（OCRログから）</option>
-                      </select>
                     </div>
                   </div>
                   {ocrDatasetCreateMode === "from_logs" ? (
