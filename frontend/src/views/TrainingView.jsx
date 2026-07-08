@@ -7,8 +7,18 @@ const OCR_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 // Tesseract学習対象文字セット（A-Z / 0-9 / 小文字筆記体 k,l,t）
 const TESSERACT_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt";
 
+// ラベル横の ⓘ ヘルプ（title属性によるツールチップ表示）
+function InfoHint({ text }) {
+  return (
+    <span title={text} className="ml-1 inline-block cursor-help align-middle text-[11px] text-accent" aria-label="ヘルプ">
+      ⓘ
+    </span>
+  );
+}
+
 export default function TrainingView({
   trainingMode = "all",
+  projectId,
   trainingFamily,
   setTrainingFamily,
   modelType,
@@ -608,8 +618,116 @@ export default function TrainingView({
             ) : (
               <>
                 <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">共通設定</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="app-label">
+                        プロジェクト
+                        <InfoHint text="学習対象のプロジェクトです。プロジェクト画面で切り替えできます。" />
+                      </label>
+                      <input className="app-input" value={projectId || ""} readOnly placeholder="未選択" />
+                    </div>
+                    <div>
+                      <label className="app-label">
+                        学習データ
+                        <InfoHint text="学習に使用するデータセットのディレクトリです。データ作成後に自動設定されます。" />
+                      </label>
+                      <input className="app-input" value={ocrDatasetDir} readOnly placeholder="データ作成後に自動設定されます" />
+                    </div>
+                    <div>
+                      <label className="app-label">
+                        データ分割
+                        <InfoHint text="Train / Validation / Test の分割比率（合計1.00）。Tesseractでは Train→train.list / Validation→eval.list / Test→評価用 として使われます。" />
+                      </label>
+                      <div className="grid grid-cols-3 gap-1">
+                        <input
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.01"
+                          value={trainRatio}
+                          onChange={(e) => setTrainRatio(e.target.value)}
+                          className="app-input"
+                          title="Train 比率"
+                        />
+                        <input
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.01"
+                          value={valRatio}
+                          onChange={(e) => setValRatio(e.target.value)}
+                          className="app-input"
+                          title="Validation 比率"
+                        />
+                        <input
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.01"
+                          value={testRatio}
+                          onChange={(e) => setTestRatio(e.target.value)}
+                          className="app-input"
+                          title="Test 比率"
+                        />
+                      </div>
+                      <p className={`mt-1 text-[11px] ${ratioSummary.valid ? "text-muted" : "text-amber-100"}`}>
+                        Train/Val/Test 合計: {ratioSummary.total}
+                        {ratioSummary.valid ? "" : "（1.00 になるよう調整してください）"}
+                      </p>
+                    </div>
+                    <div>
+                      <label className="app-label">
+                        学習回数
+                        <InfoHint text="学習の繰り返し回数です。PaddleOCR / EasyOCR では Epoch 数、Tesseract では Iteration 数として使用します。Tesseractでは一般的に500〜3000程度で学習します。" />
+                      </label>
+                      <input
+                        type="number"
+                        className="app-input"
+                        value={epochs}
+                        onChange={(e) => setEpochs(e.target.value)}
+                        disabled={ocrEngine === "easyocr"}
+                      />
+                      <p className="mt-1 text-[11px] text-muted">エンジンに応じて Epoch または Iteration として処理されます。</p>
+                    </div>
+                    <div>
+                      <label className="app-label">
+                        演算デバイス
+                        <InfoHint text="学習に使用する演算デバイスです。auto はGPUが利用可能な場合にGPUを使用します。TesseractはCPUのみ対応しています。" />
+                      </label>
+                      {isTesseractEngine ? (
+                        <select className="app-select" value="cpu" disabled>
+                          <option value="cpu">CPU（固定）</option>
+                        </select>
+                      ) : (
+                        <select
+                          className="app-select"
+                          value={ocrTrainDevice}
+                          onChange={(e) => setOcrTrainDevice(e.target.value)}
+                          disabled={ocrEngine === "easyocr"}
+                        >
+                          <option value="auto">auto</option>
+                          <option value="cpu">cpu</option>
+                          <option value="gpu">gpu</option>
+                        </select>
+                      )}
+                      {isTesseractEngine ? (
+                        <p className="mt-1 text-[11px] text-muted">TesseractはCPUのみ対応しています。</p>
+                      ) : null}
+                    </div>
+                    <div>
+                      <label className="app-label">
+                        出力先
+                        <InfoHint text="学習済みモデルの保存先です（変更不可）。" />
+                      </label>
+                      <input className="app-input" value={`data/projects/${projectId || "<project>"}/models/`} readOnly />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">1. データ準備</p>
-                  <div className="grid grid-cols-[7fr_3fr] gap-2">
+                  <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label className="app-label">OCRタイプ</label>
                       <select value={ocrEngine} onChange={(e) => setOcrEngine(e.target.value)} className="app-select">
@@ -619,22 +737,12 @@ export default function TrainingView({
                       </select>
                     </div>
                     <div>
-                      <label className="app-label">最大文字数</label>
-                      <input
-                        type="number"
-                        className="app-input"
-                        value={ocrMaxTextLength}
-                        onChange={(e) => setOcrMaxTextLength(e.target.value)}
-                        disabled={ocrEngine === "easyocr" || isTesseractEngine}
-                      />
+                      <label className="app-label">学習データ作成方法</label>
+                      <select value={ocrDatasetCreateMode} onChange={(e) => setOcrDatasetCreateMode(e.target.value)} className="app-select">
+                        <option value="new">新規作成（ラベルデータから）</option>
+                        <option value="from_logs">再学習作成（OCRログから）</option>
+                      </select>
                     </div>
-                  </div>
-                  <div>
-                    <label className="app-label">学習データ作成方法</label>
-                    <select value={ocrDatasetCreateMode} onChange={(e) => setOcrDatasetCreateMode(e.target.value)} className="app-select">
-                      <option value="new">新規作成（ラベルデータから）</option>
-                      <option value="from_logs">再学習作成（OCRログから）</option>
-                    </select>
                   </div>
                   {ocrDatasetCreateMode === "from_logs" ? (
                     <div className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-card/40 p-3 text-xs text-muted">
@@ -656,21 +764,61 @@ export default function TrainingView({
                       </label>
                     </div>
                   ) : null}
-                  <div>
-                    <label className="app-label">学習データディレクトリ</label>
-                    <input className="app-input" value={ocrDatasetDir} readOnly placeholder="データ作成後に自動設定されます" />
-                  </div>
                 </div>
 
-                {ocrEngine === "easyocr" ? (
-                  <div className="rounded-xl border border-amber-300/40 bg-amber-300/10 p-3 text-sm text-amber-100">
-                    EasyOCR はこのUIでは学習対象外です。推論画面でのみ利用できます。
-                  </div>
-                ) : (
-                  <>
-                    {isTesseractEngine ? (
-                      <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
-                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">2. 初期重み</p>
+                <details open className="rounded-xl border border-border/80 bg-card/45 p-3">
+                  <summary className="cursor-pointer select-none text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">
+                    エンジン固有設定（{ocrEngine === "paddleocr" ? "PaddleOCR" : isTesseractEngine ? "Tesseract" : "EasyOCR"}）
+                  </summary>
+                  <div className="mt-2 space-y-2">
+                    {ocrEngine === "easyocr" ? (
+                      <div className="rounded-lg border border-amber-300/40 bg-amber-300/10 p-3 text-sm text-amber-100">
+                        EasyOCR はこのUIでは学習対象外です。推論画面でのみ利用できます。
+                      </div>
+                    ) : isTesseractEngine ? (
+                      <>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="app-label">
+                              Base Model
+                              <InfoHint text="fine-tune のベースとなる公式学習済みモデルです（固定）。" />
+                            </label>
+                            <input className="app-input" value="eng.traineddata" readOnly />
+                          </div>
+                          <div>
+                            <label className="app-label">
+                              PSM
+                              <InfoHint text="Tesseractのページセグメンテーションモードです。1行テキスト向けの 7 に固定されています。" />
+                            </label>
+                            <input className="app-input" value="7" readOnly />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="app-label">
+                            学習対象文字セット（Charset）
+                            <InfoHint text="学習対象の文字セットです。charset外の文字を含むラベルは学習から除外されます（文字削除はしません）。" />
+                          </label>
+                          <input
+                            className="app-input"
+                            value={ocrCharset}
+                            onChange={(e) =>
+                              // Tesseractは大文字と小文字筆記体(k/l/t)を区別するため大小変換しない
+                              setOcrCharset(e.target.value)
+                            }
+                            placeholder={TESSERACT_CHARSET_DEFAULT}
+                          />
+                          <p className="mt-1 text-xs text-muted">
+                            既定: A-Z / 0-9 / 小文字筆記体 k,l,t。charset外の文字を含むラベルは学習から除外されます（文字削除はしません）。
+                          </p>
+                        </div>
+                        <div>
+                          <label className="app-label">
+                            Whitelist
+                            <InfoHint text="推論時に許可する文字の一覧（既定値）です。学習内容には影響しません。" />
+                          </label>
+                          <input className="app-input" value={TESSERACT_CHARSET_DEFAULT} readOnly />
+                          <p className="mt-1 text-xs text-muted">推論時whitelist（既定）</p>
+                        </div>
                         <div className="rounded-lg border border-accent/30 bg-accent/10 px-3 py-2 text-xs text-blue-100">
                           公式 <span className="font-semibold">eng.traineddata</span> をベースに LSTM を fine-tune します。
                           学習対象文字: A-Z / 0-9 / 小文字筆記体 k,l,t
@@ -679,10 +827,11 @@ export default function TrainingView({
                           学習には外部ツール（tesseract / lstmtraining / combine_tessdata）と eng.traineddata が必要です。
                           未導入の場合は学習開始時に導入手順つきでエラーになります。
                         </p>
-                      </div>
+                      </>
                     ) : (
-                    <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">2. 初期重み</p>
+                      <>
+                    <div className="space-y-2 rounded-lg border border-border/70 bg-card/50 p-3">
+                      <p className="text-xs font-semibold text-slate-100">初期重み</p>
                       <div>
                         <label className="app-label">初期化方式</label>
                         <select value={ocrInitSourceType} onChange={(e) => setOcrInitSourceType(e.target.value)} className="app-select">
@@ -729,12 +878,9 @@ export default function TrainingView({
                         </div>
                       ) : null}
                     </div>
-                    )}
 
-                    <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">3. 学習パラメータ</p>
-                      {!isTesseractEngine && (
-                      <>
+                    <div className="space-y-2 rounded-lg border border-border/70 bg-card/50 p-3">
+                      <p className="text-xs font-semibold text-slate-100">学習パラメータ</p>
                       <div className="space-y-2 rounded-lg border border-border/80 bg-card/55 p-3">
                         <p className="text-xs font-semibold text-slate-100">実行プロファイル</p>
                         <div className="grid grid-cols-2 gap-2">
@@ -765,15 +911,7 @@ export default function TrainingView({
                           </p>
                         ) : null}
                       </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="app-label">学習デバイス</label>
-                          <select className="app-select" value={ocrTrainDevice} onChange={(e) => setOcrTrainDevice(e.target.value)}>
-                            <option value="auto">auto</option>
-                            <option value="cpu">cpu</option>
-                            <option value="gpu">gpu</option>
-                          </select>
-                        </div>
+                      <div className="grid grid-cols-3 gap-2">
                         <div>
                           <label className="app-label">保存間隔（epoch）</label>
                           <input
@@ -784,8 +922,6 @@ export default function TrainingView({
                             onChange={(e) => setOcrSaveEpochStep(e.target.value)}
                           />
                         </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
                         <div>
                           <label className="app-label">Train num_workers</label>
                           <input
@@ -868,26 +1004,17 @@ export default function TrainingView({
                           現在設定はメモリ不足の可能性があります。Mac Safe プリセットへの切替を推奨します。
                         </p>
                       ) : null}
-                      </>
-                      )}
                       <div>
                         <label className="app-label">
-                          {isTesseractEngine ? "学習対象文字セット（charset）" : "文字セット（charset）"}
+                          文字セット（charset）
+                          <InfoHint text="学習対象の文字セットです。PaddleOCRでは大文字に正規化されます。" />
                         </label>
                         <input
                           className="app-input"
                           value={ocrCharset}
-                          onChange={(e) =>
-                            // Tesseractは大文字と小文字筆記体(k/l/t)を区別するため大小変換しない
-                            setOcrCharset(isTesseractEngine ? e.target.value : e.target.value.toUpperCase())
-                          }
-                          placeholder={isTesseractEngine ? TESSERACT_CHARSET_DEFAULT : OCR_CHARSET_DEFAULT}
+                          onChange={(e) => setOcrCharset(e.target.value.toUpperCase())}
+                          placeholder={OCR_CHARSET_DEFAULT}
                         />
-                        {isTesseractEngine ? (
-                          <p className="mt-1 text-xs text-muted">
-                            既定: A-Z / 0-9 / 小文字筆記体 k,l,t。charset外の文字を含むラベルは学習から除外されます（文字削除はしません）。
-                          </p>
-                        ) : null}
                       </div>
                       <div>
                         <label className="app-label">画像形状</label>
@@ -943,22 +1070,37 @@ export default function TrainingView({
                           />
                         </div>
                       </div>
-                      <div className={isTesseractEngine ? "" : "grid grid-cols-2 gap-2"}>
+                      <div className="grid grid-cols-2 gap-2">
                         <div>
-                          <label className="app-label">{isTesseractEngine ? "最大イテレーション" : "エポック数"}</label>
-                          <input type="number" className="app-input" value={epochs} onChange={(e) => setEpochs(e.target.value)} />
+                          <label className="app-label">
+                            バッチサイズ
+                            <InfoHint text="1ステップで処理する画像枚数です。Batch自動最適化がONの場合はVRAM基準で調整されます。" />
+                          </label>
+                          <input type="number" className="app-input" value={batchSize} onChange={(e) => setBatchSize(e.target.value)} />
                         </div>
-                        {!isTesseractEngine && (
-                          <div>
-                            <label className="app-label">バッチサイズ</label>
-                            <input type="number" className="app-input" value={batchSize} onChange={(e) => setBatchSize(e.target.value)} />
-                          </div>
-                        )}
+                        <div>
+                          <label className="app-label">
+                            最大文字数
+                            <InfoHint text="1ラベルあたりの最大文字数（max_text_length）です。" />
+                          </label>
+                          <input
+                            type="number"
+                            className="app-input"
+                            value={ocrMaxTextLength}
+                            onChange={(e) => setOcrMaxTextLength(e.target.value)}
+                          />
+                        </div>
                       </div>
                     </div>
+                      </>
+                    )}
+                  </div>
+                </details>
 
+                {ocrEngine !== "easyocr" ? (
+                  <>
                     <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">4. 実行</p>
+                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">2. 実行</p>
                       <Button
                         variant={ocrNextAction === "train" ? trainingVariant : "secondary"}
                         className={`${ocrNextAction === "train" ? trainingClassName : ""} w-full`}
@@ -1005,7 +1147,7 @@ export default function TrainingView({
                       </div>
                     ) : null}
                   </>
-                )}
+                ) : null}
               </>
             )}
           </div>

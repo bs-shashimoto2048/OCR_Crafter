@@ -2483,6 +2483,7 @@ export default function App() {
     view = (
       <TrainingView
         trainingMode={trainingMode}
+        projectId={projectId}
         trainingFamily={trainingFamily}
         setTrainingFamily={setTrainingFamily}
         modelType={modelType}
