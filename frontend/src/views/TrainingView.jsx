@@ -678,7 +678,7 @@ export default function TrainingView({
                     </div>
                     <div>
                       <label className="app-label">
-                        学習回数
+                        {isTesseractEngine ? "最大イテレーション" : "学習回数"}
                         <InfoHint text="学習の繰り返し回数です。PaddleOCR / EasyOCR では Epoch 数、Tesseract では Iteration 数として使用します。Tesseractでは一般的に500〜3000程度で学習します。" />
                       </label>
                       <input
@@ -688,7 +688,11 @@ export default function TrainingView({
                         onChange={(e) => setEpochs(e.target.value)}
                         disabled={ocrEngine === "easyocr"}
                       />
-                      <p className="mt-1 text-[11px] text-muted">エンジンに応じて Epoch または Iteration として処理されます。</p>
+                      <p className="mt-1 text-[11px] text-muted">
+                        {isTesseractEngine
+                          ? "Tesseractでは Epoch ではなく Iteration として処理されます"
+                          : "Epochとして処理されます"}
+                      </p>
                     </div>
                     <div>
                       <label className="app-label">
