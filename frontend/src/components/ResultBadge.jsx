@@ -1,5 +1,4 @@
-import Card from "./Card";
-
+// 前処理画面のコンパクト推論結果表示（1〜2行に集約）
 export default function ResultBadge({ loading, prediction, confidence, modelType, modelName, engine, error, warning }) {
   const engineLabel =
     engine === "easyocr"
@@ -12,42 +11,39 @@ export default function ResultBadge({ loading, prediction, confidence, modelType
 
   if (error) {
     return (
-      <Card title="推論結果" subtitle="プレビュー推論">
-        <div className="min-h-[64px] whitespace-pre-line rounded-lg border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger">
-          {error}
-        </div>
-      </Card>
+      <div className="shrink-0 whitespace-pre-line rounded-xl border border-danger/40 bg-danger/10 px-4 py-2.5 text-sm text-danger">
+        {error}
+      </div>
     );
   }
 
   return (
-    <Card title="推論結果" subtitle="プレビュー推論" className="min-h-[112px]">
+    <div className="shrink-0 rounded-xl border border-border bg-card/60 px-4 py-2.5 backdrop-blur-md">
       {loading ? (
         <div className="text-sm text-muted">プレビュー推論を実行中...</div>
       ) : prediction ? (
-        <div className="flex items-end justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-wide text-muted">予測ラベル</p>
-            <p className="text-3xl font-semibold text-text">{prediction}</p>
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-[10px] uppercase tracking-wide text-muted">予測ラベル</p>
+            <p className="truncate text-2xl font-semibold leading-tight text-text">{prediction}</p>
           </div>
-          <div className="text-right">
-            <p className="text-xs uppercase tracking-wide text-muted">信頼度</p>
-            <p className="text-lg font-semibold text-accent">
-              {typeof confidence === "number" ? `${(confidence * 100).toFixed(1)}%` : "--"}
+          <div className="shrink-0 text-right">
+            <p className="text-xs text-muted">
+              信頼度 <span className="text-base font-semibold text-accent">
+                {typeof confidence === "number" ? `${(confidence * 100).toFixed(1)}%` : "--"}
+              </span>
             </p>
-            <p className="text-xs text-muted">エンジン: {engineLabel}</p>
-            <p className="text-xs text-muted">モデル種別: {modelType || "--"}</p>
-            <p className="text-xs text-muted">モデル名: {modelName || "--"}</p>
+            <p className="text-[11px] text-muted">
+              Engine {engineLabel} / Model {modelName || modelType || "--"}
+            </p>
           </div>
         </div>
       ) : (
         <div className="text-sm text-muted">プレビュー結果はありません。</div>
       )}
       {!loading && warning ? (
-        <div className="mt-3 rounded-lg border border-amber-400/40 bg-amber-400/10 px-4 py-2 text-xs text-amber-200">
-          {warning}
-        </div>
+        <p className="mt-1.5 rounded-md border border-amber-400/40 bg-amber-400/10 px-2 py-1 text-[11px] text-amber-200">{warning}</p>
       ) : null}
-    </Card>
+    </div>
   );
 }

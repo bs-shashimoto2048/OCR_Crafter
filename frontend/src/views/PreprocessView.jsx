@@ -79,9 +79,9 @@ export default function PreprocessView({
           : "EasyOCR";
 
   return (
-    <div className="grid grid-cols-[220px_minmax(0,1fr)_360px] gap-4">
-      <Card title="画像一覧" subtitle="プレビュー対象を選択">
-        <div className="space-y-2 max-h-[72vh] overflow-auto pr-1">
+    <div className="grid h-[calc(100vh-238px)] min-h-[440px] grid-cols-[220px_minmax(0,1fr)_340px] gap-3">
+      <Card title="画像一覧" subtitle="プレビュー対象を選択" className="flex h-full min-h-0 flex-col">
+        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
           {images.map((item) => {
             const active = item.image === selectedImage;
             const thumbSrc = imageUrl(item.image, projectId, imageVersion);
@@ -100,6 +100,9 @@ export default function PreprocessView({
                 </div>
                 <div className="truncate font-medium">{item.image}</div>
                 <div className="mt-1 text-[11px] text-muted">種別: {item.type || "--"}</div>
+                {active && !loading && preview?.prediction ? (
+                  <div className="mt-1 truncate text-[11px] font-semibold text-accent">OCR: {preview.prediction}</div>
+                ) : null}
               </button>
             );
           })}
@@ -107,27 +110,25 @@ export default function PreprocessView({
         </div>
       </Card>
 
-      <div className="space-y-4">
-        <div className="grid grid-cols-3 gap-4">
-          <ImagePreview
-            title="元画像"
-            subtitle={selectedImage || "--"}
-            src={selectedImage ? imageUrl(selectedImage, projectId, imageVersion) : ""}
-            loading={false}
-          />
-          <ImagePreview
-            title="中間画像"
-            subtitle={preview?.type ? `種別: ${preview.type}` : "--"}
-            src={preview?.interim_data_url || ""}
-            loading={loading}
-          />
-          <ImagePreview
-            title="最終画像"
-            subtitle={preview?.ratio !== undefined ? `比率: ${preview.ratio}` : "--"}
-            src={preview?.processed_data_url || ""}
-            loading={loading}
-          />
-        </div>
+      <div className="flex min-h-0 flex-col gap-2">
+        <ImagePreview
+          title="元画像"
+          subtitle={selectedImage || "--"}
+          src={selectedImage ? imageUrl(selectedImage, projectId, imageVersion) : ""}
+          loading={false}
+        />
+        <ImagePreview
+          title="中間画像"
+          subtitle={preview?.type ? `種別: ${preview.type}` : "--"}
+          src={preview?.interim_data_url || ""}
+          loading={loading}
+        />
+        <ImagePreview
+          title="最終画像"
+          subtitle={preview?.ratio !== undefined ? `比率: ${preview.ratio}` : "--"}
+          src={preview?.processed_data_url || ""}
+          loading={loading}
+        />
 
         <ResultBadge
           loading={loading}
@@ -140,7 +141,13 @@ export default function PreprocessView({
           warning={preview?.predict_model_warning || ""}
         />
 
-        <Card title="推論設定" subtitle="前処理プレビューで使う推論設定">
+        <details className="group shrink-0 overflow-y-auto rounded-xl border border-border bg-card/50 backdrop-blur-md">
+          <summary className="flex cursor-pointer select-none items-center gap-1.5 px-3 py-2 text-sm font-semibold text-text transition hover:bg-card/70 [&::-webkit-details-marker]:hidden">
+            <span className="text-xs text-muted transition-transform group-open:rotate-90" aria-hidden="true">▶</span>
+            推論設定
+            <span className="ml-auto truncate text-[11px] font-normal text-muted">推論先: {resolvedModelName}</span>
+          </summary>
+          <div className="px-3 pb-3">
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="app-label">エンジン</label>
@@ -278,10 +285,11 @@ export default function PreprocessView({
               </div>
             )}
           </div>
-          <div className="mt-3 rounded-lg border border-border bg-card/45 p-2 text-xs text-muted">
-            実際に使用される推論先: <span className="font-semibold text-text">{resolvedModelName}</span>
+            <div className="mt-3 rounded-lg border border-border bg-card/45 p-2 text-xs text-muted">
+              実際に使用される推論先: <span className="font-semibold text-text">{resolvedModelName}</span>
+            </div>
           </div>
-        </Card>
+        </details>
       </div>
 
       <PreprocessPanel
