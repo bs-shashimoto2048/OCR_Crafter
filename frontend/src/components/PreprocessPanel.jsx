@@ -26,6 +26,7 @@ function Group({ title, defaultOpen = false, children }) {
 }
 
 export default function PreprocessPanel({
+  headerAction = null,
   params,
   defaultParams,
   onParamsChange,
@@ -59,6 +60,7 @@ export default function PreprocessPanel({
       title="前処理パラメータ"
       subtitle="リアルタイム調整（300msデバウンス）"
       className="preprocess-panel flex h-full min-h-0 flex-col"
+      actions={headerAction}
     >
       <div className="scroll-stable min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
         <Group title="基本設定" defaultOpen>

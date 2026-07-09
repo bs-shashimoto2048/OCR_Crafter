@@ -253,6 +253,16 @@ export default function App() {
     }
   });
 
+  // ラベル編集の「推論設定を開く」経由で前処理設定を開いたときの戻り先（通常遷移では null）
+  const [preprocessReturnView, setPreprocessReturnView] = useState(null);
+
+  useEffect(() => {
+    // 前処理設定画面を離れたら戻り先を破棄する（サイドバー等の通常遷移で復活させない）
+    if (activeView !== "preprocess" && preprocessReturnView) {
+      setPreprocessReturnView(null);
+    }
+  }, [activeView, preprocessReturnView]);
+
   function toggleSidebarCollapsed() {
     setSidebarCollapsed((prev) => {
       const next = !prev;
@@ -2522,6 +2532,12 @@ export default function App() {
       <PreprocessView
         projectId={projectId}
         imageVersion={imageVersion}
+        returnView={preprocessReturnView}
+        onReturn={() => {
+          if (preprocessReturnView) {
+            setActiveView(preprocessReturnView);
+          }
+        }}
         images={images}
         selectedImage={preprocessImage}
         onSelectImage={setPreprocessImage}
@@ -2567,7 +2583,10 @@ export default function App() {
         imageVersion={imageVersion}
         preprocessOverrides={labelingPreprocessOverrides}
         predictParams={labelingPredictParams}
-        onOpenPreprocess={() => setActiveView("preprocess")}
+        onOpenPreprocess={() => {
+          setPreprocessReturnView("labeling");
+          setActiveView("preprocess");
+        }}
         images={images}
         selectedIndex={selectedIndex}
         onSelectIndex={setSelectedIndex}

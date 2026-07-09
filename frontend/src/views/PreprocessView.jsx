@@ -1,3 +1,6 @@
+import { useEffect, useRef } from "react";
+
+import Button from "../components/Button";
 import Card from "../components/Card";
 import ImagePreview from "../components/ImagePreview";
 import PreprocessPanel from "../components/PreprocessPanel";
@@ -7,6 +10,8 @@ import { imageUrl } from "../lib/api";
 export default function PreprocessView({
   projectId,
   imageVersion,
+  returnView,
+  onReturn,
   images,
   selectedImage,
   onSelectImage,
@@ -44,6 +49,16 @@ export default function PreprocessView({
 }) {
   const latestAny = String(latestModels?.any || "");
   const latestByType = latestModels?.byType || {};
+  const predictSettingsRef = useRef(null);
+
+  // ラベル編集から「推論設定を開く」で遷移した場合は推論設定を開いた状態にして見える位置へ
+  useEffect(() => {
+    if (!returnView || !predictSettingsRef.current) {
+      return;
+    }
+    predictSettingsRef.current.open = true;
+    predictSettingsRef.current.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  }, [returnView]);
 
   function basename(path) {
     if (!path) return "";
@@ -141,7 +156,7 @@ export default function PreprocessView({
           warning={preview?.predict_model_warning || ""}
         />
 
-        <details className="group shrink-0 overflow-y-auto rounded-xl border border-border bg-card/50 backdrop-blur-md">
+        <details ref={predictSettingsRef} className="group shrink-0 overflow-y-auto rounded-xl border border-border bg-card/50 backdrop-blur-md">
           <summary className="flex cursor-pointer select-none items-center gap-1.5 px-3 py-2 text-sm font-semibold text-text transition hover:bg-card/70 [&::-webkit-details-marker]:hidden">
             <span className="text-xs text-muted transition-transform group-open:rotate-90" aria-hidden="true">▶</span>
             推論設定
@@ -293,6 +308,13 @@ export default function PreprocessView({
       </div>
 
       <PreprocessPanel
+        headerAction={
+          returnView ? (
+            <Button size="sm" variant="secondary" onClick={() => onReturn?.()} title="ラベル編集画面へ戻ります">
+              × ラベル編集へ戻る
+            </Button>
+          ) : null
+        }
         params={params}
         defaultParams={defaultParams}
         onParamsChange={onParamsChange}
