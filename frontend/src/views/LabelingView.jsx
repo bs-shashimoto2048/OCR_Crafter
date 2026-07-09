@@ -10,6 +10,22 @@ const keyRows = [
   ["z", "x", "c", "v", "b", "n", "m"],
 ];
 
+// OCR候補と現在ラベルの差分を1文字ずつ色付け表示する
+function DiffText({ candidate, current }) {
+  const chars = String(candidate || "").split("");
+  const base = String(current || "");
+  return (
+    <span className="font-mono text-lg font-semibold tracking-wide">
+      {chars.map((ch, idx) => (
+        <span key={idx} className={ch === base[idx] ? "text-text" : "text-amber-300"}>
+          {ch}
+        </span>
+      ))}
+      {base.length > chars.length ? <span className="text-amber-300/70">…</span> : null}
+    </span>
+  );
+}
+
 export default function LabelingView({
   projectId,
   imageVersion,
@@ -33,12 +49,13 @@ export default function LabelingView({
   const zoomLevels = [25, 50, 100, 150, 200];
   const [zoomPercent, setZoomPercent] = useState(100);
   const [showUnlabeledOnly, setShowUnlabeledOnly] = useState(false);
-  const [listMode, setListMode] = useState("card");
+  const [listMode, setListMode] = useState("table");
   const [previewSrc, setPreviewSrc] = useState("");
+  const [ocrCandidate, setOcrCandidate] = useState(null);
   const listRef = useRef(null);
   const itemRefs = useRef([]);
   const labelInputRef = useRef(null);
-  const saveButtonRef = useRef(null);
+  const savingRef = useRef(false);
   const selected = images[selectedIndex] || null;
   const visibleEntries = useMemo(() => {
     const entries = images.map((item, originalIndex) => {
@@ -87,7 +104,6 @@ export default function LabelingView({
 
     const top = itemEl.offsetTop - listEl.offsetTop;
     listEl.scrollTo({ top, behavior: "smooth" });
-    itemEl.focus({ preventScroll: true });
   }, [selectedIndex, visibleEntries]);
 
   useEffect(() => {
@@ -111,6 +127,7 @@ export default function LabelingView({
     async function loadPreview() {
       if (!selected?.image || !projectId) {
         setPreviewSrc("");
+        setOcrCandidate(null);
         return;
       }
       try {
@@ -130,11 +147,23 @@ export default function LabelingView({
           data?.processed_data_url ||
           processedImageUrl(selected.image, projectId, imageVersion, selected.type || "");
         setPreviewSrc(nextSrc);
+        // プレビューAPIが返す推論結果をOCR候補として活用する（追加のOCR処理は行わない）
+        const prediction = String(data?.prediction || "").trim();
+        setOcrCandidate(
+          prediction
+            ? {
+                text: prediction,
+                confidence: typeof data?.confidence === "number" ? data.confidence : null,
+                engine: data?.predict_engine || "",
+              }
+            : null
+        );
       } catch {
         if (cancelled) {
           return;
         }
         setPreviewSrc(processedImageUrl(selected.image, projectId, imageVersion, selected.type || ""));
+        setOcrCandidate(null);
       }
     }
     loadPreview();
@@ -142,6 +171,53 @@ export default function LabelingView({
       cancelled = true;
     };
   }, [selected?.image, selected?.type, projectId, imageVersion, preprocessOverrides]);
+
+  async function saveAndNext() {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    try {
+      await Promise.resolve(onSave());
+      onNext();
+    } finally {
+      savingRef.current = false;
+    }
+  }
+
+  function adoptCandidate() {
+    if (ocrCandidate?.text) {
+      onLabelChange(ocrCandidate.text);
+      labelInputRef.current?.focus();
+    }
+  }
+
+  // ⑧ キーボードショートカット: Ctrl+S=保存 / Ctrl+←→=画像移動 / Esc=OCR候補採用
+  useEffect(() => {
+    function handleKeyDown(event) {
+      if (event.isComposing) {
+        return;
+      }
+      if (event.ctrlKey && !event.altKey && (event.key === "s" || event.key === "S")) {
+        event.preventDefault();
+        onSave();
+        return;
+      }
+      if (event.ctrlKey && event.key === "ArrowRight") {
+        event.preventDefault();
+        onNext();
+        return;
+      }
+      if (event.ctrlKey && event.key === "ArrowLeft") {
+        event.preventDefault();
+        onPrev();
+        return;
+      }
+      if (event.key === "Escape") {
+        adoptCandidate();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  });
 
   if (!selected) {
     return (
@@ -151,26 +227,147 @@ export default function LabelingView({
     );
   }
 
-  return (
-    <div className="grid grid-cols-[1.5fr_1fr] gap-6">
-      <div className="space-y-6">
-        <Card title="プレビュー" subtitle={`${selected.image} / ${imageShapes[selected.image] || "--"}`}>
-          <div className="mb-3 flex flex-wrap items-center gap-2">
-            <span className="text-xs font-medium text-muted">表示倍率</span>
-            {zoomLevels.map((level) => (
-              <Button
-                key={level}
-                size="sm"
-                variant={zoomPercent === level ? "primary" : "secondary"}
-                className="h-8 px-2 text-xs"
-                onClick={() => setZoomPercent(level)}
-              >
-                {level}%
-              </Button>
-            ))}
-          </div>
+  const confidencePercent =
+    typeof ocrCandidate?.confidence === "number" ? `${(ocrCandidate.confidence * 100).toFixed(1)}%` : "--";
 
-          <div className="max-h-[70vh] overflow-auto rounded-xl border border-border bg-card/60 backdrop-blur-md p-3">
+  return (
+    <div className="grid h-[calc(100vh-238px)] min-h-[460px] grid-cols-[240px_minmax(0,1fr)_240px] gap-3">
+      {/* 左: 画像一覧（この列だけスクロール） */}
+      <Card
+        title="画像一覧"
+        subtitle={`${images.length}件`}
+        className="flex h-full min-h-0 flex-col"
+      >
+        <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
+          <div className="inline-flex rounded-lg border border-border bg-card/45 p-0.5">
+            <Button
+              size="sm"
+              variant={listMode === "table" ? "primary" : "ghost"}
+              className="h-6 px-2 text-[11px]"
+              onClick={() => setListMode("table")}
+            >
+              一覧
+            </Button>
+            <Button
+              size="sm"
+              variant={listMode === "card" ? "primary" : "ghost"}
+              className="h-6 px-2 text-[11px]"
+              onClick={() => setListMode("card")}
+            >
+              カード
+            </Button>
+          </div>
+          <label className="inline-flex items-center gap-1.5 text-[11px] text-text">
+            <input
+              type="checkbox"
+              checked={showUnlabeledOnly}
+              onChange={(e) => setShowUnlabeledOnly(e.target.checked)}
+            />
+            未のみ
+          </label>
+        </div>
+        <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto pr-1">
+          {listMode === "card" ? (
+            <div className="space-y-2">
+              {visibleEntries.map(({ item, originalIndex, savedLabel, draftLabel, isSet }, idx) => (
+                <button
+                  key={item.image}
+                  ref={(el) => {
+                    itemRefs.current[idx] = el;
+                  }}
+                  onClick={() => onSelectIndex(originalIndex)}
+                  className={`w-full rounded-xl border p-2 text-left transition ${
+                    originalIndex === selectedIndex
+                      ? "border-accent bg-accent/15"
+                      : "border-border bg-card/60 backdrop-blur-md hover:border-slate-500"
+                  }`}
+                >
+                  <div className="mb-1.5 overflow-hidden rounded-md border border-border bg-[#3b444f]/80 p-1">
+                    <img
+                      src={imageUrl(item.image, projectId, imageVersion)}
+                      alt={item.image}
+                      className="h-14 w-full object-contain"
+                      loading="lazy"
+                    />
+                  </div>
+                  <p className="truncate text-xs font-medium text-text" title={item.image}>
+                    {item.image}
+                  </p>
+                  <div className="mt-0.5 flex items-center justify-between gap-2">
+                    <span className="truncate text-sm font-semibold text-lime-300">
+                      {isSet ? savedLabel : draftLabel || "-"}
+                    </span>
+                    <span
+                      className={`shrink-0 text-[11px] font-semibold ${isSet ? "text-emerald-300" : "text-red-400"}`}
+                    >
+                      {isSet ? "🟢保存済" : "未"}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="divide-y divide-border/50 overflow-hidden rounded-xl border border-border bg-card/55 backdrop-blur-md">
+              {visibleEntries.map(({ item, originalIndex, savedLabel, draftLabel, isSet }, idx) => (
+                <button
+                  key={item.image}
+                  ref={(el) => {
+                    itemRefs.current[idx] = el;
+                  }}
+                  onClick={() => onSelectIndex(originalIndex)}
+                  className={`w-full px-2.5 py-1.5 text-left transition ${
+                    originalIndex === selectedIndex ? "bg-accent/15" : "hover:bg-accent/10"
+                  }`}
+                >
+                  <p className="truncate text-xs text-text" title={item.image}>
+                    {item.image}
+                  </p>
+                  <div className="mt-0.5 flex items-center justify-between gap-2">
+                    <span className="truncate text-sm font-semibold text-lime-300">
+                      {isSet ? savedLabel : draftLabel || "-"}
+                    </span>
+                    <span
+                      className={`shrink-0 text-[11px] font-semibold ${isSet ? "text-emerald-300" : "text-red-400"}`}
+                    >
+                      {isSet ? "🟢保存済" : "未"}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+          {visibleEntries.length === 0 ? (
+            <div className="rounded-xl border border-border bg-card/60 backdrop-blur-md px-3 py-6 text-center text-sm text-muted">
+              表示対象の画像がありません
+            </div>
+          ) : null}
+        </div>
+      </Card>
+
+      {/* 中央: プレビュー画像（主役）+ 入力 + 操作 */}
+      <div className="flex min-h-0 flex-col gap-2">
+        <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-border bg-card/60 p-2 backdrop-blur-md">
+          <div className="mb-1.5 flex shrink-0 flex-wrap items-center justify-between gap-2 px-1">
+            <p className="truncate text-xs font-semibold text-text">
+              {selected.image}
+              <span className="ml-2 font-normal text-muted">{imageShapes[selected.image] || "--"}</span>
+            </p>
+            <div className="flex items-center gap-1">
+              <span className="mr-1 text-[11px] text-muted">倍率</span>
+              {zoomLevels.map((level) => (
+                <Button
+                  key={level}
+                  size="sm"
+                  variant={zoomPercent === level ? "primary" : "secondary"}
+                  className="h-6 px-1.5 text-[11px]"
+                  onClick={() => setZoomPercent(level)}
+                >
+                  {level}%
+                </Button>
+              ))}
+            </div>
+          </div>
+          <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border bg-[#3b444f]/40 p-2">
             <img
               src={previewSrc || processedImageUrl(selected.image, projectId, imageVersion, selected.type || "")}
               alt={selected.image}
@@ -178,18 +375,9 @@ export default function LabelingView({
               style={{ width: `${zoomPercent}%` }}
             />
           </div>
+        </div>
 
-          <div className="mt-4 flex gap-2">
-            <Button variant="secondary" onClick={onPrev}>
-              前へ
-            </Button>
-            <Button variant="secondary" onClick={onNext}>
-              次へ
-            </Button>
-          </div>
-        </Card>
-
-        <Card title="ラベルエディタ" subtitle="複数文字 / 英数字入力に対応">
+        <div className="shrink-0 rounded-xl border border-border bg-card/60 p-3 backdrop-blur-md">
           <label className="app-label">現在のラベル</label>
           <input
             ref={labelInputRef}
@@ -202,80 +390,61 @@ export default function LabelingView({
               if (e.key === "Enter" || e.key === "NumpadEnter") {
                 e.preventDefault();
                 e.stopPropagation();
-                saveButtonRef.current?.click();
+                saveAndNext();
               }
             }}
-            className="app-input mb-4"
-            placeholder="ラベル文字列を入力"
+            className="app-input mb-2 text-xl font-semibold tracking-[0.1em]"
+            placeholder="ラベル文字列を入力（Enterで保存して次へ）"
           />
 
-          <div className="space-y-2 rounded-xl border border-border bg-card/60 backdrop-blur-md p-3">
-            <div className="grid grid-cols-10 gap-1.5">
-              {keyRows[0].map((key) => (
-                <Button
-                  key={key}
-                  size="sm"
-                  variant="secondary"
-                  className="h-9 px-0 text-xs"
-                  onClick={() => onAppendChar(key)}
-                >
-                  {key}
-                </Button>
-              ))}
-            </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button onClick={saveAndNext} title="ラベルを保存して次の画像へ (Enter)">
+              保存して次へ
+            </Button>
+            <Button variant="secondary" onClick={onSave} title="ラベルを保存 (Ctrl+S)">
+              保存
+            </Button>
+            <Button variant="secondary" onClick={onPrev} title="前の画像へ (Ctrl+←)">
+              前へ
+            </Button>
+            <Button variant="secondary" onClick={onNext} title="次の画像へ (Ctrl+→)">
+              次へ
+            </Button>
+            <span className="ml-auto hidden text-[11px] text-muted xl:inline">
+              Enter=保存して次へ / Ctrl+S=保存 / Ctrl+←→=移動 / Esc=候補採用
+            </span>
+          </div>
 
-            <div className="grid grid-cols-10 gap-1.5 pl-3">
-              {keyRows[1].map((key) => {
-                const label = isUppercase ? key.toUpperCase() : key.toLowerCase();
-                return (
+          <details className="group mt-2 rounded-lg border border-border/80 bg-card/45">
+            <summary className="flex cursor-pointer select-none items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-text transition hover:bg-card/70 [&::-webkit-details-marker]:hidden">
+              <span className="text-[10px] text-muted transition-transform group-open:rotate-90" aria-hidden="true">
+                ▶
+              </span>
+              ソフトキーボード
+            </summary>
+            <div className="space-y-1.5 px-2.5 pb-2.5">
+              <div className="grid grid-cols-10 gap-1.5">
+                {keyRows[0].map((key) => (
                   <Button
                     key={key}
                     size="sm"
                     variant="secondary"
-                    className="h-9 px-0 text-xs"
-                    onClick={() => onAppendChar(label)}
+                    className="h-8 px-0 text-xs"
+                    onClick={() => onAppendChar(key)}
                   >
-                    {label}
+                    {key}
                   </Button>
-                );
-              })}
-            </div>
-
-            <div className="grid grid-cols-10 gap-1.5 pl-8">
-              {keyRows[2].map((key) => {
-                const label = isUppercase ? key.toUpperCase() : key.toLowerCase();
-                return (
-                  <Button
-                    key={key}
-                    size="sm"
-                    variant="secondary"
-                    className="h-9 px-0 text-xs"
-                    onClick={() => onAppendChar(label)}
-                  >
-                    {label}
-                  </Button>
-                );
-              })}
-            </div>
-
-            <div className="grid grid-cols-12 gap-1.5">
-              <Button
-                size="sm"
-                variant={isUppercase ? "primary" : "secondary"}
-                className="col-span-2 h-9 text-xs"
-                onClick={onToggleCase}
-              >
-                {isUppercase ? "ABC" : "abc"}
-              </Button>
-              <div className="col-span-8 grid grid-cols-7 gap-1.5">
-                {keyRows[3].map((key) => {
+                ))}
+              </div>
+              <div className="grid grid-cols-10 gap-1.5 pl-3">
+                {keyRows[1].map((key) => {
                   const label = isUppercase ? key.toUpperCase() : key.toLowerCase();
                   return (
                     <Button
                       key={key}
                       size="sm"
                       variant="secondary"
-                      className="h-9 px-0 text-xs"
+                      className="h-8 px-0 text-xs"
                       onClick={() => onAppendChar(label)}
                     >
                       {label}
@@ -283,147 +452,94 @@ export default function LabelingView({
                   );
                 })}
               </div>
-              <Button size="sm" variant="secondary" className="col-span-2 h-9 text-xs" onClick={onBackspace}>
-                戻す
-              </Button>
+              <div className="grid grid-cols-10 gap-1.5 pl-8">
+                {keyRows[2].map((key) => {
+                  const label = isUppercase ? key.toUpperCase() : key.toLowerCase();
+                  return (
+                    <Button
+                      key={key}
+                      size="sm"
+                      variant="secondary"
+                      className="h-8 px-0 text-xs"
+                      onClick={() => onAppendChar(label)}
+                    >
+                      {label}
+                    </Button>
+                  );
+                })}
+              </div>
+              <div className="grid grid-cols-12 gap-1.5">
+                <Button
+                  size="sm"
+                  variant={isUppercase ? "primary" : "secondary"}
+                  className="col-span-2 h-8 text-xs"
+                  onClick={onToggleCase}
+                >
+                  {isUppercase ? "ABC" : "abc"}
+                </Button>
+                <div className="col-span-8 grid grid-cols-7 gap-1.5">
+                  {keyRows[3].map((key) => {
+                    const label = isUppercase ? key.toUpperCase() : key.toLowerCase();
+                    return (
+                      <Button
+                        key={key}
+                        size="sm"
+                        variant="secondary"
+                        className="h-8 px-0 text-xs"
+                        onClick={() => onAppendChar(label)}
+                      >
+                        {label}
+                      </Button>
+                    );
+                  })}
+                </div>
+                <Button size="sm" variant="secondary" className="col-span-2 h-8 text-xs" onClick={onBackspace}>
+                  戻す
+                </Button>
+              </div>
+              <div className="grid grid-cols-12 gap-1.5">
+                <Button size="sm" variant="secondary" className="col-span-2 h-8 text-xs" onClick={onClear}>
+                  クリア
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="col-span-10 h-8 text-xs tracking-wide"
+                  onClick={() => onAppendChar(" ")}
+                >
+                  スペース
+                </Button>
+              </div>
             </div>
-
-            <div className="grid grid-cols-12 gap-1.5">
-              <Button size="sm" variant="secondary" className="col-span-2 h-9 text-xs" onClick={onClear}>
-                クリア
-              </Button>
-              <Button
-                size="sm"
-                variant="secondary"
-                className="col-span-8 h-9 text-xs tracking-wide"
-                onClick={() => onAppendChar(" ")}
-              >
-                スペース
-              </Button>
-              <Button ref={saveButtonRef} size="sm" className="col-span-2 h-9 text-xs" onClick={onSave}>
-                ラベル保存
-              </Button>
-            </div>
-          </div>
-        </Card>
+          </details>
+        </div>
       </div>
 
-      <Card
-        title="画像リスト"
-        subtitle="ファイル名と設定ラベルを確認"
-        actions={
-          <div className="flex items-center gap-3">
-            <div className="inline-flex rounded-lg border border-border bg-card/45 p-1">
-              <Button
-                size="sm"
-                variant={listMode === "card" ? "primary" : "ghost"}
-                className="h-7 px-2 text-[11px]"
-                onClick={() => setListMode("card")}
-              >
-                カード
-              </Button>
-              <Button
-                size="sm"
-                variant={listMode === "table" ? "primary" : "ghost"}
-                className="h-7 px-2 text-[11px]"
-                onClick={() => setListMode("table")}
-              >
-                一覧
-              </Button>
+      {/* 右: OCR候補（固定表示） */}
+      <Card title="OCR候補" subtitle="クリックまたはEscで採用" className="flex h-full min-h-0 flex-col">
+        {ocrCandidate?.text ? (
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={adoptCandidate}
+              title="クリックで現在ラベルへ反映 (Esc)"
+              className="w-full rounded-xl border border-border bg-card/60 px-3 py-2.5 text-left backdrop-blur-md transition hover:border-accent/60 hover:bg-accent/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+            >
+              <DiffText candidate={ocrCandidate.text} current={labelValue} />
+            </button>
+            <div className="rounded-lg border border-border bg-card/45 px-3 py-2 text-xs text-muted">
+              <p>
+                信頼度 <span className="text-sm font-semibold text-accent">{confidencePercent}</span>
+              </p>
+              {ocrCandidate.engine ? <p className="mt-0.5">Engine: {ocrCandidate.engine}</p> : null}
             </div>
-            <label className="inline-flex items-center gap-2 text-xs text-text">
-              <input
-                type="checkbox"
-                checked={showUnlabeledOnly}
-                onChange={(e) => setShowUnlabeledOnly(e.target.checked)}
-              />
-              未ラベルのみ
-            </label>
+            <p className="text-[11px] leading-relaxed text-muted">
+              現在ラベルと異なる文字は<span className="text-amber-300">黄色</span>で表示されます。
+            </p>
           </div>
-        }
-      >
-        <div ref={listRef} className="max-h-[80vh] overflow-auto pr-1">
-          {listMode === "card" ? (
-            <div className="space-y-2">
-              {visibleEntries.map(({ item, originalIndex, savedLabel, draftLabel, isSet }, idx) => {
-                return (
-                  <button
-                    key={item.image}
-                    ref={(el) => {
-                      itemRefs.current[idx] = el;
-                    }}
-                    onClick={() => onSelectIndex(originalIndex)}
-                    className={`w-full rounded-xl border p-3 text-left transition ${
-                      originalIndex === selectedIndex
-                        ? "border-accent bg-accent/15"
-                        : "border-border bg-card/60 backdrop-blur-md hover:border-slate-500"
-                    }`}
-                  >
-                    <div className="mb-2 overflow-hidden rounded-md border border-border bg-[#3b444f]/80 p-1">
-                      <img
-                        src={imageUrl(item.image, projectId, imageVersion)}
-                        alt={item.image}
-                        className="h-20 w-full object-contain"
-                        loading="lazy"
-                      />
-                    </div>
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="truncate text-sm font-medium text-text" title={item.image}>
-                        {item.image}
-                      </p>
-                      {isSet ? (
-                        <span className="rounded-full border border-emerald-400/50 bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-300">
-                          済
-                        </span>
-                      ) : (
-                        <span className="text-[11px] font-semibold text-red-400">未</span>
-                      )}
-                    </div>
-                    <p className="mt-1 truncate text-xs text-muted">ラベル</p>
-                    <p className="truncate text-base font-semibold text-lime-300">
-                      {isSet ? savedLabel : draftLabel || "-"}
-                    </p>
-                  </button>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="overflow-hidden rounded-xl border border-border bg-card/55 backdrop-blur-md">
-              <div className="grid grid-cols-[minmax(0,1fr)_140px_54px] gap-2 border-b border-border/70 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted">
-                <span>ファイル名</span>
-                <span>ラベル</span>
-                <span className="text-center">状態</span>
-              </div>
-              <div className="divide-y divide-border/50">
-                {visibleEntries.map(({ item, originalIndex, savedLabel, draftLabel, isSet }, idx) => (
-                  <button
-                    key={item.image}
-                    ref={(el) => {
-                      itemRefs.current[idx] = el;
-                    }}
-                    onClick={() => onSelectIndex(originalIndex)}
-                    className={`grid w-full grid-cols-[minmax(0,1fr)_140px_54px] items-center gap-2 px-3 py-2 text-left text-xs transition ${
-                      originalIndex === selectedIndex ? "bg-accent/15" : "hover:bg-accent/10"
-                    }`}
-                  >
-                    <span className="truncate text-text" title={item.image}>
-                      {item.image}
-                    </span>
-                    <span className="truncate font-semibold text-lime-300">{isSet ? savedLabel : draftLabel || "-"}</span>
-                    <span className={`text-center font-semibold ${isSet ? "text-emerald-300" : "text-red-400"}`}>
-                      {isSet ? "済" : "未"}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          {visibleEntries.length === 0 ? (
-            <div className="rounded-xl border border-border bg-card/60 backdrop-blur-md px-3 py-6 text-center text-sm text-muted">
-              表示対象の画像がありません
-            </div>
-          ) : null}
-        </div>
+        ) : (
+          <p className="text-sm text-muted">OCR候補はありません。</p>
+        )}
       </Card>
     </div>
   );
