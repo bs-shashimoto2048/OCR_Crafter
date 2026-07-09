@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import Header from "./components/Header";
+import ExperimentalNotice from "./components/ExperimentalNotice";
 import Sidebar from "./components/Sidebar";
 import WorkflowProgress from "./components/WorkflowProgress";
 import DashboardView from "./views/DashboardView";
@@ -24,15 +25,15 @@ const viewMeta = {
   labeling: { title: "ラベル編集", subtitle: "数字ラベル編集" },
   training: { title: "学習", subtitle: "学習ジョブ実行とログ監視" },
   "ocr-training": { title: "学習", subtitle: "OCR認識モデル: OCRデータ作成・学習" },
-  "cls-training": { title: "学習", subtitle: "分割学習モデル: 前処理・データセット作成・学習" },
+  "cls-training": { title: "学習", subtitle: "実験機能（分割学習）: 前処理・データセット作成・学習" },
   models: { title: "モデル", subtitle: "保存済みモデル管理" },
   "ocr-models": { title: "モデル", subtitle: "OCR認識モデルの管理" },
-  "cls-models": { title: "モデル", subtitle: "分割学習モデルの管理" },
+  "cls-models": { title: "モデル", subtitle: "実験機能（分割学習）: モデル管理" },
   inference: { title: "推論", subtitle: "画像推論と精度確認" },
   "ocr-inference": { title: "推論", subtitle: "OCR認識モデルで推論" },
-  "cls-inference": { title: "推論", subtitle: "分割学習モデルで推論" },
+  "cls-inference": { title: "推論", subtitle: "実験機能（分割学習）: 推論" },
   evaluation: { title: "評価", subtitle: "精度評価と誤認識分析" },
-  "cls-evaluation": { title: "評価", subtitle: "分割学習モデルの精度評価" },
+  "cls-evaluation": { title: "評価", subtitle: "実験機能（分割学習）: 精度評価" },
   "rapid-ocr": { title: "OCR修正", subtitle: "キーボード中心でOCR結果を素早く修正" },
   "ocr-batch": { title: "バッチ推論", subtitle: "OCR認識モデルで複数画像を一括推論" },
   "ocr-eval": { title: "モデル評価", subtitle: "学習前後のOCRモデルを同一データで比較評価" },
@@ -41,6 +42,10 @@ const viewMeta = {
   "image-builder-step3": { title: "学習画像作成", subtitle: "Step3: Bounding Box選択" },
   "image-builder-step4": { title: "学習画像作成", subtitle: "Step4: クロップ出力" },
 };
+
+// 実験機能配下の view id。今後 TrOCR / PARSeq 等を追加する場合はここに足すだけで
+// 開発中バナー(ExperimentalNotice)が共通表示される。
+const EXPERIMENTAL_VIEWS = new Set(["cls-training", "cls-models", "cls-inference", "cls-evaluation"]);
 
 const PRESET_STORAGE_KEY = "ocr_preprocess_presets_v1";
 const PREPROCESS_PARAMS_BY_PROJECT_STORAGE_KEY = "ocr_preprocess_params_by_project_v1";
@@ -2831,6 +2836,7 @@ export default function App() {
           }
         />
         {showWorkflow ? <WorkflowProgress steps={workflowSteps} /> : null}
+        {EXPERIMENTAL_VIEWS.has(activeView) ? <ExperimentalNotice className="mt-4" /> : null}
 
         <section className="mt-6">{view}</section>
 

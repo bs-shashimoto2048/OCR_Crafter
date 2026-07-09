@@ -23,7 +23,7 @@ const modelCreationItems = [
   {
     type: "group",
     id: "cls-training-group",
-    label: "学習 > 分割学習モデル",
+    label: "🧪 実験機能",
     items: [
       { id: "cls-training", label: "1. 前処理・データセット作成・学習" },
       { id: "cls-models", label: "2. 分類モデル管理" },

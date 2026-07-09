@@ -362,7 +362,7 @@ export default function TrainingView({
             trainingMode === "ocr"
               ? "OCR認識モデルの学習を実行します"
               : trainingMode === "classification"
-                ? "分割学習モデルの学習を実行します"
+                ? "実験機能（分割学習）の学習を実行します"
                 : "分類モデルとOCRモデルを切り替えて学習できます"
           }
           className="flex min-h-0 flex-col"
