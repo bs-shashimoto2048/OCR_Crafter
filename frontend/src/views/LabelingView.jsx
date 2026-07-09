@@ -30,6 +30,7 @@ export default function LabelingView({
   projectId,
   imageVersion,
   preprocessOverrides,
+  predictParams,
   images,
   selectedIndex,
   onSelectIndex,
@@ -52,6 +53,10 @@ export default function LabelingView({
   const [listMode, setListMode] = useState("table");
   const [previewSrc, setPreviewSrc] = useState("");
   const [ocrCandidate, setOcrCandidate] = useState(null);
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [ocrError, setOcrError] = useState("");
+  const [ocrReloadTick, setOcrReloadTick] = useState(0);
+  const predictParamsKey = JSON.stringify(predictParams || {});
   const listRef = useRef(null);
   const itemRefs = useRef([]);
   const labelInputRef = useRef(null);
@@ -128,8 +133,12 @@ export default function LabelingView({
       if (!selected?.image || !projectId) {
         setPreviewSrc("");
         setOcrCandidate(null);
+        setOcrError("");
+        setOcrLoading(false);
         return;
       }
+      setOcrLoading(true);
+      setOcrError("");
       try {
         const data = await request("/preprocess/preview", {
           method: "POST",
@@ -138,6 +147,8 @@ export default function LabelingView({
             image: selected.image,
             project_id: projectId,
             overrides: preprocessOverrides || null,
+            // 前処理画面と同じ推論設定（engine/model/model_type/easyocr_langs）で候補を取得する
+            ...(predictParams || {}),
           }),
         });
         if (cancelled) {
@@ -158,19 +169,27 @@ export default function LabelingView({
               }
             : null
         );
-      } catch {
+        if (!prediction && data?.predict_error) {
+          setOcrError(String(data.predict_error));
+        }
+      } catch (error) {
         if (cancelled) {
           return;
         }
         setPreviewSrc(processedImageUrl(selected.image, projectId, imageVersion, selected.type || ""));
         setOcrCandidate(null);
+        setOcrError(String(error?.message || error || "不明なエラー"));
+      } finally {
+        if (!cancelled) {
+          setOcrLoading(false);
+        }
       }
     }
     loadPreview();
     return () => {
       cancelled = true;
     };
-  }, [selected?.image, selected?.type, projectId, imageVersion, preprocessOverrides]);
+  }, [selected?.image, selected?.type, projectId, imageVersion, preprocessOverrides, predictParamsKey, ocrReloadTick]);
 
   async function saveAndNext() {
     if (savingRef.current) return;
@@ -516,8 +535,26 @@ export default function LabelingView({
       </div>
 
       {/* 右: OCR候補（固定表示） */}
-      <Card title="OCR候補" subtitle="クリックまたはEscで採用" className="flex h-full min-h-0 flex-col">
-        {ocrCandidate?.text ? (
+      <Card
+        title="OCR候補"
+        subtitle="クリックまたはEscで採用"
+        className="flex h-full min-h-0 flex-col"
+        actions={
+          <Button
+            size="sm"
+            variant="secondary"
+            className="h-7 px-2 text-[11px]"
+            onClick={() => setOcrReloadTick((prev) => prev + 1)}
+            disabled={ocrLoading}
+            title="現在画像に対してOCR候補を再取得します"
+          >
+            OCR再実行
+          </Button>
+        }
+      >
+        {ocrLoading ? (
+          <p className="text-sm text-muted">OCR実行中...</p>
+        ) : ocrCandidate?.text ? (
           <div className="space-y-2">
             <button
               type="button"
@@ -537,8 +574,18 @@ export default function LabelingView({
               現在ラベルと異なる文字は<span className="text-amber-300">黄色</span>で表示されます。
             </p>
           </div>
+        ) : ocrError ? (
+          <div className="space-y-2">
+            <p className="whitespace-pre-line break-all rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-xs text-danger">
+              OCR候補取得失敗: {ocrError}
+            </p>
+            <p className="text-[11px] leading-relaxed text-muted">
+              推論エンジンは前処理設定画面の「推論設定」と共通です。カスタムモデル未学習の場合は
+              前処理設定画面でエンジンを EasyOCR / Tesseract 等へ切り替えてください。
+            </p>
+          </div>
         ) : (
-          <p className="text-sm text-muted">OCR候補はありません。</p>
+          <p className="text-sm text-muted">OCR候補なし</p>
         )}
       </Card>
     </div>

@@ -1319,6 +1319,36 @@ export default function App() {
     () => buildPreprocessOverrides(preprocessParams),
     [preprocessParams]
   );
+  // ラベル編集のOCR候補は前処理画面の推論設定と同じエンジン/モデルで取得する
+  const labelingPredictParams = useMemo(
+    () => ({
+      engine: preprocessPredictEngine,
+      model:
+        preprocessPredictEngine === "custom"
+          ? preprocessPredictModel
+          : preprocessPredictEngine === "paddleocr"
+            ? preprocessPredictPaddleModel
+            : preprocessPredictEngine === "tesseract"
+              ? preprocessPredictTesseractModel
+              : "latest",
+      model_type:
+        preprocessPredictEngine === "custom" && preprocessPredictModel === "latest"
+          ? preprocessPredictModelType
+          : null,
+      easyocr_langs:
+        preprocessPredictEngine === "easyocr" || preprocessPredictEngine === "paddleocr"
+          ? (preprocessPredictEasyOcrLangs.length > 0 ? preprocessPredictEasyOcrLangs.join(",") : "en")
+          : "en",
+    }),
+    [
+      preprocessPredictEngine,
+      preprocessPredictModel,
+      preprocessPredictPaddleModel,
+      preprocessPredictTesseractModel,
+      preprocessPredictModelType,
+      preprocessPredictEasyOcrLangs,
+    ]
+  );
   const rapidPreprocessOverrides = useMemo(
     () => buildPreprocessOverrides(preprocessParams),
     [preprocessParams]
@@ -2536,6 +2566,7 @@ export default function App() {
         projectId={projectId}
         imageVersion={imageVersion}
         preprocessOverrides={labelingPreprocessOverrides}
+        predictParams={labelingPredictParams}
         images={images}
         selectedIndex={selectedIndex}
         onSelectIndex={setSelectedIndex}
