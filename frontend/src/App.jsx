@@ -46,6 +46,7 @@ const PRESET_STORAGE_KEY = "ocr_preprocess_presets_v1";
 const PREPROCESS_PARAMS_BY_PROJECT_STORAGE_KEY = "ocr_preprocess_params_by_project_v1";
 const TRAINING_SESSION_BY_PROJECT_STORAGE_KEY = "ocr_training_session_by_project_v1";
 const LAST_PROJECT_STORAGE_KEY = "ocr_last_project_v1";
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "ocr_sidebar_collapsed_v1";
 const NOTICE_AUTO_HIDE_MS = 4500;
 const EASYOCR_LANGUAGE_OPTIONS = [
   "en",
@@ -220,6 +221,25 @@ function loadLastProjectId() {
 
 export default function App() {
   const [activeView, setActiveView] = useState("dashboard");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  function toggleSidebarCollapsed() {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, next ? "1" : "0");
+      } catch {
+        // localStorage が使えない環境では状態保持なしで動作継続
+      }
+      return next;
+    });
+  }
   const [notice, setNotice] = useState(null);
 
   const [projects, setProjects] = useState([]);
@@ -2788,9 +2808,15 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-transparent text-text">
-      <Sidebar active={activeView} onChange={setActiveView} onExitApp={exitApplication} />
+      <Sidebar
+        active={activeView}
+        onChange={setActiveView}
+        onExitApp={exitApplication}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={toggleSidebarCollapsed}
+      />
 
-      <main className="ml-64 min-h-screen px-6 py-4">
+      <main className={`${sidebarCollapsed ? "ml-14" : "ml-64"} min-h-screen px-6 py-4 transition-[margin-left] duration-200`}>
         <Header
           title={currentMeta.title}
           subtitle={`${currentMeta.subtitle} / プロジェクト: ${projectId}`}

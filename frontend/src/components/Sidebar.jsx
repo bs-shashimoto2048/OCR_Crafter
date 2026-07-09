@@ -40,7 +40,7 @@ const imageCreationItems = [
   { id: "image-builder-step4", label: "4. クロップ出力" },
 ];
 
-export default function Sidebar({ active, onChange, onExitApp }) {
+export default function Sidebar({ active, onChange, onExitApp, collapsed = false, onToggleCollapse }) {
   const [openTrees, setOpenTrees] = useState({
     modelCreation: true,
     imageCreation: true,
@@ -49,6 +49,11 @@ export default function Sidebar({ active, onChange, onExitApp }) {
     "ocr-training-group": false,
     "cls-training-group": false,
   });
+
+  const activeLabel =
+    [...modelCreationItems, ...imageCreationItems]
+      .flatMap((item) => (item.type === "group" ? item.items : [item]))
+      .find((item) => item.id === active)?.label || "";
 
   const treeSections = [
     { id: "modelCreation", label: "モデル作成", items: modelCreationItems },
@@ -63,11 +68,49 @@ export default function Sidebar({ active, onChange, onExitApp }) {
     setOpenGroups((prev) => ({ ...prev, [groupId]: !prev[groupId] }));
   }
 
+  if (collapsed) {
+    return (
+      <aside className="fixed inset-y-0 left-0 flex w-14 flex-col items-center border-r border-border/80 bg-[#2b3138]/90 px-2 py-4 backdrop-blur-xl transition-[width] duration-200">
+        <button
+          type="button"
+          onClick={() => onToggleCollapse?.()}
+          title="サイドバーを展開"
+          aria-label="サイドバーを展開"
+          aria-expanded="false"
+          className="rounded-lg px-2 py-1.5 text-base leading-none text-muted transition hover:bg-[#37404a]/72 hover:text-text"
+        >
+          ▶
+        </button>
+        <div
+          className="mt-4 flex min-h-0 flex-1 flex-col items-center overflow-hidden"
+          title={activeLabel ? `現在の画面: ${activeLabel}` : undefined}
+        >
+          <span className="h-2 w-2 shrink-0 rounded-full bg-accent" aria-hidden="true" />
+          <span className="mt-2 select-none text-xs font-medium tracking-[0.14em] text-slate-300/90 [writing-mode:vertical-rl]">
+            {activeLabel}
+          </span>
+        </div>
+      </aside>
+    );
+  }
+
   return (
-    <aside className="fixed inset-y-0 left-0 flex w-64 flex-col border-r border-border/80 bg-[#2b3138]/90 px-5 py-6 backdrop-blur-xl">
-      <div className="mb-8">
-        <p className="text-xs uppercase tracking-[0.18em] text-muted">OCR プラットフォーム</p>
-        <h1 className="mt-2 text-xl font-semibold text-text">OCR Crafter</h1>
+    <aside className="fixed inset-y-0 left-0 flex w-64 flex-col border-r border-border/80 bg-[#2b3138]/90 px-5 py-6 backdrop-blur-xl transition-[width] duration-200">
+      <div className="mb-8 flex items-start justify-between gap-2">
+        <div>
+          <p className="text-xs uppercase tracking-[0.18em] text-muted">OCR プラットフォーム</p>
+          <h1 className="mt-2 text-xl font-semibold text-text">OCR Crafter</h1>
+        </div>
+        <button
+          type="button"
+          onClick={() => onToggleCollapse?.()}
+          title="サイドバーを折り畳む"
+          aria-label="サイドバーを折り畳む"
+          aria-expanded="true"
+          className="rounded-lg px-2 py-1.5 text-base leading-none text-muted transition hover:bg-[#37404a]/72 hover:text-text"
+        >
+          ◀
+        </button>
       </div>
 
       <nav className="space-y-4">
