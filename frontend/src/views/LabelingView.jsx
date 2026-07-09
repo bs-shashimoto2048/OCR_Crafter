@@ -31,6 +31,7 @@ export default function LabelingView({
   imageVersion,
   preprocessOverrides,
   predictParams,
+  onOpenPreprocess,
   images,
   selectedIndex,
   onSelectIndex,
@@ -56,6 +57,8 @@ export default function LabelingView({
   const [ocrLoading, setOcrLoading] = useState(false);
   const [ocrError, setOcrError] = useState("");
   const [ocrReloadTick, setOcrReloadTick] = useState(0);
+  // 実際に推論に使用された Engine / Model（レスポンス優先、無ければ設定値）
+  const [ocrMeta, setOcrMeta] = useState(null);
   const predictParamsKey = JSON.stringify(predictParams || {});
   const listRef = useRef(null);
   const itemRefs = useRef([]);
@@ -169,6 +172,10 @@ export default function LabelingView({
               }
             : null
         );
+        setOcrMeta({
+          engine: data?.predict_engine || predictParams?.engine || "",
+          modelName: data?.predict_model_name || "",
+        });
         if (!prediction && data?.predict_error) {
           setOcrError(String(data.predict_error));
         }
@@ -178,6 +185,7 @@ export default function LabelingView({
         }
         setPreviewSrc(processedImageUrl(selected.image, projectId, imageVersion, selected.type || ""));
         setOcrCandidate(null);
+        setOcrMeta({ engine: predictParams?.engine || "", modelName: "" });
         setOcrError(String(error?.message || error || "不明なエラー"));
       } finally {
         if (!cancelled) {
@@ -248,6 +256,19 @@ export default function LabelingView({
 
   const confidencePercent =
     typeof ocrCandidate?.confidence === "number" ? `${(ocrCandidate.confidence * 100).toFixed(1)}%` : "--";
+  const engineKey = String(ocrMeta?.engine || "").toLowerCase();
+  const engineDisplay =
+    { tesseract: "Tesseract", paddleocr: "PaddleOCR", easyocr: "EasyOCR", custom: "カスタムモデル" }[engineKey] ||
+    (ocrMeta?.engine || "--");
+  const rawModelName = String(ocrMeta?.modelName || "");
+  const isLatestModel = String(predictParams?.model || "") === "latest";
+  const modelDisplay =
+    engineKey === "easyocr"
+      ? "--"
+      : isLatestModel
+        ? "最新モデル"
+        : rawModelName || String(predictParams?.model || "--");
+  const modelTooltip = rawModelName || undefined;
 
   return (
     <div className="grid h-[calc(100vh-238px)] min-h-[460px] grid-cols-[240px_minmax(0,1fr)_240px] gap-3">
@@ -534,59 +555,83 @@ export default function LabelingView({
         </div>
       </div>
 
-      {/* 右: OCR候補（固定表示） */}
-      <Card
-        title="OCR候補"
-        subtitle="クリックまたはEscで採用"
-        className="flex h-full min-h-0 flex-col"
-        actions={
+      {/* 右: OCR推論情報（表示専用。設定変更は前処理設定画面で行う） */}
+      <Card title="OCR推論" subtitle="表示のみ / 設定は前処理画面" className="flex h-full min-h-0 flex-col">
+        <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-0.5">
+          <div className="shrink-0 space-y-1 rounded-lg border border-border bg-card/45 px-2.5 py-2 text-xs">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-muted">Engine</span>
+              <span className="font-semibold text-text">{engineDisplay}</span>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="shrink-0 text-muted">Model</span>
+              <span className="truncate font-semibold text-text" title={modelTooltip}>
+                {modelDisplay}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-muted">Confidence</span>
+              <span className="font-semibold text-accent">{confidencePercent}</span>
+            </div>
+          </div>
+
+          <div className="shrink-0 border-t border-border/60 pt-2">
+            <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">OCR候補</p>
+            {ocrLoading ? (
+              <p className="text-sm text-muted">OCR実行中...</p>
+            ) : ocrCandidate?.text ? (
+              <div className="space-y-1.5">
+                <button
+                  type="button"
+                  onClick={adoptCandidate}
+                  title="クリックで現在ラベルへ反映 (Esc)"
+                  className="flex w-full items-center justify-between gap-2 rounded-xl border border-border bg-card/60 px-2.5 py-2 text-left backdrop-blur-md transition hover:border-accent/60 hover:bg-accent/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+                >
+                  <DiffText candidate={ocrCandidate.text} current={labelValue} />
+                  <span className="shrink-0 rounded-md border border-accent/50 bg-accent/15 px-1.5 py-0.5 text-[11px] font-semibold text-blue-200">
+                    採用
+                  </span>
+                </button>
+                <p className="text-[11px] leading-snug text-muted">
+                  異なる文字は<span className="text-amber-300">黄色</span> / Escでも採用できます
+                </p>
+              </div>
+            ) : ocrError ? (
+              <div className="space-y-1.5">
+                <p className="whitespace-pre-line break-all rounded-lg border border-danger/40 bg-danger/10 px-2.5 py-1.5 text-xs text-danger">
+                  OCR候補取得失敗
+                  {"\n"}
+                  {ocrError}
+                </p>
+                <p className="text-[11px] leading-snug text-muted">推論設定を確認してください。</p>
+              </div>
+            ) : (
+              <p className="text-sm text-muted">OCR候補なし</p>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-2 shrink-0 space-y-1.5 border-t border-border/60 pt-2">
           <Button
             size="sm"
             variant="secondary"
-            className="h-7 px-2 text-[11px]"
+            className="w-full"
             onClick={() => setOcrReloadTick((prev) => prev + 1)}
             disabled={ocrLoading}
             title="現在画像に対してOCR候補を再取得します"
           >
             OCR再実行
           </Button>
-        }
-      >
-        {ocrLoading ? (
-          <p className="text-sm text-muted">OCR実行中...</p>
-        ) : ocrCandidate?.text ? (
-          <div className="space-y-2">
-            <button
-              type="button"
-              onClick={adoptCandidate}
-              title="クリックで現在ラベルへ反映 (Esc)"
-              className="w-full rounded-xl border border-border bg-card/60 px-3 py-2.5 text-left backdrop-blur-md transition hover:border-accent/60 hover:bg-accent/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
-            >
-              <DiffText candidate={ocrCandidate.text} current={labelValue} />
-            </button>
-            <div className="rounded-lg border border-border bg-card/45 px-3 py-2 text-xs text-muted">
-              <p>
-                信頼度 <span className="text-sm font-semibold text-accent">{confidencePercent}</span>
-              </p>
-              {ocrCandidate.engine ? <p className="mt-0.5">Engine: {ocrCandidate.engine}</p> : null}
-            </div>
-            <p className="text-[11px] leading-relaxed text-muted">
-              現在ラベルと異なる文字は<span className="text-amber-300">黄色</span>で表示されます。
-            </p>
-          </div>
-        ) : ocrError ? (
-          <div className="space-y-2">
-            <p className="whitespace-pre-line break-all rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-xs text-danger">
-              OCR候補取得失敗: {ocrError}
-            </p>
-            <p className="text-[11px] leading-relaxed text-muted">
-              推論エンジンは前処理設定画面の「推論設定」と共通です。カスタムモデル未学習の場合は
-              前処理設定画面でエンジンを EasyOCR / Tesseract 等へ切り替えてください。
-            </p>
-          </div>
-        ) : (
-          <p className="text-sm text-muted">OCR候補なし</p>
-        )}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="w-full"
+            onClick={() => onOpenPreprocess?.()}
+            title="前処理設定画面の推論設定でエンジン・モデルを変更できます"
+          >
+            ⚙ 推論設定を開く
+          </Button>
+        </div>
       </Card>
     </div>
   );

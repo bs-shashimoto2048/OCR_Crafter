@@ -2567,6 +2567,7 @@ export default function App() {
         imageVersion={imageVersion}
         preprocessOverrides={labelingPreprocessOverrides}
         predictParams={labelingPredictParams}
+        onOpenPreprocess={() => setActiveView("preprocess")}
         images={images}
         selectedIndex={selectedIndex}
         onSelectIndex={setSelectedIndex}
