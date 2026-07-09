@@ -67,6 +67,8 @@ const CLS_WORKFLOW_STEP_DEFS = [
 ];
 
 const PRESET_STORAGE_KEY = "ocr_preprocess_presets_v1";
+// 前処理画面の比較用推論スロット（モデル2/3）。モデル1は既存の単一推論設定を継続使用
+const PREPROCESS_EXTRA_SLOTS_STORAGE_KEY = "ocr_preprocess_extra_slots_by_project_v1";
 const PREPROCESS_PARAMS_BY_PROJECT_STORAGE_KEY = "ocr_preprocess_params_by_project_v1";
 const TRAINING_SESSION_BY_PROJECT_STORAGE_KEY = "ocr_training_session_by_project_v1";
 const LAST_PROJECT_STORAGE_KEY = "ocr_last_project_v1";
@@ -421,6 +423,9 @@ export default function App() {
   const [preprocessPreview, setPreprocessPreview] = useState(null);
   const [preprocessLoading, setPreprocessLoading] = useState(false);
   const [preprocessError, setPreprocessError] = useState("");
+  // 比較用の追加推論スロット（最大2つ = モデル2/3）とその推論結果
+  const [preprocessExtraSlots, setPreprocessExtraSlots] = useState([]);
+  const [preprocessExtraPreviews, setPreprocessExtraPreviews] = useState([]);
   const [preprocessPresets, setPreprocessPresets] = useState({});
   const [presetName, setPresetName] = useState("");
   const [selectedPreset, setSelectedPreset] = useState("");
@@ -1080,12 +1085,38 @@ export default function App() {
     refreshEvaluationDatasetOptions(projectId).catch(() => null);
   }, [projectId]);
 
+  // 比較用推論スロットの project 別読込（既存の単一推論設定とは独立したキーで互換維持）
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(PREPROCESS_EXTRA_SLOTS_STORAGE_KEY);
+      const map = raw ? JSON.parse(raw) : {};
+      const slots = Array.isArray(map?.[projectId]) ? map[projectId].slice(0, 2) : [];
+      setPreprocessExtraSlots(slots);
+    } catch {
+      setPreprocessExtraSlots([]);
+    }
+    setPreprocessExtraPreviews([]);
+  }, [projectId]);
+
+  function persistPreprocessExtraSlots(next) {
+    setPreprocessExtraSlots(next);
+    try {
+      const raw = localStorage.getItem(PREPROCESS_EXTRA_SLOTS_STORAGE_KEY);
+      const map = raw ? JSON.parse(raw) : {};
+      map[projectId] = next;
+      localStorage.setItem(PREPROCESS_EXTRA_SLOTS_STORAGE_KEY, JSON.stringify(map));
+    } catch {
+      // localStorage が使えない環境では保存なしで動作継続
+    }
+  }
+
   useEffect(() => {
     if (activeView !== "preprocess") {
       return undefined;
     }
     if (!projectId || !preprocessImage) {
       setPreprocessPreview(null);
+      setPreprocessExtraPreviews([]);
       return undefined;
     }
 
@@ -1093,6 +1124,65 @@ export default function App() {
     setPreprocessError("");
 
     const timer = setTimeout(async () => {
+      const overrides = buildPreprocessOverrides(preprocessParams);
+      const mainFields = {
+        engine: preprocessPredictEngine,
+        model:
+          preprocessPredictEngine === "custom"
+            ? preprocessPredictModel
+            : preprocessPredictEngine === "paddleocr"
+              ? preprocessPredictPaddleModel
+              : preprocessPredictEngine === "tesseract"
+                ? preprocessPredictTesseractModel
+                : "latest",
+        model_type:
+          preprocessPredictEngine === "custom" && preprocessPredictModel === "latest"
+            ? preprocessPredictModelType
+            : null,
+        easyocr_langs:
+          preprocessPredictEngine === "easyocr" || preprocessPredictEngine === "paddleocr"
+            ? (preprocessPredictEasyOcrLangs.length > 0 ? preprocessPredictEasyOcrLangs.join(",") : "en")
+            : "en",
+      };
+      const signatureOf = (fields) => `${fields.engine}|${fields.model}|${fields.easyocr_langs}`;
+      const seenSignatures = new Set([signatureOf(mainFields)]);
+
+      // モデル2/3 は同一APIをスロット分並行呼び（既存APIは無変更）。1つの失敗が他へ波及しないよう個別に捕捉
+      const extraPromise = Promise.all(
+        preprocessExtraSlots.map(async (slot) => {
+          const engine = String(slot?.engine || "tesseract");
+          const fields = {
+            engine,
+            model: engine === "easyocr" ? "latest" : String(slot?.model || "latest"),
+            model_type: null,
+            easyocr_langs:
+              engine === "easyocr" || engine === "paddleocr" ? String(slot?.langs || "en").trim() || "en" : "en",
+          };
+          const signature = signatureOf(fields);
+          if (seenSignatures.has(signature)) {
+            return { duplicate: true, engine, modelName: "" };
+          }
+          seenSignatures.add(signature);
+          try {
+            const d = await request("/preprocess/preview", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ image: preprocessImage, project_id: projectId, overrides, ...fields }),
+            });
+            const prediction = String(d?.prediction || "").trim();
+            return {
+              prediction,
+              confidence: typeof d?.confidence === "number" ? d.confidence : null,
+              engine: d?.predict_engine || engine,
+              modelName: d?.predict_model_name || "",
+              error: !prediction && d?.predict_error ? String(d.predict_error) : "",
+            };
+          } catch (error) {
+            return { error: String(error?.message || error), engine, modelName: "" };
+          }
+        })
+      );
+
       try {
         const data = await request("/preprocess/preview", {
           method: "POST",
@@ -1100,24 +1190,8 @@ export default function App() {
           body: JSON.stringify({
             image: preprocessImage,
             project_id: projectId,
-            overrides: buildPreprocessOverrides(preprocessParams),
-            engine: preprocessPredictEngine,
-            model:
-              preprocessPredictEngine === "custom"
-                ? preprocessPredictModel
-                : preprocessPredictEngine === "paddleocr"
-                  ? preprocessPredictPaddleModel
-                  : preprocessPredictEngine === "tesseract"
-                    ? preprocessPredictTesseractModel
-                    : "latest",
-            model_type:
-              preprocessPredictEngine === "custom" && preprocessPredictModel === "latest"
-                ? preprocessPredictModelType
-                : null,
-            easyocr_langs:
-              preprocessPredictEngine === "easyocr" || preprocessPredictEngine === "paddleocr"
-                ? (preprocessPredictEasyOcrLangs.length > 0 ? preprocessPredictEasyOcrLangs.join(",") : "en")
-                : "en",
+            overrides,
+            ...mainFields,
           }),
         });
         setPreprocessPreview(data);
@@ -1127,6 +1201,7 @@ export default function App() {
       } finally {
         setPreprocessLoading(false);
       }
+      setPreprocessExtraPreviews(await extraPromise);
     }, 300);
 
     return () => {
@@ -1143,6 +1218,7 @@ export default function App() {
     preprocessPredictTesseractModel,
     preprocessPredictModelType,
     preprocessPredictEasyOcrLangs,
+    preprocessExtraSlots,
   ]);
 
   useEffect(() => {
@@ -2532,6 +2608,9 @@ export default function App() {
       <PreprocessView
         projectId={projectId}
         imageVersion={imageVersion}
+        extraSlots={preprocessExtraSlots}
+        onExtraSlotsChange={persistPreprocessExtraSlots}
+        extraPreviews={preprocessExtraPreviews}
         returnView={preprocessReturnView}
         onReturn={() => {
           if (preprocessReturnView) {

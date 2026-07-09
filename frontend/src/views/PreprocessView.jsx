@@ -8,6 +8,9 @@ import { imageUrl } from "../lib/api";
 export default function PreprocessView({
   projectId,
   imageVersion,
+  extraSlots = [],
+  onExtraSlotsChange,
+  extraPreviews = [],
   returnView,
   onReturn,
   images,
@@ -47,9 +50,35 @@ export default function PreprocessView({
 }) {
   const latestAny = String(latestModels?.any || "");
   const latestByType = latestModels?.byType || {};
-  const engineDisplayLabel =
-    { custom: "カスタムモデル", easyocr: "EasyOCR", paddleocr: "PaddleOCR", tesseract: "Tesseract" }[predictEngine] ||
-    predictEngine;
+  const engineNames = { custom: "カスタムモデル", easyocr: "EasyOCR", paddleocr: "PaddleOCR", tesseract: "Tesseract" };
+  const engineDisplayLabel = engineNames[predictEngine] || predictEngine;
+
+  function updateExtraSlot(index, patch) {
+    onExtraSlotsChange?.(extraSlots.map((slot, i) => (i === index ? { ...slot, ...patch } : slot)));
+  }
+
+  function addExtraSlot() {
+    if (extraSlots.length >= 2) {
+      return;
+    }
+    onExtraSlotsChange?.([...extraSlots, { engine: "tesseract", model: "eng", langs: "en" }]);
+  }
+
+  function removeExtraSlot(index) {
+    onExtraSlotsChange?.(extraSlots.filter((_, i) => i !== index));
+  }
+
+  // 中央の推論結果欄に渡す比較行（モデル2/3）。失敗・重複はそのスロットだけ表示する
+  const comparisonResults = extraSlots.map((slot, i) => {
+    const p = extraPreviews?.[i] || {};
+    return {
+      engine: engineNames[p.engine || slot.engine] || p.engine || slot.engine,
+      model: p.modelName || (slot.engine === "easyocr" ? "" : slot.model || ""),
+      prediction: p.prediction || "",
+      confidence: p.confidence,
+      error: p.duplicate ? "他のスロットと同一設定のため推論をスキップしました" : p.error || "",
+    };
+  });
 
   function basename(path) {
     if (!path) return "";
@@ -85,7 +114,7 @@ export default function PreprocessView({
           : "EasyOCR";
 
   return (
-    <div className="grid h-[calc(100vh-238px)] min-h-[440px] grid-cols-[220px_minmax(0,1fr)_340px] gap-3">
+    <div className="grid h-[calc(100vh-238px)] min-h-[440px] grid-cols-[minmax(180px,18fr)_minmax(0,45fr)_minmax(320px,37fr)] gap-3">
       <Card title="画像一覧" subtitle="プレビュー対象を選択" className="flex h-full min-h-0 flex-col">
         <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
           {images.map((item) => {
@@ -145,6 +174,7 @@ export default function PreprocessView({
           engine={preview?.predict_engine}
           error={error || preview?.predict_error || ""}
           warning={preview?.predict_model_warning || ""}
+          comparisons={comparisonResults}
         />
 
       </div>
@@ -294,6 +324,96 @@ export default function PreprocessView({
             <div className="mt-3 rounded-lg border border-border bg-card/45 p-2 text-xs text-muted">
               実際に使用される推論先: <span className="font-semibold text-text">{resolvedModelName}</span>
             </div>
+
+            {extraSlots.map((slot, index) => (
+              <div key={index} className="mt-3 rounded-lg border border-border bg-card/45 p-2">
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <p className="text-xs font-semibold text-text">比較モデル{index + 2}</p>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-[11px] text-danger"
+                    onClick={() => removeExtraSlot(index)}
+                    title={`比較モデル${index + 2}を削除します`}
+                  >
+                    削除
+                  </Button>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="app-label">エンジン</label>
+                    <select
+                      value={slot.engine}
+                      onChange={(e) =>
+                        updateExtraSlot(index, {
+                          engine: e.target.value,
+                          model: e.target.value === "tesseract" ? "eng" : "latest",
+                        })
+                      }
+                      className="app-select"
+                    >
+                      <option value="tesseract">Tesseract</option>
+                      <option value="paddleocr">PaddleOCR</option>
+                      <option value="easyocr">EasyOCR</option>
+                    </select>
+                  </div>
+                  {slot.engine === "tesseract" ? (
+                    <div>
+                      <label className="app-label">モデル</label>
+                      <select
+                        value={slot.model || "eng"}
+                        onChange={(e) => updateExtraSlot(index, { model: e.target.value })}
+                        className="app-select"
+                      >
+                        <option value="latest">最新（学習済み）</option>
+                        <option value="eng">eng.traineddata</option>
+                        {(tesseractModels || []).map((item) => (
+                          <option key={item} value={item}>
+                            {item}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : slot.engine === "paddleocr" ? (
+                    <div>
+                      <label className="app-label">モデル</label>
+                      <select
+                        value={slot.model || "latest"}
+                        onChange={(e) => updateExtraSlot(index, { model: e.target.value })}
+                        className="app-select"
+                      >
+                        <option value="latest">最新</option>
+                        {paddleModels.map((name) => (
+                          <option key={name} value={name}>
+                            {name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="app-label">言語（カンマ区切り）</label>
+                      <input
+                        value={slot.langs || "en"}
+                        onChange={(e) => updateExtraSlot(index, { langs: e.target.value })}
+                        className="app-input"
+                        placeholder="en"
+                      />
+                    </div>
+                  )}
+                </div>
+                {extraPreviews?.[index]?.duplicate ? (
+                  <p className="mt-1.5 text-[11px] text-amber-200">
+                    他のスロットと同一設定のため推論をスキップしました
+                  </p>
+                ) : null}
+              </div>
+            ))}
+            {extraSlots.length < 2 ? (
+              <Button size="sm" variant="secondary" className="mt-3 w-full" onClick={addExtraSlot}>
+                比較モデルを追加（最大3つ）
+              </Button>
+            ) : null}
           </>
         }
         headerAction={
