@@ -1,10 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-function toHalfWidthAlnum(value) {
-  return String(value || "")
-    .normalize("NFKC")
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, "");
+// charset 指定時はその文字のみ許可（大小文字は charset 側に存在する方へ自動補正）。
+// 未指定時は従来どおり大文字 A-Z / 0-9 に正規化する。
+function sanitizeInput(value, charset) {
+  const normalized = String(value || "").normalize("NFKC");
+  if (charset) {
+    const allowed = new Set(String(charset).split(""));
+    let out = "";
+    for (const ch of normalized) {
+      if (allowed.has(ch)) out += ch;
+      else if (allowed.has(ch.toUpperCase())) out += ch.toUpperCase();
+      else if (allowed.has(ch.toLowerCase())) out += ch.toLowerCase();
+    }
+    return out;
+  }
+  return normalized.toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
 function getColor(score) {
@@ -24,7 +34,9 @@ export default function EditableHeatmap({
   appendChar = "A",
   focusRequest = 0,
   focusIndex = 0,
+  charset = "",
 }) {
+  const allowsLowercase = /[a-z]/.test(String(charset || ""));
   const [value, setValue] = useState(String(text || ""));
   const [activeIndex, setActiveIndex] = useState(null);
   const list = useMemo(() => (Array.isArray(scores) ? scores : []), [scores]);
@@ -68,7 +80,7 @@ export default function EditableHeatmap({
   }, [focusRequest, focusIndex, value.length]);
 
   function applyCharAt(index, raw) {
-    const char = toHalfWidthAlnum(raw).slice(-1);
+    const char = sanitizeInput(raw, charset).slice(-1);
     if (!char) return;
     const chars = value.split("");
     chars[index] = char;
@@ -84,7 +96,7 @@ export default function EditableHeatmap({
 
   function handleCharKeyDown(event, index) {
     if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) {
-      const normalized = toHalfWidthAlnum(event.key).slice(-1);
+      const normalized = sanitizeInput(event.key, charset).slice(-1);
       event.preventDefault();
       if (normalized) {
         applyCharAt(index, normalized);
@@ -119,7 +131,7 @@ export default function EditableHeatmap({
 
   function handleAppendChar() {
     if (value.length >= Number(maxLength)) return;
-    const nextChar = toHalfWidthAlnum(appendChar).slice(0, 1) || "A";
+    const nextChar = sanitizeInput(appendChar, charset).slice(0, 1) || "A";
     const next = `${value}${nextChar}`;
     const nextIndex = next.length - 1;
     forceActiveIndexRef.current = nextIndex;
@@ -168,7 +180,7 @@ export default function EditableHeatmap({
                 inputMode="latin"
                 lang="en"
                 autoCorrect="off"
-                autoCapitalize="characters"
+                autoCapitalize={allowsLowercase ? "off" : "characters"}
                 spellCheck={false}
                 className="h-8 w-7 rounded border border-border bg-card/70 text-center text-lg font-semibold text-text outline-none ring-1 ring-accent/60"
                 title={hasScore ? `score: ${Number(score).toFixed(2)}` : "score: N/A"}

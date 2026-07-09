@@ -7,6 +7,8 @@ import { API_BASE, imageUrl, request } from "../lib/api";
 
 const BUSINESS_PATTERN = /^[A-Z0-9]{8}$/;
 const FORBIDDEN = new Set(["AAAAAAAA", "00000000"]);
+// Tesseract実運用の文字セット（大文字A-Z / 数字 / 小文字筆記体 k,l,t）
+const TESSERACT_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt";
 const STATUS_LABELS = {
   all: "全て",
   unprocessed: "未処理",
@@ -23,11 +25,13 @@ function validateText(value) {
   return { valid: true, reason: null };
 }
 
-function classifyDraftState(value, expectedLength = 8) {
-  const normalized = String(value || "").trim().toUpperCase();
+function classifyDraftState(value, expectedLength = 8, { keepCase = false } = {}) {
+  // keepCase(Tesseract)時は小文字を保持したまま検証する。禁止パターン判定のみ大文字で比較
+  const normalized = keepCase ? String(value || "").trim() : String(value || "").trim().toUpperCase();
   if (!normalized) return { kind: "invalid", reason: "empty_text" };
-  if (FORBIDDEN.has(normalized)) return { kind: "invalid", reason: "banned_pattern" };
-  if (!/^[A-Z0-9]+$/.test(normalized)) return { kind: "invalid", reason: "invalid_character" };
+  if (FORBIDDEN.has(normalized.toUpperCase())) return { kind: "invalid", reason: "banned_pattern" };
+  const charPattern = keepCase ? /^[A-Za-z0-9]+$/ : /^[A-Z0-9]+$/;
+  if (!charPattern.test(normalized)) return { kind: "invalid", reason: "invalid_character" };
   if (Number(expectedLength) > 0 && normalized.length !== Number(expectedLength)) {
     return { kind: "incomplete", reason: "length_mismatch" };
   }
@@ -62,11 +66,13 @@ function normalizePredictError(message) {
   return text || "推論に失敗しました";
 }
 
-function toHalfWidthAlnum(value) {
-  return String(value || "")
-    .normalize("NFKC")
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, "");
+function toHalfWidthAlnum(value, { keepCase = false } = {}) {
+  const normalized = String(value || "").normalize("NFKC");
+  if (keepCase) {
+    // Tesseractは小文字(k/l/t等)を区別するため大文字化しない
+    return normalized.replace(/[^A-Za-z0-9]/g, "");
+  }
+  return normalized.toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
 function resolveSingleStatus({
@@ -130,6 +136,9 @@ export default function RapidOCRView({
   setPreprocessEnabled,
   preprocessOverrides,
 }) {
+  // Tesseract選択時は大小文字を区別して扱う（k/l/t の小文字補正・保存を可能にする）
+  const keepCase = engine === "tesseract";
+
   const [cache, setCache] = useState({});
   const [draft, setDraft] = useState("");
   const [touched, setTouched] = useState(false);
@@ -172,8 +181,8 @@ export default function RapidOCRView({
   const expectedLength = Number(currentResult?.validation?.max_text_length || currentResult?.max_text_length || currentResultText.length || 8);
 
   const currentDraftState = useMemo(
-    () => classifyDraftState(draft, expectedLength),
-    [draft, expectedLength]
+    () => classifyDraftState(draft, expectedLength, { keepCase }),
+    [draft, expectedLength, keepCase]
   );
   const selectedLangLabel = useMemo(() => {
     const langs = Array.isArray(easyocrLangs) ? easyocrLangs.filter(Boolean) : [];
@@ -221,8 +230,11 @@ export default function RapidOCRView({
   }, [filteredImages, currentName]);
   const currentConfidence = Number(currentResult?.confidence || 0);
   const currentLowConfidence = currentConfidence < 0.9;
-  const draftNormalized = String(draft || "").trim().toUpperCase();
-  const resultNormalized = String(currentResultText || "").trim().toUpperCase();
+  // keepCase時は大小文字の違いも「編集あり」として検出する
+  const draftNormalized = keepCase ? String(draft || "").trim() : String(draft || "").trim().toUpperCase();
+  const resultNormalized = keepCase
+    ? String(currentResultText || "").trim()
+    : String(currentResultText || "").trim().toUpperCase();
   const isDraftAligned = draftNormalized === resultNormalized;
   const singleStatus = useMemo(
     () =>
@@ -242,9 +254,9 @@ export default function RapidOCRView({
       )}::pp:${preprocessEnabled ? "1" : "0"}::ov:${preprocessOverridesKey}`;
       const cached = cache[key];
       const status = imageStatusMap[imageName] || "unprocessed";
-      const predicted = toHalfWidthAlnum(cached?.text ?? cached?.prediction ?? "");
-      const confirmed = toHalfWidthAlnum(confirmedDrafts[imageName] || "");
-      const inlineDraft = imageName === currentName ? toHalfWidthAlnum(draft || "") : "";
+      const predicted = toHalfWidthAlnum(cached?.text ?? cached?.prediction ?? "", { keepCase });
+      const confirmed = toHalfWidthAlnum(confirmedDrafts[imageName] || "", { keepCase: true });
+      const inlineDraft = imageName === currentName ? toHalfWidthAlnum(draft || "", { keepCase }) : "";
       const edited = inlineDraft || confirmed;
       return {
         imageName,
@@ -316,7 +328,8 @@ export default function RapidOCRView({
           const imageName = String(row?.image || "");
           if (!imageName || !imageNames.has(imageName)) continue;
           const status = String(row?.status || "");
-          const text = toHalfWidthAlnum(row?.text || "");
+          // サーバーに保存済みのログは大小文字をそのまま保持して復元する
+          const text = toHalfWidthAlnum(row?.text || "", { keepCase: true });
           if (status === "pending") {
             nextPending.add(imageName);
           } else if (status === "confirmed") {
@@ -446,7 +459,7 @@ export default function RapidOCRView({
       .then((result) => {
         if (!result) return;
         const confirmed = confirmedDrafts[currentName];
-        setDraft(toHalfWidthAlnum(confirmed ?? result.text ?? result.prediction ?? ""));
+        setDraft(toHalfWidthAlnum(confirmed ?? result.text ?? result.prediction ?? "", { keepCase }));
         if (focusHeatmapFirstRef.current) {
           setHeatmapFocusTick((prev) => prev + 1);
           focusHeatmapFirstRef.current = false;
@@ -469,11 +482,11 @@ export default function RapidOCRView({
 
   useEffect(() => {
     if (!currentName || touched) return;
-    const preferred = toHalfWidthAlnum(confirmedDrafts[currentName] ?? currentResultText);
+    const preferred = toHalfWidthAlnum(confirmedDrafts[currentName] ?? currentResultText, { keepCase });
     if (currentResult && preferred !== draft) {
       setDraft(preferred);
     }
-  }, [currentName, currentResult, currentResultText, draft, touched, confirmedDrafts]);
+  }, [currentName, currentResult, currentResultText, draft, touched, confirmedDrafts, keepCase]);
 
   useEffect(() => {
     const nextName = getNextFilteredImageName(currentName, 1);
@@ -514,9 +527,9 @@ export default function RapidOCRView({
   async function saveCurrent({ skipped = false } = {}) {
     if (!currentName || !projectId || saving) return;
     const ocr = currentResult || {};
-    const corrected = toHalfWidthAlnum(draft || "");
+    const corrected = toHalfWidthAlnum(draft || "", { keepCase });
     const validation = validateText(corrected);
-    const predicted = toHalfWidthAlnum(ocr.text ?? ocr.prediction ?? "");
+    const predicted = toHalfWidthAlnum(ocr.text ?? ocr.prediction ?? "", { keepCase });
     const payload = {
       project_id: projectId,
       image_path: currentName,
@@ -808,20 +821,27 @@ export default function RapidOCRView({
                   value={draft}
                   onChange={(e) => {
                     setTouched(true);
-                    setDraft(toHalfWidthAlnum(e.target.value));
+                    setDraft(toHalfWidthAlnum(e.target.value, { keepCase }));
                   }}
                   onKeyDown={onInputKeyDown}
                   placeholder="OCR結果"
                   inputMode="latin"
                   lang="en"
                   autoCorrect="off"
-                  autoCapitalize="characters"
+                  autoCapitalize={keepCase ? "off" : "characters"}
                   spellCheck={false}
                   style={{ imeMode: "disabled" }}
                 />
 
                 <div className="rounded-lg border border-border bg-card/60 p-3">
-                  <p className="mb-2 text-xs text-muted">ヒートマップ（クリックで1文字編集）</p>
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs text-muted">ヒートマップ（クリックで1文字編集）</p>
+                    {keepCase ? (
+                      <p className="text-xs text-muted" title="Tesseract実運用の文字セットです。小文字は筆記体 k / l / t のみ対象です。">
+                        入力可能文字: A-Z / 0-9 / k / l / t
+                      </p>
+                    ) : null}
+                  </div>
                   <EditableHeatmap
                     text={draft || currentResultText}
                     scores={currentHeatScores}
@@ -829,10 +849,11 @@ export default function RapidOCRView({
                     appendChar="A"
                     focusRequest={heatmapFocusTick}
                     focusIndex={0}
+                    charset={keepCase ? TESSERACT_CHARSET_DEFAULT : ""}
                     onConfirm={() => saveCurrent({ skipped: false })}
                     onChange={(nextText) => {
                       setTouched(true);
-                      setDraft(toHalfWidthAlnum(nextText || ""));
+                      setDraft(toHalfWidthAlnum(nextText || "", { keepCase }));
                     }}
                   />
                 </div>

@@ -502,8 +502,9 @@ def read_latest_rapid_ocr_states(project_id: Optional[str]) -> dict[str, Any]:
                 continue
 
             reason = str(payload.get("reason") or "").strip()
-            predicted_text = str(payload.get("predicted_text") or payload.get("prediction") or "").strip().upper()
-            corrected_text = str(payload.get("corrected_text") or "").strip().upper()
+            # 大小文字はログ保存時のまま返す（Tesseractの小文字 k/l/t を復元時に失わないため）
+            predicted_text = str(payload.get("predicted_text") or payload.get("prediction") or "").strip()
+            corrected_text = str(payload.get("corrected_text") or "").strip()
             status = "pending" if reason == "skipped" else "confirmed"
             text = corrected_text if corrected_text else predicted_text
             latest_by_image[image_name] = {
