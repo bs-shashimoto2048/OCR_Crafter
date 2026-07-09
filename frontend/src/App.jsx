@@ -1386,15 +1386,15 @@ export default function App() {
       { id: "images", viewId: "images", label: "画像取込", done: images.length > 0, meta: `${images.length}件` },
       { id: "preprocess", viewId: "preprocess", label: "前処理", done: workflowState.preprocessed },
       { id: "labeling", viewId: "labeling", label: "ラベル", done: labelDone, meta: `${savedLabeledCount}/${images.length}` },
-      { id: "dataset", label: "データセット", done: workflowState.datasetBuilt },
       {
-        id: "training",
-        label: "学習",
+        id: "ocr-training",
+        viewId: "ocr-training",
+        label: "データ作成・学習",
         done: jobStatus === "completed",
         running: jobStatus === "running" || jobStatus === "queued",
         error: jobStatus === "failed",
       },
-      { id: "evaluation", label: "評価", done: Boolean(evalResult) },
+      { id: "evaluation", viewId: "ocr-eval", label: "評価", done: Boolean(evalResult) },
     ];
 
     let currentAssigned = false;
@@ -1414,7 +1414,7 @@ export default function App() {
       }
       return { ...step, status: "todo" };
     });
-  }, [activeView, images.length, savedLabeledCount, workflowState.preprocessed, workflowState.datasetBuilt, jobStatus, jobFamily, evalResult]);
+  }, [activeView, images.length, savedLabeledCount, workflowState.preprocessed, jobStatus, jobFamily, evalResult]);
 
   async function createProject() {
     const value = newProjectId.trim();
