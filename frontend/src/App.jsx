@@ -47,6 +47,25 @@ const viewMeta = {
 // 開発中バナー(ExperimentalNotice)が共通表示される。
 const EXPERIMENTAL_VIEWS = new Set(["cls-training", "cls-models", "cls-inference", "cls-evaluation"]);
 
+// ワークフロー進行状況の工程ナビ定義（viewId 付き = クリックで遷移可能）。
+// OCR認識モデル系と実験機能系は混ぜず、現在の系統内のみ表示する。
+const OCR_WORKFLOW_VIEWS = ["ocr-training", "ocr-models", "ocr-inference", "rapid-ocr", "ocr-batch", "ocr-eval"];
+const OCR_WORKFLOW_STEP_DEFS = [
+  { id: "ocr-training", viewId: "ocr-training", label: "データ作成・学習" },
+  { id: "ocr-models", viewId: "ocr-models", label: "モデル管理" },
+  { id: "ocr-inference", viewId: "ocr-inference", label: "推論" },
+  { id: "rapid-ocr", viewId: "rapid-ocr", label: "OCR修正" },
+  { id: "ocr-batch", viewId: "ocr-batch", label: "バッチ推論" },
+  { id: "ocr-eval", viewId: "ocr-eval", label: "モデル評価" },
+];
+const CLS_WORKFLOW_VIEWS = ["cls-training", "cls-models", "cls-inference", "cls-evaluation"];
+const CLS_WORKFLOW_STEP_DEFS = [
+  { id: "cls-training", viewId: "cls-training", label: "分割学習" },
+  { id: "cls-models", viewId: "cls-models", label: "モデル管理" },
+  { id: "cls-inference", viewId: "cls-inference", label: "推論" },
+  { id: "cls-evaluation", viewId: "cls-evaluation", label: "評価" },
+];
+
 const PRESET_STORAGE_KEY = "ocr_preprocess_presets_v1";
 const PREPROCESS_PARAMS_BY_PROJECT_STORAGE_KEY = "ocr_preprocess_params_by_project_v1";
 const TRAINING_SESSION_BY_PROJECT_STORAGE_KEY = "ocr_training_session_by_project_v1";
@@ -1324,11 +1343,49 @@ export default function App() {
       ocrTrainingMode === "scratch" ||
       String(ocrInitSourceValue || "").trim() !== "");
   const workflowSteps = useMemo(() => {
+    const jobRunning = jobStatus === "running" || jobStatus === "queued";
+    // OCR認識モデル系 / 実験機能系の画面では、その系統内の工程ナビを表示する
+    // （viewId 付きステップはクリックで遷移できる。系統をまたぐ導線は混ぜない）
+    if (OCR_WORKFLOW_VIEWS.includes(activeView)) {
+      return OCR_WORKFLOW_STEP_DEFS.map((step) => ({
+        ...step,
+        status:
+          step.viewId === "ocr-training" && jobFamily === "ocr"
+            ? jobStatus === "failed"
+              ? "error"
+              : jobRunning
+                ? "running"
+                : activeView === step.viewId
+                  ? "current"
+                  : "todo"
+            : activeView === step.viewId
+              ? "current"
+              : "todo",
+      }));
+    }
+    if (CLS_WORKFLOW_VIEWS.includes(activeView)) {
+      return CLS_WORKFLOW_STEP_DEFS.map((step) => ({
+        ...step,
+        status:
+          step.viewId === "cls-training" && jobFamily === "classification"
+            ? jobStatus === "failed"
+              ? "error"
+              : jobRunning
+                ? "running"
+                : activeView === step.viewId
+                  ? "current"
+                  : "todo"
+            : activeView === step.viewId
+              ? "current"
+              : "todo",
+      }));
+    }
+
     const labelDone = images.length > 0 && savedLabeledCount === images.length;
     const defs = [
-      { id: "images", label: "画像取込", done: images.length > 0, meta: `${images.length}件` },
-      { id: "preprocess", label: "前処理", done: workflowState.preprocessed },
-      { id: "labeling", label: "ラベル", done: labelDone, meta: `${savedLabeledCount}/${images.length}` },
+      { id: "images", viewId: "images", label: "画像取込", done: images.length > 0, meta: `${images.length}件` },
+      { id: "preprocess", viewId: "preprocess", label: "前処理", done: workflowState.preprocessed },
+      { id: "labeling", viewId: "labeling", label: "ラベル", done: labelDone, meta: `${savedLabeledCount}/${images.length}` },
       { id: "dataset", label: "データセット", done: workflowState.datasetBuilt },
       {
         id: "training",
@@ -1357,7 +1414,7 @@ export default function App() {
       }
       return { ...step, status: "todo" };
     });
-  }, [images.length, savedLabeledCount, workflowState.preprocessed, workflowState.datasetBuilt, jobStatus, evalResult]);
+  }, [activeView, images.length, savedLabeledCount, workflowState.preprocessed, workflowState.datasetBuilt, jobStatus, jobFamily, evalResult]);
 
   async function createProject() {
     const value = newProjectId.trim();
@@ -2835,7 +2892,7 @@ export default function App() {
               : null
           }
         />
-        {showWorkflow ? <WorkflowProgress steps={workflowSteps} /> : null}
+        {showWorkflow ? <WorkflowProgress steps={workflowSteps} activeView={activeView} onNavigate={setActiveView} /> : null}
         {EXPERIMENTAL_VIEWS.has(activeView) ? <ExperimentalNotice className="mt-4" /> : null}
 
         <section className="mt-6">{view}</section>
