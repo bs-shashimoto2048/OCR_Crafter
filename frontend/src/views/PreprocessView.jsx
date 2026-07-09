@@ -1,5 +1,3 @@
-import { useEffect, useRef } from "react";
-
 import Button from "../components/Button";
 import Card from "../components/Card";
 import ImagePreview from "../components/ImagePreview";
@@ -49,16 +47,9 @@ export default function PreprocessView({
 }) {
   const latestAny = String(latestModels?.any || "");
   const latestByType = latestModels?.byType || {};
-  const predictSettingsRef = useRef(null);
-
-  // ラベル編集から「推論設定を開く」で遷移した場合は推論設定を開いた状態にして見える位置へ
-  useEffect(() => {
-    if (!returnView || !predictSettingsRef.current) {
-      return;
-    }
-    predictSettingsRef.current.open = true;
-    predictSettingsRef.current.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
-  }, [returnView]);
+  const engineDisplayLabel =
+    { custom: "カスタムモデル", easyocr: "EasyOCR", paddleocr: "PaddleOCR", tesseract: "Tesseract" }[predictEngine] ||
+    predictEngine;
 
   function basename(path) {
     if (!path) return "";
@@ -156,14 +147,14 @@ export default function PreprocessView({
           warning={preview?.predict_model_warning || ""}
         />
 
-        <details ref={predictSettingsRef} className="group shrink-0 overflow-y-auto rounded-xl border border-border bg-card/50 backdrop-blur-md">
-          <summary className="flex cursor-pointer select-none items-center gap-1.5 px-3 py-2 text-sm font-semibold text-text transition hover:bg-card/70 [&::-webkit-details-marker]:hidden">
-            <span className="text-xs text-muted transition-transform group-open:rotate-90" aria-hidden="true">▶</span>
-            推論設定
-            <span className="ml-auto truncate text-[11px] font-normal text-muted">推論先: {resolvedModelName}</span>
-          </summary>
-          <div className="px-3 pb-3">
-          <div className="grid grid-cols-2 gap-3">
+      </div>
+
+      <PreprocessPanel
+        inferenceSummary={predictEngine === "easyocr" ? "EasyOCR" : `${engineDisplayLabel} / ${resolvedModelName}`}
+        focusInference={Boolean(returnView)}
+        inferenceSettings={
+          <>
+            <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="app-label">エンジン</label>
               <select value={predictEngine} onChange={(e) => setPredictEngine(e.target.value)} className="app-select">
@@ -299,15 +290,12 @@ export default function PreprocessView({
                 </div>
               </div>
             )}
-          </div>
+            </div>
             <div className="mt-3 rounded-lg border border-border bg-card/45 p-2 text-xs text-muted">
               実際に使用される推論先: <span className="font-semibold text-text">{resolvedModelName}</span>
             </div>
-          </div>
-        </details>
-      </div>
-
-      <PreprocessPanel
+          </>
+        }
         headerAction={
           returnView ? (
             <Button size="sm" variant="secondary" onClick={() => onReturn?.()} title="ラベル編集画面へ戻ります">

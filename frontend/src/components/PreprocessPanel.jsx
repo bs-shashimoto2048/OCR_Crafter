@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+
 import Button from "./Button";
 import Card from "./Card";
 
@@ -27,6 +29,9 @@ function Group({ title, defaultOpen = false, children }) {
 
 export default function PreprocessPanel({
   headerAction = null,
+  inferenceSettings = null,
+  inferenceSummary = "",
+  focusInference = false,
   params,
   defaultParams,
   onParamsChange,
@@ -39,6 +44,16 @@ export default function PreprocessPanel({
   onLoadPreset,
 }) {
   const presetKeys = Object.keys(presets);
+  const inferenceRef = useRef(null);
+
+  // ラベル編集の「推論設定を開く」から遷移した場合は推論設定を展開して見える位置へ
+  useEffect(() => {
+    if (!focusInference || !inferenceRef.current) {
+      return;
+    }
+    inferenceRef.current.open = true;
+    inferenceRef.current.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  }, [focusInference]);
 
   function update(key, value) {
     onParamsChange((prev) => ({ ...prev, [key]: value }));
@@ -63,6 +78,21 @@ export default function PreprocessPanel({
       actions={headerAction}
     >
       <div className="scroll-stable min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+        {inferenceSettings ? (
+          <details ref={inferenceRef} className="group rounded-xl border border-border bg-card/45">
+            <summary className="flex cursor-pointer select-none items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold text-text transition hover:bg-card/70 [&::-webkit-details-marker]:hidden">
+              <span className="text-xs text-muted transition-transform group-open:rotate-90" aria-hidden="true">
+                ▶
+              </span>
+              推論設定
+              <span className="ml-auto truncate text-[11px] font-normal text-muted" title={inferenceSummary}>
+                {inferenceSummary}
+              </span>
+            </summary>
+            <div className="px-2.5 pb-2.5">{inferenceSettings}</div>
+          </details>
+        ) : null}
+
         <Group title="基本設定" defaultOpen>
           <Section title="分岐設定">
             <label className="app-label">比率しきい値: {params.ratio_threshold.toFixed(2)}</label>
