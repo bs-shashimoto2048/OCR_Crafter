@@ -10,6 +10,12 @@ const keyRows = [
   ["z", "x", "c", "v", "b", "n", "m"],
 ];
 
+const ENGINE_LABELS = { tesseract: "Tesseract", paddleocr: "PaddleOCR", easyocr: "EasyOCR", custom: "カスタムモデル" };
+
+function engineLabelOf(engine) {
+  return ENGINE_LABELS[String(engine || "").toLowerCase()] || (engine ? String(engine) : "--");
+}
+
 // OCR候補と現在ラベルの差分を1文字ずつ色付け表示する
 function DiffText({ candidate, current }) {
   const chars = String(candidate || "").split("");
@@ -26,11 +32,56 @@ function DiffText({ candidate, current }) {
   );
 }
 
+// スロット1〜3共通の候補行。成功=採用ボタン付き / 失敗=赤 / 重複スキップ=黄
+function CandidateRow({ index, engine, modelName, prediction, confidence, error, skipped, current, onAdopt }) {
+  const header = `${index}. ${engineLabelOf(engine)}${modelName ? ` / ${modelName}` : ""}`;
+  if (skipped || error) {
+    return (
+      <div
+        className={`rounded-lg border px-2.5 py-1.5 ${
+          skipped ? "border-amber-400/40 bg-amber-400/10" : "border-danger/40 bg-danger/10"
+        }`}
+      >
+        <p className="truncate text-[10px] text-muted" title={header}>
+          {header}
+        </p>
+        <p className={`break-all text-xs ${skipped ? "text-amber-200" : "text-danger"}`}>
+          {skipped ? "同一設定のためスキップ" : error}
+        </p>
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => onAdopt?.(prediction)}
+      title="クリックで現在ラベルへ反映"
+      className="w-full rounded-lg border border-border bg-card/60 px-2.5 py-1.5 text-left backdrop-blur-md transition hover:border-accent/60 hover:bg-accent/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+    >
+      <p className="truncate text-[10px] text-muted" title={header}>
+        {header}
+      </p>
+      <div className="mt-0.5 flex items-center justify-between gap-2">
+        <DiffText candidate={prediction} current={current} />
+        <span className="flex shrink-0 items-center gap-1.5">
+          <span className="text-[11px] font-semibold text-accent">
+            {typeof confidence === "number" ? `${(confidence * 100).toFixed(1)}%` : "--"}
+          </span>
+          <span className="rounded-md border border-accent/50 bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold text-blue-200">
+            採用
+          </span>
+        </span>
+      </div>
+    </button>
+  );
+}
+
 export default function LabelingView({
   projectId,
   imageVersion,
   preprocessOverrides,
   predictParams,
+  extraPredictParams = [],
   onOpenPreprocess,
   images,
   selectedIndex,
@@ -59,7 +110,10 @@ export default function LabelingView({
   const [ocrReloadTick, setOcrReloadTick] = useState(0);
   // 実際に推論に使用された Engine / Model（レスポンス優先、無ければ設定値）
   const [ocrMeta, setOcrMeta] = useState(null);
+  // 比較スロット（モデル2/3）の推論結果
+  const [extraCandidates, setExtraCandidates] = useState([]);
   const predictParamsKey = JSON.stringify(predictParams || {});
+  const extraParamsKey = JSON.stringify(extraPredictParams || []);
   const listRef = useRef(null);
   const itemRefs = useRef([]);
   const labelInputRef = useRef(null);
@@ -136,12 +190,49 @@ export default function LabelingView({
       if (!selected?.image || !projectId) {
         setPreviewSrc("");
         setOcrCandidate(null);
+        setExtraCandidates([]);
         setOcrError("");
         setOcrLoading(false);
         return;
       }
       setOcrLoading(true);
       setOcrError("");
+
+      // 比較スロット（モデル2/3）も同時に推論する。重複設定はスキップし、失敗は行単位で保持
+      const signatureOf = (f) => `${f?.engine}|${f?.model}|${f?.easyocr_langs}`;
+      const seenSignatures = new Set([signatureOf(predictParams || {})]);
+      const extraPromise = Promise.all(
+        (extraPredictParams || []).map(async (fields) => {
+          const signature = signatureOf(fields);
+          if (seenSignatures.has(signature)) {
+            return { skipped: true, engine: fields?.engine || "", modelName: "" };
+          }
+          seenSignatures.add(signature);
+          try {
+            const d = await request("/preprocess/preview", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                image: selected.image,
+                project_id: projectId,
+                overrides: preprocessOverrides || null,
+                ...fields,
+              }),
+            });
+            const prediction = String(d?.prediction || "").trim();
+            return {
+              prediction,
+              confidence: typeof d?.confidence === "number" ? d.confidence : null,
+              engine: d?.predict_engine || fields?.engine || "",
+              modelName: d?.predict_model_name || "",
+              error: !prediction && d?.predict_error ? String(d.predict_error) : "",
+            };
+          } catch (error) {
+            return { error: String(error?.message || error), engine: fields?.engine || "", modelName: "" };
+          }
+        })
+      );
+
       try {
         const data = await request("/preprocess/preview", {
           method: "POST",
@@ -192,12 +283,16 @@ export default function LabelingView({
           setOcrLoading(false);
         }
       }
+      const extras = await extraPromise;
+      if (!cancelled) {
+        setExtraCandidates(extras);
+      }
     }
     loadPreview();
     return () => {
       cancelled = true;
     };
-  }, [selected?.image, selected?.type, projectId, imageVersion, preprocessOverrides, predictParamsKey, ocrReloadTick]);
+  }, [selected?.image, selected?.type, projectId, imageVersion, preprocessOverrides, predictParamsKey, extraParamsKey, ocrReloadTick]);
 
   async function saveAndNext() {
     if (savingRef.current) return;
@@ -210,11 +305,17 @@ export default function LabelingView({
     }
   }
 
-  function adoptCandidate() {
-    if (ocrCandidate?.text) {
-      onLabelChange(ocrCandidate.text);
+  function adoptText(text) {
+    if (text) {
+      onLabelChange(text);
       labelInputRef.current?.focus();
     }
+  }
+
+  // Esc: 最上位の有効候補を採用（モデル1が有効ならモデル1、無ければモデル2/3の先頭の有効候補）
+  function adoptTopCandidate() {
+    const top = ocrCandidate?.text || extraCandidates.find((c) => c?.prediction)?.prediction || "";
+    adoptText(top);
   }
 
   // ⑧ キーボードショートカット: Ctrl+S=保存 / Ctrl+←→=画像移動 / Esc=OCR候補採用
@@ -239,7 +340,7 @@ export default function LabelingView({
         return;
       }
       if (event.key === "Escape") {
-        adoptCandidate();
+        adoptTopCandidate();
       }
     }
     window.addEventListener("keydown", handleKeyDown);
@@ -593,34 +694,49 @@ export default function LabelingView({
             <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">OCR候補</p>
             {ocrLoading ? (
               <p className="text-sm text-muted">OCR実行中...</p>
-            ) : ocrCandidate?.text ? (
-              <div className="space-y-1.5">
-                <button
-                  type="button"
-                  onClick={adoptCandidate}
-                  title="クリックで現在ラベルへ反映 (Esc)"
-                  className="flex w-full items-center justify-between gap-2 rounded-xl border border-border bg-card/60 px-2.5 py-2 text-left backdrop-blur-md transition hover:border-accent/60 hover:bg-accent/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
-                >
-                  <DiffText candidate={ocrCandidate.text} current={labelValue} />
-                  <span className="shrink-0 rounded-md border border-accent/50 bg-accent/15 px-1.5 py-0.5 text-[11px] font-semibold text-blue-200">
-                    採用
-                  </span>
-                </button>
-                <p className="text-[11px] leading-snug text-muted">
-                  異なる文字は<span className="text-amber-300">黄色</span> / Escでも採用できます
-                </p>
-              </div>
-            ) : ocrError ? (
-              <div className="space-y-1.5">
-                <p className="whitespace-pre-line break-all rounded-lg border border-danger/40 bg-danger/10 px-2.5 py-1.5 text-xs text-danger">
-                  OCR候補取得失敗
-                  {"\n"}
-                  {ocrError}
-                </p>
-                <p className="text-[11px] leading-snug text-muted">推論設定を確認してください。</p>
-              </div>
             ) : (
-              <p className="text-sm text-muted">OCR候補なし</p>
+              <div className="space-y-1.5">
+                {ocrCandidate?.text ? (
+                  <CandidateRow
+                    index={1}
+                    engine={ocrMeta?.engine}
+                    modelName={rawModelName || (modelDisplay !== "--" ? modelDisplay : "")}
+                    prediction={ocrCandidate.text}
+                    confidence={ocrCandidate.confidence}
+                    current={labelValue}
+                    onAdopt={adoptText}
+                  />
+                ) : ocrError ? (
+                  <CandidateRow
+                    index={1}
+                    engine={ocrMeta?.engine}
+                    modelName={rawModelName}
+                    error={`OCR候補取得失敗: ${ocrError}`}
+                  />
+                ) : (
+                  <p className="text-sm text-muted">OCR候補なし</p>
+                )}
+                {extraCandidates.map((item, index) => (
+                  <CandidateRow
+                    key={index}
+                    index={index + 2}
+                    engine={item?.engine}
+                    modelName={item?.modelName}
+                    prediction={item?.prediction}
+                    confidence={item?.confidence}
+                    error={item?.error}
+                    skipped={item?.skipped}
+                    current={labelValue}
+                    onAdopt={adoptText}
+                  />
+                ))}
+                {ocrError && !ocrCandidate?.text ? (
+                  <p className="text-[11px] leading-snug text-muted">推論設定を確認してください。</p>
+                ) : null}
+                <p className="text-[11px] leading-snug text-muted">
+                  異なる文字は<span className="text-amber-300">黄色</span> / Escで最上位の有効候補を採用
+                </p>
+              </div>
             )}
           </div>
         </div>

@@ -69,6 +69,18 @@ const CLS_WORKFLOW_STEP_DEFS = [
 const PRESET_STORAGE_KEY = "ocr_preprocess_presets_v1";
 // 前処理画面の比較用推論スロット（モデル2/3）。モデル1は既存の単一推論設定を継続使用
 const PREPROCESS_EXTRA_SLOTS_STORAGE_KEY = "ocr_preprocess_extra_slots_by_project_v1";
+
+// 比較スロットを /preprocess/preview のリクエストフィールドへ変換（前処理画面・ラベル編集共通）
+function extraSlotRequestFields(slot) {
+  const engine = String(slot?.engine || "tesseract");
+  return {
+    engine,
+    model: engine === "easyocr" ? "latest" : String(slot?.model || "latest"),
+    model_type: null,
+    easyocr_langs:
+      engine === "easyocr" || engine === "paddleocr" ? String(slot?.langs || "en").trim() || "en" : "en",
+  };
+}
 const PREPROCESS_PARAMS_BY_PROJECT_STORAGE_KEY = "ocr_preprocess_params_by_project_v1";
 const TRAINING_SESSION_BY_PROJECT_STORAGE_KEY = "ocr_training_session_by_project_v1";
 const LAST_PROJECT_STORAGE_KEY = "ocr_last_project_v1";
@@ -1150,14 +1162,8 @@ export default function App() {
       // モデル2/3 は同一APIをスロット分並行呼び（既存APIは無変更）。1つの失敗が他へ波及しないよう個別に捕捉
       const extraPromise = Promise.all(
         preprocessExtraSlots.map(async (slot) => {
-          const engine = String(slot?.engine || "tesseract");
-          const fields = {
-            engine,
-            model: engine === "easyocr" ? "latest" : String(slot?.model || "latest"),
-            model_type: null,
-            easyocr_langs:
-              engine === "easyocr" || engine === "paddleocr" ? String(slot?.langs || "en").trim() || "en" : "en",
-          };
+          const fields = extraSlotRequestFields(slot);
+          const engine = fields.engine;
           const signature = signatureOf(fields);
           if (seenSignatures.has(signature)) {
             return { duplicate: true, engine, modelName: "" };
@@ -1405,6 +1411,12 @@ export default function App() {
     () => buildPreprocessOverrides(preprocessParams),
     [preprocessParams]
   );
+  // ラベル編集のOCR候補（モデル2/3）は前処理画面の比較スロット設定を参照する
+  const labelingExtraPredictParams = useMemo(
+    () => preprocessExtraSlots.map(extraSlotRequestFields),
+    [preprocessExtraSlots]
+  );
+
   // ラベル編集のOCR候補は前処理画面の推論設定と同じエンジン/モデルで取得する
   const labelingPredictParams = useMemo(
     () => ({
@@ -2662,6 +2674,7 @@ export default function App() {
         imageVersion={imageVersion}
         preprocessOverrides={labelingPreprocessOverrides}
         predictParams={labelingPredictParams}
+        extraPredictParams={labelingExtraPredictParams}
         onOpenPreprocess={() => {
           setPreprocessReturnView("labeling");
           setActiveView("preprocess");
