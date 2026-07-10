@@ -32,6 +32,109 @@ function DiffText({ candidate, current }) {
   );
 }
 
+// 右ペイン「現在の前処理設定」のカテゴリ（読み取り専用）。OFF値は薄く表示
+function SummarySection({ title, defaultOpen = false, items }) {
+  return (
+    <details open={defaultOpen} className="group rounded-lg border border-border bg-card/45">
+      <summary className="flex cursor-pointer select-none items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-text transition hover:bg-card/70 [&::-webkit-details-marker]:hidden">
+        <span className="text-[10px] text-muted transition-transform group-open:rotate-90" aria-hidden="true">
+          ▶
+        </span>
+        {title}
+      </summary>
+      <div className="space-y-0.5 px-3 pb-2">
+        {items.map(([label, value], index) => (
+          <div key={index} className="flex items-center justify-between gap-2 text-[11px]">
+            <span className="shrink-0 text-muted">{label}</span>
+            <span className={`truncate font-medium ${String(value) === "OFF" ? "text-muted/60" : "text-text"}`} title={String(value)}>
+              {value}
+            </span>
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function PreprocessSummary({ params }) {
+  if (!params) {
+    return <p className="text-sm text-muted">前処理設定を取得できませんでした。</p>;
+  }
+  const on = (v) => (v ? "ON" : "OFF");
+  const num = (v, digits = 2) => Number(v ?? 0).toFixed(digits);
+  const thresholdNames = { otsu: "大津法", binary: "固定しきい値", adaptive: "適応的しきい値" };
+  const denoiseNames = { median: "メディアン", gaussian: "ガウシアン" };
+  const strokeNames = { close: "欠け埋め", dilate: "太らせる", open: "細かなノイズ除去", erode: "細らせる" };
+  const morphNames = { close: "クローズ", open: "オープン" };
+  const sharpenGroupActive = Boolean(params.sharpen_enabled || params.unsharp_enabled || params.stroke_boost_enabled);
+  const otherActive = Boolean(
+    params.gamma_enabled || params.local_contrast_enabled || params.hist_equalize_enabled || params.morph_enabled || params.crop_margin_enabled
+  );
+  return (
+    <div className="space-y-1.5">
+      <SummarySection
+        title="基本設定"
+        defaultOpen
+        items={[
+          ["比率しきい値", num(params.ratio_threshold)],
+          ["傾き補正", on(params.deskew_enabled)],
+        ]}
+      />
+      <SummarySection
+        title="二値化"
+        defaultOpen
+        items={[
+          ["方式", thresholdNames[params.threshold_type] || params.threshold_type || "--"],
+          ["しきい値", params.threshold_value ?? "--"],
+        ]}
+      />
+      <SummarySection title="単一文字設定" items={[["サイズ", params.single_size ?? "--"]]} />
+      <SummarySection
+        title="横長文字設定"
+        items={[
+          ["高さ", params.wide_height ?? "--"],
+          ["アスペクト比維持", on(params.wide_keep_ratio)],
+        ]}
+      />
+      <SummarySection
+        title="鮮明化・補正"
+        defaultOpen={sharpenGroupActive}
+        items={[
+          ["CLAHE", `clip ${num(params.clahe_clip_limit, 1)} / tile ${params.clahe_tile_grid_size ?? "--"}`],
+          ["シャープ化", params.sharpen_enabled ? `ON（強さ ${num(params.sharpen_amount, 1)}）` : "OFF"],
+          ["アンシャープマスク", params.unsharp_enabled ? `ON（強さ ${num(params.unsharp_amount, 1)}）` : "OFF"],
+          [
+            "掠れ補正",
+            params.stroke_boost_enabled
+              ? `ON（${strokeNames[params.stroke_boost_method] || params.stroke_boost_method}）`
+              : "OFF",
+          ],
+        ]}
+      />
+      <SummarySection
+        title="ノイズ除去"
+        defaultOpen={Boolean(params.bilateral_enabled)}
+        items={[
+          ["方式", denoiseNames[params.denoise_method] || params.denoise_method || "--"],
+          ["カーネルサイズ", params.denoise_ksize ?? "--"],
+          ["バイラテラル", on(params.bilateral_enabled)],
+        ]}
+      />
+      <SummarySection
+        title="その他"
+        defaultOpen={otherActive}
+        items={[
+          ["ガンマ補正", params.gamma_enabled ? `ON（${num(params.gamma_value)}）` : "OFF"],
+          ["局所コントラスト", on(params.local_contrast_enabled)],
+          ["ヒストグラム平坦化", on(params.hist_equalize_enabled)],
+          ["オープン/クローズ", params.morph_enabled ? `ON（${morphNames[params.morph_method] || params.morph_method}）` : "OFF"],
+          ["余白トリミング", on(params.crop_margin_enabled)],
+        ]}
+      />
+    </div>
+  );
+}
+
 // スロット1〜3共通の候補行。成功=採用ボタン付き / 失敗=赤 / 重複スキップ=黄
 function CandidateRow({ index, engine, modelName, prediction, confidence, error, skipped, current, onAdopt }) {
   const header = `${index}. ${engineLabelOf(engine)}${modelName ? ` / ${modelName}` : ""}`;
@@ -80,6 +183,7 @@ export default function LabelingView({
   projectId,
   imageVersion,
   preprocessOverrides,
+  preprocessParams,
   predictParams,
   extraPredictParams = [],
   onOpenPreprocess,
@@ -355,12 +459,7 @@ export default function LabelingView({
     );
   }
 
-  const confidencePercent =
-    typeof ocrCandidate?.confidence === "number" ? `${(ocrCandidate.confidence * 100).toFixed(1)}%` : "--";
   const engineKey = String(ocrMeta?.engine || "").toLowerCase();
-  const engineDisplay =
-    { tesseract: "Tesseract", paddleocr: "PaddleOCR", easyocr: "EasyOCR", custom: "カスタムモデル" }[engineKey] ||
-    (ocrMeta?.engine || "--");
   const rawModelName = String(ocrMeta?.modelName || "");
   const isLatestModel = String(predictParams?.model || "") === "latest";
   const modelDisplay =
@@ -369,7 +468,6 @@ export default function LabelingView({
       : isLatestModel
         ? "最新モデル"
         : rawModelName || String(predictParams?.model || "--");
-  const modelTooltip = rawModelName || undefined;
 
   return (
     <div className="grid h-[calc(100vh-238px)] min-h-[460px] grid-cols-[240px_minmax(0,1fr)_300px] gap-3">
@@ -534,9 +632,73 @@ export default function LabelingView({
                 saveAndNext();
               }
             }}
-            className="app-input mb-2 text-xl font-semibold tracking-[0.1em]"
+            className="app-input mb-2 h-12 font-mono text-[26px] font-semibold tracking-[0.12em]"
             placeholder="ラベル文字列を入力（Enterで保存して次へ）"
           />
+
+          <div className="mb-2">
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">OCR候補</p>
+              <div className="flex items-center gap-2">
+                <span className="hidden text-[10px] text-muted lg:inline">
+                  差分は<span className="text-amber-300">黄色</span> / Escで最上位の有効候補を採用
+                </span>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="h-6 px-2 text-[11px]"
+                  onClick={() => setOcrReloadTick((prev) => prev + 1)}
+                  disabled={ocrLoading}
+                  title="現在画像に対して全スロットを再推論します"
+                >
+                  OCR再実行
+                </Button>
+              </div>
+            </div>
+            {ocrLoading ? (
+              <p className="text-sm text-muted">OCR実行中...</p>
+            ) : (
+              <div className="max-h-44 space-y-1.5 overflow-y-auto pr-0.5">
+                {ocrCandidate?.text ? (
+                  <CandidateRow
+                    index={1}
+                    engine={ocrMeta?.engine}
+                    modelName={rawModelName || (modelDisplay !== "--" ? modelDisplay : "")}
+                    prediction={ocrCandidate.text}
+                    confidence={ocrCandidate.confidence}
+                    current={labelValue}
+                    onAdopt={adoptText}
+                  />
+                ) : ocrError ? (
+                  <CandidateRow
+                    index={1}
+                    engine={ocrMeta?.engine}
+                    modelName={rawModelName}
+                    error={`OCR候補取得失敗: ${ocrError}`}
+                  />
+                ) : (
+                  <p className="text-sm text-muted">OCR候補なし</p>
+                )}
+                {extraCandidates.map((item, index) => (
+                  <CandidateRow
+                    key={index}
+                    index={index + 2}
+                    engine={item?.engine}
+                    modelName={item?.modelName}
+                    prediction={item?.prediction}
+                    confidence={item?.confidence}
+                    error={item?.error}
+                    skipped={item?.skipped}
+                    current={labelValue}
+                    onAdopt={adoptText}
+                  />
+                ))}
+                {ocrError && !ocrCandidate?.text ? (
+                  <p className="text-[11px] leading-snug text-muted">推論設定を確認してください（⚙ 前処理設定を開く）。</p>
+                ) : null}
+              </div>
+            )}
+          </div>
 
           <div className="flex flex-wrap items-center gap-2">
             <Button onClick={saveAndNext} title="ラベルを保存して次の画像へ (Enter)">
@@ -656,102 +818,24 @@ export default function LabelingView({
         </div>
       </div>
 
-      {/* 右: OCR推論情報（表示専用。設定変更は前処理設定画面で行う） */}
+      {/* 右: 現在の前処理設定（表示専用。変更は前処理設定画面で行う） */}
       <Card
-        title="OCR推論"
-        subtitle="表示のみ / 設定は前処理画面"
+        title="現在の前処理設定"
+        subtitle="表示のみ / 変更は前処理設定画面"
         className="flex h-full min-h-0 flex-col"
         actions={
           <Button
             size="sm"
             variant="secondary"
             onClick={() => onOpenPreprocess?.()}
-            title="前処理設定画面の推論設定でエンジン・モデルを変更できます"
+            title="前処理設定画面で前処理パラメータ・推論設定を変更できます"
           >
-            ⚙ 推論設定を開く
+            ⚙ 前処理設定を開く
           </Button>
         }
       >
-        <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-0.5">
-          <div className="shrink-0 space-y-1 rounded-lg border border-border bg-card/45 px-2.5 py-2 text-xs">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-muted">Engine</span>
-              <span className="font-semibold text-text">{engineDisplay}</span>
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <span className="shrink-0 text-muted">Model</span>
-              <span className="truncate font-semibold text-text" title={modelTooltip}>
-                {modelDisplay}
-              </span>
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-muted">Confidence</span>
-              <span className="font-semibold text-accent">{confidencePercent}</span>
-            </div>
-          </div>
-
-          <div className="shrink-0 border-t border-border/60 pt-2">
-            <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">OCR候補</p>
-            {ocrLoading ? (
-              <p className="text-sm text-muted">OCR実行中...</p>
-            ) : (
-              <div className="space-y-1.5">
-                {ocrCandidate?.text ? (
-                  <CandidateRow
-                    index={1}
-                    engine={ocrMeta?.engine}
-                    modelName={rawModelName || (modelDisplay !== "--" ? modelDisplay : "")}
-                    prediction={ocrCandidate.text}
-                    confidence={ocrCandidate.confidence}
-                    current={labelValue}
-                    onAdopt={adoptText}
-                  />
-                ) : ocrError ? (
-                  <CandidateRow
-                    index={1}
-                    engine={ocrMeta?.engine}
-                    modelName={rawModelName}
-                    error={`OCR候補取得失敗: ${ocrError}`}
-                  />
-                ) : (
-                  <p className="text-sm text-muted">OCR候補なし</p>
-                )}
-                {extraCandidates.map((item, index) => (
-                  <CandidateRow
-                    key={index}
-                    index={index + 2}
-                    engine={item?.engine}
-                    modelName={item?.modelName}
-                    prediction={item?.prediction}
-                    confidence={item?.confidence}
-                    error={item?.error}
-                    skipped={item?.skipped}
-                    current={labelValue}
-                    onAdopt={adoptText}
-                  />
-                ))}
-                {ocrError && !ocrCandidate?.text ? (
-                  <p className="text-[11px] leading-snug text-muted">推論設定を確認してください。</p>
-                ) : null}
-                <p className="text-[11px] leading-snug text-muted">
-                  異なる文字は<span className="text-amber-300">黄色</span> / Escで最上位の有効候補を採用
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="mt-2 shrink-0 border-t border-border/60 pt-2">
-          <Button
-            size="sm"
-            variant="secondary"
-            className="w-full"
-            onClick={() => setOcrReloadTick((prev) => prev + 1)}
-            disabled={ocrLoading}
-            title="現在画像に対してOCR候補を再取得します"
-          >
-            OCR再実行
-          </Button>
+        <div className="min-h-0 flex-1 overflow-y-auto pr-0.5">
+          <PreprocessSummary params={preprocessParams} />
         </div>
       </Card>
     </div>

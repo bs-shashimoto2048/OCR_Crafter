@@ -2673,6 +2673,7 @@ export default function App() {
         projectId={projectId}
         imageVersion={imageVersion}
         preprocessOverrides={labelingPreprocessOverrides}
+        preprocessParams={preprocessParams}
         predictParams={labelingPredictParams}
         extraPredictParams={labelingExtraPredictParams}
         onOpenPreprocess={() => {
