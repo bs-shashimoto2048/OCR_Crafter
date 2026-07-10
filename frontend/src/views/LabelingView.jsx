@@ -556,7 +556,21 @@ export default function LabelingView({
       </div>
 
       {/* 右: OCR推論情報（表示専用。設定変更は前処理設定画面で行う） */}
-      <Card title="OCR推論" subtitle="表示のみ / 設定は前処理画面" className="flex h-full min-h-0 flex-col">
+      <Card
+        title="OCR推論"
+        subtitle="表示のみ / 設定は前処理画面"
+        className="flex h-full min-h-0 flex-col"
+        actions={
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => onOpenPreprocess?.()}
+            title="前処理設定画面の推論設定でエンジン・モデルを変更できます"
+          >
+            ⚙ 推論設定を開く
+          </Button>
+        }
+      >
         <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-0.5">
           <div className="shrink-0 space-y-1 rounded-lg border border-border bg-card/45 px-2.5 py-2 text-xs">
             <div className="flex items-center justify-between gap-2">
@@ -611,7 +625,7 @@ export default function LabelingView({
           </div>
         </div>
 
-        <div className="mt-2 shrink-0 space-y-1.5 border-t border-border/60 pt-2">
+        <div className="mt-2 shrink-0 border-t border-border/60 pt-2">
           <Button
             size="sm"
             variant="secondary"
@@ -621,15 +635,6 @@ export default function LabelingView({
             title="現在画像に対してOCR候補を再取得します"
           >
             OCR再実行
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="w-full"
-            onClick={() => onOpenPreprocess?.()}
-            title="前処理設定画面の推論設定でエンジン・モデルを変更できます"
-          >
-            ⚙ 推論設定を開く
           </Button>
         </div>
       </Card>

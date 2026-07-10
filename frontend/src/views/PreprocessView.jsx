@@ -76,7 +76,8 @@ export default function PreprocessView({
       model: p.modelName || (slot.engine === "easyocr" ? "" : slot.model || ""),
       prediction: p.prediction || "",
       confidence: p.confidence,
-      error: p.duplicate ? "他のスロットと同一設定のため推論をスキップしました" : p.error || "",
+      skipped: Boolean(p.duplicate),
+      error: p.duplicate ? "同一設定のためスキップ" : p.error || "",
     };
   });
 

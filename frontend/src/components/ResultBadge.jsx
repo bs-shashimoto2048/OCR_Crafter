@@ -12,27 +12,37 @@ function confidenceLabel(confidence) {
   return typeof confidence === "number" ? `${(confidence * 100).toFixed(1)}%` : "--";
 }
 
-// 比較行（モデル1〜3共通のコンパクト行）
-function ComparisonRow({ index, engine, model, prediction, confidence, error }) {
+// 比較行（モデル1〜3共通のコンパクト行）。skipped=重複スキップ(黄) / error=失敗(赤)
+function ComparisonRow({ index, engine, model, prediction, confidence, error, skipped }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card/45 px-2.5 py-1.5">
+    <div
+      className={`flex items-center justify-between gap-3 rounded-lg border px-2.5 py-1.5 ${
+        skipped
+          ? "border-amber-400/40 bg-amber-400/10"
+          : error
+            ? "border-danger/40 bg-danger/10"
+            : "border-border bg-card/45"
+      }`}
+    >
       <div className="min-w-0">
         <p className="truncate text-[10px] text-muted">
           {index}. {engineLabelOf(engine)}
           {model ? ` / ${model}` : ""}
         </p>
-        {error ? (
+        {skipped ? (
+          <p className="text-xs text-amber-200">{error || "同一設定のためスキップ"}</p>
+        ) : error ? (
           <p className="break-all text-xs text-danger">{error}</p>
         ) : (
           <p className="truncate text-xl font-semibold leading-tight text-text">{prediction || "--"}</p>
         )}
       </div>
-      <p className="shrink-0 text-sm font-semibold text-accent">{error ? "" : confidenceLabel(confidence)}</p>
+      <p className="shrink-0 text-sm font-semibold text-accent">{error || skipped ? "" : confidenceLabel(confidence)}</p>
     </div>
   );
 }
 
-// 前処理画面のコンパクト推論結果表示。
+// 最終画像直下に置く推論結果カード。
 // comparisons（モデル2/3の結果）がある場合は比較リスト、無ければ従来の単一表示
 export default function ResultBadge({
   loading,
@@ -48,53 +58,41 @@ export default function ResultBadge({
   const engineLabel = engineLabelOf(engine);
   const hasComparisons = Array.isArray(comparisons) && comparisons.length > 0;
 
-  if (error && !hasComparisons) {
-    return (
-      <div className="shrink-0 whitespace-pre-line rounded-xl border border-danger/40 bg-danger/10 px-4 py-2.5 text-sm text-danger">
-        {error}
-      </div>
-    );
-  }
-
-  if (hasComparisons) {
-    return (
-      <div className="shrink-0 space-y-1.5 rounded-xl border border-border bg-card/60 px-3 py-2 backdrop-blur-md">
-        {loading ? (
-          <div className="text-sm text-muted">プレビュー推論を実行中...</div>
-        ) : (
-          <>
-            <ComparisonRow
-              index={1}
-              engine={engine}
-              model={modelName || modelType || ""}
-              prediction={prediction}
-              confidence={confidence}
-              error={error}
-            />
-            {comparisons.map((item, idx) => (
-              <ComparisonRow
-                key={idx}
-                index={idx + 2}
-                engine={item.engine}
-                model={item.model}
-                prediction={item.prediction}
-                confidence={item.confidence}
-                error={item.error}
-              />
-            ))}
-          </>
-        )}
-        {!loading && warning ? (
-          <p className="rounded-md border border-amber-400/40 bg-amber-400/10 px-2 py-1 text-[11px] text-amber-200">{warning}</p>
-        ) : null}
-      </div>
-    );
-  }
-
   return (
-    <div className="shrink-0 rounded-xl border border-border bg-card/60 px-4 py-2.5 backdrop-blur-md">
+    <div className="shrink-0 rounded-xl border border-border bg-card/60 px-3 py-2 backdrop-blur-md">
+      <div className="mb-1.5 flex items-baseline justify-between gap-2 px-0.5">
+        <p className="text-xs font-semibold text-text">推論結果</p>
+        <p className="text-[10px] text-muted">最終画像に対するOCR</p>
+      </div>
       {loading ? (
         <div className="text-sm text-muted">プレビュー推論を実行中...</div>
+      ) : hasComparisons ? (
+        <div className="space-y-1.5">
+          <ComparisonRow
+            index={1}
+            engine={engine}
+            model={modelName || modelType || ""}
+            prediction={prediction}
+            confidence={confidence}
+            error={error}
+          />
+          {comparisons.map((item, idx) => (
+            <ComparisonRow
+              key={idx}
+              index={idx + 2}
+              engine={item.engine}
+              model={item.model}
+              prediction={item.prediction}
+              confidence={item.confidence}
+              error={item.error}
+              skipped={item.skipped}
+            />
+          ))}
+        </div>
+      ) : error ? (
+        <div className="whitespace-pre-line rounded-lg border border-danger/40 bg-danger/10 px-2.5 py-1.5 text-sm text-danger">
+          {error}
+        </div>
       ) : prediction ? (
         <div className="flex items-center justify-between gap-4">
           <div className="min-w-0">
