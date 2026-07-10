@@ -567,14 +567,23 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
   }
 
   function handleImageWheel(e) {
-    if (!isStep3Active || !e.ctrlKey) {
+    if (!e.ctrlKey) {
       return;
     }
-    e.preventDefault();
     const viewport = imageViewportRef.current;
-    if (!viewport) {
+    const imgEl = imageRef.current;
+    if (!viewport || !imgEl) {
       return;
     }
+    // カーソルが表示中の画像（BBoxオーバーレイ含む領域）の上にある場合のみズームする
+    const imgRect = imgEl.getBoundingClientRect();
+    const overImage =
+      e.clientX >= imgRect.left && e.clientX <= imgRect.right && e.clientY >= imgRect.top && e.clientY <= imgRect.bottom;
+    if (!overImage) {
+      return;
+    }
+    // ネイティブリスナー(passive: false)経由なので preventDefault が効き、ブラウザ全体のズームを抑止できる
+    e.preventDefault();
     const rect = viewport.getBoundingClientRect();
     const pointerX = e.clientX - rect.left;
     const pointerY = e.clientY - rect.top;
@@ -592,6 +601,24 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       return next;
     });
   }
+
+  const handleImageWheelRef = useRef(handleImageWheel);
+  handleImageWheelRef.current = handleImageWheel;
+
+  // React の onWheel は passive のため preventDefault が効かずブラウザズームが発動してしまう。
+  // Step3 の間だけネイティブ wheel リスナー(passive: false)を viewport に登録する
+  useEffect(() => {
+    if (activeStep !== 3) {
+      return undefined;
+    }
+    const viewport = imageViewportRef.current;
+    if (!viewport) {
+      return undefined;
+    }
+    const listener = (event) => handleImageWheelRef.current(event);
+    viewport.addEventListener("wheel", listener, { passive: false });
+    return () => viewport.removeEventListener("wheel", listener);
+  }, [activeStep]);
 
   async function runResizePreview() {
     if (!file) {
@@ -994,7 +1021,6 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
         >
           <div
             ref={imageViewportRef}
-            onWheel={handleImageWheel}
             className="max-h-[78vh] overflow-auto rounded-xl border border-border bg-card/55 p-3"
           >
             {currentImageDataUrl ? (
