@@ -70,6 +70,32 @@ const PRESET_STORAGE_KEY = "ocr_preprocess_presets_v1";
 // 前処理画面の比較用推論スロット（モデル2/3）。モデル1は既存の単一推論設定を継続使用
 const PREPROCESS_EXTRA_SLOTS_STORAGE_KEY = "ocr_preprocess_extra_slots_by_project_v1";
 
+// モデル管理画面: 表示名(Alias)とモデル別評価履歴（どちらもUI側のjson保存。API変更なし）
+const MODEL_ALIASES_STORAGE_KEY = "ocr_model_aliases_by_project_v1";
+const MODEL_EVAL_HISTORY_STORAGE_KEY = "ocr_model_eval_history_by_project_v1";
+
+function readProjectScopedStorage(storageKey, projectId) {
+  try {
+    const raw = localStorage.getItem(storageKey);
+    const map = raw ? JSON.parse(raw) : {};
+    const value = map?.[projectId];
+    return value && typeof value === "object" ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeProjectScopedStorage(storageKey, projectId, value) {
+  try {
+    const raw = localStorage.getItem(storageKey);
+    const map = raw ? JSON.parse(raw) : {};
+    map[projectId] = value;
+    localStorage.setItem(storageKey, JSON.stringify(map));
+  } catch {
+    // localStorage が使えない環境では保存なしで動作継続
+  }
+}
+
 // 比較スロットを /preprocess/preview のリクエストフィールドへ変換（前処理画面・ラベル編集共通）
 function extraSlotRequestFields(slot) {
   const engine = String(slot?.engine || "tesseract");
@@ -1096,6 +1122,29 @@ export default function App() {
   useEffect(() => {
     refreshEvaluationDatasetOptions(projectId).catch(() => null);
   }, [projectId]);
+
+  // モデル表示名(Alias)とモデル別評価履歴の project 別読込
+  const [modelAliases, setModelAliases] = useState({});
+  const [modelEvalHistory, setModelEvalHistory] = useState({});
+
+  useEffect(() => {
+    setModelAliases(readProjectScopedStorage(MODEL_ALIASES_STORAGE_KEY, projectId));
+    setModelEvalHistory(readProjectScopedStorage(MODEL_EVAL_HISTORY_STORAGE_KEY, projectId));
+  }, [projectId]);
+
+  function persistModelAlias(modelName, alias) {
+    setModelAliases((prev) => {
+      const next = { ...prev };
+      const trimmed = String(alias || "").trim();
+      if (trimmed) {
+        next[modelName] = trimmed;
+      } else {
+        delete next[modelName];
+      }
+      writeProjectScopedStorage(MODEL_ALIASES_STORAGE_KEY, projectId, next);
+      return next;
+    });
+  }
 
   // 比較用推論スロットの project 別読込（既存の単一推論設定とは独立したキーで互換維持）
   useEffect(() => {
@@ -2433,6 +2482,32 @@ export default function App() {
         body: JSON.stringify(payload),
       });
       setOcrEvalResult(data);
+      // モデル管理画面向けに、モデル別の評価結果を記録（評価セットは画像フォルダ名で区別）
+      try {
+        const datasetLabel =
+          String(ocrEvalImageDir || "")
+            .replace(/[\\/]+$/, "")
+            .split(/[\\/]/)
+            .pop() || "eval";
+        setModelEvalHistory((prev) => {
+          const next = { ...prev };
+          for (const target of data?.targets || []) {
+            const key = String(target?.model || "");
+            if (!key) continue;
+            next[key] = {
+              ...(next[key] || {}),
+              [datasetLabel]: {
+                percent: Number(target?.accuracy_percent),
+                at: new Date().toISOString(),
+              },
+            };
+          }
+          writeProjectScopedStorage(MODEL_EVAL_HISTORY_STORAGE_KEY, projectId, next);
+          return next;
+        });
+      } catch {
+        // 記録失敗は評価結果表示に影響させない
+      }
       const acc = data?.comparison
         ? `学習前 ${(data.comparison.base_accuracy * 100).toFixed(1)}% → 学習後 ${(data.comparison.trained_accuracy * 100).toFixed(1)}%`
         : `対象 ${(data?.targets || []).length} 件`;
@@ -2810,6 +2885,22 @@ export default function App() {
             },
           }
         : latestModels;
+    // 現在OCR推論で使用中のモデル名を解決（"latest" 指定時は実体のモデル名へ）
+    const toBase = (value) => String(value || "").split("/").pop();
+    const inferenceInUseModel =
+      inferEngine === "tesseract"
+        ? inferTesseractModel === "latest"
+          ? toBase(latestModels.ocrTesseract)
+          : inferTesseractModel
+        : inferEngine === "paddleocr"
+          ? inferPaddleModel === "latest"
+            ? toBase(latestModels.ocrPaddle)
+            : inferPaddleModel
+          : inferEngine === "custom"
+            ? inferModel === "latest"
+              ? toBase(latestModels.any)
+              : inferModel
+            : "";
     view = (
       <ModelsView
         projectId={projectId}
@@ -2818,6 +2909,32 @@ export default function App() {
         latest={latestForView}
         onRefresh={() => loadModels(projectId)}
         onDeleteSelected={deleteSelectedModels}
+        aliases={modelAliases}
+        onAliasChange={persistModelAlias}
+        evalHistory={modelEvalHistory}
+        inferenceInUseModel={inferenceInUseModel}
+        inferenceInUseEngine={inferEngine}
+        onUseForInference={(name) => {
+          const engine = String(modelInfos?.[name]?.engine || "");
+          const family = String(modelInfos?.[name]?.training_family || "classification");
+          if (engine === "tesseract") {
+            setInferEngine("tesseract");
+            setInferTesseractModel(name);
+          } else if (family === "ocr") {
+            setInferEngine("paddleocr");
+            setInferPaddleModel(name);
+          } else {
+            setInferEngine("custom");
+            setInferModel(name);
+          }
+          notify("success", `推論使用モデルを ${modelAliases[name] || name} に設定しました`);
+        }}
+        onOpenEvaluation={(name) => {
+          if (String(modelInfos?.[name]?.engine || "") === "tesseract") {
+            setOcrEvalTrainedModel(name);
+          }
+          setActiveView("ocr-eval");
+        }}
       />
     );
   }
