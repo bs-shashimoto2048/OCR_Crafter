@@ -419,8 +419,8 @@ export default function PreprocessView({
         }
         headerAction={
           returnView ? (
-            <Button size="sm" variant="secondary" onClick={() => onReturn?.()} title="ラベル編集画面へ戻ります">
-              × ラベル編集へ戻る
+            <Button size="sm" variant="secondary" onClick={() => onReturn?.()} title="元の画面へ戻ります">
+              {returnView === "rapid-ocr" ? "× OCR修正へ戻る" : "× ラベル編集へ戻る"}
             </Button>
           ) : null
         }

@@ -12,7 +12,7 @@ const TESSERACT_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt";
 const STATUS_LABELS = {
   all: "全て",
   unprocessed: "未処理",
-  confirmed: "確定",
+  confirmed: "確定済",
   pending: "保留",
 };
 const STATUS_FILTERS = ["all", "unprocessed", "confirmed", "pending"];
@@ -135,6 +135,8 @@ export default function RapidOCRView({
   preprocessEnabled,
   setPreprocessEnabled,
   preprocessOverrides,
+  preprocessPresetName = "",
+  onOpenPreprocess,
 }) {
   // Tesseract選択時は大小文字を区別して扱う（k/l/t の小文字補正・保存を可能にする）
   const keepCase = engine === "tesseract";
@@ -630,6 +632,69 @@ export default function RapidOCRView({
     }
   }
 
+  const ENGINE_DISPLAY = { custom: "カスタム", easyocr: "EasyOCR", paddleocr: "PaddleOCR", tesseract: "Tesseract" };
+  const currentEngineLabel =
+    ENGINE_DISPLAY[String(currentResult?.engine || engine).toLowerCase()] || (currentResult?.engine || engine);
+  const currentModelLabel = String(
+    currentResult?.model_name ||
+      (engine === "tesseract" ? tesseractModel : engine === "paddleocr" ? paddleModel : engine === "custom" ? model : "-") ||
+      "-"
+  );
+  // 将来の複数OCR比較を想定した最大3件の配列構造（現在は選択中エンジンの1件）
+  const visibleCandidates = (currentResult
+    ? [
+        {
+          engineLabel: currentEngineLabel,
+          model: currentModelLabel === "-" ? "" : currentModelLabel,
+          prediction: toHalfWidthAlnum(currentResultText, { keepCase }),
+          confidence: Number(currentResult?.confidence || 0),
+        },
+      ]
+    : []
+  ).slice(0, 3);
+
+  function adoptCandidate(candidate) {
+    if (!candidate?.prediction) return;
+    setTouched(true);
+    setDraft(toHalfWidthAlnum(candidate.prediction, { keepCase }));
+    inputRef.current?.focus();
+  }
+
+  function goStep(direction) {
+    if (!onSelectImageName || images.length === 0) return;
+    const nextName = getNextFilteredImageName(currentName, direction);
+    if (nextName) onSelectImageName(nextName);
+  }
+
+  // 追加ショートカット（既存の Enter / Shift+Enter / Backspace は従来どおり）
+  useEffect(() => {
+    function handleGlobalKeyDown(event) {
+      if (event.isComposing) return;
+      if (event.ctrlKey && !event.altKey && (event.key === "s" || event.key === "S")) {
+        event.preventDefault();
+        saveCurrent({ skipped: false });
+        return;
+      }
+      if (event.ctrlKey && event.key === "ArrowRight") {
+        event.preventDefault();
+        goStep(1);
+        return;
+      }
+      if (event.ctrlKey && event.key === "ArrowLeft") {
+        event.preventDefault();
+        goStep(-1);
+        return;
+      }
+      if (event.key === "Escape") {
+        // OCR候補（元推論）へ戻す
+        setTouched(true);
+        setDraft(toHalfWidthAlnum(currentResultText, { keepCase }));
+      }
+    }
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+  });
+
   function statusChipClass() {
     if (singleStatus.kind === "waiting") return "bg-slate-500/20 text-slate-200";
     if (singleStatus.kind === "invalid") return "bg-red-500/25 text-red-200";
@@ -644,36 +709,10 @@ export default function RapidOCRView({
     return "border-border bg-card/70 text-muted";
   }
 
-  return (
-    <div className="space-y-6">
-      <div className="grid h-[calc(100vh-175px)] min-h-[640px] grid-cols-[1.5fr_1fr] gap-4">
-        <Card title="作業画像 / OCR結果入力" subtitle="" className="flex min-h-0 flex-col">
-          <div className="flex min-h-0 flex-1 flex-col space-y-4 overflow-hidden">
-            <div className="grid grid-cols-2 gap-2">
+  // 推論設定（右ペインの折り畳み内。機能・stateは従来のまま）
+  const settingsPanel = (
+    <div className="space-y-2.5">
               <div>
-                <label className="app-label">対象画像</label>
-                <select
-                  className="app-select"
-                  value={filteredImages.some((item) => item.image === currentName) ? currentName : ""}
-                  onChange={(e) => {
-                    const nextName = e.target.value;
-                    if (nextName && onSelectImageName) {
-                      onSelectImageName(nextName);
-                    }
-                  }}
-                >
-                  {filteredImages.length === 0 ? <option value="">該当画像なし</option> : null}
-                  {filteredImages.map((item) => {
-                    const status = imageStatusMap[item.image] || "unprocessed";
-                    return (
-                      <option key={item.image} value={item.image}>
-                        {item.image}（{STATUS_LABELS[status] || status}）
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
-              <div className="flex items-end">
                 <label className="inline-flex items-center gap-2 rounded border border-border px-3 py-2 text-sm">
                   <input
                     type="checkbox"
@@ -683,7 +722,6 @@ export default function RapidOCRView({
                   前処理設定を適用
                 </label>
               </div>
-            </div>
 
             <div className="grid grid-cols-2 gap-2">
               <div>
@@ -786,8 +824,22 @@ export default function RapidOCRView({
                 ) : null}
               </div>
             ) : null}
+    </div>
+  );
 
-            <div className="min-h-[160px] flex-1 rounded-lg border border-border bg-card/60 p-2">
+  return (
+    <div className="flex h-[calc(100vh-238px)] min-h-[520px] flex-col gap-2">
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(180px,18fr)_minmax(0,55fr)_minmax(280px,27fr)] gap-3">
+        {/* 中央: 作業領域（元画像 → OCR候補 → 修正後 → ヒートマップ → 操作） */}
+        <div className="order-2 flex min-h-0 flex-col gap-2">
+          <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-border bg-card/60 p-2 backdrop-blur-md">
+            <div className="mb-1.5 flex shrink-0 flex-wrap items-center justify-between gap-2 px-1">
+              <p className="truncate text-xs font-semibold text-text">{currentName || "--"}</p>
+              <p className="text-[11px] text-muted">
+                {filteredPosition}/{filteredImages.length || 0}（総数 {progressStats.total}） / 倍率: 自動フィット
+              </p>
+            </div>
+            <div className="min-h-0 flex-1 rounded-lg border border-border bg-[#3b444f]/40 p-2">
               {currentName ? (
                 <img
                   src={
@@ -802,22 +854,57 @@ export default function RapidOCRView({
                 <div className="flex h-full items-center justify-center text-sm text-muted">画像がありません</div>
               )}
             </div>
+          </div>
 
-            <div className="min-h-0 overflow-auto pr-1">
-              <div className="space-y-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusChipClass()}`}>
-                    {singleStatus.label}
+          {/* OCR候補（最大3件まで表示できる構造。現在は選択中エンジンの1件） */}
+          <div className="shrink-0 rounded-xl border border-border bg-card/60 p-2.5 backdrop-blur-md">
+            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">OCR候補</p>
+            <div className="space-y-1.5">
+              {visibleCandidates.length > 0 ? (
+                visibleCandidates.map((candidate, index) => (
+                  <div key={index} className="flex h-10 items-center gap-2 rounded-lg border border-border bg-card/45 px-2.5">
+                    <span className="w-4 shrink-0 text-[10px] text-muted">{index + 1}.</span>
+                    <span
+                      className="w-44 shrink-0 truncate text-[10px] text-muted"
+                      title={`${candidate.engineLabel}${candidate.model ? ` / ${candidate.model}` : ""}`}
+                    >
+                      {candidate.engineLabel}
+                      {candidate.model ? ` / ${candidate.model}` : ""}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate font-mono text-lg font-semibold text-text">
+                      {candidate.prediction || "--"}
+                    </span>
+                    <span className="shrink-0 text-[11px] font-semibold text-accent">
+                      {(candidate.confidence * 100).toFixed(1)}%
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="h-6 px-2 text-[11px]"
+                      onClick={() => adoptCandidate(candidate)}
+                      title="この候補を修正後へ反映します (Esc)"
+                    >
+                      採用
+                    </Button>
                   </div>
-                  <span className="text-xs text-muted">
-                    {filteredPosition}/{filteredImages.length || 0} / 総数: {progressStats.total}
-                  </span>
-                  <span className="text-xs text-muted">状態: {STATUS_LABELS[currentImageStatus] || currentImageStatus}</span>
-                </div>
+                ))
+              ) : (
+                <p className="text-xs text-muted">OCR結果待ち...</p>
+              )}
+            </div>
+          </div>
 
+          {/* 修正後（保存される文字列） */}
+          <div className="shrink-0 rounded-xl border border-border bg-card/60 p-2.5 backdrop-blur-md">
+            <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+              <label className="app-label">修正後（保存される文字列）</label>
+              <div className={`inline-flex rounded-full px-3 py-0.5 text-xs font-semibold ${statusChipClass()}`}>
+                {singleStatus.label}
+              </div>
+            </div>
                 <input
                   ref={inputRef}
-                  className="app-input text-3xl tracking-[0.15em] font-semibold"
+                  className="app-input h-12 font-mono text-[26px] font-semibold tracking-[0.12em]"
                   value={draft}
                   onChange={(e) => {
                     setTouched(true);
@@ -832,8 +919,10 @@ export default function RapidOCRView({
                   spellCheck={false}
                   style={{ imeMode: "disabled" }}
                 />
+          </div>
 
-                <div className="rounded-lg border border-border bg-card/60 p-3">
+          {/* ヒートマップ */}
+          <div className="shrink-0 rounded-xl border border-border bg-card/60 p-2.5 backdrop-blur-md">
                   <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                     <p className="text-xs text-muted">ヒートマップ（クリックで1文字編集）</p>
                     {keepCase ? (
@@ -856,100 +945,141 @@ export default function RapidOCRView({
                       setDraft(toHalfWidthAlnum(nextText || "", { keepCase }));
                     }}
                   />
-                </div>
+          </div>
 
-                <div className="rounded-lg border border-border bg-card/60 p-3 text-xs text-muted">
-                  <p>
-                    信頼度: {(Number(currentResult?.confidence || 0) * 100).toFixed(1)}%
-                    {!isDraftAligned ? "（元推論）" : ""}
-                  </p>
-                  {currentResult?.model_warning ? <p className="mt-1 text-amber-300">{currentResult.model_warning}</p> : null}
-                  {currentResult?.validation?.reason ? <p>理由: {currentResult.validation.reason}</p> : null}
-                </div>
+          {/* 操作ボタン（ヒートマップ直下） */}
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <Button onClick={() => saveCurrent({ skipped: false })} disabled={!currentName || saving} title="確定して次の画像へ (Enter)">
+              確定して次へ
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => saveCurrent({ skipped: true })}
+              disabled={!currentName || saving}
+              title="保留として保存して次の画像へ (Shift+Enter)"
+            >
+              保留して次へ
+            </Button>
+            <Button variant="secondary" onClick={() => goStep(-1)} disabled={!getNextFilteredImageName(currentName, -1)} title="前の画像へ (Ctrl+←)">
+              前へ
+            </Button>
+            <Button variant="secondary" onClick={() => goStep(1)} disabled={!getNextFilteredImageName(currentName, 1)} title="次の画像へ (Ctrl+→)">
+              次へ
+            </Button>
+            {notice ? <p className="min-w-0 flex-1 truncate text-xs text-muted" title={notice}>{notice}</p> : null}
+          </div>
+        </div>
 
-                <div className="flex flex-wrap gap-2">
-                  <Button onClick={() => saveCurrent({ skipped: false })} disabled={!currentName || saving}>
-                    確定して次へ
-                  </Button>
-                  <Button variant="secondary" onClick={() => saveCurrent({ skipped: true })} disabled={!currentName || saving}>
-                    保留して次へ
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={() => {
-                      if (!onSelectImageName || images.length === 0) return;
-                      const prevName = getNextFilteredImageName(currentName, -1);
-                      if (prevName) onSelectImageName(prevName);
-                    }}
-                    disabled={!getNextFilteredImageName(currentName, -1)}
-                  >
-                    前へ
-                  </Button>
-                </div>
-                {notice ? <p className="text-xs text-muted">{notice}</p> : null}
+        {/* 右: OCR情報（表示専用） */}
+        <Card
+          title="OCR情報"
+          subtitle="表示のみ / 設定は下の折り畳みから"
+          className="order-3 flex h-full min-h-0 flex-col"
+          actions={
+            <Button size="sm" variant="secondary" onClick={() => onOpenPreprocess?.()} title="前処理設定画面へ移動します">
+              ⚙ 前処理設定を開く
+            </Button>
+          }
+        >
+          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-0.5">
+            <div className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusChipClass()}`}>
+              {singleStatus.label}
+            </div>
+
+            <div className="space-y-1 rounded-lg border border-border bg-card/45 px-2.5 py-2 text-[11px]">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted">Engine</span>
+                <span className="font-semibold text-text">{currentEngineLabel}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="shrink-0 text-muted">Model</span>
+                <span className="truncate font-semibold text-text" title={currentModelLabel}>
+                  {currentModelLabel}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted">Language</span>
+                <span className="font-semibold text-text">
+                  {engine === "easyocr" || engine === "paddleocr" ? selectedLangLabel : "-"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted">Confidence</span>
+                <span className="font-semibold text-accent">
+                  {(Number(currentResult?.confidence || 0) * 100).toFixed(1)}%{!isDraftAligned ? "（元推論）" : ""}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted">前処理プリセット</span>
+                <span className="truncate font-semibold text-text" title={preprocessPresetName || "-"}>
+                  {preprocessPresetName || "-"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted">前処理</span>
+                <span className="font-semibold text-text">{preprocessEnabled ? "ON" : "OFF"}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted">倍率</span>
+                <span className="font-semibold text-text">自動フィット</span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted">推論時間</span>
+                <span className="font-semibold text-text">
+                  {Number(currentResult?.elapsed_ms || currentResult?.duration_ms || 0) > 0
+                    ? `${Number(currentResult.elapsed_ms || currentResult.duration_ms)}ms`
+                    : "-"}
+                </span>
               </div>
             </div>
+
+            {currentResult?.model_warning || currentResult?.validation?.reason ? (
+              <div className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-2.5 py-1.5 text-[11px] text-amber-200">
+                {currentResult?.model_warning ? <p>{currentResult.model_warning}</p> : null}
+                {currentResult?.validation?.reason ? <p>理由: {currentResult.validation.reason}</p> : null}
+              </div>
+            ) : null}
+
+            <details className="group rounded-lg border border-border/80 bg-card/45">
+              <summary className="flex cursor-pointer select-none items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-text transition hover:bg-card/70 [&::-webkit-details-marker]:hidden">
+                <span className="text-[10px] text-muted transition-transform group-open:rotate-90" aria-hidden="true">
+                  ▶
+                </span>
+                推論設定を変更
+              </summary>
+              <div className="px-2.5 pb-2.5">{settingsPanel}</div>
+            </details>
           </div>
         </Card>
 
-        <Card
-          title="画像リスト"
-          subtitle=""
-          className="flex min-h-0 flex-col"
-          actions={
-            <div className="flex flex-wrap gap-2">
+        <Card title="画像一覧" subtitle={`${progressStats.total}件`} className="order-1 flex h-full min-h-0 flex-col">
+          <div className="flex min-h-0 flex-1 flex-col gap-2">
+            <div className="flex shrink-0 flex-wrap gap-1">
               {STATUS_FILTERS.map((filterKey) => {
                 const active = statusFilter === filterKey;
+                const count =
+                  filterKey === "all"
+                    ? progressStats.total
+                    : filterKey === "unprocessed"
+                      ? progressStats.unprocessed
+                      : filterKey === "confirmed"
+                        ? progressStats.confirmed
+                        : progressStats.pending;
                 return (
                   <button
                     key={filterKey}
                     type="button"
                     onClick={() => setStatusFilter(filterKey)}
-                    className={`rounded px-3 py-1 text-xs font-semibold transition ${
+                    className={`rounded px-2 py-0.5 text-[11px] font-semibold transition ${
                       active
                         ? "border border-accent/60 bg-accent/20 text-accent"
                         : "border border-border bg-card/70 text-muted hover:bg-card"
                     }`}
                   >
-                    {STATUS_LABELS[filterKey]}
+                    {STATUS_LABELS[filterKey]} {count}
                   </button>
                 );
               })}
-            </div>
-          }
-        >
-          <div className="flex min-h-0 flex-1 flex-col space-y-3">
-            <div className="rounded-lg border border-border bg-card/60 p-3">
-              <div className="flex flex-wrap gap-2 text-xs text-muted">
-                <span
-                  className={`rounded border border-border px-2 py-0.5 ${
-                    statusFilter === "all" ? "text-emerald-300" : ""
-                  }`}
-                >
-                  総数: {progressStats.total}
-                </span>
-                <span
-                  className={`rounded border border-border px-2 py-0.5 ${
-                    statusFilter === "unprocessed" ? "text-emerald-300" : ""
-                  }`}
-                >
-                  未処理: {progressStats.unprocessed}
-                </span>
-                <span
-                  className={`rounded border border-border px-2 py-0.5 ${
-                    statusFilter === "confirmed" ? "text-emerald-300" : ""
-                  }`}
-                >
-                  確定: {progressStats.confirmed}
-                </span>
-                <span
-                  className={`rounded border border-border px-2 py-0.5 ${
-                    statusFilter === "pending" ? "text-emerald-300" : ""
-                  }`}
-                >
-                  保留: {progressStats.pending}
-                </span>
-              </div>
             </div>
 
             <div ref={listRef} className="min-h-0 flex-1 overflow-auto pr-1">
@@ -983,16 +1113,8 @@ export default function RapidOCRView({
                               {STATUS_LABELS[row.status] || row.status}
                             </span>
                           </div>
-                          <p className="truncate text-xs text-muted">
-                            推論: <span className="text-slate-100">{row.predicted || "-"}</span>
-                          </p>
-                          <p className="truncate text-xs text-muted">
-                            編集:{" "}
-                            <span className="font-semibold text-[#adff5d]">{row.edited || (row.status === "pending" ? "保留" : "-")}</span>
-                          </p>
-                          <p className="text-[11px] text-muted">
-                            信頼度: {(row.confidence * 100).toFixed(1)}% / 判定:{" "}
-                            {row.valid === null ? "-" : row.valid ? "valid" : "invalid"}
+                          <p className="truncate text-sm font-semibold text-[#adff5d]" title={row.edited || row.predicted || "-"}>
+                            {row.edited || row.predicted || "-"}
                           </p>
                         </div>
                       </div>
@@ -1008,6 +1130,11 @@ export default function RapidOCRView({
             </div>
           </div>
         </Card>
+      </div>
+
+      {/* ショートカット常時表示 */}
+      <div className="shrink-0 rounded-lg border border-border/60 bg-card/40 px-3 py-1 text-center text-[11px] text-muted">
+        Enter 確定して次 / Shift+Enter 保留して次 / Ctrl+S 確定保存 / Ctrl+← 前へ / Ctrl+→ 次へ / Esc OCR候補へ戻す
       </div>
     </div>
   );

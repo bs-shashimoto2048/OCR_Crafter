@@ -2978,6 +2978,11 @@ export default function App() {
       <RapidOCRView
         projectId={projectId}
         imageVersion={imageVersion}
+        preprocessPresetName={selectedPreset}
+        onOpenPreprocess={() => {
+          setPreprocessReturnView("rapid-ocr");
+          setActiveView("preprocess");
+        }}
         images={images}
         selectedImageName={selectedImage?.image || ""}
         onSelectImageName={(name) => {
