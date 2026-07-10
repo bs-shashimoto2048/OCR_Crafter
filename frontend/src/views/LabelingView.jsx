@@ -372,7 +372,7 @@ export default function LabelingView({
   const modelTooltip = rawModelName || undefined;
 
   return (
-    <div className="grid h-[calc(100vh-238px)] min-h-[460px] grid-cols-[240px_minmax(0,1fr)_240px] gap-3">
+    <div className="grid h-[calc(100vh-238px)] min-h-[460px] grid-cols-[240px_minmax(0,1fr)_300px] gap-3">
       {/* 左: 画像一覧（この列だけスクロール） */}
       <Card
         title="画像一覧"
