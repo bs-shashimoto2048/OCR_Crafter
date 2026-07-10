@@ -135,6 +135,23 @@ function PreprocessSummary({ params }) {
   );
 }
 
+// 中央プレビューの1段分（元画像 / 中間画像 / 最終画像）。倍率は3段共通
+function StageImage({ title, description, src, zoomPercent }) {
+  return (
+    <div>
+      <div className="mb-1 flex flex-wrap items-baseline gap-2 px-0.5">
+        <p className="shrink-0 text-[11px] font-semibold text-text">{title}</p>
+        <p className="text-[10px] text-muted">{description}</p>
+      </div>
+      {src ? (
+        <img src={src} alt={title} className="h-auto max-w-none rounded-md" style={{ width: `${zoomPercent}%` }} />
+      ) : (
+        <p className="px-0.5 py-2 text-xs text-muted">画像がありません</p>
+      )}
+    </div>
+  );
+}
+
 // スロット1〜3共通の候補行。成功=採用ボタン付き / 失敗=赤 / 重複スキップ=黄
 function CandidateRow({ index, engine, modelName, prediction, confidence, error, skipped, current, onAdopt }) {
   const header = `${index}. ${engineLabelOf(engine)}${modelName ? ` / ${modelName}` : ""}`;
@@ -208,6 +225,9 @@ export default function LabelingView({
   const [showUnlabeledOnly, setShowUnlabeledOnly] = useState(false);
   const [listMode, setListMode] = useState("table");
   const [previewSrc, setPreviewSrc] = useState("");
+  // 中間画像（前処理途中の確認画像）と種別・比率などのプレビュー情報
+  const [interimSrc, setInterimSrc] = useState("");
+  const [previewMeta, setPreviewMeta] = useState(null);
   const [ocrCandidate, setOcrCandidate] = useState(null);
   const [ocrLoading, setOcrLoading] = useState(false);
   const [ocrError, setOcrError] = useState("");
@@ -293,6 +313,8 @@ export default function LabelingView({
     async function loadPreview() {
       if (!selected?.image || !projectId) {
         setPreviewSrc("");
+        setInterimSrc("");
+        setPreviewMeta(null);
         setOcrCandidate(null);
         setExtraCandidates([]);
         setOcrError("");
@@ -356,6 +378,8 @@ export default function LabelingView({
           data?.processed_data_url ||
           processedImageUrl(selected.image, projectId, imageVersion, selected.type || "");
         setPreviewSrc(nextSrc);
+        setInterimSrc(data?.interim_data_url || "");
+        setPreviewMeta({ type: data?.type || "", ratio: data?.ratio });
         // プレビューAPIが返す推論結果をOCR候補として活用する（追加のOCR処理は行わない）
         const prediction = String(data?.prediction || "").trim();
         setOcrCandidate(
@@ -379,6 +403,8 @@ export default function LabelingView({
           return;
         }
         setPreviewSrc(processedImageUrl(selected.image, projectId, imageVersion, selected.type || ""));
+        setInterimSrc("");
+        setPreviewMeta(null);
         setOcrCandidate(null);
         setOcrMeta({ engine: predictParams?.engine || "", modelName: "" });
         setOcrError(String(error?.message || error || "不明なエラー"));
@@ -590,9 +616,13 @@ export default function LabelingView({
             <p className="truncate text-xs font-semibold text-text">
               {selected.image}
               <span className="ml-2 font-normal text-muted">{imageShapes[selected.image] || "--"}</span>
+              {previewMeta?.type ? <span className="ml-2 font-normal text-muted">種別: {previewMeta.type}</span> : null}
+              {previewMeta?.ratio !== undefined && previewMeta?.ratio !== null ? (
+                <span className="ml-2 font-normal text-muted">比率: {previewMeta.ratio}</span>
+              ) : null}
             </p>
             <div className="flex items-center gap-1">
-              <span className="mr-1 text-[11px] text-muted">倍率</span>
+              <span className="mr-1 text-[11px] text-muted">倍率（3画像共通）</span>
               {zoomLevels.map((level) => (
                 <Button
                   key={level}
@@ -606,12 +636,24 @@ export default function LabelingView({
               ))}
             </div>
           </div>
-          <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border bg-[#3b444f]/40 p-2">
-            <img
+          <div className="min-h-0 flex-1 space-y-2 overflow-auto rounded-lg border border-border bg-[#3b444f]/40 p-2">
+            <StageImage
+              title="元画像"
+              description="取り込み時の未加工画像"
+              src={imageUrl(selected.image, projectId, imageVersion)}
+              zoomPercent={zoomPercent}
+            />
+            <StageImage
+              title="中間画像"
+              description="主要な前処理を適用した途中確認画像（前処理設定により最終画像と同一になる場合があります）"
+              src={interimSrc}
+              zoomPercent={zoomPercent}
+            />
+            <StageImage
+              title="最終画像"
+              description="OCR推論へ入力される最終処理画像"
               src={previewSrc || processedImageUrl(selected.image, projectId, imageVersion, selected.type || "")}
-              alt={selected.image}
-              className="mx-auto h-auto max-w-none rounded-lg"
-              style={{ width: `${zoomPercent}%` }}
+              zoomPercent={zoomPercent}
             />
           </div>
         </div>
