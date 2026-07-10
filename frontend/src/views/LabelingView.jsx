@@ -135,16 +135,24 @@ function PreprocessSummary({ params }) {
   );
 }
 
-// 中央プレビューの1段分（元画像 / 中間画像 / 最終画像）。倍率は3段共通
+// 中央プレビューの1段分（元画像 / 中間画像 / 最終画像）。倍率は3段共通。
+// zoomPercent="fit" のときは表示領域の高さを3段で分け合い、縦横比を保ってフィット表示する
 function StageImage({ title, description, src, zoomPercent }) {
+  const fit = zoomPercent === "fit";
   return (
-    <div>
-      <div className="mb-1 flex flex-wrap items-baseline gap-2 px-0.5">
+    <div className={fit ? "flex min-h-0 flex-1 flex-col" : ""}>
+      <div className="mb-1 flex shrink-0 flex-wrap items-baseline gap-2 px-0.5">
         <p className="shrink-0 text-[11px] font-semibold text-text">{title}</p>
-        <p className="text-[10px] text-muted">{description}</p>
+        <p className="truncate text-[10px] text-muted" title={description}>{description}</p>
       </div>
       {src ? (
-        <img src={src} alt={title} className="h-auto max-w-none rounded-md" style={{ width: `${zoomPercent}%` }} />
+        fit ? (
+          <div className="min-h-0 flex-1">
+            <img src={src} alt={title} className="h-full w-full rounded-md object-contain" />
+          </div>
+        ) : (
+          <img src={src} alt={title} className="h-auto max-w-none rounded-md" style={{ width: `${zoomPercent}%` }} />
+        )
       ) : (
         <p className="px-0.5 py-2 text-xs text-muted">画像がありません</p>
       )}
@@ -221,7 +229,8 @@ export default function LabelingView({
   imageShapes,
 }) {
   const zoomLevels = [25, 50, 100, 150, 200];
-  const [zoomPercent, setZoomPercent] = useState(100);
+  // "fit" = 高さ自動（3画像を表示領域内へ収める）。数値 = 従来の幅基準倍率（内部スクロール）
+  const [zoomPercent, setZoomPercent] = useState("fit");
   const [showUnlabeledOnly, setShowUnlabeledOnly] = useState(false);
   const [listMode, setListMode] = useState("table");
   const [previewSrc, setPreviewSrc] = useState("");
@@ -623,6 +632,15 @@ export default function LabelingView({
             </p>
             <div className="flex items-center gap-1">
               <span className="mr-1 text-[11px] text-muted">倍率（3画像共通）</span>
+              <Button
+                size="sm"
+                variant={zoomPercent === "fit" ? "primary" : "secondary"}
+                className="h-6 px-1.5 text-[11px]"
+                onClick={() => setZoomPercent("fit")}
+                title="3画像を表示領域内へ自動フィットします"
+              >
+                自動
+              </Button>
               {zoomLevels.map((level) => (
                 <Button
                   key={level}
@@ -636,7 +654,11 @@ export default function LabelingView({
               ))}
             </div>
           </div>
-          <div className="min-h-0 flex-1 space-y-2 overflow-auto rounded-lg border border-border bg-[#3b444f]/40 p-2">
+          <div
+            className={`min-h-0 flex-1 rounded-lg border border-border bg-[#3b444f]/40 p-2 ${
+              zoomPercent === "fit" ? "flex flex-col gap-2 overflow-hidden" : "space-y-2 overflow-auto"
+            }`}
+          >
             <StageImage
               title="元画像"
               description="取り込み時の未加工画像"
