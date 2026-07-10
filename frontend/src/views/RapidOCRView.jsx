@@ -829,7 +829,7 @@ export default function RapidOCRView({
 
   return (
     <div className="flex h-[calc(100vh-238px)] min-h-[520px] flex-col gap-2">
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(180px,18fr)_minmax(0,55fr)_minmax(280px,27fr)] gap-3">
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(240px,24fr)_minmax(0,49fr)_minmax(280px,27fr)] gap-3">
         {/* 中央: 作業領域（元画像 → OCR候補 → 修正後 → ヒートマップ → 操作） */}
         <div className="order-2 flex min-h-0 flex-col gap-2">
           <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-border bg-card/60 p-2 backdrop-blur-md">
