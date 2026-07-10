@@ -160,47 +160,57 @@ function StageImage({ title, description, src, zoomPercent }) {
   );
 }
 
-// スロット1〜3共通の候補行。成功=採用ボタン付き / 失敗=赤 / 重複スキップ=黄
-function CandidateRow({ index, engine, modelName, prediction, confidence, error, skipped, current, onAdopt }) {
-  const header = `${index}. ${engineLabelOf(engine)}${modelName ? ` / ${modelName}` : ""}`;
-  if (skipped || error) {
-    return (
-      <div
-        className={`rounded-lg border px-2.5 py-1.5 ${
-          skipped ? "border-amber-400/40 bg-amber-400/10" : "border-danger/40 bg-danger/10"
-        }`}
-      >
-        <p className="truncate text-[10px] text-muted" title={header}>
-          {header}
-        </p>
-        <p className={`break-all text-xs ${skipped ? "text-amber-200" : "text-danger"}`}>
-          {skipped ? "同一設定のためスキップ" : error}
-        </p>
-      </div>
-    );
-  }
+// スロット1〜3共通の候補行（高さ固定の1行構成）。成功=採用ボタン付き / dimmed=再推論中の前回値
+function CandidateRow({ index, engine, modelName, prediction, confidence, current, onAdopt, dimmed }) {
+  const header = `${engineLabelOf(engine)}${modelName ? ` / ${modelName}` : ""}`;
   return (
     <button
       type="button"
       onClick={() => onAdopt?.(prediction)}
-      title="クリックで現在ラベルへ反映"
-      className="w-full rounded-lg border border-border bg-card/60 px-2.5 py-1.5 text-left backdrop-blur-md transition hover:border-accent/60 hover:bg-accent/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+      title={`${header} の候補をクリックで現在ラベルへ反映`}
+      className={`flex h-10 w-full items-center gap-2 rounded-lg border border-border bg-card/60 px-2.5 text-left backdrop-blur-md transition hover:border-accent/60 hover:bg-accent/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 ${
+        dimmed ? "opacity-50" : ""
+      }`}
     >
-      <p className="truncate text-[10px] text-muted" title={header}>
+      <span className="w-4 shrink-0 text-[10px] text-muted">{index}.</span>
+      <span className="w-44 shrink-0 truncate text-[10px] text-muted" title={header}>
         {header}
-      </p>
-      <div className="mt-0.5 flex items-center justify-between gap-2">
+      </span>
+      <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap">
         <DiffText candidate={prediction} current={current} />
-        <span className="flex shrink-0 items-center gap-1.5">
-          <span className="text-[11px] font-semibold text-accent">
-            {typeof confidence === "number" ? `${(confidence * 100).toFixed(1)}%` : "--"}
-          </span>
-          <span className="rounded-md border border-accent/50 bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold text-blue-200">
-            採用
-          </span>
-        </span>
-      </div>
+      </span>
+      <span className="shrink-0 text-[11px] font-semibold text-accent">
+        {typeof confidence === "number" ? `${(confidence * 100).toFixed(1)}%` : "--"}
+      </span>
+      <span className="shrink-0 rounded-md border border-accent/50 bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold text-blue-200">
+        採用
+      </span>
     </button>
+  );
+}
+
+// 候補行と同じ高さのメッセージ行（実行中 / エラー / スキップ / 候補なし / 未設定）
+function CandidateMessageRow({ index, header, message, tone = "muted" }) {
+  const toneClass =
+    tone === "danger"
+      ? "border-danger/40 bg-danger/10 text-danger"
+      : tone === "amber"
+        ? "border-amber-400/40 bg-amber-400/10 text-amber-200"
+        : tone === "empty"
+          ? "border-dashed border-border/40 text-muted/50"
+          : "border-border bg-card/45 text-muted";
+  return (
+    <div className={`flex h-10 items-center gap-2 rounded-lg border px-2.5 ${toneClass}`}>
+      {index ? <span className="w-4 shrink-0 text-[10px] text-muted">{index}.</span> : null}
+      {header ? (
+        <span className="w-44 shrink-0 truncate text-[10px] text-muted" title={header}>
+          {header}
+        </span>
+      ) : null}
+      <span className="min-w-0 flex-1 truncate text-xs" title={message}>
+        {message}
+      </span>
+    </div>
   );
 }
 
@@ -719,49 +729,75 @@ export default function LabelingView({
                 </Button>
               </div>
             </div>
-            {ocrLoading ? (
-              <p className="text-sm text-muted">OCR実行中...</p>
-            ) : (
-              <div className="max-h-44 space-y-1.5 overflow-y-auto pr-0.5">
-                {ocrCandidate?.text ? (
-                  <CandidateRow
-                    index={1}
-                    engine={ocrMeta?.engine}
-                    modelName={rawModelName || (modelDisplay !== "--" ? modelDisplay : "")}
-                    prediction={ocrCandidate.text}
-                    confidence={ocrCandidate.confidence}
-                    current={labelValue}
-                    onAdopt={adoptText}
-                  />
-                ) : ocrError ? (
-                  <CandidateRow
-                    index={1}
-                    engine={ocrMeta?.engine}
-                    modelName={rawModelName}
-                    error={`OCR候補取得失敗: ${ocrError}`}
-                  />
-                ) : (
-                  <p className="text-sm text-muted">OCR候補なし</p>
-                )}
-                {extraCandidates.map((item, index) => (
-                  <CandidateRow
-                    key={index}
-                    index={index + 2}
-                    engine={item?.engine}
-                    modelName={item?.modelName}
-                    prediction={item?.prediction}
-                    confidence={item?.confidence}
-                    error={item?.error}
-                    skipped={item?.skipped}
-                    current={labelValue}
-                    onAdopt={adoptText}
-                  />
-                ))}
-                {ocrError && !ocrCandidate?.text ? (
-                  <p className="text-[11px] leading-snug text-muted">推論設定を確認してください（⚙ 前処理設定を開く）。</p>
-                ) : null}
-              </div>
-            )}
+            {/* 常に3行分の高さで固定表示（成功/実行中/エラー/未設定でも画面が揺れない） */}
+            <div className="space-y-1.5">
+              {ocrCandidate?.text ? (
+                <CandidateRow
+                  index={1}
+                  engine={ocrMeta?.engine}
+                  modelName={rawModelName || (modelDisplay !== "--" ? modelDisplay : "")}
+                  prediction={ocrCandidate.text}
+                  confidence={ocrCandidate.confidence}
+                  current={labelValue}
+                  onAdopt={adoptText}
+                  dimmed={ocrLoading}
+                />
+              ) : ocrLoading ? (
+                <CandidateMessageRow index={1} header={engineLabelOf(predictParams?.engine)} message="OCR実行中..." />
+              ) : ocrError ? (
+                <CandidateMessageRow
+                  index={1}
+                  header={engineLabelOf(ocrMeta?.engine)}
+                  message={`OCR候補取得失敗: ${ocrError}（推論設定を確認してください）`}
+                  tone="danger"
+                />
+              ) : (
+                <CandidateMessageRow index={1} header={engineLabelOf(ocrMeta?.engine)} message="OCR候補なし" />
+              )}
+              {[0, 1].map((slotIndex) => {
+                const rowIndex = slotIndex + 2;
+                if (slotIndex >= (extraPredictParams?.length || 0)) {
+                  return (
+                    <CandidateMessageRow
+                      key={rowIndex}
+                      message="比較スロット未設定（前処理設定画面で追加できます）"
+                      tone="empty"
+                    />
+                  );
+                }
+                const item = extraCandidates?.[slotIndex];
+                const headerText = item?.engine || item?.modelName
+                  ? `${engineLabelOf(item.engine)}${item.modelName ? ` / ${item.modelName}` : ""}`
+                  : engineLabelOf(extraPredictParams[slotIndex]?.engine);
+                if (item?.prediction) {
+                  return (
+                    <CandidateRow
+                      key={rowIndex}
+                      index={rowIndex}
+                      engine={item.engine}
+                      modelName={item.modelName}
+                      prediction={item.prediction}
+                      confidence={item.confidence}
+                      current={labelValue}
+                      onAdopt={adoptText}
+                      dimmed={ocrLoading}
+                    />
+                  );
+                }
+                if (ocrLoading) {
+                  return <CandidateMessageRow key={rowIndex} index={rowIndex} header={headerText} message="OCR実行中..." />;
+                }
+                if (item?.skipped) {
+                  return (
+                    <CandidateMessageRow key={rowIndex} index={rowIndex} header={headerText} message="同一設定のためスキップ" tone="amber" />
+                  );
+                }
+                if (item?.error) {
+                  return <CandidateMessageRow key={rowIndex} index={rowIndex} header={headerText} message={item.error} tone="danger" />;
+                }
+                return <CandidateMessageRow key={rowIndex} index={rowIndex} header={headerText} message="OCR候補なし" />;
+              })}
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
