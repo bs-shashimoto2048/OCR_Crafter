@@ -2665,6 +2665,11 @@ export default function App() {
           onSelectProject={setProjectId}
         onCreateProject={createProject}
         onDeleteProject={deleteProject}
+        onNavigate={setActiveView}
+        currentStepLabel={
+          (workflowSteps.find((step) => step.status === "current") ||
+            workflowSteps.find((step) => step.status === "running"))?.label || "完了"
+        }
         imagesCount={images.length}
         labeledCount={labeledCount}
         modelCount={models.length}
