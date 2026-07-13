@@ -319,6 +319,11 @@ export default function App() {
   const [projects, setProjects] = useState([]);
   const [projectSummaries, setProjectSummaries] = useState({});
   const [projectId, setProjectId] = useState("");
+  // レース対策用: 非同期応答の反映可否判定に最新の projectId を参照する
+  const projectIdRef = useRef(projectId);
+  projectIdRef.current = projectId;
+  // 現在の images 一覧がどのプロジェクトのものかを記録（切替直後の不整合描画防止）
+  const [imageListProjectId, setImageListProjectId] = useState("");
   const [newProjectId, setNewProjectId] = useState("");
 
   const [sourceDir, setSourceDir] = useState("");
@@ -716,14 +721,20 @@ export default function App() {
   async function loadImages(targetProjectId = projectId) {
     if (!targetProjectId) {
       setImages([]);
+      setImageListProjectId("");
       setLabelDrafts({});
       setSelectedIndex(0);
       return;
     }
     const pid = encodeURIComponent(targetProjectId);
     const data = await request(`/images?project_id=${pid}`);
+    // 取得中にプロジェクトが切り替わっていたら旧応答を反映しない（レース対策）
+    if (projectIdRef.current !== targetProjectId) {
+      return;
+    }
     const items = data.items || [];
     setImages(items);
+    setImageListProjectId(targetProjectId);
 
     const drafts = {};
     for (const item of items) {
@@ -1461,7 +1472,11 @@ export default function App() {
     };
   }, [inferPreviewUrl]);
 
-  const selectedImage = images[selectedIndex] || null;
+  // 一覧が現在のプロジェクトに属する場合のみ描画に使用する。
+  // プロジェクト切替直後の1フレームで「旧一覧+新projectId」の画像URLが生成され
+  // 存在しないファイルへの404リクエストが発生するのを防ぐ
+  const currentImages = imageListProjectId === projectId ? images : [];
+  const selectedImage = currentImages[selectedIndex] || null;
   const selectedLabel = selectedImage ? labelDrafts[selectedImage.image] ?? "" : "";
   const labelingPreprocessOverrides = useMemo(
     () => buildPreprocessOverrides(preprocessParams),
@@ -2679,14 +2694,14 @@ export default function App() {
           setPreprocessImage(name);
           setActiveView("preprocess");
         }}
-        images={images}
+        images={currentImages}
         imageVersion={imageVersion}
         workflowSteps={workflowSteps}
         currentStepLabel={
           (workflowSteps.find((step) => step.status === "current") ||
             workflowSteps.find((step) => step.status === "running"))?.label || "完了"
         }
-        imagesCount={images.length}
+        imagesCount={currentImages.length}
         labeledCount={labeledCount}
         modelCount={models.length}
       />
@@ -2705,7 +2720,7 @@ export default function App() {
         onRotate={rotateImage}
         imageVersion={imageVersion}
         imageVersions={imageVersions}
-        images={images}
+        images={currentImages}
         imageShapes={imageShapes}
         onOpenLabeling={openLabeling}
       />
@@ -2726,7 +2741,7 @@ export default function App() {
             setActiveView(preprocessReturnView);
           }
         }}
-        images={images}
+        images={currentImages}
         selectedImage={preprocessImage}
         onSelectImage={setPreprocessImage}
         defaultParams={DEFAULT_PREPROCESS_PARAMS}
@@ -2777,7 +2792,7 @@ export default function App() {
           setPreprocessReturnView("labeling");
           setActiveView("preprocess");
         }}
-        images={images}
+        images={currentImages}
         selectedIndex={selectedIndex}
         onSelectIndex={setSelectedIndex}
         labelDrafts={labelDrafts}
@@ -3005,7 +3020,7 @@ export default function App() {
           setPreprocessReturnView("rapid-ocr");
           setActiveView("preprocess");
         }}
-        images={images}
+        images={currentImages}
         selectedImageName={selectedImage?.image || ""}
         onSelectImageName={(name) => {
           const idx = images.findIndex((item) => item.image === name);
