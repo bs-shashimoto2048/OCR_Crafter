@@ -89,8 +89,10 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
   const pendingFocusBboxIdRef = useRef(null);
   const imageRef = useRef(null);
   const imageViewportRef = useRef(null);
-  // 画像上シングルクリックによる選択切替の直近記録（ダブルクリック時の復元用）
-  const lastImageClickToggleRef = useRef({ id: null, at: 0 });
+  // 画像上シングルクリックによる選択変更の直近記録（ダブルクリック時の復元用）
+  const lastImageClickToggleRef = useRef({ id: null, at: 0, prevSelection: null });
+  // UI上の選択状態（操作対象）。有効/無効(row.selected=保存対象)とは独立して管理する
+  const [selectedUiIds, setSelectedUiIds] = useState([]);
   const clickTimerRef = useRef(null);
   const dragStateRef = useRef(null);
 
@@ -413,14 +415,27 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
     setOk(`${pastedRows.length}件のROIを貼り付けました`);
   }
 
-  function scheduleBBoxClick(id) {
+  // 画像上クリック: UI選択のみ変更（有効/無効は変更しない）。additive=Ctrl/Cmd押下時は複数選択の追加/解除
+  function handleBoxSelect(id, additive) {
+    setSelectedUiIds((prev) => {
+      const has = prev.includes(id);
+      if (additive) {
+        return has ? prev.filter((item) => item !== id) : [...prev, id];
+      }
+      return has && prev.length === 1 ? [] : [id];
+    });
+  }
+
+  function scheduleBBoxClick(e, id) {
+    const additive = Boolean(e?.ctrlKey || e?.metaKey);
     if (clickTimerRef.current) {
       clearTimeout(clickTimerRef.current);
     }
     clickTimerRef.current = setTimeout(() => {
-      toggleDetection(id, { focusCard: true });
-      // ダブルクリック判定用（間隔が長いダブルクリックで選択状態が変わった場合に復元する）
-      lastImageClickToggleRef.current = { id, at: Date.now() };
+      // ダブルクリック判定用に、クリック前の選択状態を記録しておく（復元用）
+      lastImageClickToggleRef.current = { id, at: Date.now(), prevSelection: selectedUiIds };
+      handleBoxSelect(id, additive);
+      focusBboxCard(id);
       clickTimerRef.current = null;
     }, 220);
   }
@@ -432,11 +447,11 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       clearTimeout(clickTimerRef.current);
       clickTimerRef.current = null;
     }
-    // ダブルクリックは編集開始のみ。1回目のクリックで選択状態が切り替わってしまっていた場合は元へ戻す
+    // ダブルクリックは編集開始のみ。1回目のクリックで選択状態が変わってしまっていた場合は元へ戻す
     const lastToggle = lastImageClickToggleRef.current;
-    if (lastToggle.id === id && Date.now() - lastToggle.at < 700) {
-      setDetections((prev) => prev.map((row) => (row.id === id ? { ...row, selected: !row.selected } : row)));
-      lastImageClickToggleRef.current = { id: null, at: 0 };
+    if (lastToggle.id === id && Array.isArray(lastToggle.prevSelection) && Date.now() - lastToggle.at < 700) {
+      setSelectedUiIds(lastToggle.prevSelection);
+      lastImageClickToggleRef.current = { id: null, at: 0, prevSelection: null };
     }
     setEditMode(true);
     setEditingBboxId(id);
@@ -444,7 +459,8 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
   }
 
   function deleteSelectedBboxes() {
-    const targets = detections.filter((row) => row.selected);
+    const targetIds = new Set(selectedUiIds);
+    const targets = detections.filter((row) => targetIds.has(row.id));
     if (targets.length === 0) {
       return;
     }
@@ -455,11 +471,12 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       return;
     }
     pushUndoSnapshot(detections);
-    setDetections((prev) => prev.filter((row) => !row.selected));
-    if (editingBboxId != null && targets.some((row) => row.id === editingBboxId)) {
+    setDetections((prev) => prev.filter((row) => !targetIds.has(row.id)));
+    setSelectedUiIds([]);
+    if (editingBboxId != null && targetIds.has(editingBboxId)) {
       setEditingBboxId(null);
     }
-    if (focusedBboxId != null && targets.some((row) => row.id === focusedBboxId)) {
+    if (focusedBboxId != null && targetIds.has(focusedBboxId)) {
       setFocusedBboxId(null);
     }
     setOk(`${targets.length}件のBBOXを削除しました`);
@@ -735,12 +752,18 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
     }
   }
 
-  function toggleDetection(id, options = {}) {
+  // 有効/無効（保存対象）の切替。一覧右端のチェックボックスからのみ呼び出す
+  function handleBoxEnabledChange(id) {
     setDetections((prev) => prev.map((row) => (row.id === id ? { ...row, selected: !row.selected } : row)));
-    if (options.focusCard) {
-      focusBboxCard(id);
-    }
   }
+
+  // BBOX削除・再検出などで存在しなくなった id をUI選択から取り除く
+  useEffect(() => {
+    setSelectedUiIds((prev) => {
+      const alive = prev.filter((id) => detections.some((row) => row.id === id));
+      return alive.length === prev.length ? prev : alive;
+    });
+  }, [detections]);
 
   useEffect(() => {
     if (activeStep !== 3) {
@@ -923,7 +946,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
         return;
       }
       // 編集中・フォーカス中が無い場合は選択中BBOXを一括削除（確認・Undoは上部ボタンと同一挙動）
-      if (detections.some((row) => row.selected)) {
+      if (selectedUiIds.length > 0) {
         ev.preventDefault();
         deleteSelectedBboxes();
       }
@@ -933,7 +956,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [activeStep, detections, editingBboxId, focusedBboxId, copiedBboxes, currentImageSize]);
+  }, [activeStep, detections, selectedUiIds, editingBboxId, focusedBboxId, copiedBboxes, currentImageSize]);
 
   async function browseOutputDir() {
     try {
@@ -1076,13 +1099,14 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                   const width = (Number(row.width) / imageWidth) * 100;
                   const height = (Number(row.height) / imageHeight) * 100;
                   const active = row.selected;
+                  const isUiSelected = selectedUiIds.includes(row.id);
                   const isEditing = editMode && editingBboxId === row.id;
                   return (
                     <div
                       key={row.id}
-                      onClick={() => {
+                      onClick={(e) => {
                         if (isStep3Active) {
-                          scheduleBBoxClick(row.id);
+                          scheduleBBoxClick(e, row.id);
                         }
                       }}
                       onDoubleClick={(e) => {
@@ -1101,7 +1125,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                           : active
                             ? "border-emerald-300"
                             : "border-slate-300/55"
-                      }`}
+                      } ${isUiSelected && !isEditing ? "ring-2 ring-accent/80" : ""}`}
                       style={{ left: `${left}%`, top: `${top}%`, width: `${width}%`, height: `${height}%` }}
                       title={`#${row.id} conf=${formatConfidence(row.confidence)}`}
                     >
@@ -1386,7 +1410,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                   size="sm"
                   className="whitespace-nowrap px-2"
                   variant="secondary"
-                  onClick={() => setDetections((prev) => prev.map((row) => ({ ...row, selected: true })))}
+                  onClick={() => setSelectedUiIds(detections.map((row) => row.id))}
                   disabled={detections.length === 0}
                 >
                   すべて選択
@@ -1395,8 +1419,8 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                   size="sm"
                   className="whitespace-nowrap px-2"
                   variant="secondary"
-                  onClick={() => setDetections((prev) => prev.map((row) => ({ ...row, selected: false })))}
-                  disabled={detections.length === 0}
+                  onClick={() => setSelectedUiIds([])}
+                  disabled={selectedUiIds.length === 0}
                 >
                   選択解除
                 </Button>
@@ -1405,13 +1429,13 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                   className="whitespace-nowrap px-2"
                   variant="danger"
                   onClick={deleteSelectedBboxes}
-                  disabled={selectedCount === 0}
+                  disabled={selectedUiIds.length === 0}
                   title="選択中のBBOXをまとめて削除します（元に戻すで復元可能）"
                 >
                   選択中を削除
                 </Button>
                 <span className="text-xs text-muted">
-                  選択件数: {selectedCount} / {detections.length}
+                  選択: {selectedUiIds.length} / 有効: {selectedCount} / 総数: {detections.length}
                 </span>
               </div>
               <div className="mb-2 flex items-center gap-2">
@@ -1430,7 +1454,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                 </select>
               </div>
               <p className="mb-2 text-xs text-muted">
-                画像上のクリックで選択切替、ダブルクリックで編集開始。有効／無効は一覧右端のチェックボックスで切り替えます。
+                画像上のクリックは選択のみ（有効／無効は変わりません）。有効／無効は一覧右端のチェックボックスでのみ切り替えます。
               </p>
               <div className="min-h-0 flex-1 space-y-1 overflow-auto rounded-lg border border-border bg-card/45 p-2">
                 {filteredDetections.length === 0 ? (
@@ -1453,7 +1477,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                           : row.selected
                             ? "border-emerald-400/60 text-emerald-200"
                             : "border-red-400/60 text-red-200"
-                      }`}
+                      } ${selectedUiIds.includes(row.id) ? "bg-accent/10" : ""}`}
                     >
                       <span className="truncate">
                         #{row.id} {row.label}
@@ -1481,7 +1505,8 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                         <input
                           type="checkbox"
                           checked={!!row.selected}
-                          onChange={() => toggleDetection(row.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={() => handleBoxEnabledChange(row.id)}
                           aria-label={row.selected ? `#${row.id} このBBOXを無効にする` : `#${row.id} このBBOXを有効にする`}
                           title={row.selected ? "このBBOXを無効にする" : "このBBOXを有効にする"}
                         />
@@ -1493,15 +1518,15 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
               <div className="mt-3 rounded-lg border border-border bg-card/45 px-3 py-2 text-xs text-muted">
                 <p className="mb-1 font-semibold text-slate-200">操作方法</p>
                 <ul className="list-disc space-y-1 pl-4">
-                  <li>クリック: BBOXの選択／選択解除（もう一度クリックで解除）</li>
-                  <li>ダブルクリック: 編集開始（選択状態は変わりません）</li>
-                  <li>編集モードONで画像をダブルクリック: 新規BBOX追加</li>
+                  <li>クリック: BBOXの選択／選択解除</li>
+                  <li>Ctrl/Cmd + クリック: 複数選択</li>
+                  <li>ダブルクリック: 編集開始（有効状態は変わりません）</li>
+                  <li>編集モードONで画像の空白部分をダブルクリック: 新規BBOX追加</li>
                   <li>ドラッグ: BBOXを移動</li>
                   <li>四隅ハンドル: サイズ変更</li>
-                  <li>Ctrl/Cmd + C: コピー</li>
-                  <li>Ctrl/Cmd + V: 貼り付け</li>
+                  <li>Ctrl/Cmd + C: コピー / Ctrl/Cmd + V: 貼り付け</li>
                   <li>Delete: 編集中・フォーカス中のBBOXを削除（無ければ選択中を確認のうえ一括削除）</li>
-                  <li>有効／無効（保存対象）: 一覧右端のチェックボックスで切替</li>
+                  <li>有効／無効: 一覧右端のチェックボックスでのみ切替</li>
                 </ul>
               </div>
               <div className="mt-3">
