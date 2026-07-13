@@ -88,6 +88,7 @@ from .services.tesseract_pipeline import (
     ensure_tesseract_training_tools,
     run_tesseract_training,
 )
+from .services.detection_preprocess import parse_detection_preprocess_json
 from .services.training_image_builder import (
     detect_bboxes_with_yolo,
     export_selected_crops,
@@ -2156,13 +2157,21 @@ async def image_builder_resize_preview(
     resize_long_side: int = Form(...),
     use_resize: bool = Form(True),
     resize_axis: str = Form("long"),
+    detect_preprocess_json: str = Form(""),
 ) -> dict[str, Any]:
     suffix = Path(file.filename or "image.png").suffix.lower()
     if suffix not in IMAGE_BUILDER_ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail="unsupported image format")
     content = await file.read()
     try:
-        return make_resize_preview(content, int(resize_long_side), bool(use_resize), str(resize_axis))
+        detect_preprocess = parse_detection_preprocess_json(detect_preprocess_json)
+        return make_resize_preview(
+            content,
+            int(resize_long_side),
+            bool(use_resize),
+            str(resize_axis),
+            detect_preprocess=detect_preprocess,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -2178,10 +2187,13 @@ async def image_builder_detect(
     merge_overlaps: bool = Form(True),
     merge_iou_threshold: float = Form(0.5),
     project_id: str = Form("default"),
+    detect_preprocess_json: str = Form(""),
 ) -> dict[str, Any]:
     resolved = _resolve_project_id(project_id)
     content = await file.read()
     try:
+        # 前処理が無指定または無変換設定の場合は None（従来どおり元画像で検出）
+        detect_preprocess = parse_detection_preprocess_json(detect_preprocess_json)
         return detect_bboxes_with_yolo(
             image_bytes=content,
             long_side=int(resize_long_side),
@@ -2192,6 +2204,7 @@ async def image_builder_detect(
             merge_overlaps=bool(merge_overlaps),
             merge_iou_threshold=float(merge_iou_threshold),
             project_id=resolved,
+            detect_preprocess=detect_preprocess,
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
@@ -2210,9 +2223,11 @@ async def image_builder_export(
     boxes_json: str = Form(...),
     output_dir: str = Form(...),
     crop_height: int = Form(32),
+    detect_preprocess_json: str = Form(""),
 ) -> dict[str, Any]:
     content = await file.read()
     try:
+        detect_preprocess = parse_detection_preprocess_json(detect_preprocess_json)
         return export_selected_crops(
             image_bytes=content,
             long_side=int(resize_long_side),
@@ -2221,6 +2236,7 @@ async def image_builder_export(
             boxes_json=boxes_json,
             output_dir=output_dir,
             crop_height=int(crop_height),
+            detect_preprocess=detect_preprocess,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

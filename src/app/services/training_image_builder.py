@@ -3,12 +3,13 @@ import io
 import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 from PIL import Image, UnidentifiedImageError
 
 from ..project_paths import ensure_project_directories, get_project_paths
+from .detection_preprocess import apply_detection_preprocess
 
 RESIZE_LONG_SIDE_OPTIONS = [640, 1280, 1536, 1920, 2048]
 RESIZE_AXES = {"long", "width", "height"}
@@ -204,8 +205,11 @@ def make_resize_preview(
     long_side: int,
     use_resize: bool = True,
     resize_axis: str = "long",
+    detect_preprocess: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     original = _decode_image_bytes(image_bytes)
+    if detect_preprocess:
+        original = apply_detection_preprocess(original, detect_preprocess)
     resized = _prepare_image(original, long_side, use_resize, resize_axis)
     return {
         "use_resize": bool(use_resize),
@@ -227,6 +231,7 @@ def detect_bboxes_with_yolo(
     merge_overlaps: bool,
     merge_iou_threshold: float,
     project_id: str,
+    detect_preprocess: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     if not (0.0 <= float(conf_threshold) <= 1.0):
         raise ValueError("conf_threshold must be between 0 and 1")
@@ -234,6 +239,9 @@ def detect_bboxes_with_yolo(
         raise ValueError("merge_iou_threshold must be between 0 and 1")
 
     original = _decode_image_bytes(image_bytes)
+    # 検出前処理はリサイズ前に適用（プレビュー・出力と同一の座標系を保つ）
+    if detect_preprocess:
+        original = apply_detection_preprocess(original, detect_preprocess)
     resized = _prepare_image(original, long_side, use_resize, resize_axis)
     image_np = np.array(resized)
 
@@ -342,6 +350,7 @@ def export_selected_crops(
     boxes_json: str,
     output_dir: str,
     crop_height: int = 32,
+    detect_preprocess: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     if crop_height <= 0:
         raise ValueError("crop_height must be positive")
@@ -354,6 +363,9 @@ def export_selected_crops(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     source = _decode_image_bytes(image_bytes)
+    # 検出時と同じ前処理を適用してBBOX座標系を一致させる（クロップ処理自体は従来どおり）
+    if detect_preprocess:
+        source = apply_detection_preprocess(source, detect_preprocess)
     resized = _prepare_image(source, long_side, use_resize, resize_axis)
 
     total = len(selected_boxes)

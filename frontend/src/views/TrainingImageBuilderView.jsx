@@ -9,6 +9,62 @@ const IMAGE_BUILDER_STATE_STORAGE_KEY = "ocr_image_builder_last_state_v1";
 const HEIC_EXTENSIONS = [".heic", ".heif"];
 const IMAGE_ZOOM_MIN = 0.1;
 const IMAGE_ZOOM_MAX = 4.0;
+
+// YOLO検出専用の前処理設定（OCR前処理とは独立）。初期値は元画像を変化させない
+const DETECT_PREPROCESS_DEFAULTS = {
+  rotation: 0,
+  crop_unit: "px",
+  crop_top: 0,
+  crop_bottom: 0,
+  crop_left: 0,
+  crop_right: 0,
+  brightness: 1.0,
+  contrast: 1.0,
+  sharpen: false,
+  sharpen_strength: 1.0,
+  resize_width: "",
+  resize_height: "",
+  keep_aspect_ratio: true,
+  grayscale: false,
+};
+const DETECT_PREPROCESS_STORAGE_KEY = "ocr_detection_preprocess_by_project_v1";
+
+// サーバー送信用の設定オブジェクトを構築。無変換設定なら null（=従来どおり元画像で処理）
+function buildDetectPreprocessPayload(p) {
+  const toInt = (v) => {
+    const n = Number.parseInt(String(v ?? ""), 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+  const payload = {
+    rotation: Number(p.rotation) || 0,
+    crop_unit: p.crop_unit === "percent" ? "percent" : "px",
+    crop_top: Math.max(0, Number(p.crop_top) || 0),
+    crop_bottom: Math.max(0, Number(p.crop_bottom) || 0),
+    crop_left: Math.max(0, Number(p.crop_left) || 0),
+    crop_right: Math.max(0, Number(p.crop_right) || 0),
+    brightness: Number(p.brightness) || 1.0,
+    contrast: Number(p.contrast) || 1.0,
+    sharpen: Boolean(p.sharpen),
+    sharpen_strength: Number(p.sharpen_strength) || 1.0,
+    resize_width: toInt(p.resize_width),
+    resize_height: toInt(p.resize_height),
+    keep_aspect_ratio: Boolean(p.keep_aspect_ratio),
+    grayscale: Boolean(p.grayscale),
+  };
+  const noop =
+    payload.rotation % 360 === 0 &&
+    payload.crop_top === 0 &&
+    payload.crop_bottom === 0 &&
+    payload.crop_left === 0 &&
+    payload.crop_right === 0 &&
+    Math.abs(payload.brightness - 1.0) < 1e-6 &&
+    Math.abs(payload.contrast - 1.0) < 1e-6 &&
+    !payload.sharpen &&
+    payload.resize_width === null &&
+    payload.resize_height === null &&
+    !payload.grayscale;
+  return noop ? null : payload;
+}
 const RESIZE_AXES = ["width", "height"];
 const COPY_PASTE_OFFSET = 12;
 const SERIES_FILTER_ALL = "__all__";
@@ -104,6 +160,80 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
   const [resizeLongSide, setResizeLongSide] = useState(initialState.resizeLongSide);
   const [resizeAxis, setResizeAxis] = useState(initialState.resizeAxis);
   const [useResize, setUseResize] = useState(initialState.useResize);
+
+  // YOLO検出前処理（プロジェクト単位で保存）とプレビュー表示状態
+  const [detectPreprocess, setDetectPreprocess] = useState({ ...DETECT_PREPROCESS_DEFAULTS });
+  const [imagePreviewMode, setImagePreviewMode] = useState("original");
+  const [detectPreviewUrl, setDetectPreviewUrl] = useState("");
+  const [detectPreviewLoading, setDetectPreviewLoading] = useState(false);
+  // 検出実行時に使用した前処理（クロップ出力の座標整合のため保持）
+  const [detectUsedPreprocess, setDetectUsedPreprocess] = useState(null);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(DETECT_PREPROCESS_STORAGE_KEY);
+      const map = raw ? JSON.parse(raw) : {};
+      setDetectPreprocess({ ...DETECT_PREPROCESS_DEFAULTS, ...(map?.[projectId] || {}) });
+    } catch {
+      setDetectPreprocess({ ...DETECT_PREPROCESS_DEFAULTS });
+    }
+  }, [projectId]);
+
+  function updateDetectPreprocess(patch) {
+    setDetectPreprocess((prev) => {
+      const next = { ...prev, ...patch };
+      try {
+        const raw = localStorage.getItem(DETECT_PREPROCESS_STORAGE_KEY);
+        const map = raw ? JSON.parse(raw) : {};
+        map[projectId] = next;
+        localStorage.setItem(DETECT_PREPROCESS_STORAGE_KEY, JSON.stringify(map));
+      } catch {
+        // localStorage が使えない環境では保存なしで動作継続
+      }
+      return next;
+    });
+  }
+
+  const detectPreprocessPayload = buildDetectPreprocessPayload(detectPreprocess);
+  const detectPreprocessKey = JSON.stringify(detectPreprocessPayload);
+
+  // 前処理後プレビュー（300msデバウンスで既存のresize-previewを利用）
+  useEffect(() => {
+    if (activeStep !== 2 || imagePreviewMode !== "preprocessed" || !file) {
+      return undefined;
+    }
+    const payload = buildDetectPreprocessPayload(detectPreprocess);
+    if (!payload) {
+      setDetectPreviewUrl("");
+      return undefined;
+    }
+    const timer = setTimeout(async () => {
+      setDetectPreviewLoading(true);
+      try {
+        const form = new FormData();
+        form.append("file", file);
+        form.append("resize_long_side", String(resizeLongSide));
+        form.append("use_resize", String(useResize));
+        form.append("resize_axis", String(resizeAxis));
+        form.append("detect_preprocess_json", JSON.stringify(payload));
+        const res = await fetch(
+          `${import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000"}/image-builder/resize-preview`,
+          { method: "POST", body: form }
+        );
+        if (!res.ok) {
+          throw new Error(await res.text());
+        }
+        const data = await res.json();
+        setDetectPreviewUrl(data.image_data_url || "");
+      } catch {
+        setDetectPreviewUrl("");
+      } finally {
+        setDetectPreviewLoading(false);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeStep, imagePreviewMode, file, resizeLongSide, useResize, resizeAxis, detectPreprocessKey]);
   const [resizeLoading, setResizeLoading] = useState(false);
   const [resizePreview, setResizePreview] = useState(null);
 
@@ -239,6 +369,9 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
     return detections.filter((row) => (String(row.label || "").trim() || "(unlabeled)") === seriesFilter);
   }, [detections, seriesFilter]);
   const currentImageDataUrl = detectResult?.image_data_url || resizePreview?.image_data_url || rawPreviewUrl || "";
+  // Step2 で「前処理後」表示を選んだ場合は検出前処理プレビューを表示（未取得時は元画像）
+  const displayImageDataUrl =
+    activeStep === 2 && imagePreviewMode === "preprocessed" && detectPreviewUrl ? detectPreviewUrl : currentImageDataUrl;
   const currentImageSize = detectResult?.resized_size || resizePreview?.resized_size || null;
   const step1Done = Boolean(file && (!useResize || resizePreview?.resized_size || detectResult || exportResult));
   const step2Done = Boolean(detectResult);
@@ -729,6 +862,10 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       form.append("merge_overlaps", String(mergeOverlaps));
       form.append("merge_iou_threshold", String(mergeIouThreshold));
       form.append("project_id", projectId);
+      // 検出前処理が有効な場合のみ適用（無変換設定なら従来どおり元画像で検出）
+      if (detectPreprocessPayload) {
+        form.append("detect_preprocess_json", JSON.stringify(detectPreprocessPayload));
+      }
       const res = await fetch(`${import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000"}/image-builder/detect`, {
         method: "POST",
         body: form,
@@ -738,6 +875,8 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       }
       const data = await res.json();
       setDetectResult(data);
+      // クロップ出力時に同じ前処理を適用するため、検出時点の設定を保持
+      setDetectUsedPreprocess(detectPreprocessPayload);
       setDetections((data.detections || []).map((row) => ({ ...row, selected: row.selected !== false })));
       setSeriesFilter(SERIES_FILTER_ALL);
       setBboxUndoStack([]);
@@ -1015,6 +1154,10 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       form.append("boxes_json", JSON.stringify(selectedBoxes));
       form.append("output_dir", outputDir.trim());
       form.append("crop_height", String(cropHeight));
+      // 検出時に使用した前処理と同一設定でBBOX座標系を一致させる
+      if (detectUsedPreprocess) {
+        form.append("detect_preprocess_json", JSON.stringify(detectUsedPreprocess));
+      }
       const res = await fetch(`${import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000"}/image-builder/export`, {
         method: "POST",
         body: form,
@@ -1070,8 +1213,31 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
           title="作業画像"
           subtitle={imageSubtitle}
           actions={
-            <div className="rounded-md border border-border bg-card/55 px-2 py-1 text-xs text-slate-200">
-              サイズ: {displaySizeLabel}
+            <div className="flex items-center gap-2">
+              {activeStep === 2 ? (
+                <div className="inline-flex rounded-lg border border-border bg-card/45 p-0.5">
+                  <Button
+                    size="sm"
+                    variant={imagePreviewMode === "original" ? "primary" : "ghost"}
+                    className="h-6 px-2 text-[11px]"
+                    onClick={() => setImagePreviewMode("original")}
+                  >
+                    元画像
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={imagePreviewMode === "preprocessed" ? "primary" : "ghost"}
+                    className="h-6 px-2 text-[11px]"
+                    onClick={() => setImagePreviewMode("preprocessed")}
+                    title={detectPreprocessPayload ? "検出前処理を適用した画像を表示します" : "検出前処理がすべて無効のため元画像と同じです"}
+                  >
+                    前処理後{detectPreviewLoading ? "…" : ""}
+                  </Button>
+                </div>
+              ) : null}
+              <div className="rounded-md border border-border bg-card/55 px-2 py-1 text-xs text-slate-200">
+                サイズ: {displaySizeLabel}
+              </div>
             </div>
           }
         >
@@ -1079,7 +1245,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
             ref={imageViewportRef}
             className="max-h-[78vh] overflow-auto rounded-xl border border-border bg-card/55 p-3"
           >
-            {currentImageDataUrl ? (
+            {displayImageDataUrl ? (
               <div
                 className={isStep3Active ? "relative w-max" : "relative mx-auto w-full max-w-[980px]"}
                 style={isStep3Active ? { width: imageRenderWidth } : undefined}
@@ -1087,7 +1253,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
               >
                 <img
                   ref={imageRef}
-                  src={currentImageDataUrl}
+                  src={displayImageDataUrl}
                   alt="preview"
                   className={isStep3Active ? "block h-auto rounded-md" : "block h-auto w-full rounded-md"}
                   style={isStep3Active ? { width: "100%", maxWidth: "none" } : undefined}
@@ -1275,6 +1441,163 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
           {activeStep === 2 ? (
             <Card title="2. YOLO検出" subtitle={step2Done ? "完了" : "モデル選択 + 閾値で推論"}>
               <div className="space-y-3">
+                <details className="group rounded-lg border border-border bg-card/45">
+                  <summary className="flex cursor-pointer select-none items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-text transition hover:bg-card/70 [&::-webkit-details-marker]:hidden">
+                    <span className="text-[10px] text-muted transition-transform group-open:rotate-90" aria-hidden="true">
+                      ▶
+                    </span>
+                    検出前処理
+                    <span className={`ml-auto text-[10px] font-normal ${detectPreprocessPayload ? "text-emerald-300" : "text-muted"}`}>
+                      {detectPreprocessPayload ? "適用中" : "無効（元画像のまま）"}
+                    </span>
+                  </summary>
+                  <div className="space-y-2.5 px-2.5 pb-2.5">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="app-label">回転</label>
+                        <select
+                          className="app-select"
+                          value={detectPreprocess.rotation}
+                          onChange={(e) => updateDetectPreprocess({ rotation: Number(e.target.value) })}
+                        >
+                          <option value={0}>0°</option>
+                          <option value={90}>90°</option>
+                          <option value={180}>180°</option>
+                          <option value={270}>270°</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="app-label">トリミング単位</label>
+                        <select
+                          className="app-select"
+                          value={detectPreprocess.crop_unit}
+                          onChange={(e) => updateDetectPreprocess({ crop_unit: e.target.value })}
+                        >
+                          <option value="px">ピクセル</option>
+                          <option value="percent">割合（%）</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="app-label">トリミング（上 / 下 / 左 / 右）</label>
+                      <div className="grid grid-cols-4 gap-2">
+                        {["crop_top", "crop_bottom", "crop_left", "crop_right"].map((key, idx) => (
+                          <input
+                            key={key}
+                            type="number"
+                            min={0}
+                            className="app-input"
+                            value={detectPreprocess[key]}
+                            onChange={(e) => updateDetectPreprocess({ [key]: e.target.value })}
+                            title={["上", "下", "左", "右"][idx]}
+                            placeholder={["上", "下", "左", "右"][idx]}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="app-label">明るさ: {Number(detectPreprocess.brightness).toFixed(2)}</label>
+                      <input
+                        type="range"
+                        min={0.2}
+                        max={2.0}
+                        step={0.05}
+                        value={detectPreprocess.brightness}
+                        onChange={(e) => updateDetectPreprocess({ brightness: Number(e.target.value) })}
+                        className="w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="app-label">コントラスト: {Number(detectPreprocess.contrast).toFixed(2)}</label>
+                      <input
+                        type="range"
+                        min={0.2}
+                        max={2.0}
+                        step={0.05}
+                        value={detectPreprocess.contrast}
+                        onChange={(e) => updateDetectPreprocess({ contrast: Number(e.target.value) })}
+                        className="w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="inline-flex items-center gap-2 text-sm text-text">
+                        <input
+                          type="checkbox"
+                          checked={detectPreprocess.sharpen}
+                          onChange={(e) => updateDetectPreprocess({ sharpen: e.target.checked })}
+                        />
+                        シャープ化
+                      </label>
+                      <label className="app-label mt-1">
+                        強度: {Number(detectPreprocess.sharpen_strength).toFixed(1)}
+                      </label>
+                      <input
+                        type="range"
+                        min={0.1}
+                        max={3.0}
+                        step={0.1}
+                        value={detectPreprocess.sharpen_strength}
+                        onChange={(e) => updateDetectPreprocess({ sharpen_strength: Number(e.target.value) })}
+                        className="w-full"
+                        disabled={!detectPreprocess.sharpen}
+                      />
+                    </div>
+                    <div>
+                      <label className="app-label">リサイズ（幅 / 高さ・空欄で未指定）</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="number"
+                          min={1}
+                          className="app-input"
+                          value={detectPreprocess.resize_width}
+                          onChange={(e) => updateDetectPreprocess({ resize_width: e.target.value })}
+                          placeholder="幅(px)"
+                        />
+                        <input
+                          type="number"
+                          min={1}
+                          className="app-input"
+                          value={detectPreprocess.resize_height}
+                          onChange={(e) => updateDetectPreprocess({ resize_height: e.target.value })}
+                          placeholder="高さ(px)"
+                        />
+                      </div>
+                      <label className="mt-1 inline-flex items-center gap-2 text-sm text-text">
+                        <input
+                          type="checkbox"
+                          checked={detectPreprocess.keep_aspect_ratio}
+                          onChange={(e) => updateDetectPreprocess({ keep_aspect_ratio: e.target.checked })}
+                        />
+                        アスペクト比を維持
+                      </label>
+                    </div>
+                    <label className="inline-flex items-center gap-2 text-sm text-text">
+                      <input
+                        type="checkbox"
+                        checked={detectPreprocess.grayscale}
+                        onChange={(e) => updateDetectPreprocess({ grayscale: e.target.checked })}
+                      />
+                      グレースケール
+                    </label>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="w-full"
+                      onClick={() => updateDetectPreprocess({ ...DETECT_PREPROCESS_DEFAULTS })}
+                    >
+                      検出前処理をリセット
+                    </Button>
+                  </div>
+                </details>
+
+                <details open className="group rounded-lg border border-border bg-card/45">
+                  <summary className="flex cursor-pointer select-none items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-text transition hover:bg-card/70 [&::-webkit-details-marker]:hidden">
+                    <span className="text-[10px] text-muted transition-transform group-open:rotate-90" aria-hidden="true">
+                      ▶
+                    </span>
+                    YOLO設定
+                  </summary>
+                  <div className="space-y-3 px-2.5 pb-2.5">
                 <div>
                   <label className="app-label">YOLOモデル</label>
                   <select
@@ -1339,6 +1662,9 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                     disabled={!mergeOverlaps}
                   />
                 </div>
+                  </div>
+                </details>
+
                 <div className="flex gap-2">
                   <Button onClick={runDetect} disabled={!file || detecting}>
                     {detecting ? "検出中..." : "検出実行"}
