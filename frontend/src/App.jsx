@@ -327,6 +327,8 @@ export default function App() {
   const [labelUppercase, setLabelUppercase] = useState(false);
   const [imageShapes, setImageShapes] = useState({});
   const [imageVersion, setImageVersion] = useState(0);
+  // 画像単位のキャッシュキー（回転時に対象画像のサムネイルだけ更新するため）
+  const [imageVersions, setImageVersions] = useState({});
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [workflowState, setWorkflowState] = useState({
     refreshed: false,
@@ -1747,6 +1749,8 @@ export default function App() {
         delete next[imageName];
         return next;
       });
+      // 画像一覧は対象画像のサムネイルのみ更新（全件再取得を避ける）。他画面用のグローバル版数も更新
+      setImageVersions((prev) => ({ ...prev, [imageName]: (prev[imageName] || 0) + 1 }));
       setImageVersion((prev) => prev + 1);
       setWorkflowState((prev) => ({
         refreshed: prev.refreshed,
@@ -2695,6 +2699,7 @@ export default function App() {
         onRefresh={() => loadImages(projectId)}
         onRotate={rotateImage}
         imageVersion={imageVersion}
+        imageVersions={imageVersions}
         images={images}
         imageShapes={imageShapes}
         onOpenLabeling={openLabeling}

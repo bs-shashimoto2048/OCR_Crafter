@@ -899,17 +899,93 @@ def select_file(req: FileSelectRequest) -> dict[str, str]:
 
 
 @app.get("/images")
-def list_images(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+def list_images(
+    project_id: Optional[str] = Query(default="default"),
+    offset: Optional[int] = Query(default=None, ge=0),
+    limit: Optional[int] = Query(default=None, ge=1, le=1000),
+    search: Optional[str] = Query(default=None),
+    unlabeled_only: bool = Query(default=False),
+) -> dict[str, Any]:
     resolved = _resolve_project_id(project_id)
     images = list_raw_images(project_id=resolved)
     rows = read_labels(project_id=resolved)
     label_map = {row.get("filename") or row.get("image"): row.get("label", "") for row in rows}
     type_map = {row.get("filename") or row.get("image"): row.get("type", "") for row in rows}
+    items = [{"image": name, "label": label_map.get(name, ""), "type": type_map.get(name, "")} for name in images]
+
+    keyword = str(search or "").strip().lower()
+    if keyword:
+        items = [item for item in items if keyword in item["image"].lower() or keyword in str(item["label"]).lower()]
+    if unlabeled_only:
+        items = [item for item in items if not str(item["label"]).strip()]
+
+    total = len(items)
+    # offset/limit 未指定時は従来どおり全件返却（既存クライアント互換）
+    if offset is not None or limit is not None:
+        start = int(offset or 0)
+        size = int(limit or 100)
+        page_items = items[start : start + size]
+        return {
+            "project_id": resolved,
+            "count": len(page_items),
+            "items": page_items,
+            "total": total,
+            "offset": start,
+            "limit": size,
+            "has_more": start + size < total,
+        }
     return {
         "project_id": resolved,
-        "count": len(images),
-        "items": [{"image": name, "label": label_map.get(name, ""), "type": type_map.get(name, "")} for name in images],
+        "count": total,
+        "items": items,
+        "total": total,
+        "offset": 0,
+        "limit": total,
+        "has_more": False,
     }
+
+
+@app.get("/images/{image_name}/thumbnail")
+def image_thumbnail(
+    image_name: str,
+    project_id: Optional[str] = Query(default="default"),
+    width: int = Query(default=240, ge=16, le=640),
+    height: int = Query(default=96, ge=16, le=640),
+) -> FileResponse:
+    """一覧表示用の軽量サムネイル。元画像のmtimeをキャッシュキーにディスクへ保存し、
+    回転などで元画像が更新された場合のみ再生成する（原画像の直接配信を避ける）。"""
+    safe_name = Path(image_name).name
+    if safe_name != image_name:
+        raise HTTPException(status_code=400, detail="invalid image name")
+    resolved = _resolve_project_id(project_id)
+    paths = ensure_project_directories(resolved)
+    source = paths.raw / safe_name
+    if not source.exists() or not source.is_file():
+        raise HTTPException(status_code=404, detail="image not found")
+
+    stem = Path(safe_name).stem
+    mtime_key = int(source.stat().st_mtime)
+    cache_dir = paths.outputs / "thumbnails"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_file = cache_dir / f"{stem}_{width}x{height}_{mtime_key}.jpg"
+
+    if not cache_file.exists():
+        # 同一画像の古いキャッシュを掃除してから生成
+        for stale in cache_dir.glob(f"{stem}_{width}x{height}_*.jpg"):
+            try:
+                stale.unlink()
+            except OSError:
+                pass
+        with Image.open(source) as opened:
+            thumb = opened.convert("RGB")
+            thumb.thumbnail((width, height), Image.Resampling.LANCZOS)
+            thumb.save(cache_file, format="JPEG", quality=85)
+
+    return FileResponse(
+        cache_file,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @app.post("/images/{image_name}/rotate")

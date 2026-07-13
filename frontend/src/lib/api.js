@@ -39,6 +39,12 @@ export function imageUrl(imageName, projectId = "default", version = 0) {
   return `${API_BASE}/images/${name}/file?project_id=${pid}&v=${encodeURIComponent(String(version ?? 0))}`;
 }
 
+export function thumbnailUrl(imageName, projectId = "default", version = 0, width = 240, height = 96) {
+  const name = encodeURIComponent(String(imageName || ""));
+  const pid = encodeURIComponent(String(projectId || "default"));
+  return `${API_BASE}/images/${name}/thumbnail?project_id=${pid}&width=${width}&height=${height}&v=${encodeURIComponent(String(version ?? 0))}`;
+}
+
 export function interimImageUrl(imageName, projectId = "default", version = 0) {
   const name = encodeURIComponent(String(imageName || ""));
   const pid = encodeURIComponent(String(projectId || "default"));
