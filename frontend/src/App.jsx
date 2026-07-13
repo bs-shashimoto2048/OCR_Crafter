@@ -2666,6 +2666,7 @@ export default function App() {
         onCreateProject={createProject}
         onDeleteProject={deleteProject}
         onNavigate={setActiveView}
+        workflowSteps={workflowSteps}
         currentStepLabel={
           (workflowSteps.find((step) => step.status === "current") ||
             workflowSteps.find((step) => step.status === "running"))?.label || "完了"
