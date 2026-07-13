@@ -215,6 +215,38 @@ def _resolve_project_id(project_id: Optional[str]) -> str:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
+def _project_image_stage(paths: Any) -> str:
+    """実在ファイルに基づく画像段階の判定（processed > interim > raw > none）。"""
+    for image_type in ("single", "wide"):
+        processed_dir = paths.processed / image_type / "images"
+        if processed_dir.is_dir() and any(p.suffix.lower() == ".png" for p in processed_dir.iterdir()):
+            return "processed"
+    if paths.interim.is_dir() and any(p.suffix.lower() == ".png" for p in paths.interim.iterdir()):
+        return "interim"
+    return "raw"
+
+
+def _project_updated_at(paths: Any) -> Optional[str]:
+    """主要ファイル・ディレクトリのmtime最大値（軽量な代表値）。"""
+    candidates = [
+        paths.annotations_csv,
+        paths.raw,
+        paths.processed,
+        paths.models,
+        paths.outputs / "ocr_logs" / "predictions.jsonl",
+    ]
+    latest = 0.0
+    for candidate in candidates:
+        try:
+            if candidate.exists():
+                latest = max(latest, candidate.stat().st_mtime)
+        except OSError:
+            continue
+    if latest <= 0:
+        return None
+    return datetime.fromtimestamp(latest).isoformat()
+
+
 def _build_project_summary(project_id: str) -> dict[str, Any]:
     image_count = len(list_raw_images(project_id=project_id))
     labels = read_labels(project_id=project_id)
@@ -231,6 +263,7 @@ def _build_project_summary(project_id: str) -> dict[str, Any]:
                 confirmed_count += 1
             elif status == "pending":
                 pending_count += 1
+    paths = ensure_project_directories(project_id)
     return {
         "project_id": project_id,
         "images": image_count,
@@ -238,6 +271,9 @@ def _build_project_summary(project_id: str) -> dict[str, Any]:
         "ocr_confirmed": confirmed_count,
         "ocr_pending": pending_count,
         "models": models_count,
+        # ダッシュボード表示用の読み取り専用フィールド（実在ファイルに基づく判定）
+        "image_stage": _project_image_stage(paths) if image_count > 0 else "none",
+        "updated_at": _project_updated_at(paths),
     }
 
 
@@ -957,6 +993,23 @@ def image_processed_file(
         pass
 
     raise HTTPException(status_code=404, detail="processed image not found")
+
+
+@app.get("/images/{image_name}/interim")
+def image_interim_file(
+    image_name: str,
+    project_id: Optional[str] = Query(default="default"),
+) -> FileResponse:
+    """中間画像（前処理途中の保存済みファイル）を配信する。実在しない場合は404（生成はしない）。"""
+    safe_name = Path(image_name).name
+    if safe_name != image_name:
+        raise HTTPException(status_code=400, detail="invalid image name")
+    resolved = _resolve_project_id(project_id)
+    paths = ensure_project_directories(resolved)
+    candidate = paths.interim / f"{Path(safe_name).stem}.png"
+    if candidate.exists() and candidate.is_file():
+        return FileResponse(candidate)
+    raise HTTPException(status_code=404, detail="interim image not found")
 
 
 @app.post("/preprocess/run")

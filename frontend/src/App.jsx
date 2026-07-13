@@ -2666,6 +2666,12 @@ export default function App() {
         onCreateProject={createProject}
         onDeleteProject={deleteProject}
         onNavigate={setActiveView}
+        onOpenImageInPreprocess={(name) => {
+          setPreprocessImage(name);
+          setActiveView("preprocess");
+        }}
+        images={images}
+        imageVersion={imageVersion}
         workflowSteps={workflowSteps}
         currentStepLabel={
           (workflowSteps.find((step) => step.status === "current") ||
