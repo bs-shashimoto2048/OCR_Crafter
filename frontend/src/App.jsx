@@ -931,6 +931,11 @@ export default function App() {
       refreshAll("").catch((error) => notify("error", error.message));
       return;
     }
+    // プロジェクト切替直後に旧プロジェクトの一覧のまま新IDで画像URLが生成され
+    // 404リクエストが発生するのを防ぐため、新一覧の取得前に旧一覧をクリアする
+    setImages([]);
+    setLabelDrafts({});
+    setSelectedIndex(0);
     refreshAll(projectId).catch((error) => notify("error", error.message));
   }, [projectId]);
 
