@@ -1753,7 +1753,7 @@ export default function App() {
   async function rotateImage(imageName, angle) {
     if (!projectId) {
       notify("error", "プロジェクトを作成または選択してください");
-      return;
+      return false;
     }
     try {
       await request(`/images/${encodeURIComponent(imageName)}/rotate?project_id=${encodeURIComponent(projectId)}`, {
@@ -1779,8 +1779,10 @@ export default function App() {
         trainingStarted: false,
       }));
       notify("success", `${imageName} を回転しました（${angle > 0 ? "+" : ""}${angle}°）`);
+      return true;
     } catch (error) {
       notify("error", error.message);
+      return false;
     }
   }
 

@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import Card from "../components/Card";
@@ -66,8 +66,51 @@ const Thumbnail = memo(function Thumbnail({ src, alt, className }) {
   );
 });
 
+// 回転操作ボタン（一覧・カード共用）。押下中=青グロー / 成功=緑グロー / 失敗=赤グロー、処理中は両ボタン無効
+const ROTATE_FEEDBACK_CLASS = {
+  processing: "!border-accent/70 !text-blue-200 shadow-[0_0_0_1px_rgba(96,165,250,0.55),0_0_10px_rgba(96,165,250,0.45)]",
+  success: "!border-emerald-400/70 !text-emerald-200 shadow-[0_0_0_1px_rgba(52,211,153,0.55),0_0_10px_rgba(52,211,153,0.45)]",
+  error: "!border-red-400/70 !text-red-200 shadow-[0_0_0_1px_rgba(248,113,113,0.55),0_0_12px_rgba(248,113,113,0.5)]",
+};
+
+const RotateButtons = memo(function RotateButtons({ imageName, feedback, onRotate }) {
+  const busy = feedback?.status === "processing";
+
+  function feedbackClass(angle) {
+    if (feedback?.angle !== angle) return "";
+    return ROTATE_FEEDBACK_CLASS[feedback.status] || "";
+  }
+
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="secondary"
+        className={`h-6 px-2 text-[11px] transition-shadow duration-200 ${feedbackClass(90)}`}
+        disabled={busy}
+        onClick={() => onRotate(imageName, 90)}
+        title="時計回りに90度回転"
+        aria-label="時計回りに90度回転"
+      >
+        {busy && feedback?.angle === 90 ? "回転中…" : "90°回転"}
+      </Button>
+      <Button
+        size="sm"
+        variant="secondary"
+        className={`h-6 px-2 text-[11px] transition-shadow duration-200 ${feedbackClass(180)}`}
+        disabled={busy}
+        onClick={() => onRotate(imageName, 180)}
+        title="180度回転"
+        aria-label="180度回転"
+      >
+        {busy && feedback?.angle === 180 ? "回転中…" : "180°回転"}
+      </Button>
+    </>
+  );
+});
+
 // 一覧の1行（メタ情報が変わらない限り再レンダリングしない）
-const ImageRow = memo(function ImageRow({ item, shape, thumbSrc, onRotate, onOpenLabeling }) {
+const ImageRow = memo(function ImageRow({ item, shape, thumbSrc, rotateFeedback, onRotate, onOpenLabeling }) {
   return (
     <div className="flex h-full items-center gap-3 border-b border-border/50 px-2">
       <Thumbnail src={thumbSrc} alt={item.image} className="h-12 w-28 shrink-0 rounded border border-border" />
@@ -93,19 +136,14 @@ const ImageRow = memo(function ImageRow({ item, shape, thumbSrc, onRotate, onOpe
         )}
       </span>
       <div className="flex shrink-0 gap-1.5">
-        <Button size="sm" variant="secondary" className="h-6 px-2 text-[11px]" onClick={() => onRotate(item.image, -90)}>
-          左回転
-        </Button>
-        <Button size="sm" variant="secondary" className="h-6 px-2 text-[11px]" onClick={() => onRotate(item.image, 90)}>
-          右回転
-        </Button>
+        <RotateButtons imageName={item.image} feedback={rotateFeedback} onRotate={onRotate} />
       </div>
     </div>
   );
 });
 
 // カード表示の1枚
-const ImageCard = memo(function ImageCard({ item, shape, thumbSrc, onRotate, onOpenLabeling }) {
+const ImageCard = memo(function ImageCard({ item, shape, thumbSrc, rotateFeedback, onRotate, onOpenLabeling }) {
   return (
     <div className="group flex h-full flex-col overflow-hidden rounded-xl border border-border bg-card/60">
       <div className="relative h-28 shrink-0">
@@ -123,12 +161,7 @@ const ImageCard = memo(function ImageCard({ item, shape, thumbSrc, onRotate, onO
         <p className="truncate text-[11px] text-muted">ラベル: {item.label || "-"}</p>
         <p className="text-[11px] text-muted">サイズ: {shape || "--"}</p>
         <div className="flex gap-1.5 pt-1">
-          <Button size="sm" variant="secondary" className="h-6 px-2 text-[11px]" onClick={() => onRotate(item.image, -90)}>
-            左回転
-          </Button>
-          <Button size="sm" variant="secondary" className="h-6 px-2 text-[11px]" onClick={() => onRotate(item.image, 90)}>
-            右回転
-          </Button>
+          <RotateButtons imageName={item.image} feedback={rotateFeedback} onRotate={onRotate} />
         </div>
       </div>
     </div>
@@ -153,7 +186,34 @@ export default function ImagesView({
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [unlabeledOnly, setUnlabeledOnly] = useState(false);
+  // 画像単位の回転フィードバック: { [imageName]: { angle, status: processing|success|error } }
+  const [rotateFeedbacks, setRotateFeedbacks] = useState({});
+  const feedbackTimersRef = useRef({});
   const scrollRef = useRef(null);
+
+  const handleRotate = useCallback(
+    async (imageName, angle) => {
+      // 同一画像の処理中は連打を無視（ボタンも無効化されている）
+      if (feedbackTimersRef.current[imageName] === "processing") {
+        return;
+      }
+      feedbackTimersRef.current[imageName] = "processing";
+      setRotateFeedbacks((prev) => ({ ...prev, [imageName]: { angle, status: "processing" } }));
+      const ok = await onRotate(imageName, angle);
+      setRotateFeedbacks((prev) => ({ ...prev, [imageName]: { angle, status: ok ? "success" : "error" } }));
+      feedbackTimersRef.current[imageName] = "done";
+      // 成功は500ms緑グロー、失敗は1.2秒赤グローの後に通常へ戻す
+      setTimeout(() => {
+        delete feedbackTimersRef.current[imageName];
+        setRotateFeedbacks((prev) => {
+          const next = { ...prev };
+          delete next[imageName];
+          return next;
+        });
+      }, ok ? 500 : 1200);
+    },
+    [onRotate]
+  );
 
   // 検索は300msデバウンス
   useEffect(() => {
@@ -301,7 +361,8 @@ export default function ImagesView({
                         item={item}
                         shape={imageShapes[item.image]}
                         thumbSrc={thumbSrcOf(item.image)}
-                        onRotate={onRotate}
+                        rotateFeedback={rotateFeedbacks[item.image]}
+                        onRotate={handleRotate}
                         onOpenLabeling={onOpenLabeling}
                       />
                     </div>
@@ -331,7 +392,8 @@ export default function ImagesView({
                         item={item}
                         shape={imageShapes[item.image]}
                         thumbSrc={thumbSrcOf(item.image)}
-                        onRotate={onRotate}
+                        rotateFeedback={rotateFeedbacks[item.image]}
+                        onRotate={handleRotate}
                         onOpenLabeling={onOpenLabeling}
                       />
                     ))}
