@@ -1,3 +1,4 @@
+import logging
 import tempfile
 import uuid
 import os
@@ -16,7 +17,7 @@ from typing import Any, Optional
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from PIL import Image
 from starlette.background import BackgroundTask
 
@@ -111,9 +112,35 @@ IMAGE_BUILDER_ALLOWED_EXTENSIONS = {
     ".heif",
 }
 
+def _cors_allowed_origins() -> list[str]:
+    """許可オリジン。環境変数 CORS_ALLOWED_ORIGINS（カンマ区切り）> settings.yaml cors.allowed_origins > 既定値。"""
+    env_value = os.environ.get("CORS_ALLOWED_ORIGINS", "").strip()
+    if env_value:
+        return [origin.strip() for origin in env_value.split(",") if origin.strip()]
+    try:
+        configured = get_settings().get("cors", {}).get("allowed_origins")
+        if isinstance(configured, list) and configured:
+            return [str(origin) for origin in configured]
+    except Exception:  # noqa: BLE001
+        pass
+    return ["http://localhost:5173", "http://127.0.0.1:5173"]
+
+
+# CORSMiddleware より内側で未処理例外を捕捉する。
+# これが無いと未処理例外の500はCORSヘッダーなしで返り、ブラウザではCORSエラーとして表示される
+@app.middleware("http")
+async def _unhandled_exception_as_json(request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as e:  # noqa: BLE001
+        logging.getLogger("uvicorn.error").exception("unhandled exception: %s %s", request.method, request.url.path)
+        return JSONResponse(status_code=500, content={"detail": f"{type(e).__name__}: {e}"})
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    # allow_credentials=True と "*" の組み合わせを避け、開発オリジンを明示する
+    allow_origins=_cors_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

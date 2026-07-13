@@ -2,6 +2,13 @@ app:
   name: ocr-crafter
   db_path: outputs/app.db
 
+cors:
+  # フロントエンド開発サーバーのオリジン。Viteのポートを変更した場合はここへ追加する。
+  # 環境変数 CORS_ALLOWED_ORIGINS（カンマ区切り）でも上書き可能
+  allowed_origins:
+    - http://localhost:5173
+    - http://127.0.0.1:5173
+
 paths:
   data_projects: data/projects
   outputs: outputs
