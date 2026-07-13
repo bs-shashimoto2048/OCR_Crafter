@@ -9,71 +9,17 @@ const LIST_ROW_HEIGHT = 64;
 const CARD_ROW_HEIGHT = 240;
 const CARD_MIN_WIDTH = 200;
 
-// ---- サムネイル同時読込みの制限（グローバルセマフォ、同時6件） ----
-const THUMB_MAX_CONCURRENT = 6;
-let thumbActiveCount = 0;
-const thumbWaitQueue = [];
-
-function acquireThumbSlot(task) {
-  const entry = { task, cancelled: false };
-  if (thumbActiveCount < THUMB_MAX_CONCURRENT) {
-    thumbActiveCount += 1;
-    task();
-  } else {
-    thumbWaitQueue.push(entry);
-  }
-  return entry;
-}
-
-function releaseThumbSlot() {
-  const next = thumbWaitQueue.shift();
-  if (next) {
-    if (next.cancelled) {
-      releaseThumbSlot();
-      return;
-    }
-    next.task();
-    return;
-  }
-  thumbActiveCount = Math.max(0, thumbActiveCount - 1);
-}
-
-// サムネイル1枚。読込中スケルトン / 失敗時は自動再試行2回 + 手動再読込
+// サムネイル1枚。直接 img src + loading="lazy" 方式（仮想化でDOMは表示範囲のみなので
+// 同時リクエストはブラウザの接続管理に任せる）。読込中スケルトン / 失敗時は自動再試行2回 + 手動再読込
 const Thumbnail = memo(function Thumbnail({ src, alt, className }) {
   const [status, setStatus] = useState("loading"); // loading | loaded | error
-  const [activeSrc, setActiveSrc] = useState("");
-  const retryRef = useRef(0);
-  const slotRef = useRef(null);
+  const [retryCount, setRetryCount] = useState(0);
 
+  // src（画像やキャッシュキー）が変わったら状態をリセット
   useEffect(() => {
-    retryRef.current = 0;
     setStatus("loading");
-    setActiveSrc("");
-    const entry = acquireThumbSlot(() => setActiveSrc(src));
-    slotRef.current = entry;
-    return () => {
-      entry.cancelled = true;
-      slotRef.current = null;
-    };
+    setRetryCount(0);
   }, [src]);
-
-  function handleDone(nextStatus) {
-    if (slotRef.current && !slotRef.current.cancelled) {
-      releaseThumbSlot();
-      slotRef.current.cancelled = true;
-    }
-    setStatus(nextStatus);
-  }
-
-  function retry(manual = false) {
-    if (!manual && retryRef.current >= 2) {
-      handleDone("error");
-      return;
-    }
-    retryRef.current += manual ? 0 : 1;
-    setStatus("loading");
-    setActiveSrc(`${src}${src.includes("?") ? "&" : "?"}retry=${Date.now()}`);
-  }
 
   if (status === "error") {
     return (
@@ -84,8 +30,8 @@ const Thumbnail = memo(function Thumbnail({ src, alt, className }) {
           variant="secondary"
           className="h-5 px-1.5 text-[10px]"
           onClick={() => {
-            retryRef.current = 0;
-            retry(true);
+            setStatus("loading");
+            setRetryCount((prev) => prev + 1);
           }}
         >
           再読込
@@ -94,26 +40,28 @@ const Thumbnail = memo(function Thumbnail({ src, alt, className }) {
     );
   }
 
+  const activeSrc = retryCount > 0 ? `${src}${src.includes("?") ? "&" : "?"}retry=${retryCount}` : src;
+
   return (
     <div className={`relative bg-card/60 ${className}`}>
       {status === "loading" ? <div className="absolute inset-0 animate-pulse rounded bg-border/30" /> : null}
-      {activeSrc ? (
-        <img
-          src={activeSrc}
-          alt={alt}
-          loading="lazy"
-          decoding="async"
-          onLoad={() => handleDone("loaded")}
-          onError={() => {
-            if (retryRef.current < 2) {
-              retry();
-            } else {
-              handleDone("error");
-            }
-          }}
-          className={`h-full w-full object-contain ${status === "loaded" ? "" : "opacity-0"}`}
-        />
-      ) : null}
+      <img
+        key={activeSrc}
+        src={activeSrc}
+        alt={alt}
+        loading="lazy"
+        decoding="async"
+        onLoad={() => setStatus("loaded")}
+        onError={() => {
+          if (retryCount < 2) {
+            // 自動再試行は最大2回まで
+            setRetryCount((prev) => prev + 1);
+          } else {
+            setStatus("error");
+          }
+        }}
+        className={`h-full w-full object-contain ${status === "loaded" ? "opacity-100" : "opacity-0"}`}
+      />
     </div>
   );
 });
