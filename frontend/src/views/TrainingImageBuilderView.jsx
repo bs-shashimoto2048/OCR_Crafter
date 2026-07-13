@@ -89,6 +89,8 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
   const pendingFocusBboxIdRef = useRef(null);
   const imageRef = useRef(null);
   const imageViewportRef = useRef(null);
+  // 画像上シングルクリックによる選択切替の直近記録（ダブルクリック時の復元用）
+  const lastImageClickToggleRef = useRef({ id: null, at: 0 });
   const clickTimerRef = useRef(null);
   const dragStateRef = useRef(null);
 
@@ -417,6 +419,8 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
     }
     clickTimerRef.current = setTimeout(() => {
       toggleDetection(id, { focusCard: true });
+      // ダブルクリック判定用（間隔が長いダブルクリックで選択状態が変わった場合に復元する）
+      lastImageClickToggleRef.current = { id, at: Date.now() };
       clickTimerRef.current = null;
     }, 220);
   }
@@ -428,9 +432,37 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       clearTimeout(clickTimerRef.current);
       clickTimerRef.current = null;
     }
+    // ダブルクリックは編集開始のみ。1回目のクリックで選択状態が切り替わってしまっていた場合は元へ戻す
+    const lastToggle = lastImageClickToggleRef.current;
+    if (lastToggle.id === id && Date.now() - lastToggle.at < 700) {
+      setDetections((prev) => prev.map((row) => (row.id === id ? { ...row, selected: !row.selected } : row)));
+      lastImageClickToggleRef.current = { id: null, at: 0 };
+    }
     setEditMode(true);
     setEditingBboxId(id);
     focusBboxCard(id);
+  }
+
+  function deleteSelectedBboxes() {
+    const targets = detections.filter((row) => row.selected);
+    if (targets.length === 0) {
+      return;
+    }
+    const ok = window.confirm(
+      `選択中のBBOX ${targets.length}件を削除しますか？\nこの操作は「元に戻す」で復元できます。`
+    );
+    if (!ok) {
+      return;
+    }
+    pushUndoSnapshot(detections);
+    setDetections((prev) => prev.filter((row) => !row.selected));
+    if (editingBboxId != null && targets.some((row) => row.id === editingBboxId)) {
+      setEditingBboxId(null);
+    }
+    if (focusedBboxId != null && targets.some((row) => row.id === focusedBboxId)) {
+      setFocusedBboxId(null);
+    }
+    setOk(`${targets.length}件のBBOXを削除しました`);
   }
 
   function handleCanvasDoubleClick(e) {
@@ -885,15 +917,16 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
           : focusedBboxId != null
             ? focusedBboxId
             : null;
-      if (candidateId == null) {
+      if (candidateId != null && detections.some((row) => row.id === candidateId)) {
+        ev.preventDefault();
+        deleteBbox(candidateId);
         return;
       }
-      if (!detections.some((row) => row.id === candidateId)) {
-        return;
+      // 編集中・フォーカス中が無い場合は選択中BBOXを一括削除（確認・Undoは上部ボタンと同一挙動）
+      if (detections.some((row) => row.selected)) {
+        ev.preventDefault();
+        deleteSelectedBboxes();
       }
-
-      ev.preventDefault();
-      deleteBbox(candidateId);
     }
 
     window.addEventListener("keydown", onKeyDown);
@@ -1308,7 +1341,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
               subtitle={step3Done ? "完了" : "保存対象をチェック"}
               className="flex min-h-0 flex-1 flex-col"
             >
-              <div className="mb-2 flex gap-2">
+              <div className="mb-2 flex flex-wrap items-center gap-2">
                 <Button
                   size="sm"
                   className="whitespace-nowrap px-2"
@@ -1320,7 +1353,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                     }
                   }}
                 >
-                  {editMode ? "Edit: ON" : "Edit: OFF"}
+                  {editMode ? "編集モード: ON" : "編集モード: OFF"}
                 </Button>
                 <Button
                   size="sm"
@@ -1329,7 +1362,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                   onClick={undoDetections}
                   disabled={bboxUndoStack.length === 0}
                 >
-                  Undo
+                  元に戻す
                 </Button>
                 <Button
                   size="sm"
@@ -1338,7 +1371,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                   onClick={copyBboxes}
                   disabled={detections.length === 0}
                 >
-                  Copy
+                  コピー
                 </Button>
                 <Button
                   size="sm"
@@ -1347,7 +1380,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                   onClick={pasteBboxes}
                   disabled={copiedBboxes.length === 0}
                 >
-                  Paste
+                  貼り付け
                 </Button>
                 <Button
                   size="sm"
@@ -1356,7 +1389,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                   onClick={() => setDetections((prev) => prev.map((row) => ({ ...row, selected: true })))}
                   disabled={detections.length === 0}
                 >
-                  Select All
+                  すべて選択
                 </Button>
                 <Button
                   size="sm"
@@ -1365,8 +1398,21 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                   onClick={() => setDetections((prev) => prev.map((row) => ({ ...row, selected: false })))}
                   disabled={detections.length === 0}
                 >
-                  Clear All
+                  選択解除
                 </Button>
+                <Button
+                  size="sm"
+                  className="whitespace-nowrap px-2"
+                  variant="danger"
+                  onClick={deleteSelectedBboxes}
+                  disabled={selectedCount === 0}
+                  title="選択中のBBOXをまとめて削除します（元に戻すで復元可能）"
+                >
+                  選択中を削除
+                </Button>
+                <span className="text-xs text-muted">
+                  選択件数: {selectedCount} / {detections.length}
+                </span>
               </div>
               <div className="mb-2 flex items-center gap-2">
                 <label className="text-xs text-muted">Series Filter</label>
@@ -1383,9 +1429,8 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                   ))}
                 </select>
               </div>
-              <p className="mb-2 text-xs text-muted">選択件数: {selectedCount} / {detections.length}</p>
               <p className="mb-2 text-xs text-muted">
-                画像上のクリック/ダブルクリックで選択・編集できます。必要時は編集モードをONにしてください。
+                画像上のクリックで選択切替、ダブルクリックで編集開始。有効／無効は一覧右端のチェックボックスで切り替えます。
               </p>
               <div className="min-h-0 flex-1 space-y-1 overflow-auto rounded-lg border border-border bg-card/45 p-2">
                 {filteredDetections.length === 0 ? (
@@ -1424,16 +1469,22 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                             focusBboxCard(row.id);
                           }}
                         >
-                          Edit
+                          編集
                         </button>
                         <button
                           type="button"
                           className="rounded border border-danger/50 px-1 text-[10px] text-danger"
                           onClick={() => deleteBbox(row.id)}
                         >
-                          Delete
+                          削除
                         </button>
-                        <input type="checkbox" checked={!!row.selected} onChange={() => toggleDetection(row.id)} />
+                        <input
+                          type="checkbox"
+                          checked={!!row.selected}
+                          onChange={() => toggleDetection(row.id)}
+                          aria-label={row.selected ? `#${row.id} このBBOXを無効にする` : `#${row.id} このBBOXを有効にする`}
+                          title={row.selected ? "このBBOXを無効にする" : "このBBOXを有効にする"}
+                        />
                       </div>
                     </div>
                   ))
@@ -1442,23 +1493,24 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
               <div className="mt-3 rounded-lg border border-border bg-card/45 px-3 py-2 text-xs text-muted">
                 <p className="mb-1 font-semibold text-slate-200">操作方法</p>
                 <ul className="list-disc space-y-1 pl-4">
-                  <li>クリック: 選択切替</li>
-                  <li>ダブルクリック: 編集開始</li>
-                  <li>編集モードONで画像をダブルクリック: 新規BBox追加</li>
-                  <li>ドラッグ: 移動</li>
+                  <li>クリック: BBOXの選択／選択解除（もう一度クリックで解除）</li>
+                  <li>ダブルクリック: 編集開始（選択状態は変わりません）</li>
+                  <li>編集モードONで画像をダブルクリック: 新規BBOX追加</li>
+                  <li>ドラッグ: BBOXを移動</li>
                   <li>四隅ハンドル: サイズ変更</li>
-                  <li>Ctrl/Cmd + C: ROIをコピー</li>
-                  <li>Ctrl/Cmd + V: ROIを貼り付け</li>
-                  <li>Delキー: 編集中またはフォーカス中BBox削除</li>
+                  <li>Ctrl/Cmd + C: コピー</li>
+                  <li>Ctrl/Cmd + V: 貼り付け</li>
+                  <li>Delete: 編集中・フォーカス中のBBOXを削除（無ければ選択中を確認のうえ一括削除）</li>
+                  <li>有効／無効（保存対象）: 一覧右端のチェックボックスで切替</li>
                 </ul>
               </div>
               <div className="mt-3">
                 <div className="flex items-center justify-between gap-2">
                   <Button size="sm" className="whitespace-nowrap px-2" onClick={() => goStep(4)} disabled={!step3Done}>
-                    Next
+                    次へ
                   </Button>
                   <Button size="sm" className="whitespace-nowrap px-2" variant="secondary" onClick={() => goStep(2)}>
-                    Back
+                    戻る
                   </Button>
                 </div>
               </div>
