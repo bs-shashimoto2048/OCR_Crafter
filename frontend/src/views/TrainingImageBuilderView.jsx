@@ -1871,6 +1871,12 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
           {activeStep === 4 ? (
             <Card title="4. クロップ出力" subtitle={step4Done ? "完了" : "選択Bounding Boxを指定高さで保存"}>
               <div className="space-y-3">
+                {detectUsedPreprocess ? (
+                  <p className="rounded-lg border border-border bg-card/45 px-3 py-2 text-xs text-muted">
+                    検出には前処理画像を使用しています。学習用クロップは<span className="text-text">元画像の色・画質を維持</span>
+                    して出力します（BBOX座標は元画像へ逆変換されます）。
+                  </p>
+                ) : null}
                 <div>
                   <label className="app-label">保存先パス</label>
                   <div className="flex gap-2">
@@ -1905,9 +1911,17 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                   </Button>
                 </div>
                 {exportResult ? (
-                  <p className="text-xs text-muted">
-                    出力: {exportResult.count}枚 / 桁数: {exportResult.digits} / 保存先: {exportResult.output_dir}
-                  </p>
+                  <div className="space-y-1 text-xs text-muted">
+                    <p>
+                      出力: {exportResult.count}枚 / 桁数: {exportResult.digits} / 保存先: {exportResult.output_dir}
+                    </p>
+                    {exportResult.crop_source === "original" ? <p>クロップ元: 元画像（色・画質を維持）</p> : null}
+                    {Array.isArray(exportResult.skipped_invalid_bbox) && exportResult.skipped_invalid_bbox.length > 0 ? (
+                      <p className="text-amber-200">
+                        元画像範囲外のためスキップしたBBOX: #{exportResult.skipped_invalid_bbox.join(", #")}
+                      </p>
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
             </Card>

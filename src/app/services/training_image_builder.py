@@ -9,7 +9,7 @@ import numpy as np
 from PIL import Image, UnidentifiedImageError
 
 from ..project_paths import ensure_project_directories, get_project_paths
-from .detection_preprocess import apply_detection_preprocess
+from .detection_preprocess import apply_detection_preprocess, invert_detection_bbox
 
 RESIZE_LONG_SIDE_OPTIONS = [640, 1280, 1536, 1920, 2048]
 RESIZE_AXES = {"long", "width", "height"}
@@ -363,28 +363,65 @@ def export_selected_crops(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     source = _decode_image_bytes(image_bytes)
-    # 検出時と同じ前処理を適用してBBOX座標系を一致させる（クロップ処理自体は従来どおり）
+
+    # 検出前処理は「YOLOがBBOXを見つけやすくするための一時処理」。
+    # 学習用クロップは元画像の色・階調・画質を維持するため、前処理は画像へ適用せず
+    # Step3座標（前処理+共通リサイズ後）を元画像座標へ逆変換してから元画像を切り出す。
     if detect_preprocess:
-        source = apply_detection_preprocess(source, detect_preprocess)
-    resized = _prepare_image(source, long_side, use_resize, resize_axis)
+        preprocessed = apply_detection_preprocess(source, detect_preprocess)
+        detect_input = _prepare_image(preprocessed, long_side, use_resize, resize_axis)
+        # 共通リサイズ（_prepare_image）分の逆スケール
+        scale_x = preprocessed.width / detect_input.width if detect_input.width else 1.0
+        scale_y = preprocessed.height / detect_input.height if detect_input.height else 1.0
+        crop_image = source
+        reported_size = [detect_input.width, detect_input.height]
+    else:
+        resized = _prepare_image(source, long_side, use_resize, resize_axis)
+        scale_x = 1.0
+        scale_y = 1.0
+        crop_image = resized
+        reported_size = [resized.width, resized.height]
 
     total = len(selected_boxes)
     digits = len(str(total))
     outputs: list[str] = []
+    skipped: list[int] = []
     for idx, box in enumerate(selected_boxes, start=1):
-        cropped = _crop_and_resize(resized, box, crop_height)
-        filename = f"{idx:0{digits}d}.png"
+        target_box = box
+        if detect_preprocess:
+            inverted = invert_detection_bbox(
+                (
+                    float(box.get("x1", 0)) * scale_x,
+                    float(box.get("y1", 0)) * scale_y,
+                    float(box.get("x2", 0)) * scale_x,
+                    float(box.get("y2", 0)) * scale_y,
+                ),
+                detect_preprocess,
+                (source.width, source.height),
+            )
+            if inverted is None:
+                # 逆変換後に有効範囲が残らないBBOXは黙って誤画像を出さずスキップとして報告
+                skipped.append(int(box.get("id") or idx))
+                continue
+            target_box = {"x1": inverted[0], "y1": inverted[1], "x2": inverted[2], "y2": inverted[3]}
+        cropped = _crop_and_resize(crop_image, target_box, crop_height)
+        filename = f"{len(outputs) + 1:0{digits}d}.png"
         target = out_dir / filename
         cropped.save(target, format="PNG")
         outputs.append(str(target.resolve()))
+
+    if not outputs:
+        raise ValueError("すべてのBBOXが元画像範囲外のため出力できませんでした（逆変換スキップ）")
 
     return {
         "use_resize": bool(use_resize),
         "resize_axis": resize_axis,
         "output_dir": str(out_dir.resolve()),
-        "count": total,
+        "count": len(outputs),
         "digits": digits,
         "crop_height": int(crop_height),
-        "resized_size": [resized.width, resized.height],
+        "resized_size": reported_size,
+        "crop_source": "original" if detect_preprocess else "resized",
+        "skipped_invalid_bbox": skipped,
         "files": outputs,
     }
