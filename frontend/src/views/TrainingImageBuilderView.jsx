@@ -257,6 +257,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
   const [editMode, setEditMode] = useState(false);
   const [editingBboxId, setEditingBboxId] = useState(null);
   const [bboxUndoStack, setBboxUndoStack] = useState([]);
+  const [bboxRedoStack, setBboxRedoStack] = useState([]);
   const [step3PaneHeight, setStep3PaneHeight] = useState(0);
   const [imageZoom, setImageZoom] = useState(1);
   const [copiedBboxes, setCopiedBboxes] = useState([]);
@@ -268,17 +269,36 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
 
   function pushUndoSnapshot(sourceRows) {
     const snapshot = cloneDetections(sourceRows);
-    setBboxUndoStack((prev) => [...prev.slice(-29), snapshot]);
+    // 履歴上限100件。新しい編集操作でRedo履歴は破棄する（一般的なエディタと同じ挙動）
+    setBboxUndoStack((prev) => [...prev.slice(-99), snapshot]);
+    setBboxRedoStack([]);
   }
 
   function undoDetections() {
-    setBboxUndoStack((prev) => {
-      if (prev.length === 0) {
-        return prev;
+    setBboxUndoStack((prevUndo) => {
+      if (prevUndo.length === 0) {
+        return prevUndo;
       }
-      const snapshot = prev[prev.length - 1];
-      setDetections(cloneDetections(snapshot));
-      return prev.slice(0, -1);
+      const snapshot = prevUndo[prevUndo.length - 1];
+      setDetections((prevDetections) => {
+        setBboxRedoStack((prevRedo) => [...prevRedo.slice(-99), cloneDetections(prevDetections)]);
+        return cloneDetections(snapshot);
+      });
+      return prevUndo.slice(0, -1);
+    });
+  }
+
+  function redoDetections() {
+    setBboxRedoStack((prevRedo) => {
+      if (prevRedo.length === 0) {
+        return prevRedo;
+      }
+      const snapshot = prevRedo[prevRedo.length - 1];
+      setDetections((prevDetections) => {
+        setBboxUndoStack((prevUndo) => [...prevUndo.slice(-99), cloneDetections(prevDetections)]);
+        return cloneDetections(snapshot);
+      });
+      return prevRedo.slice(0, -1);
     });
   }
 
@@ -476,14 +496,36 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
     };
   }
 
+  // 削除後は次の番号のBBOX（無ければ前の番号）を選択する
+  function nextSelectionAfterDelete(rows, deletedIds) {
+    const deleted = new Set(deletedIds);
+    const remaining = rows.filter((row) => !deleted.has(row.id)).map((row) => row.id);
+    if (remaining.length === 0) {
+      return null;
+    }
+    const minDeleted = Math.min(...deletedIds);
+    const after = remaining.filter((id) => id > minDeleted).sort((a, b) => a - b);
+    if (after.length > 0) {
+      return after[0];
+    }
+    return remaining.sort((a, b) => b - a)[0];
+  }
+
   function deleteBbox(id) {
     pushUndoSnapshot(detections);
+    const nextId = nextSelectionAfterDelete(detections, [id]);
     setDetections((prev) => prev.filter((row) => row.id !== id));
     if (editingBboxId === id) {
       setEditingBboxId(null);
     }
     if (focusedBboxId === id) {
       setFocusedBboxId(null);
+    }
+    if (nextId != null) {
+      setSelectedUiIds([nextId]);
+      focusBboxCard(nextId);
+    } else {
+      setSelectedUiIds([]);
     }
   }
 
@@ -604,8 +646,14 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       return;
     }
     pushUndoSnapshot(detections);
+    const nextId = nextSelectionAfterDelete(detections, targets.map((row) => row.id));
     setDetections((prev) => prev.filter((row) => !targetIds.has(row.id)));
-    setSelectedUiIds([]);
+    if (nextId != null) {
+      setSelectedUiIds([nextId]);
+      focusBboxCard(nextId);
+    } else {
+      setSelectedUiIds([]);
+    }
     if (editingBboxId != null && targetIds.has(editingBboxId)) {
       setEditingBboxId(null);
     }
@@ -702,6 +750,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
     setDetections([]);
     setSeriesFilter(SERIES_FILTER_ALL);
     setBboxUndoStack([]);
+    setBboxRedoStack([]);
     setEditingBboxId(null);
     setFocusedBboxId(null);
     setImageZoom(1);
@@ -880,6 +929,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       setDetections((data.detections || []).map((row) => ({ ...row, selected: row.selected !== false })));
       setSeriesFilter(SERIES_FILTER_ALL);
       setBboxUndoStack([]);
+    setBboxRedoStack([]);
       setEditingBboxId(null);
       setFocusedBboxId(null);
       setExportResult(null);
@@ -891,8 +941,9 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
     }
   }
 
-  // 有効/無効（保存対象）の切替。一覧右端のチェックボックスからのみ呼び出す
+  // 有効/無効（保存対象）の切替。一覧右端のチェックボックスからのみ呼び出す（Undo/Redo対象）
   function handleBoxEnabledChange(id) {
+    pushUndoSnapshot(detections);
     setDetections((prev) => prev.map((row) => (row.id === id ? { ...row, selected: !row.selected } : row)));
   }
 
@@ -1058,6 +1109,58 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       const key = String(ev.key || "").toLowerCase();
       const withModifier = !!(ev.ctrlKey || ev.metaKey);
 
+      // Tab / Shift+Tab: 編集モードON時のみ、表示中(Series Filter適用後)のBBOXを番号順に巡回
+      if (key === "tab" && !withModifier && !ev.altKey) {
+        if (!editMode || filteredDetections.length === 0) {
+          return; // 通常のTab移動を優先
+        }
+        ev.preventDefault();
+        const ids = filteredDetections.map((row) => row.id);
+        const currentId =
+          focusedBboxId != null
+            ? focusedBboxId
+            : editingBboxId != null
+              ? editingBboxId
+              : selectedUiIds.length > 0
+                ? selectedUiIds[selectedUiIds.length - 1]
+                : null;
+        const currentIndex = currentId != null ? ids.indexOf(currentId) : -1;
+        const nextIndex = ev.shiftKey
+          ? currentIndex <= 0
+            ? ids.length - 1
+            : currentIndex - 1
+          : currentIndex < 0 || currentIndex === ids.length - 1
+            ? 0
+            : currentIndex + 1;
+        const nextId = ids[nextIndex];
+        // 複数選択中でも次の1件だけを新しい選択対象にする
+        setSelectedUiIds([nextId]);
+        setEditingBboxId(nextId);
+        focusBboxCard(nextId);
+        return;
+      }
+
+      if (withModifier && key === "z" && !ev.altKey) {
+        // Ctrl/Cmd+Z=Undo, Ctrl/Cmd+Shift+Z=Redo。履歴がある場合のみ既定動作を抑止
+        const isRedo = ev.shiftKey;
+        if (isRedo ? bboxRedoStack.length > 0 : bboxUndoStack.length > 0) {
+          ev.preventDefault();
+          if (isRedo) {
+            redoDetections();
+          } else {
+            undoDetections();
+          }
+        }
+        return;
+      }
+      if (withModifier && key === "y" && !ev.altKey && !ev.shiftKey) {
+        if (bboxRedoStack.length > 0) {
+          ev.preventDefault();
+          redoDetections();
+        }
+        return;
+      }
+
       if (withModifier && key === "c") {
         ev.preventDefault();
         copyBboxes();
@@ -1095,7 +1198,19 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [activeStep, detections, selectedUiIds, editingBboxId, focusedBboxId, copiedBboxes, currentImageSize]);
+  }, [
+    activeStep,
+    detections,
+    filteredDetections,
+    selectedUiIds,
+    editingBboxId,
+    focusedBboxId,
+    copiedBboxes,
+    currentImageSize,
+    editMode,
+    bboxUndoStack,
+    bboxRedoStack,
+  ]);
 
   async function browseOutputDir() {
     try {
@@ -1711,8 +1826,19 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                   variant="secondary"
                   onClick={undoDetections}
                   disabled={bboxUndoStack.length === 0}
+                  title="元に戻す（Ctrl/Cmd+Z）"
                 >
                   元に戻す
+                </Button>
+                <Button
+                  size="sm"
+                  className="whitespace-nowrap px-2"
+                  variant="secondary"
+                  onClick={redoDetections}
+                  disabled={bboxRedoStack.length === 0}
+                  title="やり直す（Ctrl+Y / Ctrl/Cmd+Shift+Z）"
+                >
+                  やり直す
                 </Button>
                 <Button
                   size="sm"
@@ -1851,8 +1977,10 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                   <li>ドラッグ: BBOXを移動</li>
                   <li>四隅ハンドル: サイズ変更</li>
                   <li>Ctrl/Cmd + C: コピー / Ctrl/Cmd + V: 貼り付け</li>
+                  <li>Tab / Shift + Tab: 次／前のBBOXへ移動（編集モードON時・表示中のみ・循環）</li>
+                  <li>Ctrl/Cmd + Z: 元に戻す / Ctrl + Y・Ctrl/Cmd + Shift + Z: やり直す</li>
                   <li>Delete: 編集中・フォーカス中のBBOXを削除（無ければ選択中を確認のうえ一括削除）</li>
-                  <li>有効／無効: 一覧右端のチェックボックスでのみ切替</li>
+                  <li>有効／無効: 一覧右端のチェックボックスでのみ切替（Undo/Redo対象）</li>
                 </ul>
               </div>
               <div className="mt-3">
