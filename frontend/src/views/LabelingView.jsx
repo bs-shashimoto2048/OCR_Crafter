@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Card from "../components/Card";
 import Button from "../components/Button";
 import { imageUrl, processedImageUrl, request } from "../lib/api";
+import { searchDictionaryCandidates } from "../lib/candidateDictionary";
 import { decideNextImageIndex } from "../lib/labelNavigation";
 import { lowercaseToggleApplicable } from "../lib/lowercase";
 
@@ -254,6 +255,7 @@ export default function LabelingView({
   preprocessParams,
   predictParams,
   extraPredictParams = [],
+  candidateDict = null,
   onOpenPreprocess,
   images,
   selectedIndex,
@@ -514,6 +516,28 @@ export default function LabelingView({
     }
   }
 
+  // 辞書からの近似候補（全OCR候補を検索元に、辞書文字列単位で統合）。
+  // 辞書未選択時は null（セクション非表示）。OCR結果が変わった時だけ再計算する
+  const dictionaryCandidates = useMemo(() => {
+    const entries = candidateDict?.entries || [];
+    if (entries.length === 0) {
+      return null;
+    }
+    const sources = [];
+    if (ocrCandidate?.text) {
+      sources.push({ text: ocrCandidate.text, source: engineLabelOf(ocrMeta?.engine) });
+    }
+    for (const item of extraCandidates || []) {
+      if (item?.prediction) {
+        sources.push({ text: item.prediction, source: engineLabelOf(item.engine) });
+      }
+    }
+    return searchDictionaryCandidates(sources, entries, {
+      maxCandidates: candidateDict?.max_candidates ?? 3,
+      minSimilarity: (candidateDict?.min_similarity ?? 60) / 100,
+    });
+  }, [candidateDict, ocrCandidate, extraCandidates, ocrMeta]);
+
   // Esc: 最上位の有効候補を採用（モデル1が有効ならモデル1、無ければモデル2/3の先頭の有効候補）
   function adoptTopCandidate() {
     const top = ocrCandidate?.text || extraCandidates.find((c) => c?.prediction)?.prediction || "";
@@ -562,6 +586,15 @@ export default function LabelingView({
         }
         event.preventDefault();
         saveAndNext();
+        return;
+      }
+      // Alt+1〜5: 辞書からの近似候補を採用（Esc=OCR候補採用とは競合しない）
+      if (event.altKey && !event.ctrlKey && !event.metaKey && /^[1-5]$/.test(event.key)) {
+        const candidate = dictionaryCandidates?.[Number(event.key) - 1];
+        if (candidate) {
+          event.preventDefault();
+          adoptText(candidate.entry);
+        }
         return;
       }
       if (event.key === "Escape") {
@@ -879,6 +912,47 @@ export default function LabelingView({
                 return <CandidateMessageRow key={rowIndex} index={rowIndex} header={headerText} message="OCR候補なし" />;
               })}
             </div>
+
+            {/* 辞書からの近似候補（OCR候補辞書を選択している場合のみ表示） */}
+            {dictionaryCandidates !== null ? (
+              <div className="mt-2 border-t border-border pt-2">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">辞書からの近似候補</p>
+                  <span className="truncate text-[10px] text-muted" title={candidateDict?.source_name}>
+                    {candidateDict?.source_name || ""}
+                  </span>
+                </div>
+                {ocrLoading ? (
+                  <p className="px-1 text-xs text-muted">OCR実行中...</p>
+                ) : dictionaryCandidates.length === 0 ? (
+                  <p className="px-1 text-xs text-muted">辞書内に近い候補はありません</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {dictionaryCandidates.map((candidate, index) => (
+                      <button
+                        key={candidate.entry}
+                        type="button"
+                        onClick={() => adoptText(candidate.entry)}
+                        title={`辞書候補をクリックで現在ラベルへ反映 (Alt+${index + 1})。差分はOCR結果（${candidate.sourceText}）との比較`}
+                        className="flex h-10 w-full items-center gap-2 rounded-lg border border-border bg-card/60 px-2.5 text-left backdrop-blur-md transition hover:border-accent/60 hover:bg-accent/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+                      >
+                        <span className="w-4 shrink-0 text-[10px] text-muted">{index + 1}.</span>
+                        <span className="w-44 shrink-0 truncate text-[10px] text-muted" title={`元候補: ${candidate.source}`}>
+                          類似度 {(candidate.score * 100).toFixed(1)}%{candidate.source ? ` / ${candidate.source}` : ""}
+                        </span>
+                        <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap">
+                          <DiffText candidate={candidate.entry} current={candidate.sourceText} />
+                        </span>
+                        <span className="shrink-0 text-[10px] text-muted">Alt+{index + 1}</span>
+                        <span className="shrink-0 rounded-md border border-accent/50 bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold text-blue-200">
+                          採用
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : null}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">

@@ -113,6 +113,15 @@ function extraSlotRequestFields(slot) {
 }
 const PREPROCESS_PARAMS_BY_PROJECT_STORAGE_KEY = "ocr_preprocess_params_by_project_v1";
 const INCLUDE_LOWERCASE_BY_PROJECT_STORAGE_KEY = "ocr_include_lowercase_by_project_v1";
+const CANDIDATE_DICT_BY_PROJECT_STORAGE_KEY = "ocr_candidate_dict_by_project_v1";
+// OCR候補辞書の既定値（ファイル未選択）。entriesはプロジェクト別にlocalStorageへ保存する
+const DEFAULT_CANDIDATE_DICT = {
+  source_name: "",
+  entries: [],
+  stats: null,
+  max_candidates: 3,
+  min_similarity: 60,
+};
 const TRAINING_SESSION_BY_PROJECT_STORAGE_KEY = "ocr_training_session_by_project_v1";
 const LAST_PROJECT_STORAGE_KEY = "ocr_last_project_v1";
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "ocr_sidebar_collapsed_v1";
@@ -484,6 +493,8 @@ export default function App() {
   // 小文字を出力に含める（EasyOCR/PaddleOCR）。未設定=ONで既存動作を維持
   const [preprocessPredictIncludeLowercase, setPreprocessPredictIncludeLowercase] = useState(true);
   const [inferIncludeLowercase, setInferIncludeLowercase] = useState(true);
+  // OCR候補辞書（ラベル編集の近似候補表示用。プロジェクト単位で保存）
+  const [candidateDict, setCandidateDict] = useState({ ...DEFAULT_CANDIDATE_DICT });
   const [preprocessPreview, setPreprocessPreview] = useState(null);
   const [preprocessLoading, setPreprocessLoading] = useState(false);
   const [preprocessError, setPreprocessError] = useState("");
@@ -1227,6 +1238,24 @@ export default function App() {
     setPreprocessPredictIncludeLowercase(saved?.preprocess !== false);
     setInferIncludeLowercase(saved?.infer !== false);
   }, [projectId]);
+
+  // OCR候補辞書をプロジェクト単位で復元（プロジェクト切替で混在させない）
+  useEffect(() => {
+    const saved = readProjectScopedStorage(CANDIDATE_DICT_BY_PROJECT_STORAGE_KEY, projectId);
+    if (saved && Array.isArray(saved.entries)) {
+      setCandidateDict({ ...DEFAULT_CANDIDATE_DICT, ...saved });
+    } else {
+      setCandidateDict({ ...DEFAULT_CANDIDATE_DICT });
+    }
+  }, [projectId]);
+
+  function persistCandidateDict(next) {
+    const value = { ...DEFAULT_CANDIDATE_DICT, ...next };
+    setCandidateDict(value);
+    if (projectId) {
+      writeProjectScopedStorage(CANDIDATE_DICT_BY_PROJECT_STORAGE_KEY, projectId, value);
+    }
+  }
 
   useEffect(() => {
     if (!projectId) {
@@ -2796,6 +2825,8 @@ export default function App() {
         onExtraSlotsChange={persistPreprocessExtraSlots}
         extraPreviews={preprocessExtraPreviews}
         onManualMasksSaved={() => setManualMaskVersion((prev) => prev + 1)}
+        candidateDict={candidateDict}
+        onCandidateDictChange={persistCandidateDict}
         returnView={preprocessReturnView}
         onReturn={() => {
           if (preprocessReturnView) {
@@ -2851,6 +2882,7 @@ export default function App() {
         preprocessParams={preprocessParams}
         predictParams={labelingPredictParams}
         extraPredictParams={labelingExtraPredictParams}
+        candidateDict={candidateDict}
         onOpenPreprocess={() => {
           setPreprocessReturnView("labeling");
           setActiveView("preprocess");
