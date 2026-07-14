@@ -6,8 +6,9 @@ import Button from "../components/Button";
 import { thumbnailUrl } from "../lib/api";
 
 const LIST_ROW_HEIGHT = 64;
-const CARD_ROW_HEIGHT = 240;
-const CARD_MIN_WIDTH = 200;
+// OCR画像は横長のためカードも横長比率（幅広め・低め）にする
+const CARD_ROW_HEIGHT = 220;
+const CARD_MIN_WIDTH = 250;
 
 // サムネイル1枚。直接 img src + loading="lazy" 方式（仮想化でDOMは表示範囲のみなので
 // 同時リクエストはブラウザの接続管理に任せる）。読込中スケルトン / 失敗時は自動再試行2回 + 手動再読込
@@ -73,6 +74,10 @@ const ROTATE_FEEDBACK_CLASS = {
   error: "!border-red-400/70 !text-red-200 shadow-[0_0_0_1px_rgba(248,113,113,0.55),0_0_12px_rgba(248,113,113,0.5)]",
 };
 
+// 90°=青 / 180°=オレンジで色分け。押下時は約200msの光る演出（scale + brightness + shadow）
+const ROTATE_PRESS_CLASS =
+  "transition-[box-shadow,transform,filter,border-color] duration-200 active:scale-[0.98] active:brightness-125";
+
 const RotateButtons = memo(function RotateButtons({ imageName, feedback, onRotate }) {
   const busy = feedback?.status === "processing";
 
@@ -86,24 +91,24 @@ const RotateButtons = memo(function RotateButtons({ imageName, feedback, onRotat
       <Button
         size="sm"
         variant="secondary"
-        className={`h-6 px-2 text-[11px] transition-shadow duration-200 ${feedbackClass(90)}`}
+        className={`h-6 w-16 px-0 text-[11px] !border-sky-400/60 !text-sky-300 active:shadow-[0_0_10px_rgba(56,189,248,0.6)] ${ROTATE_PRESS_CLASS} ${feedbackClass(90)}`}
         disabled={busy}
         onClick={() => onRotate(imageName, 90)}
         title="時計回りに90度回転"
         aria-label="時計回りに90度回転"
       >
-        {busy && feedback?.angle === 90 ? "回転中…" : "90°回転"}
+        {busy && feedback?.angle === 90 ? "回転中…" : "↻90°"}
       </Button>
       <Button
         size="sm"
         variant="secondary"
-        className={`h-6 px-2 text-[11px] transition-shadow duration-200 ${feedbackClass(180)}`}
+        className={`h-6 w-16 px-0 text-[11px] !border-amber-500/60 !text-amber-300 active:shadow-[0_0_10px_rgba(251,146,60,0.6)] ${ROTATE_PRESS_CLASS} ${feedbackClass(180)}`}
         disabled={busy}
         onClick={() => onRotate(imageName, 180)}
         title="180度回転"
         aria-label="180度回転"
       >
-        {busy && feedback?.angle === 180 ? "回転中…" : "180°回転"}
+        {busy && feedback?.angle === 180 ? "回転中…" : "↺180°"}
       </Button>
     </>
   );
@@ -142,25 +147,49 @@ const ImageRow = memo(function ImageRow({ item, shape, thumbSrc, rotateFeedback,
   );
 });
 
-// カード表示の1枚
+// カード表示の1枚。優先順位: 画像 → ラベル → ファイル名/サイズ → 回転ボタン
 const ImageCard = memo(function ImageCard({ item, shape, thumbSrc, rotateFeedback, onRotate, onOpenLabeling }) {
+  const label = String(item.label || "").trim();
   return (
-    <div className="group flex h-full flex-col overflow-hidden rounded-xl border border-border bg-card/60">
-      <div className="relative h-28 shrink-0">
+    <div className="group relative flex h-full flex-col overflow-hidden rounded-xl border border-border bg-card/60 transition duration-200 hover:z-10 hover:scale-[1.02] hover:border-slate-500 hover:shadow-[0_8px_24px_rgba(0,0,0,0.45)]">
+      {/* 画像（カード内で最大領域。object-contain / 上下中央） */}
+      <div className="relative min-h-0 flex-1">
         <Thumbnail src={thumbSrc} alt={item.image} className="h-full w-full" />
+        {/* ラベル済みバッジ（右上）: 済=🟢 / 未=🟡 */}
+        <span
+          className="absolute right-1.5 top-1 text-[11px] drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]"
+          title={label ? "ラベル済み" : "未ラベル"}
+          aria-label={label ? "ラベル済み" : "未ラベル"}
+        >
+          {label ? "🟢" : "🟡"}
+        </span>
         <div className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 transition duration-200 group-hover:opacity-100">
           <Button size="sm" onClick={() => onOpenLabeling(item.image)}>
             ラベル編集を開く
           </Button>
         </div>
       </div>
-      <div className="space-y-0.5 p-2.5">
-        <p className="truncate text-xs font-medium text-text" title={item.image}>
-          {item.image}
-        </p>
-        <p className="truncate text-[11px] text-muted">ラベル: {item.label || "-"}</p>
-        <p className="text-[11px] text-muted">サイズ: {shape || "--"}</p>
-        <div className="flex gap-1.5 pt-1">
+      <div className="shrink-0 space-y-1 p-2">
+        {/* ラベル（最重要情報。薄緑バッジ + 18px太字） */}
+        {label ? (
+          <p
+            className="truncate rounded-md border border-emerald-400/25 bg-emerald-400/15 px-2 py-0.5 text-lg font-bold leading-6 text-emerald-300"
+            title={label}
+          >
+            {label}
+          </p>
+        ) : (
+          <p className="truncate rounded-md border border-border/60 bg-card/45 px-2 py-0.5 text-lg font-bold leading-6 text-muted/70">
+            未ラベル
+          </p>
+        )}
+        <div className="flex items-baseline justify-between gap-2 text-xs text-muted">
+          <span className="truncate" title={item.image}>
+            {item.image}
+          </span>
+          <span className="shrink-0 text-right">{shape || "--"}</span>
+        </div>
+        <div className="flex gap-1.5">
           <RotateButtons imageName={item.image} feedback={rotateFeedback} onRotate={onRotate} />
         </div>
       </div>
