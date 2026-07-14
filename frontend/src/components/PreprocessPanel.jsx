@@ -33,7 +33,6 @@ export default function PreprocessPanel({
   inferenceSummary = "",
   focusInference = false,
   manualMaskSection = null,
-  candidateDictSection = null,
   params,
   defaultParams,
   onParamsChange,
@@ -621,8 +620,6 @@ export default function PreprocessPanel({
             </Button>
           </Section>
         </Group>
-
-        {candidateDictSection ? <Group title="OCR候補辞書">{candidateDictSection}</Group> : null}
       </div>
 
       <div className="mt-2 flex shrink-0 items-center gap-2 border-t border-border pt-2">

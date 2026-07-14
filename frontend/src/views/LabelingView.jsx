@@ -2,7 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Card from "../components/Card";
 import Button from "../components/Button";
 import { imageUrl, processedImageUrl, request } from "../lib/api";
-import { searchDictionaryCandidates } from "../lib/candidateDictionary";
+import {
+  DICT_FILE_MAX_BYTES,
+  parseCandidateDictionary,
+  searchDictionaryCandidates,
+} from "../lib/candidateDictionary";
 import { decideNextImageIndex } from "../lib/labelNavigation";
 import { lowercaseToggleApplicable } from "../lib/lowercase";
 
@@ -256,6 +260,7 @@ export default function LabelingView({
   predictParams,
   extraPredictParams = [],
   candidateDict = null,
+  onCandidateDictChange,
   onOpenPreprocess,
   images,
   selectedIndex,
@@ -537,6 +542,67 @@ export default function LabelingView({
       minSimilarity: (candidateDict?.min_similarity ?? 60) / 100,
     });
   }, [candidateDict, ocrCandidate, extraCandidates, ocrMeta]);
+
+  // ---- OCR候補辞書（右サイドバーから直接ファイル選択。プロジェクト単位で保存） ----
+  const dictFileInputRef = useRef(null);
+  const [dictError, setDictError] = useState("");
+  const dictEntries = candidateDict?.entries || [];
+  const dictStats = candidateDict?.stats || null;
+
+  async function handleDictFileSelected(file) {
+    if (!file) return;
+    if (file.size > DICT_FILE_MAX_BYTES) {
+      setDictError("ファイルが大きすぎます（上限5MB）");
+      return;
+    }
+    try {
+      const buffer = await file.arrayBuffer();
+      let encoding = "UTF-8";
+      let text = new TextDecoder("utf-8").decode(buffer);
+      if (text.charCodeAt(0) === 0xfeff) {
+        encoding = "UTF-8 (BOM)";
+      }
+      if (text.includes("�")) {
+        // UTF-8として壊れる場合はShift_JISを試す（実ファイルの文字コード差異対応）
+        try {
+          const sjis = new TextDecoder("shift_jis").decode(buffer);
+          if (!sjis.includes("�")) {
+            text = sjis;
+            encoding = "Shift_JIS";
+          }
+        } catch {
+          // shift_jis非対応環境ではUTF-8のまま処理する
+        }
+      }
+      if (text.includes(String.fromCharCode(0))) {
+        throw new Error("バイナリファイルの可能性があるため読み込めません");
+      }
+      const parsed = parseCandidateDictionary(text);
+      if (parsed.entries.length === 0) {
+        throw new Error("有効な候補が1件もありません（1行1候補のテキストファイルを選択してください）");
+      }
+      onCandidateDictChange?.({
+        ...candidateDict,
+        source_name: file.name,
+        entries: parsed.entries,
+        stats: {
+          encoding,
+          valid: parsed.validCount,
+          empty_skipped: parsed.emptySkipped,
+          duplicate_skipped: parsed.duplicateSkipped,
+          invalid_skipped: parsed.invalidSkipped,
+        },
+      });
+      setDictError("");
+    } catch (e) {
+      setDictError(`読み込みに失敗しました: ${e.message}`);
+    }
+  }
+
+  function clearDict() {
+    onCandidateDictChange?.({ ...candidateDict, source_name: "", entries: [], stats: null });
+    setDictError("");
+  }
 
   // Esc: 最上位の有効候補を採用（モデル1が有効ならモデル1、無ければモデル2/3の先頭の有効候補）
   function adoptTopCandidate() {
@@ -1091,6 +1157,114 @@ export default function LabelingView({
       >
         <div className="min-h-0 flex-1 overflow-y-auto pr-0.5">
           <PreprocessSummary params={preprocessParams} />
+
+          {/* OCR候補辞書（設定元はこの画面のみ。初期は閉じた状態） */}
+          <details className="group mt-2 rounded-lg border border-border bg-card/45">
+            <summary className="flex cursor-pointer select-none items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-text transition hover:bg-card/70 [&::-webkit-details-marker]:hidden">
+              <span className="text-[10px] text-muted transition-transform group-open:rotate-90" aria-hidden="true">
+                ▶
+              </span>
+              OCR候補辞書
+              <span className="ml-auto truncate text-[10px] font-normal text-muted" title={candidateDict?.source_name}>
+                {dictEntries.length > 0 ? candidateDict?.source_name : "未選択"}
+              </span>
+            </summary>
+            <div
+              className="space-y-2 px-2.5 pb-2.5"
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                handleDictFileSelected(e.dataTransfer?.files?.[0]);
+              }}
+            >
+              <p className="param-hint">
+                1行1候補のテキストファイル（.txt）から、OCR候補の下へ近似候補を表示します。ここへTXTをドラッグしても読み込めます。
+              </p>
+              <input
+                ref={dictFileInputRef}
+                type="file"
+                accept=".txt"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  handleDictFileSelected(file);
+                  e.target.value = ""; // 同じファイルを選び直せるようにする
+                }}
+              />
+              {dictError ? <p className="text-xs text-danger">{dictError}</p> : null}
+              {dictEntries.length > 0 ? (
+                <>
+                  <div className="space-y-0.5 rounded-lg border border-border bg-card/45 p-2 text-[11px]">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted">選択中</span>
+                      <span className="truncate font-semibold text-text" title={candidateDict?.source_name}>
+                        {candidateDict?.source_name || "--"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted">候補数</span>
+                      <span className="font-semibold text-text">{(dictStats?.valid ?? dictEntries.length).toLocaleString()}件</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted">文字コード</span>
+                      <span className="font-semibold text-text">{dictStats?.encoding || "--"}</span>
+                    </div>
+                    {(dictStats?.empty_skipped || 0) + (dictStats?.duplicate_skipped || 0) + (dictStats?.invalid_skipped || 0) >
+                    0 ? (
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-muted">除外</span>
+                        <span className="text-muted">
+                          空行{dictStats?.empty_skipped || 0} / 重複{dictStats?.duplicate_skipped || 0} / 不正
+                          {dictStats?.invalid_skipped || 0}
+                        </span>
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="secondary" className="flex-1" onClick={() => dictFileInputRef.current?.click()}>
+                      選び直す
+                    </Button>
+                    <Button size="sm" variant="ghost" className="text-danger" onClick={clearDict}>
+                      選択解除
+                    </Button>
+                  </div>
+                  <div>
+                    <label className="app-label">最大候補数: {candidateDict?.max_candidates ?? 3}</label>
+                    <input
+                      type="range"
+                      min="1"
+                      max="5"
+                      step="1"
+                      value={candidateDict?.max_candidates ?? 3}
+                      onChange={(e) =>
+                        onCandidateDictChange?.({ ...candidateDict, max_candidates: Number(e.target.value) })
+                      }
+                      className="w-full"
+                    />
+                    <label className="app-label mt-1">最低類似度: {candidateDict?.min_similarity ?? 60}%</label>
+                    <input
+                      type="range"
+                      min="30"
+                      max="95"
+                      step="5"
+                      value={candidateDict?.min_similarity ?? 60}
+                      onChange={(e) =>
+                        onCandidateDictChange?.({ ...candidateDict, min_similarity: Number(e.target.value) })
+                      }
+                      className="w-full"
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-xs text-muted">辞書未選択（従来のOCR候補のみ表示されます）</p>
+                  <Button size="sm" variant="secondary" className="w-full" onClick={() => dictFileInputRef.current?.click()}>
+                    ファイルを選択
+                  </Button>
+                </>
+              )}
+            </div>
+          </details>
         </div>
       </Card>
     </div>

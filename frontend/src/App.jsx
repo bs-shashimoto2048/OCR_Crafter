@@ -2825,8 +2825,6 @@ export default function App() {
         onExtraSlotsChange={persistPreprocessExtraSlots}
         extraPreviews={preprocessExtraPreviews}
         onManualMasksSaved={() => setManualMaskVersion((prev) => prev + 1)}
-        candidateDict={candidateDict}
-        onCandidateDictChange={persistCandidateDict}
         returnView={preprocessReturnView}
         onReturn={() => {
           if (preprocessReturnView) {
@@ -2883,6 +2881,7 @@ export default function App() {
         predictParams={labelingPredictParams}
         extraPredictParams={labelingExtraPredictParams}
         candidateDict={candidateDict}
+        onCandidateDictChange={persistCandidateDict}
         onOpenPreprocess={() => {
           setPreprocessReturnView("labeling");
           setActiveView("preprocess");
