@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import Button from "../components/Button";
 import Card from "../components/Card";
+import LowercaseToggle from "../components/LowercaseToggle";
 import { API_BASE } from "../lib/api";
+import { lowercaseToggleApplicable } from "../lib/lowercase";
 
 const BATCH_TEXT_MIN_LENGTH = 1;
 const BATCH_TEXT_MAX_LENGTH = 12;
@@ -118,10 +120,15 @@ export default function OcrBatchView({
   easyocrLangs,
   setEasyocrLangs,
   easyocrLanguageOptions,
+  includeLowercase = true,
+  setIncludeLowercase,
   preprocessEnabled,
   setPreprocessEnabled,
   preprocessOverrides,
 }) {
+  // 小文字設定が有効なエンジン/言語か（EasyOCR/PaddleOCR × ラテン言語）
+  const lowercaseApplicable = lowercaseToggleApplicable(engine, easyocrLangs);
+  const effectiveIncludeLowercase = lowercaseApplicable ? includeLowercase !== false : true;
   const [notice, setNotice] = useState("");
   const [batchFolderName, setBatchFolderName] = useState("");
   const [batchFiles, setBatchFiles] = useState([]);
@@ -351,6 +358,9 @@ export default function OcrBatchView({
         } else {
           formData.append("easyocr_langs", (easyocrLangs || []).join(",") || "en");
         }
+        if (lowercaseApplicable) {
+          formData.append("include_lowercase", effectiveIncludeLowercase ? "true" : "false");
+        }
 
         try {
           const response = await fetch(`${API_BASE}/predict`, { method: "POST", body: formData });
@@ -360,7 +370,8 @@ export default function OcrBatchView({
           }
           const result = await response.json();
           const prediction = toHalfWidthAlnum(result.prediction || result.text || "", {
-            keepCase: engine === "tesseract",
+            // Tesseract、または小文字ONのEasyOCR/PaddleOCRでは大小文字を保持する
+            keepCase: engine === "tesseract" || (lowercaseApplicable && effectiveIncludeLowercase),
           });
           const corrected = prediction;
           const expected_length = resolveBatchExpectedLength({ ...result, prediction });
@@ -425,7 +436,21 @@ export default function OcrBatchView({
           : engine === "tesseract"
             ? tesseractModel || "latest"
             : "";
-    const header = ["file_name", "engine", "model", "prediction", "corrected", "confidence", "valid", "status", "error"];
+    const languageLabel =
+      engine === "easyocr" || engine === "paddleocr" ? (easyocrLangs || []).join(",") || "en" : "";
+    const header = [
+      "file_name",
+      "engine",
+      "model",
+      "language",
+      "include_lowercase",
+      "prediction",
+      "corrected",
+      "confidence",
+      "valid",
+      "status",
+      "error",
+    ];
     const lines = [header.join(",")];
     for (const row of batchRows) {
       lines.push(
@@ -433,6 +458,8 @@ export default function OcrBatchView({
           row.file_name,
           row.engine || engine,
           row.model_name || selectedModelLabel,
+          languageLabel,
+          lowercaseApplicable ? (effectiveIncludeLowercase ? "true" : "false") : "",
           row.prediction,
           row.corrected,
           row.confidence ?? "",
@@ -612,6 +639,14 @@ export default function OcrBatchView({
                   ) : null}
                 </div>
               ) : null}
+
+              <LowercaseToggle
+                className="rounded-lg border border-border bg-card/50 p-2"
+                engine={engine}
+                langs={easyocrLangs}
+                value={includeLowercase}
+                onChange={setIncludeLowercase}
+              />
 
               <label className="inline-flex items-center gap-2 rounded border border-border px-3 py-2 text-sm">
                 <input

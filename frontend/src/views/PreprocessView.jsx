@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import Button from "../components/Button";
 import Card from "../components/Card";
 import ImagePreview from "../components/ImagePreview";
+import LowercaseToggle from "../components/LowercaseToggle";
 import ManualMaskEditor from "../components/ManualMaskEditor";
 import PreprocessPanel from "../components/PreprocessPanel";
 import ResultBadge from "../components/ResultBadge";
@@ -33,6 +34,8 @@ export default function PreprocessView({
   setPredictModelType,
   predictEasyOcrLangs,
   setPredictEasyOcrLangs,
+  predictIncludeLowercase,
+  setPredictIncludeLowercase,
   easyocrLanguageOptions,
   modelTypes,
   models,
@@ -852,6 +855,13 @@ export default function PreprocessView({
               </div>
             )}
             </div>
+            <LowercaseToggle
+              className="mt-3 rounded-lg border border-border bg-card/45 p-2"
+              engine={predictEngine}
+              langs={predictEasyOcrLangs}
+              value={predictIncludeLowercase}
+              onChange={setPredictIncludeLowercase}
+            />
             <div className="mt-3 rounded-lg border border-border bg-card/45 p-2 text-xs text-muted">
               実際に使用される推論先: <span className="font-semibold text-text">{resolvedModelName}</span>
             </div>
@@ -933,6 +943,13 @@ export default function PreprocessView({
                     </div>
                   )}
                 </div>
+                <LowercaseToggle
+                  className="mt-2"
+                  engine={slot.engine}
+                  langs={slot.engine === "easyocr" || slot.engine === "paddleocr" ? slot.langs || "en" : ""}
+                  value={slot.includeLowercase !== false}
+                  onChange={(v) => updateExtraSlot(index, { includeLowercase: v })}
+                />
                 {extraPreviews?.[index]?.duplicate ? (
                   <p className="mt-1.5 text-[11px] text-amber-200">
                     他のスロットと同一設定のため推論をスキップしました

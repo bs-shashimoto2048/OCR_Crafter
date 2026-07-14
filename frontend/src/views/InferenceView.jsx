@@ -1,6 +1,7 @@
 import Card from "../components/Card";
 import Button from "../components/Button";
 import CharHeatmap from "../components/CharHeatmap";
+import LowercaseToggle from "../components/LowercaseToggle";
 
 export default function InferenceView({
   engine,
@@ -8,6 +9,8 @@ export default function InferenceView({
   easyocrLangs,
   setEasyocrLangs,
   easyocrLanguageOptions,
+  includeLowercase,
+  setIncludeLowercase,
   modelType,
   setModelType,
   modelTypes,
@@ -207,6 +210,14 @@ export default function InferenceView({
               </div>
             </div>
           )}
+
+          <LowercaseToggle
+            className="rounded-lg border border-border bg-card/45 p-2"
+            engine={engine}
+            langs={easyocrLangs}
+            value={includeLowercase}
+            onChange={setIncludeLowercase}
+          />
 
           <div className="rounded-lg border border-border bg-card/45 p-2 text-xs text-muted">
             実際に使用される推論先: <span className="font-semibold text-text">{resolvedModelName}</span>

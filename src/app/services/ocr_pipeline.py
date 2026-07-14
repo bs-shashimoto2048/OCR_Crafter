@@ -411,9 +411,12 @@ def validate_ocr_result(
     charset: str = OCR_CHARSET_DEFAULT,
     confidence: Optional[float] = None,
     conf_threshold: float = CONF_THRESHOLD,
+    text_case: str = "upper",
 ) -> dict[str, Any]:
-    allowed = set(_normalize_charset(charset))
-    raw = str(text or "").strip().upper()
+    # text_case="keep" のとき大小文字を保持して検証する（小文字を出力に含める設定用）。
+    # 既定は従来どおり大文字へ正規化する
+    allowed = set(_normalize_charset(charset, text_case))
+    raw = _apply_text_case(str(text or "").strip(), text_case)
     cleaned = "".join(ch for ch in raw if ch in allowed)
     reason: Optional[str] = None
     valid = True

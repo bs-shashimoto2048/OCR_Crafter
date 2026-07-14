@@ -75,6 +75,10 @@ class PreprocessPreviewRequest(BaseModel):
     model: str = Field(default="latest", description="custom/paddleocr/tesseract時のモデル指定 (tesseractはengでベースモデル指定可)")
     model_type: Optional[str] = Field(default=None, description="custom+latest時のモデル種別")
     easyocr_langs: str = Field(default="en", description="OCR使用言語 (comma separated)")
+    include_lowercase: bool = Field(
+        default=True,
+        description="小文字を出力に含める（EasyOCR/PaddleOCRのラテン言語時のみ有効。未指定はtrue）",
+    )
 
 
 class EvaluateRequest(BaseModel):

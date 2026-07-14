@@ -17,6 +17,7 @@ import TrainingImageBuilderView from "./views/TrainingImageBuilderView";
 import RapidOCRView from "./views/RapidOCRView";
 import OcrBatchView from "./views/OcrBatchView";
 import { API_BASE, imageUrl, request } from "./lib/api";
+import { lowercaseToggleApplicable } from "./lib/lowercase";
 
 const viewMeta = {
   dashboard: { title: "ダッシュボード", subtitle: "OCR学習ワークフロー全体を管理" },
@@ -99,15 +100,19 @@ function writeProjectScopedStorage(storageKey, projectId, value) {
 // 比較スロットを /preprocess/preview のリクエストフィールドへ変換（前処理画面・ラベル編集共通）
 function extraSlotRequestFields(slot) {
   const engine = String(slot?.engine || "tesseract");
+  const langs =
+    engine === "easyocr" || engine === "paddleocr" ? String(slot?.langs || "en").trim() || "en" : "en";
   return {
     engine,
     model: engine === "easyocr" ? "latest" : String(slot?.model || "latest"),
     model_type: null,
-    easyocr_langs:
-      engine === "easyocr" || engine === "paddleocr" ? String(slot?.langs || "en").trim() || "en" : "en",
+    easyocr_langs: langs,
+    // 小文字設定はスロット単位。非対象（Tesseract等・非ラテン言語）は常にtrueへ正規化する
+    include_lowercase: lowercaseToggleApplicable(engine, langs) ? slot?.includeLowercase !== false : true,
   };
 }
 const PREPROCESS_PARAMS_BY_PROJECT_STORAGE_KEY = "ocr_preprocess_params_by_project_v1";
+const INCLUDE_LOWERCASE_BY_PROJECT_STORAGE_KEY = "ocr_include_lowercase_by_project_v1";
 const TRAINING_SESSION_BY_PROJECT_STORAGE_KEY = "ocr_training_session_by_project_v1";
 const LAST_PROJECT_STORAGE_KEY = "ocr_last_project_v1";
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "ocr_sidebar_collapsed_v1";
@@ -476,6 +481,9 @@ export default function App() {
   const [preprocessPredictTesseractModel, setPreprocessPredictTesseractModel] = useState("latest");
   const [preprocessPredictModelType, setPreprocessPredictModelType] = useState("square");
   const [preprocessPredictEasyOcrLangs, setPreprocessPredictEasyOcrLangs] = useState(["en"]);
+  // 小文字を出力に含める（EasyOCR/PaddleOCR）。未設定=ONで既存動作を維持
+  const [preprocessPredictIncludeLowercase, setPreprocessPredictIncludeLowercase] = useState(true);
+  const [inferIncludeLowercase, setInferIncludeLowercase] = useState(true);
   const [preprocessPreview, setPreprocessPreview] = useState(null);
   const [preprocessLoading, setPreprocessLoading] = useState(false);
   const [preprocessError, setPreprocessError] = useState("");
@@ -1213,6 +1221,23 @@ export default function App() {
     }
   }
 
+  // 「小文字を出力に含める」をプロジェクト単位で復元（旧設定・未保存はON扱い）
+  useEffect(() => {
+    const saved = readProjectScopedStorage(INCLUDE_LOWERCASE_BY_PROJECT_STORAGE_KEY, projectId);
+    setPreprocessPredictIncludeLowercase(saved?.preprocess !== false);
+    setInferIncludeLowercase(saved?.infer !== false);
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!projectId) {
+      return;
+    }
+    writeProjectScopedStorage(INCLUDE_LOWERCASE_BY_PROJECT_STORAGE_KEY, projectId, {
+      preprocess: preprocessPredictIncludeLowercase,
+      infer: inferIncludeLowercase,
+    });
+  }, [projectId, preprocessPredictIncludeLowercase, inferIncludeLowercase]);
+
   useEffect(() => {
     if (activeView !== "preprocess") {
       return undefined;
@@ -1246,8 +1271,12 @@ export default function App() {
           preprocessPredictEngine === "easyocr" || preprocessPredictEngine === "paddleocr"
             ? (preprocessPredictEasyOcrLangs.length > 0 ? preprocessPredictEasyOcrLangs.join(",") : "en")
             : "en",
+        include_lowercase: lowercaseToggleApplicable(preprocessPredictEngine, preprocessPredictEasyOcrLangs)
+          ? preprocessPredictIncludeLowercase
+          : true,
       };
-      const signatureOf = (fields) => `${fields.engine}|${fields.model}|${fields.easyocr_langs}`;
+      const signatureOf = (fields) =>
+        `${fields.engine}|${fields.model}|${fields.easyocr_langs}|lc:${fields.include_lowercase !== false ? "1" : "0"}`;
       const seenSignatures = new Set([signatureOf(mainFields)]);
 
       // モデル2/3 は同一APIをスロット分並行呼び（既存APIは無変更）。1つの失敗が他へ波及しないよう個別に捕捉
@@ -1315,6 +1344,7 @@ export default function App() {
     preprocessPredictTesseractModel,
     preprocessPredictModelType,
     preprocessPredictEasyOcrLangs,
+    preprocessPredictIncludeLowercase,
     preprocessExtraSlots,
     manualMaskVersion,
   ]);
@@ -1533,6 +1563,9 @@ export default function App() {
         preprocessPredictEngine === "easyocr" || preprocessPredictEngine === "paddleocr"
           ? (preprocessPredictEasyOcrLangs.length > 0 ? preprocessPredictEasyOcrLangs.join(",") : "en")
           : "en",
+      include_lowercase: lowercaseToggleApplicable(preprocessPredictEngine, preprocessPredictEasyOcrLangs)
+        ? preprocessPredictIncludeLowercase
+        : true,
     }),
     [
       preprocessPredictEngine,
@@ -1541,6 +1574,7 @@ export default function App() {
       preprocessPredictTesseractModel,
       preprocessPredictModelType,
       preprocessPredictEasyOcrLangs,
+      preprocessPredictIncludeLowercase,
     ]
   );
   const rapidPreprocessOverrides = useMemo(
@@ -2448,6 +2482,9 @@ export default function App() {
       } else if (inferEngine === "easyocr") {
         formData.append("easyocr_langs", inferEasyOcrLangs.length > 0 ? inferEasyOcrLangs.join(",") : "en");
       }
+      if (lowercaseToggleApplicable(inferEngine, inferEasyOcrLangs)) {
+        formData.append("include_lowercase", inferIncludeLowercase ? "true" : "false");
+      }
       formData.append("project_id", projectId);
 
       const response = await fetch(`${API_BASE}/predict`, {
@@ -2785,6 +2822,8 @@ export default function App() {
         setPredictModelType={setPreprocessPredictModelType}
         predictEasyOcrLangs={preprocessPredictEasyOcrLangs}
         setPredictEasyOcrLangs={setPreprocessPredictEasyOcrLangs}
+        predictIncludeLowercase={preprocessPredictIncludeLowercase}
+        setPredictIncludeLowercase={setPreprocessPredictIncludeLowercase}
         easyocrLanguageOptions={EASYOCR_LANGUAGE_OPTIONS}
         modelTypes={modelTypes}
         models={classificationModels}
@@ -3013,6 +3052,8 @@ export default function App() {
         easyocrLangs={inferEasyOcrLangs}
         setEasyocrLangs={setInferEasyOcrLangs}
         easyocrLanguageOptions={EASYOCR_LANGUAGE_OPTIONS}
+        includeLowercase={inferIncludeLowercase}
+        setIncludeLowercase={setInferIncludeLowercase}
         modelType={inferModelType}
         setModelType={setInferModelType}
         modelTypes={modelTypes}
@@ -3071,6 +3112,8 @@ export default function App() {
         easyocrLangs={inferEasyOcrLangs}
         setEasyocrLangs={setInferEasyOcrLangs}
         easyocrLanguageOptions={EASYOCR_LANGUAGE_OPTIONS}
+        includeLowercase={inferIncludeLowercase}
+        setIncludeLowercase={setInferIncludeLowercase}
         preprocessEnabled={rapidPreprocessEnabled}
         setPreprocessEnabled={setRapidPreprocessEnabled}
         preprocessOverrides={rapidPreprocessOverrides}
@@ -3099,6 +3142,8 @@ export default function App() {
         easyocrLangs={inferEasyOcrLangs}
         setEasyocrLangs={setInferEasyOcrLangs}
         easyocrLanguageOptions={EASYOCR_LANGUAGE_OPTIONS}
+        includeLowercase={inferIncludeLowercase}
+        setIncludeLowercase={setInferIncludeLowercase}
         preprocessEnabled={rapidPreprocessEnabled}
         setPreprocessEnabled={setRapidPreprocessEnabled}
         preprocessOverrides={rapidPreprocessOverrides}

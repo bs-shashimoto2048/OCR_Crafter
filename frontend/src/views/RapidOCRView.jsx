@@ -3,7 +3,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Button from "../components/Button";
 import Card from "../components/Card";
 import EditableHeatmap from "../components/EditableHeatmap";
+import LowercaseToggle from "../components/LowercaseToggle";
 import { API_BASE, imageUrl, request } from "../lib/api";
+import { lowercaseToggleApplicable } from "../lib/lowercase";
 
 const BUSINESS_PATTERN = /^[A-Z0-9]{8}$/;
 const FORBIDDEN = new Set(["AAAAAAAA", "00000000"]);
@@ -132,14 +134,19 @@ export default function RapidOCRView({
   easyocrLangs,
   setEasyocrLangs,
   easyocrLanguageOptions,
+  includeLowercase = true,
+  setIncludeLowercase,
   preprocessEnabled,
   setPreprocessEnabled,
   preprocessOverrides,
   preprocessPresetName = "",
   onOpenPreprocess,
 }) {
-  // Tesseract選択時は大小文字を区別して扱う（k/l/t の小文字補正・保存を可能にする）
-  const keepCase = engine === "tesseract";
+  // 小文字設定が有効なエンジン/言語か（EasyOCR/PaddleOCR × ラテン言語）
+  const lowercaseApplicable = lowercaseToggleApplicable(engine, easyocrLangs);
+  const effectiveIncludeLowercase = lowercaseApplicable ? includeLowercase !== false : true;
+  // Tesseract、または小文字ONのEasyOCR/PaddleOCRでは大小文字を区別して扱う
+  const keepCase = engine === "tesseract" || (lowercaseApplicable && effectiveIncludeLowercase);
 
   const [cache, setCache] = useState({});
   const [draft, setDraft] = useState("");
@@ -171,9 +178,9 @@ export default function RapidOCRView({
   const current = images[selectedIndex] || null;
   const currentName = current?.image || "";
   const currentCacheKey = currentName
-    ? `${projectId}::${currentName}::${engine}::${model}::${modelType}::${paddleModel}::${(easyocrLangs || []).join(",")}::pp:${
-        preprocessEnabled ? "1" : "0"
-      }::ov:${preprocessOverridesKey}`
+    ? `${projectId}::${currentName}::${engine}::${model}::${modelType}::${paddleModel}::${(easyocrLangs || []).join(",")}::lc:${
+        effectiveIncludeLowercase ? "1" : "0"
+      }::pp:${preprocessEnabled ? "1" : "0"}::ov:${preprocessOverridesKey}`
     : "";
   const currentResult = currentCacheKey ? cache[currentCacheKey] : null;
   const currentResultText = String(currentResult?.text ?? currentResult?.prediction ?? "");
@@ -365,7 +372,7 @@ export default function RapidOCRView({
     if (!imageName || !projectId) return null;
     const key = `${projectId}::${imageName}::${engine}::${model}::${modelType}::${paddleModel}::${(easyocrLangs || []).join(
       ","
-    )}::pp:${preprocessEnabled ? "1" : "0"}::ov:${preprocessOverridesKey}`;
+    )}::lc:${effectiveIncludeLowercase ? "1" : "0"}::pp:${preprocessEnabled ? "1" : "0"}::ov:${preprocessOverridesKey}`;
     if (cache[key]) return cache[key];
     if (pendingPredictRef.current[key]) return pendingPredictRef.current[key];
 
@@ -383,6 +390,7 @@ export default function RapidOCRView({
             model: engine === "custom" ? model : engine === "paddleocr" ? paddleModel || "latest" : "latest",
             model_type: engine === "custom" && model === "latest" ? modelType : null,
             easyocr_langs: (easyocrLangs || []).join(",") || "en",
+            include_lowercase: effectiveIncludeLowercase,
           }),
         });
         result = {
@@ -430,6 +438,9 @@ export default function RapidOCRView({
           formData.append("model", tesseractModel || "latest");
         } else {
           formData.append("easyocr_langs", (easyocrLangs || []).join(",") || "en");
+        }
+        if (lowercaseApplicable) {
+          formData.append("include_lowercase", effectiveIncludeLowercase ? "true" : "false");
         }
 
         const response = await fetch(`${API_BASE}/predict`, { method: "POST", body: formData });
@@ -824,6 +835,14 @@ export default function RapidOCRView({
                 ) : null}
               </div>
             ) : null}
+
+            <LowercaseToggle
+              className="rounded-lg border border-border bg-card/50 p-2"
+              engine={engine}
+              langs={easyocrLangs}
+              value={includeLowercase}
+              onChange={setIncludeLowercase}
+            />
     </div>
   );
 
@@ -925,7 +944,7 @@ export default function RapidOCRView({
           <div className="shrink-0 rounded-xl border border-border bg-card/60 p-2.5 backdrop-blur-md">
                   <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                     <p className="text-xs text-muted">ヒートマップ（クリックで1文字編集）</p>
-                    {keepCase ? (
+                    {engine === "tesseract" ? (
                       <p className="text-xs text-muted" title="Tesseract実運用の文字セットです。小文字は筆記体 k / l / t のみ対象です。">
                         入力可能文字: A-Z / 0-9 / k / l / t
                       </p>
@@ -938,7 +957,7 @@ export default function RapidOCRView({
                     appendChar="A"
                     focusRequest={heatmapFocusTick}
                     focusIndex={0}
-                    charset={keepCase ? TESSERACT_CHARSET_DEFAULT : ""}
+                    charset={engine === "tesseract" ? TESSERACT_CHARSET_DEFAULT : ""}
                     onConfirm={() => saveCurrent({ skipped: false })}
                     onChange={(nextText) => {
                       setTouched(true);
@@ -1003,6 +1022,12 @@ export default function RapidOCRView({
                   {engine === "easyocr" || engine === "paddleocr" ? selectedLangLabel : "-"}
                 </span>
               </div>
+              {lowercaseApplicable ? (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-muted">小文字</span>
+                  <span className="font-semibold text-text">{effectiveIncludeLowercase ? "ON" : "OFF"}</span>
+                </div>
+              ) : null}
               <div className="flex items-center justify-between gap-2">
                 <span className="text-muted">Confidence</span>
                 <span className="font-semibold text-accent">

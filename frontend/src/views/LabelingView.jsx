@@ -2,6 +2,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Card from "../components/Card";
 import Button from "../components/Button";
 import { imageUrl, processedImageUrl, request } from "../lib/api";
+import { lowercaseToggleApplicable } from "../lib/lowercase";
+
+// 候補ヘッダーへ付ける「小文字: ON/OFF」表示（EasyOCR/PaddleOCR × ラテン言語時のみ）
+function lowercaseLabelOf(fields) {
+  if (!lowercaseToggleApplicable(fields?.engine, fields?.easyocr_langs)) {
+    return "";
+  }
+  return fields?.include_lowercase !== false ? "小文字: ON" : "小文字: OFF";
+}
 
 const keyRows = [
   ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
@@ -184,8 +193,8 @@ function StageImage({ title, description, src, zoomPercent }) {
 }
 
 // スロット1〜3共通の候補行（高さ固定の1行構成）。成功=採用ボタン付き / dimmed=再推論中の前回値
-function CandidateRow({ index, engine, modelName, prediction, confidence, current, onAdopt, dimmed }) {
-  const header = `${engineLabelOf(engine)}${modelName ? ` / ${modelName}` : ""}`;
+function CandidateRow({ index, engine, modelName, prediction, confidence, current, onAdopt, dimmed, lowercaseLabel = "" }) {
+  const header = `${engineLabelOf(engine)}${modelName ? ` / ${modelName}` : ""}${lowercaseLabel ? ` / ${lowercaseLabel}` : ""}`;
   return (
     <button
       type="button"
@@ -367,7 +376,8 @@ export default function LabelingView({
       setOcrError("");
 
       // 比較スロット（モデル2/3）も同時に推論する。重複設定はスキップし、失敗は行単位で保持
-      const signatureOf = (f) => `${f?.engine}|${f?.model}|${f?.easyocr_langs}`;
+      const signatureOf = (f) =>
+        `${f?.engine}|${f?.model}|${f?.easyocr_langs}|lc:${f?.include_lowercase !== false ? "1" : "0"}`;
       const seenSignatures = new Set([signatureOf(predictParams || {})]);
       const extraPromise = Promise.all(
         (extraPredictParams || []).map(async (fields) => {
@@ -764,6 +774,7 @@ export default function LabelingView({
                   current={labelValue}
                   onAdopt={adoptText}
                   dimmed={ocrLoading}
+                  lowercaseLabel={lowercaseLabelOf(predictParams)}
                 />
               ) : ocrLoading ? (
                 <CandidateMessageRow index={1} header={engineLabelOf(predictParams?.engine)} message="OCR実行中..." />
@@ -804,6 +815,7 @@ export default function LabelingView({
                       current={labelValue}
                       onAdopt={adoptText}
                       dimmed={ocrLoading}
+                      lowercaseLabel={lowercaseLabelOf(extraPredictParams[slotIndex])}
                     />
                   );
                 }

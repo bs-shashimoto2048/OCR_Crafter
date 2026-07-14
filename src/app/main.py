@@ -736,6 +736,7 @@ def _attach_preview_prediction(
     model: str = "latest",
     model_type: Optional[str] = None,
     easyocr_langs: str = "en",
+    include_lowercase: bool = True,
 ) -> dict[str, Any]:
     image_type = str(preview.get("type", "single"))
     selected_model_type = model_type
@@ -759,6 +760,7 @@ def _attach_preview_prediction(
             engine=engine,
             easyocr_languages=langs,
             apply_preprocess=False,
+            include_lowercase=bool(include_lowercase),
         )
         preview["prediction"] = prediction.get("prediction", "")
         preview["confidence"] = prediction.get("confidence")
@@ -772,6 +774,9 @@ def _attach_preview_prediction(
         preview["predict_model_warning"] = prediction.get("model_warning")
         preview["predict_retry_used"] = prediction.get("retry_used")
         preview["predict_multi_ocr"] = prediction.get("multi_ocr")
+        if prediction.get("include_lowercase") is not None:
+            preview["predict_include_lowercase"] = bool(prediction.get("include_lowercase"))
+            preview["predict_lowercase_control_applied"] = bool(prediction.get("lowercase_control_applied"))
         if prediction.get("easyocr_languages") is not None:
             preview["predict_easyocr_languages"] = prediction.get("easyocr_languages")
         if prediction.get("paddleocr_languages") is not None:
@@ -1172,6 +1177,7 @@ def preprocess_preview_get(
     model: str = Query(default="latest"),
     model_type: Optional[str] = Query(default=None),
     easyocr_langs: str = Query(default="en"),
+    include_lowercase: bool = Query(default=True),
 ) -> dict[str, Any]:
     resolved = _resolve_project_id(project_id)
     try:
@@ -1183,6 +1189,7 @@ def preprocess_preview_get(
             model=model,
             model_type=model_type,
             easyocr_langs=easyocr_langs,
+            include_lowercase=include_lowercase,
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
@@ -1202,6 +1209,7 @@ def preprocess_preview_post(req: PreprocessPreviewRequest) -> dict[str, Any]:
             model=req.model,
             model_type=req.model_type,
             easyocr_langs=req.easyocr_langs,
+            include_lowercase=req.include_lowercase,
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
@@ -2003,6 +2011,7 @@ async def predict(
     model_type: str = Form(""),
     model: str = Form("latest"),
     easyocr_langs: str = Form("en"),
+    include_lowercase: bool = Form(True),
     apply_preprocess: bool = Form(True),
     preprocess_overrides_json: str = Form(""),
     project_id: str = Form("default"),
@@ -2038,6 +2047,7 @@ async def predict(
             easyocr_languages=langs,
             apply_preprocess=bool(apply_preprocess),
             preprocess_overrides=overrides,
+            include_lowercase=bool(include_lowercase),
         )
         prediction["preprocess_preview_data_url"] = preprocess_preview_data_url
         save_ocr_prediction_log(
@@ -2100,6 +2110,7 @@ async def api_ocr_predict_batch(
     model_type: str = Form(""),
     model: str = Form("latest"),
     easyocr_langs: str = Form("en"),
+    include_lowercase: bool = Form(True),
     apply_preprocess: bool = Form(True),
     preprocess_overrides_json: str = Form(""),
     project_id: str = Form("default"),
@@ -2130,6 +2141,7 @@ async def api_ocr_predict_batch(
                 easyocr_languages=langs,
                 apply_preprocess=bool(apply_preprocess),
                 preprocess_overrides=overrides,
+                include_lowercase=bool(include_lowercase),
             )
             record = {
                 "file_name": upload.filename or Path(tmp_path).name,
@@ -2170,6 +2182,8 @@ async def api_ocr_predict_batch(
         "count": len(items),
         "engine": engine,
         "model": model,
+        "easyocr_langs": ",".join(langs),
+        "include_lowercase": bool(include_lowercase),
         "items": items,
     }
 
@@ -2188,6 +2202,7 @@ async def api_ocr_yolo_predict(
     model: str = Form("latest"),
     model_type: str = Form(""),
     easyocr_langs: str = Form("en"),
+    include_lowercase: bool = Form(True),
     project_id: str = Form("default"),
 ) -> dict[str, Any]:
     resolved = _resolve_project_id(project_id)
@@ -2237,6 +2252,7 @@ async def api_ocr_yolo_predict(
                 project_id=resolved,
                 engine=engine,
                 easyocr_languages=langs,
+                include_lowercase=bool(include_lowercase),
             )
             result_item = {
                 "bbox": [x1, y1, x2, y2],

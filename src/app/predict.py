@@ -19,6 +19,11 @@ from .services.tesseract_pipeline import (
     recognize_line,
     resolve_base_traineddata,
 )
+from .services.latin_case import (
+    build_latin_allowlist,
+    is_latin_case_langs,
+    normalize_latin_case,
+)
 from .services.ocr_pipeline import (
     CONF_THRESHOLD,
     OCR_CHARSET_DEFAULT,
@@ -235,8 +240,46 @@ def _get_easyocr_reader(languages: list[str]) -> tuple[Any, bool]:
     return _EASYOCR_READER_CACHE[key], use_gpu
 
 
-def _run_easyocr(reader: Any, input_path: str) -> tuple[str, float, list[dict[str, Any]]]:
-    raw_results = reader.readtext(input_path, detail=1, paragraph=False)
+def _resolve_latin_case_control(languages: list[str], include_lowercase: bool) -> tuple[bool, Optional[str]]:
+    """ラテン言語設定のときのみ小文字制御を適用する。
+
+    戻り値: (適用するか, EasyOCR readtext へ渡す allowlist)。
+    小文字ON時の allowlist は None（無制限）とし、既存動作を変えない。
+    日本語等の非ラテン言語が含まれる場合は (False, None) を返し一切適用しない。
+    """
+    if not is_latin_case_langs(languages):
+        return False, None
+    return True, build_latin_allowlist(include_lowercase=include_lowercase)
+
+
+def _apply_latin_case_to_results(
+    prediction: str,
+    parsed_results: list[dict[str, Any]],
+    languages: list[str],
+    include_lowercase: bool,
+) -> tuple[str, list[dict[str, Any]]]:
+    """出力後の大文字化（PaddleOCR等、推論時whitelistがないエンジン向け）。
+
+    小文字を削除せず大文字へ変換し、文字列長・Confidenceは変更しない。
+    非ラテン言語設定では何もしない。
+    """
+    if include_lowercase or not is_latin_case_langs(languages):
+        return prediction, parsed_results
+    normalized = normalize_latin_case(prediction, include_lowercase=False)
+    normalized_results = [
+        {**row, "text": normalize_latin_case(str(row.get("text") or ""), include_lowercase=False)}
+        for row in parsed_results
+    ]
+    return normalized, normalized_results
+
+
+def _run_easyocr(
+    reader: Any, input_path: str, allowlist: Optional[str] = None
+) -> tuple[str, float, list[dict[str, Any]]]:
+    if allowlist:
+        raw_results = reader.readtext(input_path, detail=1, paragraph=False, allowlist=allowlist)
+    else:
+        raw_results = reader.readtext(input_path, detail=1, paragraph=False)
     parsed_results: list[dict[str, Any]] = []
     for row in raw_results[:20]:
         if len(row) < 3:
@@ -262,24 +305,39 @@ def _predict_with_easyocr(
     max_text_length: int = 8,
     image_shape: Optional[list[int]] = None,
     apply_preprocess: bool = True,
+    include_lowercase: bool = True,
 ) -> dict[str, Any]:
     shape = _normalize_ocr_shape(image_shape or [3, 48, 320])
     langs = _normalize_ocr_languages(languages)
     reader, use_gpu = _get_easyocr_reader(langs)
+    case_control, allowlist = _resolve_latin_case_control(langs, include_lowercase)
+    # 小文字ON時は検証でも大小文字を保持する（従来はvalidationで常に大文字化していた）
+    if case_control and include_lowercase:
+        validation_charset = build_latin_allowlist(include_lowercase=True, base_allowlist=charset)
+        validation_text_case = "keep"
+    else:
+        validation_charset = charset
+        validation_text_case = "upper"
 
     def _infer(variant: str) -> dict[str, Any]:
         input_path, temp_path = _prepare_ocr_input_path(image_source, shape, apply_preprocess, variant=variant)
         try:
-            prediction, confidence, parsed_results = _run_easyocr(reader, input_path)
+            prediction, confidence, parsed_results = _run_easyocr(reader, input_path, allowlist=allowlist)
         finally:
             if temp_path is not None:
                 temp_path.unlink(missing_ok=True)
+        if case_control:
+            # allowlistで制限済みだが、旧EasyOCR等でallowlist未対応の場合の保険として正規化も行う
+            prediction, parsed_results = _apply_latin_case_to_results(
+                prediction, parsed_results, langs, include_lowercase
+            )
         validation = validate_ocr_result(
             prediction,
             max_text_length=max_text_length,
-            charset=charset,
+            charset=validation_charset,
             confidence=confidence,
             conf_threshold=CONF_THRESHOLD,
+            text_case=validation_text_case,
         )
         business = validate_business_rules(validation["text"])
         merged_validation = _merge_validation(validation, business)
@@ -335,6 +393,8 @@ def _predict_with_easyocr(
         "engine": "easyocr",
         "easyocr_gpu": use_gpu,
         "easyocr_languages": langs,
+        "include_lowercase": bool(include_lowercase),
+        "lowercase_control_applied": bool(case_control),
         "easyocr_results": chosen["easyocr_results"],
         "multi_ocr_candidates": variant_results,
         "multi_ocr": True,
@@ -573,9 +633,13 @@ def _predict_with_paddleocr(
     max_text_length: int = 8,
     image_shape: Optional[list[int]] = None,
     apply_preprocess: bool = True,
+    include_lowercase: bool = True,
 ) -> dict[str, Any]:
     langs = _normalize_ocr_languages(languages)
     selected_lang = langs[0]
+    # PaddleOCR 3.x の推論APIには実行時whitelistがないため、
+    # 小文字OFF時は出力後に英字を大文字へ正規化する（Confidenceは変更しない）
+    case_control = is_latin_case_langs(langs)
     # 学習済み認識モデルのみを使う運用では角度分類器を無効化し、
     # 追加の公式モデル取得を避ける。
     use_angle_cls = False
@@ -659,6 +723,14 @@ def _predict_with_paddleocr(
                 use_textline_orientation=False,
             )
 
+    # 小文字ON時は検証でも大小文字を保持する（従来はvalidationで常に大文字化していた）
+    if case_control and include_lowercase:
+        validation_charset = build_latin_allowlist(include_lowercase=True, base_allowlist=effective_charset)
+        validation_text_case = "keep"
+    else:
+        validation_charset = effective_charset
+        validation_text_case = "upper"
+
     def _infer(variant: str) -> dict[str, Any]:
         input_path, temp_path = _prepare_ocr_input_path(image_source, shape, apply_preprocess, variant=variant)
         try:
@@ -666,12 +738,17 @@ def _predict_with_paddleocr(
         finally:
             if temp_path is not None:
                 temp_path.unlink(missing_ok=True)
+        if case_control:
+            prediction, parsed_results = _apply_latin_case_to_results(
+                prediction, parsed_results, langs, include_lowercase
+            )
         validation = validate_ocr_result(
             prediction,
             max_text_length=effective_max_text_length,
-            charset=effective_charset,
+            charset=validation_charset,
             confidence=confidence,
             conf_threshold=CONF_THRESHOLD,
+            text_case=validation_text_case,
         )
         business = validate_business_rules(validation["text"])
         merged_validation = _merge_validation(validation, business)
@@ -727,6 +804,8 @@ def _predict_with_paddleocr(
         "engine": "paddleocr",
         "paddleocr_language": selected_lang,
         "paddleocr_languages": langs,
+        "include_lowercase": bool(include_lowercase),
+        "lowercase_control_applied": bool(case_control),
         "paddleocr_results": chosen["paddleocr_results"],
         "multi_ocr_candidates": variant_results,
         "multi_ocr": True,
@@ -858,6 +937,7 @@ def predict_from_image(
     easyocr_languages: Optional[list[str]] = None,
     apply_preprocess: bool = True,
     preprocess_overrides: Optional[dict[str, Any]] = None,
+    include_lowercase: bool = True,
 ) -> dict[str, Any]:
     engine_name = (engine or "custom").strip().lower()
     preprocess_meta: dict[str, Any] = {"applied": False, "image_type": "", "pipeline": []}
@@ -880,6 +960,7 @@ def predict_from_image(
             project_id=project_id,
             languages=easyocr_languages,
             apply_preprocess=(apply_preprocess and not preprocess_overrides),
+            include_lowercase=include_lowercase,
         )
         result["preprocess_applied"] = preprocess_meta["applied"]
         result["preprocess_image_type"] = preprocess_meta["image_type"]
@@ -892,6 +973,7 @@ def predict_from_image(
             languages=easyocr_languages,
             model=model,
             apply_preprocess=(apply_preprocess and not preprocess_overrides),
+            include_lowercase=include_lowercase,
         )
         result["preprocess_applied"] = preprocess_meta["applied"]
         result["preprocess_image_type"] = preprocess_meta["image_type"]
