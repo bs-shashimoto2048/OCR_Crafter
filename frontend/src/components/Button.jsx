@@ -19,6 +19,7 @@ const Button = forwardRef(function Button(
     variant = "primary",
     size = "md",
     className = "",
+    type = "button",
     ...props
   },
   ref
@@ -26,6 +27,7 @@ const Button = forwardRef(function Button(
   return (
     <button
       ref={ref}
+      type={type}
       className={`inline-flex items-center justify-center rounded-lg font-medium transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 focus-visible:ring-offset-2 focus-visible:ring-offset-bg disabled:cursor-not-allowed disabled:opacity-50 ${variants[variant]} ${sizes[size]} ${className}`}
       {...props}
     >

@@ -1472,11 +1472,8 @@ export default function App() {
       }
 
       const key = event.key;
-      if ((key === "Enter" || key === "NumpadEnter") && !event.isComposing) {
-        event.preventDefault();
-        saveLabel(selected.image).catch(() => null);
-        return;
-      }
+      // Enterの「保存して次へ」はLabelingView側の saveAndNext に一本化している
+      // （ここでも保存すると二重発火で2件先へ進むため、このハンドラでは扱わない）
       if (/^[a-zA-Z0-9]$/.test(key)) {
         event.preventDefault();
         setLabelDrafts((prev) => ({
@@ -1845,10 +1842,12 @@ export default function App() {
     }
   }
 
+  // ラベルを保存する（保存のみ。次画像への移動は呼び出し側=LabelingViewのsaveAndNextへ集約）。
+  // 戻り値: 保存成功なら true、失敗なら false（失敗時は次へ進まない判断に使う）
   async function saveLabel(imageName) {
     if (!projectId) {
       notify("error", "プロジェクトを作成または選択してください");
-      return;
+      return false;
     }
     const value = String(labelDrafts[imageName] || "");
 
@@ -1866,14 +1865,11 @@ export default function App() {
         datasetBuilt: false,
         trainingStarted: false,
       }));
-      setSelectedIndex((prev) => {
-        const currentIndex = images.findIndex((item) => item.image === imageName);
-        const base = currentIndex >= 0 ? currentIndex : prev;
-        return Math.min(base + 1, Math.max(images.length - 1, 0));
-      });
       notify("success", `ラベル保存: ${imageName} -> ${value || "(空)"}`);
+      return true;
     } catch (error) {
       notify("error", error.message);
+      return false;
     }
   }
 
@@ -2875,7 +2871,7 @@ export default function App() {
         onClear={clearLabel}
         isUppercase={labelUppercase}
         onToggleCase={() => setLabelUppercase((prev) => !prev)}
-        onSave={() => (selectedImage ? saveLabel(selectedImage.image) : Promise.resolve())}
+        onSave={() => (selectedImage ? saveLabel(selectedImage.image) : Promise.resolve(false))}
         onPrev={() => setSelectedIndex((prev) => Math.max(prev - 1, 0))}
         onNext={() => setSelectedIndex((prev) => Math.min(prev + 1, images.length - 1))}
         imageShapes={imageShapes}

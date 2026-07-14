@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Card from "../components/Card";
 import Button from "../components/Button";
 import { imageUrl, processedImageUrl, request } from "../lib/api";
+import { decideNextImageIndex } from "../lib/labelNavigation";
 import { lowercaseToggleApplicable } from "../lib/lowercase";
 
 // 候補ヘッダーへ付ける「小文字: ON/OFF」表示（EasyOCR/PaddleOCR × ラテン言語時のみ）
@@ -293,6 +294,7 @@ export default function LabelingView({
   const itemRefs = useRef([]);
   const labelInputRef = useRef(null);
   const savingRef = useRef(false);
+  const [savingAndAdvancing, setSavingAndAdvancing] = useState(false);
   const selected = images[selectedIndex] || null;
   const visibleEntries = useMemo(() => {
     const entries = images.map((item, originalIndex) => {
@@ -476,14 +478,32 @@ export default function LabelingView({
     };
   }, [selected?.image, selected?.type, projectId, imageVersion, preprocessOverrides, predictParamsKey, extraParamsKey, ocrReloadTick]);
 
+  // 「保存して次へ」の唯一の実装（Enter・ボタン共通）。
+  // 1. 保存前の表示一覧から次画像を画像名で1回だけ確定（方式A）
+  // 2. 保存し、成功を待つ（失敗時は現在画像に留まる）
+  // 3. 確定しておいた画像へ移動（保存で「未編集のみ」から現在画像が消えても飛ばさない）
   async function saveAndNext() {
     if (savingRef.current) return;
+    const currentName = selected?.image;
+    if (!currentName) return;
     savingRef.current = true;
+    setSavingAndAdvancing(true);
     try {
-      await Promise.resolve(onSave());
-      onNext();
+      const nextIndex = decideNextImageIndex(
+        images.map((item) => item.image),
+        visibleEntries.map((entry) => entry.item.image),
+        currentName
+      );
+      const saved = await Promise.resolve(onSave());
+      if (saved === false) {
+        return; // 保存失敗時は次へ進まない
+      }
+      if (nextIndex !== null) {
+        onSelectIndex(nextIndex);
+      }
     } finally {
       savingRef.current = false;
+      setSavingAndAdvancing(false);
     }
   }
 
@@ -519,6 +539,29 @@ export default function LabelingView({
       if (event.ctrlKey && event.key === "ArrowLeft") {
         event.preventDefault();
         onPrev();
+        return;
+      }
+      // Enter=保存して次へ（ボタンクリックと同じ saveAndNext に一本化）。
+      // 入力欄フォーカス時は入力欄自身の onKeyDown が処理するためここでは扱わない
+      if ((event.key === "Enter" || event.key === "NumpadEnter") && !event.ctrlKey) {
+        const target = event.target;
+        const isEditableTarget =
+          target instanceof HTMLElement &&
+          (target.isContentEditable ||
+            target.tagName === "INPUT" ||
+            target.tagName === "TEXTAREA" ||
+            target.tagName === "SELECT");
+        if (isEditableTarget) {
+          return;
+        }
+        if (target instanceof HTMLElement && target.tagName === "BUTTON") {
+          return; // ボタン上のEnterはクリックとして発火するため二重実行しない
+        }
+        if (event.repeat) {
+          return; // 長押しrepeatは無視
+        }
+        event.preventDefault();
+        saveAndNext();
         return;
       }
       if (event.key === "Escape") {
@@ -736,6 +779,9 @@ export default function LabelingView({
               if (e.key === "Enter" || e.key === "NumpadEnter") {
                 e.preventDefault();
                 e.stopPropagation();
+                if (e.repeat) {
+                  return; // 長押しrepeatは無視（連打での多重実行防止）
+                }
                 saveAndNext();
               }
             }}
@@ -836,7 +882,7 @@ export default function LabelingView({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <Button onClick={saveAndNext} title="ラベルを保存して次の画像へ (Enter)">
+            <Button onClick={saveAndNext} disabled={savingAndAdvancing} title="ラベルを保存して次の画像へ (Enter)">
               保存して次へ
             </Button>
             <Button variant="secondary" onClick={onSave} title="ラベルを保存 (Ctrl+S)">
