@@ -137,6 +137,11 @@ const DEFAULT_PREPROCESS_PARAMS = {
   illumination_method: "gaussian",
   illumination_background_size: 81,
   illumination_strength: 1.0,
+  // 手動マスク補正（マスク自体は画像単位でサーバー保存。ここは共通設定のみ）
+  manual_mask_enabled: false,
+  manual_mask_fill: "white",
+  manual_mask_timing: "post",
+  manual_mask_threshold: 80,
   threshold_type: "binary",
   threshold_value: 128,
   clahe_clip_limit: 1.0,
@@ -476,6 +481,8 @@ export default function App() {
   // 比較用の追加推論スロット（最大2つ = モデル2/3）とその推論結果
   const [preprocessExtraSlots, setPreprocessExtraSlots] = useState([]);
   const [preprocessExtraPreviews, setPreprocessExtraPreviews] = useState([]);
+  // 手動マスク更新カウンタ（マスクはサーバー保存のため、保存後にプレビューを再実行するトリガー）
+  const [manualMaskVersion, setManualMaskVersion] = useState(0);
   const [preprocessPresets, setPreprocessPresets] = useState({});
   const [presetName, setPresetName] = useState("");
   const [selectedPreset, setSelectedPreset] = useState("");
@@ -592,6 +599,11 @@ export default function App() {
       preprocess: {
         ratio_threshold: Number(params.ratio_threshold),
         operations: {
+          manual_mask: {
+            enabled: Boolean(params.manual_mask_enabled),
+            fill: params.manual_mask_fill || "white",
+            timing: params.manual_mask_timing || "post",
+          },
           illumination: {
             enabled: Boolean(params.illumination_enabled),
             method: params.illumination_method || "gaussian",
@@ -1303,6 +1315,7 @@ export default function App() {
     preprocessPredictModelType,
     preprocessPredictEasyOcrLangs,
     preprocessExtraSlots,
+    manualMaskVersion,
   ]);
 
   useEffect(() => {
@@ -2748,6 +2761,7 @@ export default function App() {
         extraSlots={preprocessExtraSlots}
         onExtraSlotsChange={persistPreprocessExtraSlots}
         extraPreviews={preprocessExtraPreviews}
+        onManualMasksSaved={() => setManualMaskVersion((prev) => prev + 1)}
         returnView={preprocessReturnView}
         onReturn={() => {
           if (preprocessReturnView) {

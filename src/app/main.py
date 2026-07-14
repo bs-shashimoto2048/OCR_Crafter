@@ -32,8 +32,10 @@ from .project_paths import (
     normalize_project_id,
 )
 from .schemas import (
+    AnalyzeMaskRegionRequest,
     AppShutdownRequest,
     DatasetBuildRequest,
+    ManualMasksUpdateRequest,
     DirectorySelectRequest,
     EvaluateRequest,
     FileSelectRequest,
@@ -83,6 +85,7 @@ from .services.ocr_pipeline import (
     run_paddleocr_training,
     save_ocr_prediction_log,
 )
+from .services.manual_mask import extract_black_region, load_manual_masks, save_manual_masks_for_image
 from .services.preprocess import build_preprocess_config, preview_preprocess, preprocess_image_for_model, run_preprocess
 from .services.tesseract_pipeline import (
     TESSERACT_TARGET_CHARSET,
@@ -1013,6 +1016,45 @@ def image_thumbnail(
         media_type="image/jpeg",
         headers={"Cache-Control": "public, max-age=86400"},
     )
+
+
+@app.get("/images/manual-masks")
+def get_manual_masks(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+    """プロジェクト内の全画像分の手動マスク定義（画像単位）を返す。"""
+    resolved = _resolve_project_id(project_id)
+    return {"project_id": resolved, "items": load_manual_masks(resolved)}
+
+
+@app.put("/images/{image_name}/manual-masks")
+def put_manual_masks(image_name: str, req: ManualMasksUpdateRequest) -> dict[str, Any]:
+    safe_name = Path(image_name).name
+    if safe_name != image_name:
+        raise HTTPException(status_code=400, detail="invalid image name")
+    resolved = _resolve_project_id(req.project_id)
+    try:
+        save_manual_masks_for_image(resolved, safe_name, req.manual_masks)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"project_id": resolved, "image": safe_name, "count": len(req.manual_masks)}
+
+
+@app.post("/images/{image_name}/analyze-mask-region")
+def analyze_mask_region(image_name: str, req: AnalyzeMaskRegionRequest) -> dict[str, Any]:
+    """クリック点（正規化座標）が属する黒連結領域を元画像グレースケール上で抽出する。"""
+    safe_name = Path(image_name).name
+    if safe_name != image_name:
+        raise HTTPException(status_code=400, detail="invalid image name")
+    resolved = _resolve_project_id(req.project_id)
+    paths = ensure_project_directories(resolved)
+    source = paths.raw / safe_name
+    if not source.exists() or not source.is_file():
+        raise HTTPException(status_code=404, detail="image not found")
+    import numpy as _np
+
+    with Image.open(source) as opened:
+        gray = _np.asarray(opened.convert("L"))
+    result = extract_black_region(gray, float(req.x), float(req.y), int(req.threshold))
+    return {"project_id": resolved, "image": safe_name, **result}
 
 
 @app.post("/images/{image_name}/rotate")

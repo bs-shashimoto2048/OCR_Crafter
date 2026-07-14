@@ -31,7 +31,9 @@ DEFAULT_PREPROCESS_CONFIG: dict[str, Any] = {
             "bilateral",
             "sharpen",
             "unsharp",
+            "manual_mask_pre",
             "threshold",
+            "manual_mask_post",
             "morph",
             "stroke_boost",
             "denoise",
@@ -49,7 +51,9 @@ DEFAULT_PREPROCESS_CONFIG: dict[str, Any] = {
             "bilateral",
             "sharpen",
             "unsharp",
+            "manual_mask_pre",
             "threshold",
+            "manual_mask_post",
             "morph",
             "stroke_boost",
             "deskew",
@@ -60,6 +64,7 @@ DEFAULT_PREPROCESS_CONFIG: dict[str, Any] = {
     },
     "operations": {
         "illumination": {"enabled": False, "method": "gaussian", "background_size": 81, "strength": 1.0},
+        "manual_mask": {"enabled": False, "fill": "white", "timing": "post", "masks": []},
         "threshold": {"type": "binary", "value": 128, "block_size": 35, "c": 11},
         "clahe": {"clip_limit": 1.0, "tile_grid_size": 2},
         "sharpen": {"enabled": True, "amount": 0.2, "sigma": 0.5},
@@ -291,6 +296,42 @@ def apply_illumination_correction(
     else:
         result = src * (1.0 - blend) + corrected * blend
     return np.clip(result, 0.0, 255.0).astype(np.uint8)
+
+
+def _apply_manual_mask_stage(value: Any, operations: dict[str, Any], stage: str) -> np.ndarray:
+    """手動マスク補正（画像単位）。timing が一致する段階でのみ適用する。"""
+    from .manual_mask import apply_manual_masks
+
+    cfg = operations.get("manual_mask", {})
+    gray_or_current = _ensure_gray_uint8(value)
+    if not cfg.get("enabled", False):
+        return gray_or_current
+    if str(cfg.get("timing", "post")) != stage:
+        return gray_or_current
+    masks = cfg.get("masks") or []
+    if not masks:
+        return gray_or_current
+    return apply_manual_masks(gray_or_current, masks, fill_mode=str(cfg.get("fill", "white")))
+
+
+def _op_manual_mask_pre(value: Any, _: str, operations: dict[str, Any]) -> np.ndarray:
+    return _apply_manual_mask_stage(value, operations, "pre")
+
+
+def _op_manual_mask_post(value: Any, _: str, operations: dict[str, Any]) -> np.ndarray:
+    return _apply_manual_mask_stage(value, operations, "post")
+
+
+def attach_manual_masks_to_config(cfg: dict[str, Any], project_id: Optional[str], image_name: str) -> dict[str, Any]:
+    """画像単位で保存された手動マスクを前処理設定へ注入する（有効時のみ読み込み）。"""
+    from .manual_mask import load_manual_masks
+
+    op_cfg = cfg.get("operations", {}).get("manual_mask")
+    if not isinstance(op_cfg, dict) or not op_cfg.get("enabled", False):
+        return cfg
+    record = load_manual_masks(project_id).get(Path(image_name).name) or {}
+    op_cfg["masks"] = record.get("manual_masks") or []
+    return cfg
 
 
 def _op_illumination(value: Any, _: str, operations: dict[str, Any]) -> np.ndarray:
@@ -703,6 +744,8 @@ def _op_normalize(value: Any, _: str, operations: dict[str, Any]) -> np.ndarray:
 OPERATIONS: dict[str, Callable[[Any, str, dict[str, Any]], np.ndarray]] = {
     "grayscale": _op_grayscale,
     "illumination": _op_illumination,
+    "manual_mask_pre": _op_manual_mask_pre,
+    "manual_mask_post": _op_manual_mask_post,
     "gamma": _op_gamma,
     "local_contrast": _op_local_contrast,
     "hist_equalize": _op_hist_equalize,
@@ -877,7 +920,11 @@ def run_preprocess(
             continue
         raw_files.append(path)
 
-    results = [_process_one(file_path, paths, cfg) for file_path in raw_files]
+    results = []
+    for file_path in raw_files:
+        # 手動マスクは画像単位のため、1枚ごとに設定へ注入してから処理する
+        attach_manual_masks_to_config(cfg, paths.project_id, file_path.name)
+        results.append(_process_one(file_path, paths, cfg))
 
     type_counts = {"single": 0, "wide": 0}
     for row in results:
@@ -909,6 +956,7 @@ def preview_preprocess(
         raise FileNotFoundError(f"image not found: {safe_name}")
 
     cfg = _build_preprocess_config(overrides)
+    attach_manual_masks_to_config(cfg, paths.project_id, safe_name)
     with Image.open(src) as opened:
         img = ImageOps.exif_transpose(opened)
         width, height = img.size

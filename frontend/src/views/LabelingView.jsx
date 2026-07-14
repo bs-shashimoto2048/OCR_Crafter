@@ -91,6 +91,20 @@ function PreprocessSummary({ params }) {
           ["しきい値", params.threshold_value ?? "--"],
         ]}
       />
+      <SummarySection
+        title="手動マスク補正"
+        defaultOpen={Boolean(params.manual_mask_enabled)}
+        items={[
+          [
+            "手動マスク補正",
+            params.manual_mask_enabled
+              ? `ON（${params.manual_mask_fill === "background" ? "周辺背景色" : "白"} / ${
+                  params.manual_mask_timing === "pre" ? "二値化前" : "二値化後"
+                }）`
+              : "OFF",
+          ],
+        ]}
+      />
       <SummarySection title="単一文字設定" items={[["サイズ", params.single_size ?? "--"]]} />
       <SummarySection
         title="横長文字設定"

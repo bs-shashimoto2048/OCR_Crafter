@@ -55,6 +55,18 @@ class RotateImageRequest(BaseModel):
     angle: int = Field(..., description="回転角度（90の倍数。右回転が正）")
 
 
+class AnalyzeMaskRegionRequest(BaseModel):
+    project_id: Optional[str] = Field(default="default")
+    x: float = Field(..., ge=0.0, le=1.0, description="クリック位置X（元画像に対する正規化座標）")
+    y: float = Field(..., ge=0.0, le=1.0, description="クリック位置Y（元画像に対する正規化座標）")
+    threshold: int = Field(default=80, ge=0, le=255, description="黒判定しきい値（画素値<=threshold）")
+
+
+class ManualMasksUpdateRequest(BaseModel):
+    project_id: Optional[str] = Field(default="default")
+    manual_masks: list[dict] = Field(default_factory=list, description="画像単位の手動マスク一覧")
+
+
 class PreprocessPreviewRequest(BaseModel):
     image: str = Field(..., description="プレビュー対象の画像ファイル名")
     project_id: Optional[str] = Field(default="default", description="プロジェクトID")

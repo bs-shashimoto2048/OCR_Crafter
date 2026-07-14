@@ -32,6 +32,7 @@ export default function PreprocessPanel({
   inferenceSettings = null,
   inferenceSummary = "",
   focusInference = false,
+  manualMaskSection = null,
   params,
   defaultParams,
   onParamsChange,
@@ -145,6 +146,8 @@ export default function PreprocessPanel({
             />
           </Section>
         </Group>
+
+        {manualMaskSection ? <Group title="手動マスク補正">{manualMaskSection}</Group> : null}
 
         <Group title="単一文字設定">
           <Section>

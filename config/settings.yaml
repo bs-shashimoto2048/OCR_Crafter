@@ -25,7 +25,9 @@ preprocess:
       - bilateral
       - sharpen
       - unsharp
+      - manual_mask_pre
       - threshold
+      - manual_mask_post
       - morph
       - stroke_boost
       - denoise
@@ -42,7 +44,9 @@ preprocess:
       - bilateral
       - sharpen
       - unsharp
+      - manual_mask_pre
       - threshold
+      - manual_mask_post
       - morph
       - stroke_boost
       - deskew
