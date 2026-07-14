@@ -55,3 +55,5 @@ Thumbs.db
 .vscode/
 .idea/
 pj
+
+.cache/
