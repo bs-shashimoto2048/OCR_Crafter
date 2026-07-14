@@ -31,21 +31,25 @@ function engineLabelOf(engine) {
   return ENGINE_LABELS[String(engine || "").toLowerCase()] || (engine ? String(engine) : "--");
 }
 
-// OCR候補と現在ラベルの差分を1文字ずつ色付け表示する
-function DiffText({ candidate, current }) {
+// OCR候補と現在ラベルの差分を1文字ずつ色付け表示する。
+// highlightClass で差分文字の色を変更できる（既定=黄。辞書候補では蛍光緑を使用）
+function DiffText({ candidate, current, highlightClass = "text-amber-300" }) {
   const chars = String(candidate || "").split("");
   const base = String(current || "");
   return (
     <span className="font-mono text-lg font-semibold tracking-wide">
       {chars.map((ch, idx) => (
-        <span key={idx} className={ch === base[idx] ? "text-text" : "text-amber-300"}>
+        <span key={idx} className={ch === base[idx] ? "text-text" : highlightClass}>
           {ch}
         </span>
       ))}
-      {base.length > chars.length ? <span className="text-amber-300/70">…</span> : null}
+      {base.length > chars.length ? <span className={`opacity-70 ${highlightClass}`}>…</span> : null}
     </span>
   );
 }
+
+// 辞書からの近似候補の差分文字色（蛍光緑。軽いグローで注目しやすくする）
+const DICT_DIFF_HIGHLIGHT_CLASS = "text-[#adff5d] drop-shadow-[0_0_4px_rgba(173,255,93,0.55)]";
 
 // 右ペイン「現在の前処理設定」のカテゴリ（読み取り専用）。OFF値は薄く表示
 function SummarySection({ title, defaultOpen = false, items }) {
@@ -1007,7 +1011,11 @@ export default function LabelingView({
                           類似度 {(candidate.score * 100).toFixed(1)}%{candidate.source ? ` / ${candidate.source}` : ""}
                         </span>
                         <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap">
-                          <DiffText candidate={candidate.entry} current={candidate.sourceText} />
+                          <DiffText
+                            candidate={candidate.entry}
+                            current={candidate.sourceText}
+                            highlightClass={DICT_DIFF_HIGHLIGHT_CLASS}
+                          />
                         </span>
                         <span className="shrink-0 text-[10px] text-muted">Alt+{index + 1}</span>
                         <span className="shrink-0 rounded-md border border-accent/50 bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold text-blue-200">
