@@ -139,6 +139,7 @@ const DEFAULT_PREPROCESS_PARAMS = {
   illumination_strength: 1.0,
   // 手動マスク補正（マスク自体は画像単位でサーバー保存。ここは共通設定のみ）
   manual_mask_enabled: false,
+  manual_mask_mode: "point",
   manual_mask_fill: "white",
   manual_mask_timing: "post",
   manual_mask_threshold: 80,

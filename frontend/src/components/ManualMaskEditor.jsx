@@ -41,10 +41,11 @@ export default function ManualMaskEditor({
   masks = [],
   masksVisible = true,
   pendingRegion = null,
+  pendingRect = null,
   selectedIndex = -1,
   analyzing = false,
   onSelect,
-  onAddRect,
+  onDraftRect,
   onUpdateRect,
   onPointClick,
 }) {
@@ -125,7 +126,8 @@ export default function ManualMaskEditor({
     setDraftRect((current) => {
       if (drag && current) {
         if (drag.mode === "create" && current.width > 0.005 && current.height > 0.005) {
-          onAddRect?.({ x: current.x, y: current.y, width: current.width, height: current.height });
+          // 即登録せず候補として親へ渡す（Enterまたはボタンで確定）
+          onDraftRect?.({ x: current.x, y: current.y, width: current.width, height: current.height });
         } else if ((drag.mode === "move" || drag.mode === "resize") && drag.index != null) {
           onUpdateRect?.(drag.index, {
             x: current.x,
@@ -190,10 +192,10 @@ export default function ManualMaskEditor({
         <p className="truncate text-[11px] text-muted">
           {enabled && editMode !== "off"
             ? editMode === "rect"
-              ? "ドラッグで矩形マスクを追加（登録済みはドラッグ移動・右下ハンドルでサイズ変更）"
+              ? "ドラッグで矩形候補を作成 → Enterまたはボタンで確定（Escで取消）"
               : analyzing
                 ? "黒領域を解析中..."
-                : "黒い塊をクリックすると連結領域を検出します"
+                : "黒い塊をクリックで候補を検出 → Enterまたはボタンで確定（Escで取消）"
             : subtitle}
         </p>
       </div>
@@ -278,6 +280,20 @@ export default function ManualMaskEditor({
                   width: `${draftRect.width * 100}%`,
                   height: `${draftRect.height * 100}%`,
                 }}
+              />
+            ) : null}
+
+            {/* 矩形候補（確定前・黄） */}
+            {pendingRect && !draftRect ? (
+              <div
+                className="absolute rounded-sm border-2 border-amber-300 bg-amber-300/25"
+                style={{
+                  left: `${pendingRect.x * 100}%`,
+                  top: `${pendingRect.y * 100}%`,
+                  width: `${pendingRect.width * 100}%`,
+                  height: `${pendingRect.height * 100}%`,
+                }}
+                title="矩形候補（Enterまたはボタンで確定）"
               />
             ) : null}
 

@@ -59,18 +59,38 @@ export default function PreprocessView({
 
   // ---- 手動マスク補正（マスクは画像単位でサーバー保存） ----
   const [manualMasksMap, setManualMasksMap] = useState({});
-  const [maskEditMode, setMaskEditMode] = useState("rect"); // rect | point
   const [masksVisible, setMasksVisible] = useState(true);
   const [maskSelectedIndex, setMaskSelectedIndex] = useState(-1);
   const [pendingRegion, setPendingRegion] = useState(null);
+  const [pendingRect, setPendingRect] = useState(null);
   const [maskAnalyzing, setMaskAnalyzing] = useState(false);
   const [maskError, setMaskError] = useState("");
+  const [maskNotice, setMaskNotice] = useState("");
   const [maskUndoStack, setMaskUndoStack] = useState([]);
   const [maskRedoStack, setMaskRedoStack] = useState([]);
   const analyzeSeqRef = useRef(0);
+  const maskConfirmingRef = useRef(false);
+  const maskNoticeTimerRef = useRef(null);
 
   const manualMaskEnabled = Boolean(params.manual_mask_enabled);
+  // 指定方式は設定として保存（保存値あり→復元 / 未設定→黒領域ポイント指定）
+  const maskEditMode = params.manual_mask_mode === "rect" ? "rect" : "point";
+  const setMaskEditMode = (mode) => onParamsChange((prev) => ({ ...prev, manual_mask_mode: mode }));
   const currentMasks = manualMasksMap?.[selectedImage]?.manual_masks || [];
+
+  function showMaskNotice(text) {
+    setMaskNotice(text);
+    if (maskNoticeTimerRef.current) {
+      clearTimeout(maskNoticeTimerRef.current);
+    }
+    maskNoticeTimerRef.current = setTimeout(() => setMaskNotice(""), 2000);
+  }
+
+  useEffect(() => () => {
+    if (maskNoticeTimerRef.current) {
+      clearTimeout(maskNoticeTimerRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -94,6 +114,7 @@ export default function PreprocessView({
   useEffect(() => {
     analyzeSeqRef.current += 1;
     setPendingRegion(null);
+    setPendingRect(null);
     setMaskSelectedIndex(-1);
     setMaskError("");
     setMaskUndoStack([]);
@@ -140,6 +161,7 @@ export default function PreprocessView({
   async function analyzeMaskPoint(x, y) {
     if (!selectedImage) return;
     const seq = ++analyzeSeqRef.current;
+    setPendingRect(null); // 候補は同時に1つだけ
     setMaskAnalyzing(true);
     setMaskError("");
     try {
@@ -172,22 +194,108 @@ export default function PreprocessView({
     }
   }
 
-  function confirmPendingRegion() {
-    if (!pendingRegion?.found) return;
-    applyMasks([
-      ...currentMasks,
-      {
-        type: "region",
-        rle: pendingRegion.rle,
-        source_size: pendingRegion.source_size,
-        bbox: pendingRegion.bbox,
-        area_px: pendingRegion.area_px,
-        area_ratio: pendingRegion.area_ratio,
-        enabled: true,
-      },
-    ]);
-    setPendingRegion(null);
+  const hasPendingCandidate = Boolean(pendingRect || pendingRegion?.found);
+
+  // 候補（矩形/黒領域）を確定。連打・repeat中の重複登録を防ぐため候補は即時クリアする
+  function confirmPendingCandidate() {
+    if (maskConfirmingRef.current) return false;
+    maskConfirmingRef.current = true;
+    try {
+      if (pendingRect) {
+        const rect = pendingRect;
+        setPendingRect(null);
+        applyMasks([...currentMasks, { type: "rect", ...rect, enabled: true }]);
+        showMaskNotice("マスクを追加しました");
+        return true;
+      }
+      if (pendingRegion?.found) {
+        const region = pendingRegion;
+        setPendingRegion(null);
+        applyMasks([
+          ...currentMasks,
+          {
+            type: "region",
+            rle: region.rle,
+            source_size: region.source_size,
+            bbox: region.bbox,
+            area_px: region.area_px,
+            area_ratio: region.area_ratio,
+            enabled: true,
+          },
+        ]);
+        showMaskNotice("マスクを追加しました");
+        return true;
+      }
+      return false;
+    } finally {
+      maskConfirmingRef.current = false;
+    }
   }
+
+  function cancelPendingCandidate() {
+    if (!hasPendingCandidate) return false;
+    setPendingRect(null);
+    setPendingRegion(null);
+    return true;
+  }
+
+  // Enter=候補確定 / Esc=候補取消 / Ctrl+Z・Ctrl+Y=マスクUndo/Redo。
+  // フォーム部品へフォーカス中は通常のキー操作を優先する
+  useEffect(() => {
+    function isFormElementFocused() {
+      const el = document.activeElement;
+      if (!el) return false;
+      const tag = el.tagName;
+      return (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        tag === "BUTTON" ||
+        el.isContentEditable
+      );
+    }
+
+    function handleKeyDown(e) {
+      if (!manualMaskEnabled) return;
+      if (isFormElementFocused()) return;
+      const key = e.key;
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && (key === "z" || key === "Z")) {
+        if (e.shiftKey) {
+          if (maskRedoStack.length > 0) {
+            e.preventDefault();
+            redoMasks();
+          }
+        } else if (maskUndoStack.length > 0) {
+          e.preventDefault();
+          undoMasks();
+        }
+        return;
+      }
+      if (mod && (key === "y" || key === "Y")) {
+        if (maskRedoStack.length > 0) {
+          e.preventDefault();
+          redoMasks();
+        }
+        return;
+      }
+      if (key === "Enter") {
+        if (e.repeat) return; // 長押しrepeatは無視
+        if (!hasPendingCandidate) return; // 候補なしなら何もしない
+        e.preventDefault();
+        confirmPendingCandidate();
+        return;
+      }
+      if (key === "Escape") {
+        if (cancelPendingCandidate()) {
+          e.preventDefault();
+        }
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  });
 
   function updateExtraSlot(index, patch) {
     onExtraSlotsChange?.(extraSlots.map((slot, i) => (i === index ? { ...slot, ...patch } : slot)));
@@ -292,10 +400,14 @@ export default function PreprocessView({
           masks={currentMasks}
           masksVisible={masksVisible}
           pendingRegion={pendingRegion}
+          pendingRect={pendingRect}
           selectedIndex={maskSelectedIndex}
           analyzing={maskAnalyzing}
           onSelect={setMaskSelectedIndex}
-          onAddRect={(rect) => applyMasks([...currentMasks, { type: "rect", ...rect, enabled: true }])}
+          onDraftRect={(rect) => {
+            setPendingRegion(null);
+            setPendingRect(rect);
+          }}
           onUpdateRect={(index, patch) =>
             applyMasks(currentMasks.map((mask, i) => (i === index ? { ...mask, ...patch } : mask)))
           }
@@ -345,6 +457,21 @@ export default function PreprocessView({
               手動マスク補正を有効にする
             </label>
 
+            <div className="rounded-lg border border-border bg-card/45 p-2 text-[11px] leading-relaxed text-muted">
+              操作:
+              <br />
+              ・{maskEditMode === "rect" ? "矩形をドラッグして候補を作成" : "黒領域をクリックして候補を検出"}
+              <br />
+              ・Enter: 候補を確定
+              <br />
+              ・Esc: 候補を取消
+            </div>
+
+            {maskNotice ? (
+              <p className="rounded-lg border border-emerald-400/50 bg-emerald-400/10 px-2 py-1 text-xs font-semibold text-emerald-300">
+                {maskNotice}
+              </p>
+            ) : null}
             {maskError ? <p className="text-xs text-danger">{maskError}</p> : null}
 
             <div>
@@ -373,8 +500,8 @@ export default function PreprocessView({
               </div>
               <p className="param-hint">
                 {maskEditMode === "rect"
-                  ? "左の元画像上をドラッグして塗りつぶす範囲を指定します。"
-                  : "左の元画像上の黒い塊をクリックすると、つながった黒領域を自動検出します。"}
+                  ? "左の元画像上をドラッグして矩形候補を作成し、Enterまたはボタンで確定します。"
+                  : "左の元画像上の黒い塊をクリックすると、つながった黒領域を候補として検出します。"}
               </p>
             </div>
 
@@ -461,6 +588,24 @@ export default function PreprocessView({
               マスクを画像上に表示
             </label>
 
+            {pendingRect ? (
+              <div className="rounded-lg border border-amber-300/60 bg-amber-300/10 p-2 text-xs text-text">
+                <p className="font-semibold text-amber-200">矩形候補（未確定）</p>
+                <p className="mt-1 text-muted">
+                  左 {(pendingRect.x * 100).toFixed(1)}% / 上 {(pendingRect.y * 100).toFixed(1)}% / 幅{" "}
+                  {(pendingRect.width * 100).toFixed(1)}% / 高さ {(pendingRect.height * 100).toFixed(1)}%
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <Button size="sm" className="flex-1" onClick={confirmPendingCandidate}>
+                    この領域を追加（Enter）
+                  </Button>
+                  <Button size="sm" variant="ghost" className="flex-1" onClick={cancelPendingCandidate}>
+                    キャンセル（Esc）
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+
             {pendingRegion?.found ? (
               <div className="rounded-lg border border-amber-300/60 bg-amber-300/10 p-2 text-xs text-text">
                 <p className="font-semibold text-amber-200">検出された黒領域（未確定）</p>
@@ -473,11 +618,11 @@ export default function PreprocessView({
                   </p>
                 ) : null}
                 <div className="mt-2 flex gap-2">
-                  <Button size="sm" className="flex-1" onClick={confirmPendingRegion}>
-                    この領域を追加
+                  <Button size="sm" className="flex-1" onClick={confirmPendingCandidate}>
+                    この領域を追加（Enter）
                   </Button>
-                  <Button size="sm" variant="ghost" className="flex-1" onClick={() => setPendingRegion(null)}>
-                    キャンセル
+                  <Button size="sm" variant="ghost" className="flex-1" onClick={cancelPendingCandidate}>
+                    キャンセル（Esc）
                   </Button>
                 </div>
               </div>
