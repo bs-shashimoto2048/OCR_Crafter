@@ -185,6 +185,64 @@ export default function PreprocessPanel({
         </Group>
 
         <Group title="鮮明化・補正">
+          <Section title="照明ムラ補正">
+            <p className="param-hint">影・照明ムラ・背景濃淡を二値化前に均一化します。</p>
+            <label className="inline-flex items-center gap-2 text-sm text-text">
+              <input
+                type="checkbox"
+                checked={Boolean(params.illumination_enabled)}
+                onChange={(e) => update("illumination_enabled", e.target.checked)}
+              />
+              照明ムラ補正を有効にする
+            </label>
+            <label className="app-label mt-2">方式</label>
+            <select
+              value={params.illumination_method || "gaussian"}
+              onChange={(e) => update("illumination_method", e.target.value)}
+              className="app-select"
+              disabled={!params.illumination_enabled}
+            >
+              <option value="gaussian">Gaussian背景補正</option>
+              <option value="rolling_ball">Rolling Ball背景補正（近似）</option>
+              <option value="retinex">Retinex</option>
+            </select>
+            <p className="param-hint">
+              {params.illumination_method === "rolling_ball"
+                ? "ラベルや銘板の局所的な背景ムラに有効です。処理はやや重くなります。"
+                : params.illumination_method === "retinex"
+                  ? "強い影や照明差に有効な高精度方式です。補正が強すぎる場合は強度を下げてください。"
+                  : "高速で安定した標準方式です。広い範囲の影や明るさの偏りを補正します。"}
+            </p>
+            <label className="app-label mt-2">背景サイズ: {params.illumination_background_size ?? 81}</label>
+            <p className="param-hint">
+              文字より大きな値を指定してください。値を大きくすると、広い範囲の照明ムラを補正します。
+            </p>
+            <input
+              type="range"
+              min="15"
+              max="201"
+              step="2"
+              value={params.illumination_background_size ?? 81}
+              onChange={(e) => update("illumination_background_size", Number(e.target.value))}
+              className="w-full"
+              disabled={!params.illumination_enabled}
+            />
+            <label className="app-label mt-2">
+              補正強度: {Number(params.illumination_strength ?? 1).toFixed(2)}
+            </label>
+            <p className="param-hint">補正が強すぎて文字が崩れる場合は下げてください（元画像とブレンドします）。</p>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={params.illumination_strength ?? 1}
+              onChange={(e) => update("illumination_strength", Number(e.target.value))}
+              className="w-full"
+              disabled={!params.illumination_enabled}
+            />
+          </Section>
+
           <Section title="CLAHE">
             <p className="param-hint">局所コントラストを強調します。強すぎるとザラつきが増えます。</p>
             <label className="app-label">クリップ上限: {params.clahe_clip_limit.toFixed(1)}</label>

@@ -66,7 +66,10 @@ function PreprocessSummary({ params }) {
   const denoiseNames = { median: "メディアン", gaussian: "ガウシアン" };
   const strokeNames = { close: "欠け埋め", dilate: "太らせる", open: "細かなノイズ除去", erode: "細らせる" };
   const morphNames = { close: "クローズ", open: "オープン" };
-  const sharpenGroupActive = Boolean(params.sharpen_enabled || params.unsharp_enabled || params.stroke_boost_enabled);
+  const illuminationNames = { gaussian: "Gaussian", rolling_ball: "Rolling Ball（近似）", retinex: "Retinex" };
+  const sharpenGroupActive = Boolean(
+    params.sharpen_enabled || params.unsharp_enabled || params.stroke_boost_enabled || params.illumination_enabled
+  );
   const otherActive = Boolean(
     params.gamma_enabled || params.local_contrast_enabled || params.hist_equalize_enabled || params.morph_enabled || params.crop_margin_enabled
   );
@@ -100,6 +103,12 @@ function PreprocessSummary({ params }) {
         title="鮮明化・補正"
         defaultOpen={sharpenGroupActive}
         items={[
+          [
+            "照明ムラ補正",
+            params.illumination_enabled
+              ? `ON（${illuminationNames[params.illumination_method] || params.illumination_method}）`
+              : "OFF",
+          ],
           ["CLAHE", `clip ${num(params.clahe_clip_limit, 1)} / tile ${params.clahe_tile_grid_size ?? "--"}`],
           ["シャープ化", params.sharpen_enabled ? `ON（強さ ${num(params.sharpen_amount, 1)}）` : "OFF"],
           ["アンシャープマスク", params.unsharp_enabled ? `ON（強さ ${num(params.unsharp_amount, 1)}）` : "OFF"],

@@ -24,6 +24,7 @@ DEFAULT_PREPROCESS_CONFIG: dict[str, Any] = {
     "pipelines": {
         "single": [
             "grayscale",
+            "illumination",
             "gamma",
             "local_contrast",
             "hist_equalize",
@@ -40,6 +41,7 @@ DEFAULT_PREPROCESS_CONFIG: dict[str, Any] = {
         ],
         "wide": [
             "grayscale",
+            "illumination",
             "gamma",
             "clahe",
             "local_contrast",
@@ -57,6 +59,7 @@ DEFAULT_PREPROCESS_CONFIG: dict[str, Any] = {
         ],
     },
     "operations": {
+        "illumination": {"enabled": False, "method": "gaussian", "background_size": 81, "strength": 1.0},
         "threshold": {"type": "binary", "value": 128, "block_size": 35, "c": 11},
         "clahe": {"clip_limit": 1.0, "tile_grid_size": 2},
         "sharpen": {"enabled": True, "amount": 0.2, "sigma": 0.5},
@@ -219,6 +222,88 @@ def _resize_gray(gray: np.ndarray, width: int, height: int, interpolation: str) 
 
 def _op_grayscale(value: Any, _: str, __: dict[str, Any]) -> np.ndarray:
     return _ensure_gray_uint8(value)
+
+
+ILLUMINATION_METHODS = ("gaussian", "rolling_ball", "retinex")
+
+
+def _normalize_background_size(background_size: int, height: int, width: int) -> int:
+    """背景サイズを 下限15 / 画像短辺以下 / 奇数 に正規化する。"""
+    short_side = max(3, min(int(height), int(width)))
+    size = max(15, int(background_size))
+    size = min(size, short_side)
+    if size % 2 == 0:
+        size -= 1
+    return max(3, size)
+
+
+def apply_illumination_correction(
+    image: Any,
+    method: str,
+    background_size: int,
+    strength: float,
+) -> np.ndarray:
+    """照明ムラ補正（OCR前処理専用）。暗文字/明背景を前提に背景を推定して均一化する。
+
+    - gaussian: 大きなGaussianで背景推定し、元画像を背景で除算して正規化（高速・標準）
+    - rolling_ball: 形態学的Closing（明背景の中の暗文字を除去した背景推定）による近似
+    - retinex: Single Scale Retinex（log差分）を0-255へ正規化
+    出力は入力と同サイズのuint8グレースケール。strengthで元画像とブレンドする。
+    """
+    from scipy import ndimage
+
+    method_key = str(method or "gaussian").strip().lower()
+    if method_key not in ILLUMINATION_METHODS:
+        raise ValueError(f"照明ムラ補正の方式が不正です: {method}（gaussian / rolling_ball / retinex）")
+
+    gray = _ensure_gray_uint8(image)
+    height, width = gray.shape[:2]
+    size = _normalize_background_size(background_size, height, width)
+    blend = min(1.0, max(0.0, float(strength)))
+
+    src = gray.astype(np.float32)
+    if method_key == "gaussian":
+        sigma = max(1.0, size / 6.0)
+        background = ndimage.gaussian_filter(src, sigma=sigma)
+        corrected = src / np.maximum(background, 1.0) * 255.0
+    elif method_key == "rolling_ball":
+        # 明背景・暗文字では Closing(膨張→収縮) が文字を除去した背景を推定する
+        background = ndimage.minimum_filter(ndimage.maximum_filter(src, size=size), size=size)
+        corrected = src / np.maximum(background, 1.0) * 255.0
+    else:  # retinex
+        sigma = max(1.0, size / 6.0)
+        blurred = ndimage.gaussian_filter(src + 1.0, sigma=sigma)
+        retinex = np.log(src + 1.0) - np.log(np.maximum(blurred, 1e-6))
+        retinex = np.nan_to_num(retinex, nan=0.0, posinf=0.0, neginf=0.0)
+        r_min = float(retinex.min())
+        r_max = float(retinex.max())
+        if r_max - r_min < 1e-9:
+            # 完全に平坦な画像（全黒/全白など）は補正対象がないため元画像を返す
+            corrected = src
+        else:
+            corrected = (retinex - r_min) / (r_max - r_min) * 255.0
+
+    corrected = np.clip(np.nan_to_num(corrected, nan=0.0, posinf=255.0, neginf=0.0), 0.0, 255.0)
+    if blend >= 1.0:
+        result = corrected
+    elif blend <= 0.0:
+        result = src
+    else:
+        result = src * (1.0 - blend) + corrected * blend
+    return np.clip(result, 0.0, 255.0).astype(np.uint8)
+
+
+def _op_illumination(value: Any, _: str, operations: dict[str, Any]) -> np.ndarray:
+    cfg = operations.get("illumination", {})
+    if not cfg.get("enabled", False):
+        # OFF時は完全に従来どおり（グレースケールのみ保証）
+        return _ensure_gray_uint8(value)
+    return apply_illumination_correction(
+        value,
+        method=str(cfg.get("method", "gaussian")),
+        background_size=int(cfg.get("background_size", 81) or 81),
+        strength=float(cfg.get("strength", 1.0) if cfg.get("strength") is not None else 1.0),
+    )
 
 
 def _op_threshold(value: Any, _: str, operations: dict[str, Any]) -> np.ndarray:
@@ -617,6 +702,7 @@ def _op_normalize(value: Any, _: str, operations: dict[str, Any]) -> np.ndarray:
 
 OPERATIONS: dict[str, Callable[[Any, str, dict[str, Any]], np.ndarray]] = {
     "grayscale": _op_grayscale,
+    "illumination": _op_illumination,
     "gamma": _op_gamma,
     "local_contrast": _op_local_contrast,
     "hist_equalize": _op_hist_equalize,

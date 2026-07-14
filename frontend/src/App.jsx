@@ -132,6 +132,11 @@ const DEFAULT_PREPROCESS_PARAMS = {
   single_size: 64,
   wide_height: 48,
   wide_keep_ratio: true,
+  // 照明ムラ補正（既存プロジェクトへ影響しないよう初期はOFF）
+  illumination_enabled: false,
+  illumination_method: "gaussian",
+  illumination_background_size: 81,
+  illumination_strength: 1.0,
   threshold_type: "binary",
   threshold_value: 128,
   clahe_clip_limit: 1.0,
@@ -587,6 +592,12 @@ export default function App() {
       preprocess: {
         ratio_threshold: Number(params.ratio_threshold),
         operations: {
+          illumination: {
+            enabled: Boolean(params.illumination_enabled),
+            method: params.illumination_method || "gaussian",
+            background_size: Number(params.illumination_background_size) || 81,
+            strength: Number(params.illumination_strength),
+          },
           threshold: {
             type: params.threshold_type,
             value: Number(params.threshold_value),

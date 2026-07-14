@@ -18,6 +18,7 @@ preprocess:
   pipelines:
     single:
       - grayscale
+      - illumination
       - gamma
       - local_contrast
       - hist_equalize
@@ -33,6 +34,7 @@ preprocess:
       - resize
     wide:
       - grayscale
+      - illumination
       - gamma
       - clahe
       - local_contrast
