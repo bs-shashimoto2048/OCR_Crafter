@@ -1104,9 +1104,14 @@ export default function TrainingView({
                           </p>
                         ) : null}
                       </div>
+                      {/* ラベルは日本語＋折り返し禁止（whitespace-nowrap）で3項目の高さを揃える。
+                          内部キー（save_epoch_step / train・eval num_workers）は変更せずInfoHintで示す */}
                       <div className="grid grid-cols-3 gap-2">
-                        <div>
-                          <label className="app-label">保存間隔（epoch）</label>
+                        <div className="min-w-0">
+                          <label className="app-label whitespace-nowrap">
+                            エポック数
+                            <InfoHint text="チェックポイントを保存するエポック間隔です（内部キー: save_epoch_step）。学習回数そのものはプロジェクト設定の「学習回数」で指定します。" />
+                          </label>
                           <input
                             type="number"
                             min="1"
@@ -1115,8 +1120,11 @@ export default function TrainingView({
                             onChange={(e) => setOcrSaveEpochStep(e.target.value)}
                           />
                         </div>
-                        <div>
-                          <label className="app-label">Train num_workers</label>
+                        <div className="min-w-0">
+                          <label className="app-label whitespace-nowrap">
+                            学習ワーカー数
+                            <InfoHint text="学習データ読み込みの並列プロセス数です（内部キー: train num_workers）。Mac環境では0〜1推奨です。" />
+                          </label>
                           <input
                             type="number"
                             min="0"
@@ -1125,8 +1133,11 @@ export default function TrainingView({
                             onChange={(e) => setOcrTrainNumWorkers(e.target.value)}
                           />
                         </div>
-                        <div>
-                          <label className="app-label">Eval num_workers</label>
+                        <div className="min-w-0">
+                          <label className="app-label whitespace-nowrap">
+                            評価ワーカー数
+                            <InfoHint text="評価データ読み込みの並列プロセス数です（内部キー: eval num_workers）。Mac環境では0〜1推奨です。" />
+                          </label>
                           <input
                             type="number"
                             min="0"
