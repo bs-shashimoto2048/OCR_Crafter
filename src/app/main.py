@@ -22,7 +22,13 @@ from PIL import Image
 from starlette.background import BackgroundTask
 
 from .config import get_settings
-from .db import delete_training_jobs_by_project, fetch_training_job, init_db, upsert_training_job
+from .db import (
+    delete_training_jobs_by_project,
+    fetch_active_training_job,
+    fetch_training_job,
+    init_db,
+    upsert_training_job,
+)
 from .init_dirs import ensure_directories
 from .predict import list_paddleocr_official_rec_models, predict_from_image
 from .project_paths import (
@@ -615,6 +621,21 @@ def _spawn_training_runner(job_type: str, job_id: str) -> int:
         close_fds=True,
     )
     return int(process.pid)
+
+
+def _reject_if_training_active(project_id: str, training_family: str) -> None:
+    """同一プロジェクト・同一系統でアクティブなジョブがある場合は409で開始要求を拒否する。
+
+    フロントのボタン無効化だけに依存せず、連打・複数タブ・画面再読込でも
+    二重起動しないためのバックエンド側ガード。
+    """
+    active = fetch_active_training_job(project_id, training_family)
+    if active:
+        label = "OCR学習" if training_family == "ocr" else "学習"
+        raise HTTPException(
+            status_code=409,
+            detail=f"このプロジェクトでは{label}ジョブがすでに実行中です。(job: {active.get('id')})",
+        )
 
 
 def _delete_training_artifacts(job: dict[str, Any]) -> dict[str, Any]:
@@ -1515,6 +1536,7 @@ def _run_tesseract_training_job(job_id: str) -> None:
 @app.post("/train/start")
 def train_start(req: TrainRequest, background_tasks: BackgroundTasks) -> dict[str, str]:
     project_id = _resolve_project_id(req.project_id)
+    _reject_if_training_active(project_id, "classification")
     training_mode = str(req.training_mode or "finetune").strip().lower()
     init_source_type = str(req.init_source_type or "imagenet").strip().lower()
     init_source_value = str(req.init_source_value or "").strip()
@@ -1634,6 +1656,7 @@ def api_ocr_dataset_from_logs(req: OcrDatasetFromLogsRequest) -> dict[str, Any]:
 @app.post("/api/ocr/train/start")
 def api_ocr_train_start(req: OcrTrainStartRequest, background_tasks: BackgroundTasks) -> dict[str, Any]:
     project_id = _resolve_project_id(req.project_id)
+    _reject_if_training_active(project_id, "ocr")
     engine = str(req.engine or "").strip().lower()
     if engine != "paddleocr":
         raise HTTPException(status_code=400, detail="Only paddleocr is trainable. EasyOCR is inference-only.")
@@ -1761,6 +1784,7 @@ def api_ocr_train_start(req: OcrTrainStartRequest, background_tasks: BackgroundT
 @app.post("/api/tesseract/train/start")
 def api_tesseract_train_start(req: TesseractTrainStartRequest) -> dict[str, Any]:
     project_id = _resolve_project_id(req.project_id)
+    _reject_if_training_active(project_id, "ocr")
     dataset_dir = str(req.dataset_dir or "").strip()
     if not dataset_dir:
         raise HTTPException(status_code=400, detail="dataset_dir is required")
@@ -1813,6 +1837,23 @@ def api_tesseract_train_start(req: TesseractTrainStartRequest) -> dict[str, Any]
         }
     )
     return {"job_id": job_id, "project_id": project_id, "status": "queued", "training_family": "ocr", "engine": "tesseract"}
+
+
+@app.get("/api/ocr/train/active")
+def api_ocr_train_active(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+    """プロジェクトのアクティブなOCR学習ジョブ（queued/running）を返す。
+
+    画面再読込・別タブからの再接続用。プロセス実態との突き合わせ
+    （_reconcile_ocr_training_job）を通した最新状態を返す。
+    """
+    resolved = _resolve_project_id(project_id)
+    job = fetch_active_training_job(resolved, "ocr")
+    if job:
+        job = _reconcile_ocr_training_job(str(job.get("id"))) or job
+        # 突き合わせの結果、実は終了していた場合はアクティブ扱いにしない
+        if str(job.get("status") or "") not in {"queued", "running"}:
+            job = None
+    return {"project_id": resolved, "job": job}
 
 
 @app.get("/api/ocr/train/status/{job_id}")

@@ -2,6 +2,17 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Card from "../components/Card";
 import Button from "../components/Button";
 import { PADDLEOCR_OFFICIAL_MODELS_TOOLTIP } from "../lib/paddleocrOfficialTooltip";
+import {
+  UI_TRAINING_STATE_LABELS,
+  classifyLogLine,
+  computeEtaSeconds,
+  computeProgressPercent,
+  deriveUiTrainingState,
+  extractImportantEvents,
+  formatDuration,
+  isImportantLogLine,
+  parseTrainingProgress,
+} from "../lib/trainingLog";
 
 const OCR_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 // Tesseract学習対象文字セット（A-Z / 0-9 / 小文字筆記体 k,l,t）
@@ -101,10 +112,14 @@ export default function TrainingView({
   canStartOcrTraining,
   jobId,
   jobStatus,
+  jobInfo = null,
+  stopRequested = false,
+  startPending = false,
+  onOpenModels,
+  onOpenInference,
   logs,
   workflowState,
 }) {
-  const [showImportantOnly, setShowImportantOnly] = useState(false);
   const [paramsCollapsed, setParamsCollapsed] = useState(false);
   const [showOcrOfficialModelHelp, setShowOcrOfficialModelHelp] = useState(false);
   const logContainerRef = useRef(null);
@@ -116,6 +131,43 @@ export default function TrainingView({
   const isFailed = jobStatus === "failed";
   const isStopped = jobStatus === "stopped";
   const canToggleParams = trainingStarted || isRunning || isCompleted || isFailed || isStopped;
+
+  // ---- 学習状態の導出とログ解析（lib/trainingLog.js の純関数） ----
+  const trainingProgress = useMemo(() => parseTrainingProgress(logs), [logs]);
+  // UI状態: idle/preparing/training/stopping/completed/failed/cancelled
+  const uiTrainingState = startPending
+    ? "preparing"
+    : deriveUiTrainingState(jobStatus, {
+        hasIterationLog: trainingProgress.iteration !== null,
+        stopRequested,
+      });
+  const uiStateLabel = UI_TRAINING_STATE_LABELS[uiTrainingState] || uiTrainingState;
+  // preparing/training/stopping 中は設定変更・データ再作成・再開始を禁止する
+  const settingsLocked = ["preparing", "training", "stopping"].includes(uiTrainingState);
+  // 最大iteration: ログ（Paddleのepoch総数）優先、無ければジョブ設定（Tesseractは epochs=max_iterations を流用）
+  const maxIterations =
+    trainingProgress.maxFromLog ?? (Number.isFinite(Number(jobInfo?.epochs)) && Number(jobInfo?.epochs) > 0 ? Number(jobInfo.epochs) : null);
+  const progressPercent = computeProgressPercent(trainingProgress.iteration, maxIterations);
+  const etaSeconds = computeEtaSeconds(trainingProgress.samples, maxIterations);
+  const importantEvents = useMemo(() => extractImportantEvents(logs), [logs]);
+
+  // 経過時間（実行中のみ5秒ごとに更新）
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!isRunning) {
+      return undefined;
+    }
+    const timer = setInterval(() => setNowMs(Date.now()), 5000);
+    setNowMs(Date.now());
+    return () => clearInterval(timer);
+  }, [isRunning, jobId]);
+  const jobStartedAtMs = useMemo(() => {
+    const raw = String(jobInfo?.created_at || "");
+    if (!raw) return null;
+    const parsed = Date.parse(raw);
+    return Number.isFinite(parsed) ? parsed : null;
+  }, [jobInfo?.created_at]);
+  const elapsedSeconds = isRunning && jobStartedAtMs ? Math.max(0, Math.round((nowMs - jobStartedAtMs) / 1000)) : null;
 
   let trainingVariant = "secondary";
   let trainingClassName = "";
@@ -130,36 +182,22 @@ export default function TrainingView({
     trainingVariant = "primary";
   }
 
-  function statusLabel(value) {
-    if (value === "queued") return "待機中";
-    if (value === "running") return "実行中";
-    if (value === "completed") return "完了";
-    if (value === "failed") return "失敗";
-    if (value === "stopped") return "停止";
-    if (value === "idle") return "未実行";
-    return value || "-";
-  }
-
-  function logLevel(line) {
-    const text = String(line || "").toLowerCase();
-    if (text.includes("failed") || text.includes("error") || text.includes("失敗") || text.includes("例外")) {
-      return "error";
-    }
-    if (text.includes("completed") || text.includes("success") || text.includes("完了")) {
-      return "success";
-    }
-    if (text.includes("warning") || text.includes("警告") || text.includes("missing") || text.includes("0件")) {
-      return "warn";
-    }
-    return "info";
-  }
-
+  // 詳細ログのフィルタ: all=すべて / important=重要イベントのみ / problem=警告・エラー
+  // （表示切替のみでログデータ自体は保持する）
+  const [logFilter, setLogFilter] = useState("all");
+  const [autoScroll, setAutoScroll] = useState(true);
   const filteredLogs = useMemo(() => {
-    if (!showImportantOnly) {
-      return logs;
+    if (logFilter === "important") {
+      return logs.filter(isImportantLogLine);
     }
-    return logs.filter((line) => logLevel(line) !== "info");
-  }, [logs, showImportantOnly]);
+    if (logFilter === "problem") {
+      return logs.filter((line) => {
+        const level = classifyLogLine(line);
+        return level === "error" || level === "warn";
+      });
+    }
+    return logs;
+  }, [logs, logFilter]);
 
   const latestEta = useMemo(() => {
     function parseTimestamp(value) {
@@ -223,10 +261,11 @@ export default function TrainingView({
   }
 
   useEffect(() => {
+    if (!autoScroll) return;
     const el = logContainerRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [filteredLogs]);
+  }, [filteredLogs, autoScroll]);
 
   useEffect(() => {
     if (!canToggleParams) {
@@ -324,7 +363,6 @@ export default function TrainingView({
 
   const isTesseractEngine = ocrEngine === "tesseract";
   const trainingFamilyLabel = trainingFamily === "ocr" ? "OCR認識モデル" : "分類モデル";
-  const statusText = statusLabel(jobStatus);
   const statusToneClass = isRunning
     ? "border-accent/60 bg-accent/15 text-blue-100"
     : isCompleted
@@ -334,20 +372,6 @@ export default function TrainingView({
         : isStopped
           ? "border-amber-300/40 bg-amber-300/10 text-amber-100"
         : "border-border bg-card/70 text-muted";
-
-  function logRowClass(level) {
-    if (level === "error") return "border-danger/30 bg-danger/10 text-red-100";
-    if (level === "success") return "border-success/30 bg-success/10 text-emerald-100";
-    if (level === "warn") return "border-amber-300/35 bg-amber-300/10 text-amber-100";
-    return "border-border/70 bg-card/55 text-slate-100";
-  }
-
-  function logDotClass(level) {
-    if (level === "error") return "bg-danger";
-    if (level === "success") return "bg-success";
-    if (level === "warn") return "bg-amber-300";
-    return "bg-accent/80";
-  }
 
   return (
     <div
@@ -580,7 +604,8 @@ export default function TrainingView({
                     variant={clsNextAction === "train" ? trainingVariant : "secondary"}
                     className={`${clsNextAction === "train" ? trainingClassName : ""} w-full`}
                     onClick={clsNextAction === "preprocess" ? onPreprocess : clsNextAction === "dataset" ? onBuildDataset : onStartTraining}
-                    disabled={clsNextAction === "train" ? !canTrain || !clsHasInitModel : false}
+                    disabled={isRunning || (clsNextAction === "train" ? !canTrain || !clsHasInitModel : false)}
+                    title={isRunning ? "学習実行中は開始できません" : undefined}
                   >
                     {clsNextAction === "preprocess"
                       ? "次アクション: 前処理を実行"
@@ -617,6 +642,12 @@ export default function TrainingView({
               </>
             ) : (
               <>
+                {/* preparing/training/stopping 中は設定変更を禁止（fieldsetで配下の入力を一括無効化） */}
+                <fieldset
+                  disabled={settingsLocked}
+                  className={`contents ${settingsLocked ? "opacity-70" : ""}`}
+                  title={settingsLocked ? "学習実行中は設定を変更できません。" : undefined}
+                >
                 <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">共通設定</p>
                   <div className="grid grid-cols-2 gap-2">
@@ -1146,38 +1177,174 @@ export default function TrainingView({
                     )}
                   </div>
                 </details>
+                </fieldset>
 
                 {ocrEngine !== "easyocr" ? (
                   <>
                     <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">2. 実行</p>
-                      <Button
-                        variant={ocrNextAction === "train" ? trainingVariant : "secondary"}
-                        className={`${ocrNextAction === "train" ? trainingClassName : ""} w-full`}
-                        onClick={ocrNextAction === "dataset" ? onCreateSelectedOcrDataset : onStartOcrTraining}
-                        disabled={ocrNextAction === "train" ? !canStartOcrTraining || !ocrHasInitModel : false}
-                      >
-                        {ocrNextAction === "dataset"
-                          ? ocrDatasetCreateMode === "from_logs"
-                            ? "次アクション: 再学習データ作成"
-                            : "次アクション: 新規学習データ作成"
-                          : "次アクション: OCR学習開始"}
-                      </Button>
+                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">3. 実行状態</p>
+
+                      {/* 主ボタン: UI状態（idle/preparing/training/stopping/completed/failed/cancelled）に連動 */}
+                      {!ocrDatasetReady ? (
+                        <Button
+                          variant="secondary"
+                          className="w-full"
+                          onClick={onCreateSelectedOcrDataset}
+                          disabled={settingsLocked}
+                        >
+                          {ocrDatasetCreateMode === "from_logs" ? "再学習データを作成" : "新規学習データを作成"}
+                        </Button>
+                      ) : uiTrainingState === "preparing" ? (
+                        <Button className="w-full" disabled>
+                          <span className="mr-1 inline-block animate-spin" aria-hidden="true">↻</span>
+                          学習準備中...
+                        </Button>
+                      ) : uiTrainingState === "training" ? (
+                        <Button className="w-full" disabled>
+                          <span className="mr-1 inline-block animate-spin" aria-hidden="true">↻</span>
+                          OCR学習中
+                        </Button>
+                      ) : uiTrainingState === "stopping" ? (
+                        <Button className="w-full" disabled>
+                          停止処理中...
+                        </Button>
+                      ) : uiTrainingState === "completed" ? (
+                        <div className="space-y-2">
+                          <div className="rounded-lg border border-emerald-400/40 bg-emerald-400/10 p-2 text-xs text-emerald-200">
+                            学習が完了しました
+                            {jobInfo?.model_path ? (
+                              <p className="mt-0.5 truncate text-emerald-100/80" title={String(jobInfo.model_path)}>
+                                保存先: {String(jobInfo.model_path)}
+                              </p>
+                            ) : null}
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <Button className="w-full" onClick={() => onOpenModels?.()}>
+                              学習結果を確認
+                            </Button>
+                            <Button variant="secondary" className="w-full" onClick={() => onOpenInference?.()}>
+                              推論で試す
+                            </Button>
+                          </div>
+                          <Button
+                            variant="secondary"
+                            className="w-full"
+                            disabled={!canStartOcrTraining || !ocrHasInitModel}
+                            onClick={() => {
+                              if (window.confirm("同じ設定でOCR学習を再実行します。よろしいですか？")) {
+                                onStartOcrTraining();
+                              }
+                            }}
+                          >
+                            同じ設定で再学習
+                          </Button>
+                        </div>
+                      ) : uiTrainingState === "failed" ? (
+                        <div className="space-y-2">
+                          <div className="rounded-lg border border-red-400/40 bg-red-400/10 p-2 text-xs text-red-200">
+                            学習に失敗しました
+                            {jobInfo?.message ? <p className="mt-0.5 break-all text-red-100/80">原因: {String(jobInfo.message)}</p> : null}
+                          </div>
+                          <Button
+                            className="w-full"
+                            disabled={!canStartOcrTraining || !ocrHasInitModel}
+                            onClick={onStartOcrTraining}
+                          >
+                            再実行
+                          </Button>
+                        </div>
+                      ) : uiTrainingState === "cancelled" ? (
+                        <Button
+                          className="w-full"
+                          disabled={!canStartOcrTraining || !ocrHasInitModel}
+                          onClick={onStartOcrTraining}
+                        >
+                          学習を再実行
+                        </Button>
+                      ) : (
+                        <Button
+                          className="w-full"
+                          disabled={!canStartOcrTraining || !ocrHasInitModel}
+                          onClick={onStartOcrTraining}
+                        >
+                          OCR学習を開始
+                        </Button>
+                      )}
                       {!ocrHasInitModel ? (
                         <p className="text-xs text-amber-100">OCR Fine-tuneを選択中です。初期モデルを指定してください。</p>
                       ) : null}
-                      {isRunning ? (
+
+                      {/* 実行状態カード（未開始時は非表示） */}
+                      {uiTrainingState !== "idle" ? (
+                        <div className="space-y-1 rounded-lg border border-border/70 bg-card/55 p-2 text-xs">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-muted">状態</span>
+                            <span className="font-semibold text-text">{uiStateLabel}</span>
+                          </div>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-muted">進捗</span>
+                            <span className="font-semibold text-text">
+                              {trainingProgress.iteration !== null
+                                ? `${trainingProgress.iteration.toLocaleString()} / ${maxIterations ? maxIterations.toLocaleString() : "--"}`
+                                : uiTrainingState === "preparing"
+                                  ? "学習準備中"
+                                  : "--"}
+                            </span>
+                          </div>
+                          {progressPercent !== null ? (
+                            <div className="h-1.5 rounded-full bg-[#3f4854]/65">
+                              <div className="h-1.5 rounded-full bg-accent transition-all duration-500" style={{ width: `${progressPercent}%` }} />
+                            </div>
+                          ) : null}
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-muted">経過時間</span>
+                            <span className="font-semibold text-text">{elapsedSeconds !== null ? formatDuration(elapsedSeconds) : "--"}</span>
+                          </div>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-muted">推定残り時間</span>
+                            <span className="font-semibold text-text">{formatDuration(etaSeconds)}</span>
+                          </div>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-muted">Job ID</span>
+                            <span className="max-w-[180px] truncate font-mono text-[11px] text-text" title={jobId || ""}>{jobId || "--"}</span>
+                          </div>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-muted">開始日時</span>
+                            <span className="text-text">{jobInfo?.created_at ? String(jobInfo.created_at).replace("T", " ").slice(0, 19) : "--"}</span>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {isRunning || uiTrainingState === "stopping" ? (
                         <div className="grid grid-cols-2 gap-2">
-                          <Button variant="danger" className="w-full" onClick={onStopTraining}>
+                          <Button
+                            variant="danger"
+                            className="w-full"
+                            onClick={onStopTraining}
+                            disabled={uiTrainingState === "stopping"}
+                            title="ジョブを停止します。生成済みのログ・checkpoint・学習データは保持します。"
+                          >
                             学習停止
                           </Button>
-                          <Button variant="danger" className="w-full" onClick={onStopTrainingAndDelete}>
+                          <Button
+                            variant="danger"
+                            className="w-full"
+                            onClick={onStopTrainingAndDelete}
+                            disabled={uiTrainingState === "stopping"}
+                            title="ジョブを停止し、この実行で生成したチェックポイント・モデル・学習ログを削除します（他のジョブのモデルには影響しません）。"
+                          >
                             停止して削除
                           </Button>
                         </div>
                       ) : null}
                       {ocrDatasetReady ? (
-                        <Button variant="secondary" className="w-full" onClick={onCreateSelectedOcrDataset}>
+                        <Button
+                          variant="secondary"
+                          className="w-full"
+                          onClick={onCreateSelectedOcrDataset}
+                          disabled={settingsLocked}
+                          title={settingsLocked ? "学習実行中はデータを再作成できません。" : "学習データを作り直します"}
+                        >
                           データを再作成
                         </Button>
                       ) : null}
@@ -1205,20 +1372,29 @@ export default function TrainingView({
       ) : null}
 
       <Card
-        title="学習ログ"
-        subtitle="学習状態をリアルタイムで表示します"
+        title="学習状況"
+        subtitle="要約・重要イベント・詳細ログ"
         className="flex h-full min-h-0 flex-col"
         actions={
           <div className="flex items-center gap-2">
-            <span className="rounded-md border border-border bg-card/60 px-2 py-1 text-xs text-muted">
-              残り時間: <span className="font-semibold text-text">{latestEta}</span>
-            </span>
-            {isRunning ? (
+            {isRunning || uiTrainingState === "stopping" ? (
               <>
-                <Button size="sm" variant="danger" onClick={onStopTraining}>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  onClick={onStopTraining}
+                  disabled={uiTrainingState === "stopping"}
+                  title="ジョブを停止します。生成済みのログ・checkpoint・学習データは保持します。"
+                >
                   学習停止
                 </Button>
-                <Button size="sm" variant="danger" onClick={onStopTrainingAndDelete}>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  onClick={onStopTrainingAndDelete}
+                  disabled={uiTrainingState === "stopping"}
+                  title="ジョブを停止し、この実行で生成したチェックポイント・モデル・学習ログを削除します（他のジョブのモデルには影響しません）。"
+                >
                   停止して削除
                 </Button>
               </>
@@ -1235,57 +1411,153 @@ export default function TrainingView({
           </div>
         }
       >
-        <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
-          <span className="flex items-baseline gap-1.5 rounded-md border border-border/80 bg-card/55 px-2 py-1">
-            <span className="text-[10px] uppercase tracking-wide text-muted/80">Status</span>
-            <span className="font-semibold text-text">{statusText}</span>
-          </span>
-          <span className="flex min-w-0 items-baseline gap-1.5 rounded-md border border-border/80 bg-card/55 px-2 py-1">
-            <span className="text-[10px] uppercase tracking-wide text-muted/80">Job ID</span>
-            <span className="max-w-[180px] truncate font-semibold text-text">{jobId || "-"}</span>
-          </span>
-          <span className="flex items-baseline gap-1.5 rounded-md border border-border/80 bg-card/55 px-2 py-1">
-            <span className="text-[10px] uppercase tracking-wide text-muted/80">ETA</span>
-            <span className="font-semibold text-text">{latestEta}</span>
-          </span>
-          <span className="flex items-baseline gap-1.5 rounded-md border border-border/80 bg-card/55 px-2 py-1">
-            <span className="text-[10px] uppercase tracking-wide text-muted/80">Visible</span>
-            <span className="font-semibold text-text">{filteredLogs.length}</span>
-          </span>
-          <span className="ml-auto flex items-center gap-2">
-            <label className="inline-flex items-center gap-2 rounded-md border border-border/80 bg-card/55 px-2 py-1 text-muted">
-              <input
-                type="checkbox"
-                checked={showImportantOnly}
-                onChange={(e) => setShowImportantOnly(e.target.checked)}
-              />
-              重要イベントのみ表示
-            </label>
-            <span className="text-muted">総ログ: {logs.length}件</span>
-          </span>
+        {/* 学習状況サマリー（取得できない項目は -- 表示） */}
+        <div className="mb-2 grid shrink-0 grid-cols-2 gap-x-4 gap-y-1 rounded-xl border border-border/80 bg-card/55 p-2.5 text-xs lg:grid-cols-4">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-muted">状態</span>
+            <span className={`rounded-full border px-2 py-0.5 font-semibold ${statusToneClass}`}>{uiStateLabel}</span>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-muted">iteration</span>
+            <span className="font-semibold text-text">
+              {trainingProgress.iteration !== null
+                ? `${trainingProgress.iteration.toLocaleString()} / ${maxIterations ? maxIterations.toLocaleString() : "--"}`
+                : "--"}
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-muted">経過時間</span>
+            <span className="font-semibold text-text">{elapsedSeconds !== null ? formatDuration(elapsedSeconds) : "--"}</span>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-muted">推定残り時間</span>
+            <span className="font-semibold text-text">{formatDuration(etaSeconds)}</span>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-muted">最新BCER</span>
+            <span className="font-semibold text-text">{trainingProgress.bcer !== null ? `${trainingProgress.bcer}%` : "--"}</span>
+          </div>
+          <div className="col-span-2 flex min-w-0 items-center justify-between gap-2">
+            <span className="shrink-0 text-muted">最新checkpoint</span>
+            <span className="truncate font-mono text-[10px] text-text" title={trainingProgress.checkpoint || ""}>
+              {trainingProgress.checkpoint || "--"}
+            </span>
+          </div>
+          <div className="flex min-w-0 items-center justify-between gap-2">
+            <span className="shrink-0 text-muted">Job ID</span>
+            <span className="truncate font-mono text-[10px] text-text" title={jobId || ""}>{jobId || "--"}</span>
+          </div>
+          {progressPercent !== null ? (
+            <div className="col-span-2 lg:col-span-4">
+              <div className="h-1.5 rounded-full bg-[#3f4854]/65">
+                <div className="h-1.5 rounded-full bg-accent transition-all duration-500" style={{ width: `${progressPercent}%` }} />
+              </div>
+              <p className="mt-0.5 text-right text-[10px] text-muted">{progressPercent.toFixed(1)}%</p>
+            </div>
+          ) : uiTrainingState === "preparing" ? (
+            <p className="col-span-2 text-[11px] text-muted lg:col-span-4">学習準備中（iteration取得前のため進捗率は表示しません）</p>
+          ) : null}
         </div>
 
-        <div
-          ref={logContainerRef}
-          className="min-h-0 flex-1 overflow-auto rounded-xl border border-border bg-gradient-to-b from-card/65 to-card/45 p-3 font-mono text-xs"
-        >
-          {filteredLogs.length === 0 ? (
-            <p className="text-muted">ログはまだありません。</p>
-          ) : (
-            filteredLogs.map((line, idx) => {
-              const level = logLevel(line);
-              return (
-                <div
-                  key={`${line}-${idx}`}
-                  className={`mb-1.5 flex items-start gap-2 rounded-md border px-2 py-1 ${logRowClass(level)}`}
-                >
-                  <span className={`mt-1.5 inline-block h-1.5 w-1.5 rounded-full ${logDotClass(level)}`} />
-                  <p className="flex-1 whitespace-pre-wrap break-all leading-5">{line}</p>
-                </div>
-              );
-            })
-          )}
+        {/* 重要イベント（意味のあるイベントのみ抽出） */}
+        <div className="mb-2 shrink-0 rounded-xl border border-border/80 bg-card/55 p-2.5">
+          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">重要イベント</p>
+          <div className="max-h-36 overflow-y-auto font-mono text-[11px] leading-5">
+            {importantEvents.length === 0 ? (
+              <p className="text-muted">イベントはまだありません。</p>
+            ) : (
+              importantEvents.slice(-12).map((event, idx) => {
+                const level = classifyLogLine(event.text);
+                return (
+                  <div key={`${event.time}-${idx}`} className="flex gap-2 whitespace-nowrap">
+                    <span className="shrink-0 text-muted/80">{event.time || "--:--:--"}</span>
+                    <span
+                      className={`truncate ${
+                        level === "error" ? "text-red-300" : level === "warn" ? "text-amber-300" : level === "success" ? "text-emerald-300" : "text-slate-200"
+                      }`}
+                      title={event.text}
+                    >
+                      {event.text}
+                    </span>
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
+
+        {/* 詳細ログ（ターミナル形式・初期は閉じる。トラブル調査用に全行保持） */}
+        <details className="group flex min-h-0 flex-1 flex-col rounded-xl border border-border/80 bg-card/55">
+          <summary className="flex cursor-pointer select-none items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-text transition hover:bg-card/70 [&::-webkit-details-marker]:hidden">
+            <span className="text-[10px] text-muted transition-transform group-open:rotate-90" aria-hidden="true">▶</span>
+            詳細ログ
+            <span className="ml-auto flex items-center gap-2 font-normal" onClick={(e) => e.preventDefault()}>
+              <span className="inline-flex rounded-lg border border-border bg-card/45 p-0.5">
+                {[
+                  ["all", "すべて"],
+                  ["important", "重要のみ"],
+                  ["problem", "警告・エラー"],
+                ].map(([key, label]) => (
+                  <Button
+                    key={key}
+                    size="sm"
+                    variant={logFilter === key ? "primary" : "ghost"}
+                    className="h-5 px-1.5 text-[10px]"
+                    onClick={() => setLogFilter(key)}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </span>
+              <label className="inline-flex items-center gap-1 text-[10px] text-muted">
+                <input type="checkbox" checked={autoScroll} onChange={(e) => setAutoScroll(e.target.checked)} />
+                自動スクロール
+              </label>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="h-5 px-1.5 text-[10px]"
+                onClick={() => {
+                  const el = logContainerRef.current;
+                  if (el) el.scrollTop = el.scrollHeight;
+                }}
+              >
+                最新行へ
+              </Button>
+              <span className="text-[10px] text-muted">
+                {filteredLogs.length} / {logs.length}件
+              </span>
+            </span>
+          </summary>
+          <div
+            ref={logContainerRef}
+            className="min-h-[160px] flex-1 select-text overflow-auto border-t border-border/60 bg-[#1d2229] px-2 py-1.5 font-mono text-[11px] leading-5"
+          >
+            {filteredLogs.length === 0 ? (
+              <p className="text-muted">ログはまだありません。</p>
+            ) : (
+              filteredLogs.map((line, idx) => {
+                const level = classifyLogLine(line);
+                return (
+                  <div
+                    key={idx}
+                    className={`whitespace-pre ${
+                      level === "error"
+                        ? "text-red-300"
+                        : level === "warn"
+                          ? "text-amber-300"
+                          : level === "success"
+                            ? "text-emerald-300"
+                            : "text-slate-300/85"
+                    }`}
+                  >
+                    {line}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </details>
       </Card>
     </div>
   );

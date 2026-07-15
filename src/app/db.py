@@ -283,6 +283,30 @@ def fetch_training_job(job_id: str) -> Optional[dict[str, Any]]:
     return payload
 
 
+# 実行中とみなすジョブ状態（開始要求の二重実行防止・再接続の対象）
+ACTIVE_TRAINING_STATUSES = ("queued", "running")
+
+
+def fetch_active_training_job(project_id: str, training_family: Optional[str] = None) -> Optional[dict[str, Any]]:
+    """プロジェクト内のアクティブ（queued/running）な学習ジョブを1件返す。無ければ None。
+
+    training_family を指定した場合はその系統（ocr / classification）のみ対象。
+    複数存在する場合は最新（updated_at 降順）の1件。
+    """
+    placeholders = ",".join("?" for _ in ACTIVE_TRAINING_STATUSES)
+    query = f"SELECT id FROM training_jobs WHERE project_id = ? AND status IN ({placeholders})"
+    params: list[Any] = [project_id, *ACTIVE_TRAINING_STATUSES]
+    if training_family:
+        query += " AND training_family = ?"
+        params.append(training_family)
+    query += " ORDER BY updated_at DESC LIMIT 1"
+    with get_conn() as conn:
+        row = conn.execute(query, params).fetchone()
+    if row is None:
+        return None
+    return fetch_training_job(str(row[0]))
+
+
 def delete_training_jobs_by_project(project_id: str) -> int:
     with get_conn() as conn:
         cur = conn.execute("DELETE FROM training_jobs WHERE project_id = ?", (project_id,))

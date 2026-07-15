@@ -383,6 +383,12 @@ export default function App() {
   const [jobId, setJobId] = useState("");
   const [jobStatus, setJobStatus] = useState("idle");
   const [jobFamily, setJobFamily] = useState("classification");
+  // 実行中ジョブの詳細（実行スナップショット表示・開始日時・最大iteration用）。ポーリングで更新
+  const [jobInfo, setJobInfo] = useState(null);
+  // 停止要求中（stopping状態の表示・二重停止防止）
+  const [stopRequested, setStopRequested] = useState(false);
+  // 学習開始API応答待ち（押下直後にUIをロックするため）
+  const [startingTraining, setStartingTraining] = useState(false);
   const [logs, setLogs] = useState([]);
 
   const [ocrEngine, setOcrEngine] = useState("paddleocr");
@@ -1424,6 +1430,7 @@ export default function App() {
           return;
         }
         setJobStatus(data.status || "unknown");
+        setJobInfo(data);
 
         if (data.status && data.status !== lastStatusRef.current) {
           pushLog(`学習ステータス: ${data.status}`);
@@ -1473,6 +1480,15 @@ export default function App() {
       clearInterval(timer);
     };
   }, [jobId, jobFamily, projectId]);
+
+  // OCR学習画面を開いたとき、実行中ジョブがあればAPIから復元する（画面再読込・別タブでもidle表示にしない）
+  useEffect(() => {
+    if (activeView !== "ocr-training" || !projectId || jobId) {
+      return;
+    }
+    reconnectActiveOcrJob(projectId).catch(() => null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeView, projectId, jobId]);
 
   useEffect(() => {
     if (activeView !== "labeling") {
@@ -2209,7 +2225,14 @@ export default function App() {
       notify("info", `Tesseract学習キューに追加しました (${data.job_id})`);
       setActiveView("ocr-training");
     } catch (error) {
-      notify("error", error.message);
+      // 409（すでに実行中）は新規開始せず既存ジョブへ再接続する
+      if (String(error?.message || "").includes("すでに実行中")) {
+        notify("info", "OCR学習ジョブがすでに実行中のため、既存ジョブへ再接続しました");
+        await reconnectActiveOcrJob();
+        setActiveView("ocr-training");
+      } else {
+        notify("error", error.message);
+      }
     }
   }
 
@@ -2218,14 +2241,26 @@ export default function App() {
       notify("error", "プロジェクトを作成または選択してください");
       return;
     }
-    if (ocrEngine === "tesseract") {
-      await startTesseractTraining();
-      return;
+    if (startingTraining) {
+      return; // API応答待ちの間の再押下（連打）を無視
     }
-    if (ocrEngine !== "paddleocr") {
-      notify("error", "EasyOCR は学習対象外です。PaddleOCR または Tesseract を選択してください。");
-      return;
+    setStartingTraining(true);
+    try {
+      if (ocrEngine === "tesseract") {
+        await startTesseractTraining();
+        return;
+      }
+      if (ocrEngine !== "paddleocr") {
+        notify("error", "EasyOCR は学習対象外です。PaddleOCR または Tesseract を選択してください。");
+        return;
+      }
+      await startPaddleOcrTraining();
+    } finally {
+      setStartingTraining(false);
     }
+  }
+
+  async function startPaddleOcrTraining() {
     try {
       const latestSystemCheck = (await loadSystemCheck().catch(() => null)) || systemCheck || {};
       const imageShape = parseOcrImageShape(ocrImageShape);
@@ -2322,7 +2357,14 @@ export default function App() {
       notify("info", `OCR学習キューに追加しました (${data.job_id})`);
       setActiveView("ocr-training");
     } catch (error) {
-      notify("error", error.message);
+      // 409（すでに実行中）は新規開始せず既存ジョブへ再接続する
+      if (String(error?.message || "").includes("すでに実行中")) {
+        notify("info", "OCR学習ジョブがすでに実行中のため、既存ジョブへ再接続しました");
+        await reconnectActiveOcrJob();
+        setActiveView("ocr-training");
+      } else {
+        notify("error", error.message);
+      }
     }
   }
 
@@ -2360,12 +2402,16 @@ export default function App() {
       notify("error", "停止対象の学習ジョブがありません");
       return;
     }
+    if (stopRequested) {
+      return; // 停止処理中の二重停止を防止
+    }
     const confirmMessage = deleteArtifacts
-      ? "現在の学習を停止し、このジョブの関連データを削除します。続行しますか？"
-      : "現在の学習を停止します。続行しますか？";
+      ? "現在の学習を停止し、この実行で生成したチェックポイント・モデル・学習ログを削除します。続行しますか？（他のジョブのモデルには影響しません）"
+      : "現在の学習を停止します。続行しますか？（生成済みのログ・checkpoint・学習データは保持されます）";
     if (!window.confirm(confirmMessage)) {
       return;
     }
+    setStopRequested(true);
     try {
       const suffix = deleteArtifacts ? "?delete_artifacts=true" : "";
       const path = jobFamily === "ocr" ? `/api/ocr/train/stop/${jobId}${suffix}` : `/train/stop/${jobId}${suffix}`;
@@ -2376,6 +2422,35 @@ export default function App() {
       notify("info", deleteArtifacts ? "学習を停止し、関連データを削除しました" : "学習を停止しました");
     } catch (error) {
       notify("error", error.message);
+    } finally {
+      setStopRequested(false);
+    }
+  }
+
+  // 実行中のOCR学習ジョブへ再接続する（画面再読込・別タブ・409応答時）
+  async function reconnectActiveOcrJob(targetProjectId) {
+    const pid = targetProjectId || projectId;
+    if (!pid) {
+      return false;
+    }
+    try {
+      const data = await request(`/api/ocr/train/active?project_id=${encodeURIComponent(pid)}`);
+      const job = data?.job;
+      if (!job?.id) {
+        return false;
+      }
+      stopPollingRef.current = false;
+      lastStatusRef.current = "";
+      lastMessageRef.current = "";
+      setJobId(job.id);
+      setJobFamily("ocr");
+      setJobStatus(job.status || "running");
+      setJobInfo(job);
+      setWorkflowState((prev) => ({ ...prev, trainingStarted: true }));
+      pushLog(`実行中のOCR学習ジョブへ再接続しました: ${job.id}`);
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -3002,6 +3077,11 @@ export default function App() {
         canStartOcrTraining={canStartOcrTraining}
         jobId={jobId}
         jobStatus={jobStatus}
+        jobInfo={jobInfo}
+        stopRequested={stopRequested}
+        startPending={startingTraining}
+        onOpenModels={() => setActiveView(trainingMode === "classification" ? "cls-models" : "ocr-models")}
+        onOpenInference={() => setActiveView(trainingMode === "classification" ? "cls-inference" : "ocr-inference")}
         logs={logs}
         workflowState={workflowState}
       />
