@@ -141,7 +141,14 @@ export default function TrainingView({
         hasIterationLog: trainingProgress.iteration !== null,
         stopRequested,
       });
-  const uiStateLabel = UI_TRAINING_STATE_LABELS[uiTrainingState] || uiTrainingState;
+  // 日本語表示ラベル（共通定義 UI_TRAINING_STATE_LABELS が唯一のソース。未知状態は「状態不明」）
+  const statusLabel = UI_TRAINING_STATE_LABELS[uiTrainingState] ?? "状態不明";
+  useEffect(() => {
+    if (!UI_TRAINING_STATE_LABELS[uiTrainingState] || uiTrainingState === "unknown") {
+      // 未知状態はidleへ偽装せず警告を残す（バックエンドの状態追加時の検知用）
+      console.warn(`未対応の学習状態: ${jobStatus} (ui: ${uiTrainingState})`);
+    }
+  }, [uiTrainingState, jobStatus]);
   // preparing/training/stopping 中は設定変更・データ再作成・再開始を禁止する
   const settingsLocked = ["preparing", "training", "stopping"].includes(uiTrainingState);
   // 最大iteration: ログ（Paddleのepoch総数）優先、無ければジョブ設定（Tesseractは epochs=max_iterations を流用）
@@ -198,52 +205,6 @@ export default function TrainingView({
     }
     return logs;
   }, [logs, logFilter]);
-
-  const latestEta = useMemo(() => {
-    function parseTimestamp(value) {
-      const match = String(value || "").match(/\[(\d{4})\/(\d{2})\/(\d{2}) (\d{2}):(\d{2}):(\d{2})\]/);
-      if (!match) return null;
-      const [, y, m, d, hh, mm, ss] = match;
-      const parsed = new Date(`${y}-${m}-${d}T${hh}:${mm}:${ss}`);
-      return Number.isFinite(parsed.getTime()) ? parsed : null;
-    }
-
-    const progressRows = [];
-    let rawEta = "-";
-    for (let i = logs.length - 1; i >= 0; i -= 1) {
-      const line = String(logs[i] || "");
-      const progress = line.match(/epoch:\s*\[(\d+)\/(\d+)\].*global_step:\s*(\d+)/i);
-      if (progress) {
-        const ts = parseTimestamp(line);
-        const currentEpoch = Number(progress[1]);
-        const totalEpochs = Number(progress[2]);
-        const globalStep = Number(progress[3]);
-        if (ts && Number.isFinite(currentEpoch) && Number.isFinite(totalEpochs) && Number.isFinite(globalStep)) {
-          progressRows.push({ ts, currentEpoch, totalEpochs, globalStep });
-        }
-      }
-      const jp = line.match(/残り\s*([0-9:]+)/);
-      if (jp?.[1] && rawEta === "-") rawEta = jp[1];
-      const en = line.match(/eta:\s*([0-9:]+)/i);
-      if (en?.[1] && rawEta === "-") rawEta = en[1];
-    }
-
-    if (progressRows.length >= 2) {
-      const latest = progressRows[0];
-      const earliest = progressRows[progressRows.length - 1];
-      const elapsedSec = Math.max(1, Math.round((latest.ts.getTime() - earliest.ts.getTime()) / 1000));
-      const completedSteps = Math.max(1, latest.globalStep - earliest.globalStep);
-      const inferredStepsPerEpoch = Math.max(1, Math.round(latest.globalStep / Math.max(latest.currentEpoch, 1)));
-      const totalSteps = Math.max(latest.globalStep, inferredStepsPerEpoch * latest.totalEpochs);
-      const remainingSteps = Math.max(0, totalSteps - latest.globalStep);
-      const remainingSec = Math.round((elapsedSec / completedSteps) * remainingSteps);
-      const hours = Math.floor(remainingSec / 3600);
-      const minutes = Math.floor((remainingSec % 3600) / 60);
-      const seconds = remainingSec % 60;
-      return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-    }
-    return rawEta;
-  }, [logs]);
 
   const [ocrChannel, ocrHeight, ocrWidth] = useMemo(() => {
     const [c = "", h = "", w = ""] = String(ocrImageShape || "").split(",");
@@ -403,11 +364,11 @@ export default function TrainingView({
                   </div>
                   <div className={`rounded-lg border px-2 py-2 ${statusToneClass}`}>
                     <p className="text-[10px] uppercase tracking-wide text-slate-200/80">状態</p>
-                    <p className="mt-1 text-sm font-semibold">{statusText}</p>
+                    <p className="mt-1 text-sm font-semibold">{statusLabel}</p>
                   </div>
                   <div className="rounded-lg border border-white/10 bg-black/15 px-2 py-2">
-                    <p className="text-[10px] uppercase tracking-wide text-slate-300/80">ETA</p>
-                    <p className="mt-1 text-sm font-semibold text-slate-100">{latestEta}</p>
+                    <p className="text-[10px] uppercase tracking-wide text-slate-300/80">残り時間</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-100">{formatDuration(etaSeconds)}</p>
                   </div>
                 </div>
               </div>
@@ -1279,7 +1240,7 @@ export default function TrainingView({
                         <div className="space-y-1 rounded-lg border border-border/70 bg-card/55 p-2 text-xs">
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-muted">状態</span>
-                            <span className="font-semibold text-text">{uiStateLabel}</span>
+                            <span className="font-semibold text-text">{statusLabel}</span>
                           </div>
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-muted">進捗</span>
@@ -1415,7 +1376,7 @@ export default function TrainingView({
         <div className="mb-2 grid shrink-0 grid-cols-2 gap-x-4 gap-y-1 rounded-xl border border-border/80 bg-card/55 p-2.5 text-xs lg:grid-cols-4">
           <div className="flex items-center justify-between gap-2">
             <span className="text-muted">状態</span>
-            <span className={`rounded-full border px-2 py-0.5 font-semibold ${statusToneClass}`}>{uiStateLabel}</span>
+            <span className={`rounded-full border px-2 py-0.5 font-semibold ${statusToneClass}`}>{statusLabel}</span>
           </div>
           <div className="flex items-center justify-between gap-2">
             <span className="text-muted">iteration</span>

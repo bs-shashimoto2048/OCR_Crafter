@@ -45,6 +45,12 @@ test("completed/failed/stopped/idle の写像", () => {
   assert.equal(deriveUiTrainingState(null), "idle");
 });
 
+test("予期しない状態は idle へ偽装せず unknown（状態不明）にする", () => {
+  assert.equal(deriveUiTrainingState("unknown"), "unknown");
+  assert.equal(deriveUiTrainingState("weird-status"), "unknown");
+  assert.equal(UI_TRAINING_STATE_LABELS.unknown, "状態不明");
+});
+
 test("全UI状態に日本語ラベルがある", () => {
   for (const state of ["idle", "preparing", "training", "stopping", "completed", "failed", "cancelled"]) {
     assert.ok(UI_TRAINING_STATE_LABELS[state], state);

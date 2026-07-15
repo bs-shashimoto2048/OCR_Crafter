@@ -22,6 +22,7 @@ export const UI_TRAINING_STATE_LABELS = {
   completed: "完了",
   failed: "失敗",
   cancelled: "停止済み",
+  unknown: "状態不明",
 };
 
 export function deriveUiTrainingState(jobStatus, { hasIterationLog = false, stopRequested = false } = {}) {
@@ -40,7 +41,8 @@ export function deriveUiTrainingState(jobStatus, { hasIterationLog = false, stop
     case "stopped":
       return "cancelled";
     default:
-      return "idle";
+      // 予期しない状態は idle へ偽装せず「状態不明」として表示する（未指定・idle のみ未開始）
+      return !jobStatus || jobStatus === "idle" ? "idle" : "unknown";
   }
 }
 

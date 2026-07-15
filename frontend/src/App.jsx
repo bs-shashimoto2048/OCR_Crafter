@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import Header from "./components/Header";
 import ExperimentalNotice from "./components/ExperimentalNotice";
+import ViewErrorBoundary from "./components/ViewErrorBoundary";
 import Sidebar from "./components/Sidebar";
 import WorkflowProgress from "./components/WorkflowProgress";
 import DashboardView from "./views/DashboardView";
@@ -3382,7 +3383,16 @@ export default function App() {
         {showWorkflow ? <WorkflowProgress steps={workflowSteps} activeView={activeView} onNavigate={setActiveView} /> : null}
         {EXPERIMENTAL_VIEWS.has(activeView) ? <ExperimentalNotice className="mt-4" /> : null}
 
-        <section className="mt-6">{view}</section>
+        <section className="mt-6">
+          {/* 1画面の例外でアプリ全体が消えないよう画面単位で捕捉（key=画面IDで切替時に自動リセット） */}
+          <ViewErrorBoundary
+            key={activeView}
+            viewName={viewMeta[activeView]?.title || activeView}
+            onBackToDashboard={() => setActiveView("dashboard")}
+          >
+            {view}
+          </ViewErrorBoundary>
+        </section>
 
         {!notice || suppressRapidOcrInferenceNotice ? null : (
           <div
