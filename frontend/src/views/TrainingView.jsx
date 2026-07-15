@@ -502,7 +502,7 @@ export default function TrainingView({
             {trainingFamily === "classification" ? (
               <>
                 <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">1. データ準備</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">データ準備</p>
                   <div className="grid grid-cols-3 gap-2">
                     <div>
                       <label className="app-label">学習比率</label>
@@ -559,7 +559,7 @@ export default function TrainingView({
                 </div>
 
                 <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">2. 初期重み</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">初期重み</p>
                   <div>
                     <label className="app-label">初期化方式</label>
                     <select value={clsInitSourceType} onChange={(e) => setClsInitSourceType(e.target.value)} className="app-select">
@@ -602,7 +602,7 @@ export default function TrainingView({
                 </div>
 
                 <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">3. 学習パラメータ</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">学習パラメータ</p>
                   <div>
                     <label className="app-label">モデル種別</label>
                     <select value={modelType} onChange={(e) => setModelType(e.target.value)} className="app-select">
@@ -668,7 +668,7 @@ export default function TrainingView({
                 </div>
 
                 <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">4. 実行</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">実行</p>
                   <Button
                     variant={clsNextAction === "train" ? trainingVariant : "secondary"}
                     className={`${clsNextAction === "train" ? trainingClassName : ""} w-full`}
@@ -735,7 +735,7 @@ export default function TrainingView({
                     </span>
                     次回学習の設定
                     <span className="ml-auto text-[11px] font-normal text-muted">
-                      {settingsLocked ? "学習実行中は変更できません" : "データ準備・エンジン設定・学習パラメータ"}
+                      {settingsLocked ? "学習実行中は変更できません" : "学習設定・プロジェクト設定・データ準備・エンジン設定"}
                     </span>
                   </button>
                   <div
@@ -751,95 +751,10 @@ export default function TrainingView({
                   className={`contents ${settingsLocked ? "opacity-70" : ""}`}
                   title={settingsLocked ? "学習実行中は設定を変更できません。" : undefined}
                 >
+                {/* 学習設定: OCRタイプの選択が後続設定（最大イテレーションの意味・初期値等）へ影響するため最初に配置し、
+                    変更後に画面上部へ戻らなくてよい導線にする */}
                 <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">共通設定</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="app-label">
-                        プロジェクト
-                        <InfoHint text="学習対象のプロジェクトです。プロジェクト画面で切り替えできます。" />
-                      </label>
-                      <input className="app-input" value={projectId || ""} readOnly placeholder="未選択" />
-                    </div>
-                    <div>
-                      <label className="app-label">
-                        学習データ
-                        <InfoHint text="学習に使用するデータセットのディレクトリです。データ作成後に自動設定されます。" />
-                      </label>
-                      <input className="app-input" value={ocrDatasetDir} readOnly placeholder="データ作成後に自動設定されます" />
-                    </div>
-                    <div>
-                      <label className="app-label">
-                        データ分割
-                        <InfoHint text="Train / Validation / Test の分割比率（合計1.00）。Tesseractでは Train→train.list / Validation→eval.list / Test→評価用 として使われます。" />
-                      </label>
-                      <div className="grid grid-cols-3 gap-1">
-                        <input
-                          type="number"
-                          min="0"
-                          max="1"
-                          step="0.01"
-                          value={trainRatio}
-                          onChange={(e) => setTrainRatio(e.target.value)}
-                          className="app-input"
-                          title="Train 比率"
-                        />
-                        <input
-                          type="number"
-                          min="0"
-                          max="1"
-                          step="0.01"
-                          value={valRatio}
-                          onChange={(e) => setValRatio(e.target.value)}
-                          className="app-input"
-                          title="Validation 比率"
-                        />
-                        <input
-                          type="number"
-                          min="0"
-                          max="1"
-                          step="0.01"
-                          value={testRatio}
-                          onChange={(e) => setTestRatio(e.target.value)}
-                          className="app-input"
-                          title="Test 比率"
-                        />
-                      </div>
-                      <p className={`mt-1 text-[11px] ${ratioSummary.valid ? "text-muted" : "text-amber-100"}`}>
-                        Train/Val/Test 合計: {ratioSummary.total}
-                        {ratioSummary.valid ? "" : "（1.00 になるよう調整してください）"}
-                      </p>
-                    </div>
-                    <div>
-                      <label className="app-label">
-                        {isTesseractEngine ? "最大イテレーション" : "学習回数"}
-                        <InfoHint text="学習の繰り返し回数です。PaddleOCR / EasyOCR では Epoch 数、Tesseract では Iteration 数として使用します。Tesseractでは一般的に500〜3000程度で学習します。" />
-                      </label>
-                      <input
-                        type="number"
-                        className="app-input"
-                        value={epochs}
-                        onChange={(e) => setEpochs(e.target.value)}
-                        disabled={ocrEngine === "easyocr"}
-                      />
-                      <p className="mt-1 text-[11px] text-muted">
-                        {isTesseractEngine
-                          ? "Tesseractでは Epoch ではなく Iteration として処理されます"
-                          : "Epochとして処理されます"}
-                      </p>
-                    </div>
-                    <div>
-                      <label className="app-label">
-                        出力先
-                        <InfoHint text="学習済みモデルの保存先です（変更不可）。" />
-                      </label>
-                      <input className="app-input" value={`data/projects/${projectId || "<project>"}/models/`} readOnly />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">1. データ準備</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">学習設定</p>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label className="app-label">OCRタイプ</label>
@@ -928,6 +843,97 @@ export default function TrainingView({
                       ) : null}
                     </div>
                   </div>
+                </div>
+
+                <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">プロジェクト設定</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="app-label">
+                        プロジェクト
+                        <InfoHint text="学習対象のプロジェクトです。プロジェクト画面で切り替えできます。" />
+                      </label>
+                      <input className="app-input" value={projectId || ""} readOnly placeholder="未選択" />
+                    </div>
+                    <div>
+                      <label className="app-label">
+                        学習データ
+                        <InfoHint text="学習に使用するデータセットのディレクトリです。データ作成後に自動設定されます。" />
+                      </label>
+                      <input className="app-input" value={ocrDatasetDir} readOnly placeholder="データ作成後に自動設定されます" />
+                    </div>
+                    <div>
+                      <label className="app-label">
+                        データ分割
+                        <InfoHint text="Train / Validation / Test の分割比率（合計1.00）。Tesseractでは Train→train.list / Validation→eval.list / Test→評価用 として使われます。" />
+                      </label>
+                      <div className="grid grid-cols-3 gap-1">
+                        <input
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.01"
+                          value={trainRatio}
+                          onChange={(e) => setTrainRatio(e.target.value)}
+                          className="app-input"
+                          title="Train 比率"
+                        />
+                        <input
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.01"
+                          value={valRatio}
+                          onChange={(e) => setValRatio(e.target.value)}
+                          className="app-input"
+                          title="Validation 比率"
+                        />
+                        <input
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.01"
+                          value={testRatio}
+                          onChange={(e) => setTestRatio(e.target.value)}
+                          className="app-input"
+                          title="Test 比率"
+                        />
+                      </div>
+                      <p className={`mt-1 text-[11px] ${ratioSummary.valid ? "text-muted" : "text-amber-100"}`}>
+                        Train/Val/Test 合計: {ratioSummary.total}
+                        {ratioSummary.valid ? "" : "（1.00 になるよう調整してください）"}
+                      </p>
+                    </div>
+                    <div>
+                      <label className="app-label">
+                        {isTesseractEngine ? "最大イテレーション" : "学習回数"}
+                        <InfoHint text="学習の繰り返し回数です。PaddleOCR / EasyOCR では Epoch 数、Tesseract では Iteration 数として使用します。Tesseractでは一般的に500〜3000程度で学習します。" />
+                      </label>
+                      <input
+                        type="number"
+                        className="app-input"
+                        value={epochs}
+                        onChange={(e) => setEpochs(e.target.value)}
+                        disabled={ocrEngine === "easyocr"}
+                      />
+                      <p className="mt-1 text-[11px] text-muted">
+                        {isTesseractEngine
+                          ? "Tesseractでは Epoch ではなく Iteration として処理されます"
+                          : "Epochとして処理されます"}
+                      </p>
+                    </div>
+                    <div>
+                      <label className="app-label">
+                        出力先
+                        <InfoHint text="学習済みモデルの保存先です（変更不可）。" />
+                      </label>
+                      <input className="app-input" value={`data/projects/${projectId || "<project>"}/models/`} readOnly />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">データ準備</p>
                   {ocrDatasetCreateMode === "from_logs" ? (
                     <div className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-card/40 p-3 text-xs text-muted">
                       <label className="inline-flex items-center gap-2">
@@ -947,7 +953,11 @@ export default function TrainingView({
                         correctedを優先
                       </label>
                     </div>
-                  ) : null}
+                  ) : (
+                    <p className="text-xs text-muted">
+                      ラベル付け済みデータから学習データを新規作成します（作成は下の「実行操作」から実行）。
+                    </p>
+                  )}
                 </div>
 
                 <details open className="rounded-xl border border-border/80 bg-card/45 p-3">
