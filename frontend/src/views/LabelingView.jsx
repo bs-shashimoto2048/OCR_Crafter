@@ -1008,15 +1008,19 @@ export default function LabelingView({
                   saveAndNext();
                 }
               }}
-              className="app-input min-h-[64px] !bg-[#f4f5f7] px-4 font-mono text-[32px] font-bold tracking-[0.12em] !text-[#111827] placeholder:!text-slate-400"
+              className="app-input label-main-input min-h-[72px] !bg-[#f4f5f7] px-4 font-mono !text-[#111827] placeholder:!text-slate-400"
               style={{
                 textAlign: labelTextAlign,
                 // 実描画幅が取れるまではカード全幅。小画像でも入力しやすいよう最低320px（親幅は超えない）
                 width: finalImageWidth ? `${Math.round(finalImageWidth)}px` : "100%",
                 minWidth: "min(320px, 100%)",
                 maxWidth: "100%",
+                // プレースホルダーだけ入力欄幅に応じて縮小（16〜28px。入力済み文字は38px固定）
+                "--label-placeholder-size": `${Math.round(
+                  Math.max(16, Math.min(28, (finalImageWidth || 560) * 0.05))
+                )}px`,
               }}
-              placeholder="ラベル文字列を入力（Enterで保存して次へ）"
+              placeholder="ラベル文字列を入力"
             />
           </div>
 

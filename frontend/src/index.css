@@ -39,6 +39,21 @@
     @apply h-8 w-full rounded-lg border border-border/80 bg-card/80 px-3 text-sm text-text outline-none transition placeholder:text-muted/75 focus:border-accent focus:bg-card/90 focus-visible:ring-2 focus-visible:ring-accent/55;
   }
 
+  /* ラベル編集「現在のラベル」入力欄。
+     入力済み: 38px太字（画像内文字との比較優先） /
+     未入力(:placeholder-shown): 入力欄幅に応じたサイズへ縮小（--label-placeholder-size をJS側で幅から算出） */
+  .label-main-input {
+    font-size: 38px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+  }
+
+  .label-main-input:placeholder-shown {
+    font-size: var(--label-placeholder-size, 24px);
+    font-weight: 600;
+    letter-spacing: 0.05em;
+  }
+
   .app-select {
     @apply h-8 w-full rounded-lg border border-border/80 bg-card/80 px-3 text-sm text-text outline-none transition focus:border-accent focus:bg-card/90 focus-visible:ring-2 focus-visible:ring-accent/55;
   }
