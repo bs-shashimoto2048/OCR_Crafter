@@ -143,6 +143,12 @@ export default function TrainingView({
       });
   // 日本語表示ラベル（共通定義 UI_TRAINING_STATE_LABELS が唯一のソース。未知状態は「状態不明」）
   const statusLabel = UI_TRAINING_STATE_LABELS[uiTrainingState] ?? "状態不明";
+  // 「次回学習の設定」の開閉。ユーザー操作後はポーリング・状態変化でも開閉を維持する（null=未操作）
+  const [settingsToggled, setSettingsToggled] = useState(null);
+  const nextSettingsOpen = settingsToggled ?? (uiTrainingState === "idle" && !jobInfo);
+  // 詳細ログの開閉。開時は右ペインの高さを重要イベントと分割する（右カード全体の高さは変えない）
+  const [detailLogOpen, setDetailLogOpen] = useState(false);
+  const eventsRef = useRef(null);
   useEffect(() => {
     if (!UI_TRAINING_STATE_LABELS[uiTrainingState] || uiTrainingState === "unknown") {
       // 未知状態はidleへ偽装せず警告を残す（バックエンドの状態追加時の検知用）
@@ -167,6 +173,17 @@ export default function TrainingView({
         : uiTrainingState === "cancelled"
           ? "bg-amber-400"
           : "bg-accent";
+
+  // 重要イベントの自動追従: 利用者が最下部付近を見ている場合のみ追従し、
+  // 過去のイベントを読んでいる間は勝手にスクロールしない（ページ全体もスクロールしない）
+  useEffect(() => {
+    const el = eventsRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    if (nearBottom) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [importantEvents]);
 
   // 経過時間（実行中のみ5秒ごとに更新）
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -362,9 +379,10 @@ export default function TrainingView({
         : "border-border bg-card/70 text-muted";
 
   return (
-    // ページ全体は縦スクロールのみ（横スクロール禁止）。1400px未満は縦積みへ切替
+    // デスクトップ(1400px以上)は表示領域高さへ固定し内部スクロールのみ（ページ縦スクロールなし）。
+    // 1400px未満は縦積み+ページ縦スクロール。横スクロールは詳細ログ内のみ
     <div
-      className={`grid items-start gap-4 overflow-x-hidden ${
+      className={`grid items-start gap-4 overflow-x-hidden min-[1400px]:h-[calc(100vh-175px)] min-[1400px]:min-h-[520px] min-[1400px]:items-stretch min-[1400px]:overflow-hidden ${
         paramsCollapsed
           ? "grid-cols-1"
           : "grid-cols-1 min-[1400px]:grid-cols-[minmax(420px,35fr)_minmax(0,65fr)]"
@@ -380,11 +398,12 @@ export default function TrainingView({
                 ? "実験機能（分割学習）の学習を実行します"
                 : "分類モデルとOCRモデルを切り替えて学習できます"
           }
-          className="min-w-0"
+          className="flex min-h-0 min-w-0 flex-col"
         >
-          <div className="space-y-2.5">
+          {/* 左ペイン: 実行概要/実行時設定/学習方式/実行操作=固定、次回学習の設定=残り高さで内部スクロール */}
+          <div className="flex min-h-0 flex-1 flex-col space-y-2.5">
             {/* 実行概要（2列グリッド・日本語統一） */}
-            <div className="rounded-xl border border-border/80 bg-card/55 p-3">
+            <div className="shrink-0 rounded-xl border border-border/80 bg-card/55 p-3">
               <p className="text-[15px] font-semibold text-text">実行概要</p>
               <div className="mt-2 grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-1 text-sm">
                 <span className="text-muted">方式</span>
@@ -400,7 +419,7 @@ export default function TrainingView({
 
             {/* 実行時設定（ジョブ開始時のスナップショット・読み取り専用） */}
             {jobInfo ? (
-              <div className="rounded-xl border border-border/80 bg-card/55 p-3">
+              <div className="shrink-0 rounded-xl border border-border/80 bg-card/55 p-3">
                 <p className="text-[15px] font-semibold text-text">
                   実行時設定
                   <span className="ml-2 text-[11px] font-normal text-muted">このジョブ開始時の値（読み取り専用）</span>
@@ -440,7 +459,7 @@ export default function TrainingView({
             ) : null}
 
             {trainingMode === "all" ? (
-              <div className="rounded-xl border border-border/80 bg-card/50 p-3">
+              <div className="shrink-0 rounded-xl border border-border/80 bg-card/50 p-3">
                 <label className="app-label">学習方式</label>
                 <select value={trainingFamily} onChange={(e) => setTrainingFamily(e.target.value)} className="app-select">
                   <option value="classification">分類モデル（classification）</option>
@@ -448,7 +467,7 @@ export default function TrainingView({
                 </select>
               </div>
             ) : (
-              <div className="rounded-xl border border-border/80 bg-card/60 p-3 text-sm text-text">
+              <div className="shrink-0 rounded-xl border border-border/80 bg-card/60 p-3 text-sm text-text">
                 学習方式:{" "}
                 <span className="font-semibold">
                   {trainingMode === "ocr" ? "OCR認識モデル（ocr）" : "分類モデル（classification）"}
@@ -669,19 +688,27 @@ export default function TrainingView({
             ) : (
               <>
                 {/* 次回学習に使う編集設定。実行時設定（スナップショット）と区別するため折り畳みに分離。
-                    未開始時のみ初期展開し、ジョブ閲覧中は閉じておく */}
+                    開時は左ペインの残り高さを使い、この中だけ内部スクロールする（閉時は他領域が詰まる） */}
                 <details
-                  open={uiTrainingState === "idle" && !jobInfo}
-                  className="group rounded-xl border border-border/80 bg-card/45"
+                  open={nextSettingsOpen}
+                  className={`group min-w-0 rounded-xl border border-border/80 bg-card/45 ${
+                    nextSettingsOpen ? "flex min-h-0 min-[1400px]:flex-1 flex-col" : "shrink-0"
+                  }`}
                 >
-                  <summary className="flex cursor-pointer select-none items-center gap-1.5 rounded-xl px-3 py-2 text-[15px] font-semibold text-text transition hover:bg-card/70 [&::-webkit-details-marker]:hidden">
+                  <summary
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setSettingsToggled(!nextSettingsOpen);
+                    }}
+                    className="flex shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-xl px-3 py-2 text-[15px] font-semibold text-text transition hover:bg-card/70 [&::-webkit-details-marker]:hidden"
+                  >
                     <span className="text-xs text-muted transition-transform group-open:rotate-90" aria-hidden="true">▶</span>
                     次回学習の設定
                     <span className="ml-auto text-[11px] font-normal text-muted">
                       {settingsLocked ? "学習実行中は変更できません" : "データ準備・エンジン設定・学習パラメータ"}
                     </span>
                   </summary>
-                  <div className="space-y-2.5 px-2.5 pb-2.5">
+                  <div className="scroll-stable min-h-[180px] min-w-0 flex-1 space-y-2.5 overflow-y-auto overflow-x-hidden px-2.5 pb-2.5 dark-scroll">
                 {/* preparing/training/stopping 中は設定変更を禁止（fieldsetで配下の入力を一括無効化） */}
                 <fieldset
                   disabled={settingsLocked}
@@ -1223,7 +1250,8 @@ export default function TrainingView({
 
                 {ocrEngine !== "easyocr" ? (
                   <>
-                    <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
+                    {/* 実行操作は左ペイン末尾の固定領域（設定をスクロールしても常に見える。position:fixedは不使用） */}
+                    <div className="shrink-0 space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
                       <p className="text-[15px] font-semibold text-text">実行操作</p>
 
                       {/* 主ボタン: UI状態（idle/preparing/training/stopping/completed/failed/cancelled）に連動 */}
@@ -1359,7 +1387,7 @@ export default function TrainingView({
                     </div>
 
                     {ocrDatasetInfo ? (
-                      <div className="rounded-xl border border-accent/30 bg-accent/10 p-3 text-xs text-blue-100">
+                      <div className="shrink-0 rounded-xl border border-accent/30 bg-accent/10 p-3 text-xs text-blue-100">
                         <p>作成済みデータ: {ocrDatasetInfo.dataset_root || "-"}</p>
                         {ocrDatasetInfo.counts ? (
                           <p>
@@ -1382,7 +1410,7 @@ export default function TrainingView({
       <Card
         title="学習状況"
         subtitle="要約・重要イベント・詳細ログ"
-        className="min-w-0"
+        className="flex min-h-0 min-w-0 flex-col"
         actions={
           <div className="flex items-center gap-2">
             {isRunning || uiTrainingState === "stopping" ? (
@@ -1419,8 +1447,8 @@ export default function TrainingView({
           </div>
         }
       >
-        {/* 学習状況サマリー（コンパクト構成。取得できない項目は -- 表示） */}
-        <div className="mb-3 rounded-xl border border-border/80 bg-card/55 p-3">
+        {/* 学習状況サマリー（コンパクト構成・固定領域。数値は等幅数字で揺れ防止。取得できない項目は -- 表示） */}
+        <div className="mb-3 shrink-0 rounded-xl border border-border/80 bg-card/55 p-3 tabular-nums">
           <div className="flex items-center justify-between gap-3">
             <p className="text-[15px] font-semibold text-text">
               進捗
@@ -1464,15 +1492,20 @@ export default function TrainingView({
             </div>
             <div className="col-span-2 min-w-0 xl:col-span-4">
               <p className="text-xs text-muted">最終checkpoint</p>
-              <p className="break-all font-mono text-xs text-text">{trainingProgress.checkpoint || "--"}</p>
+              <p className="truncate font-mono text-xs text-text" title={trainingProgress.checkpoint || ""}>
+                {trainingProgress.checkpoint || "--"}
+              </p>
             </div>
           </div>
         </div>
 
-        {/* 重要イベント（縦型タイムライン。生ログ全文は詳細ログへ） */}
-        <div className="mb-3 rounded-xl border border-border/80 bg-card/55 p-3">
-          <p className="mb-2 text-[15px] font-semibold text-text">重要イベント</p>
-          <div className="max-h-[420px] min-w-0 overflow-y-auto">
+        {/* 重要イベント（縦型タイムライン・右ペインの残り高さへ伸縮。生ログ全文は詳細ログへ） */}
+        <div className="mb-3 flex min-h-0 min-w-0 flex-col rounded-xl border border-border/80 bg-card/55 p-3 min-[1400px]:flex-1">
+          <p className="mb-2 shrink-0 text-[15px] font-semibold text-text">重要イベント</p>
+          <div
+            ref={eventsRef}
+            className="scroll-stable dark-scroll max-h-[50vh] min-h-[180px] min-w-0 flex-1 overflow-y-auto overflow-x-hidden min-[1400px]:max-h-none"
+          >
             {importantEvents.length === 0 ? (
               <p className="text-sm text-muted">イベントはまだありません。</p>
             ) : (
@@ -1505,12 +1538,23 @@ export default function TrainingView({
           </div>
         </div>
 
-        {/* 詳細ログ（ターミナル形式・初期は閉じる。トラブル調査用に全行保持） */}
-        <details className="group min-w-0 rounded-xl border border-border/80 bg-card/55">
-          <summary className="flex cursor-pointer select-none items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-text transition hover:bg-card/70 [&::-webkit-details-marker]:hidden">
+        {/* 詳細ログ（ターミナル形式・初期は閉じる。開時は右ペイン内で高さを分割し、右カード全体は伸ばさない） */}
+        <details
+          open={detailLogOpen}
+          className={`group min-w-0 rounded-xl border border-border/80 bg-card/55 ${
+            detailLogOpen ? "flex min-h-[160px] flex-col min-[1400px]:flex-[0_1_45%]" : "shrink-0"
+          }`}
+        >
+          <summary
+            onClick={(e) => {
+              e.preventDefault();
+              setDetailLogOpen(!detailLogOpen);
+            }}
+            className="flex shrink-0 cursor-pointer select-none items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-text transition hover:bg-card/70 [&::-webkit-details-marker]:hidden"
+          >
             <span className="text-[10px] text-muted transition-transform group-open:rotate-90" aria-hidden="true">▶</span>
             詳細ログ
-            <span className="ml-auto flex items-center gap-2 font-normal" onClick={(e) => e.preventDefault()}>
+            <span className="ml-auto flex items-center gap-2 font-normal" onClick={(e) => e.stopPropagation()}>
               <span className="inline-flex rounded-lg border border-border bg-card/45 p-0.5">
                 {[
                   ["all", "すべて"],
@@ -1561,7 +1605,7 @@ export default function TrainingView({
           </summary>
           <div
             ref={logContainerRef}
-            className="h-[380px] select-text overflow-auto border-t border-border/60 bg-[#1d2229] px-2.5 py-2 font-mono text-[12px] leading-[18px]"
+            className="dark-scroll h-[320px] min-h-0 select-text overflow-auto border-t border-border/60 bg-[#1d2229] px-2.5 py-2 font-mono text-[12px] leading-[18px] min-[1400px]:h-auto min-[1400px]:flex-1"
           >
             {filteredLogs.length === 0 ? (
               <p className="text-muted">ログはまだありません。</p>
