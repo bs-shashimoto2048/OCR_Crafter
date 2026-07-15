@@ -332,6 +332,33 @@ export default function LabelingView({
   // 最終画像の実描画幅（px）。入力欄の幅をこれへ追従させる（nullの間はカード全幅）
   const finalImageRef = useRef(null);
   const [finalImageWidth, setFinalImageWidth] = useState(null);
+  // OCR再実行ボタンの状態フィードバック: press=押下発光 / success=緑 / error=赤（短時間で通常へ戻す）
+  const [rerunFeedback, setRerunFeedback] = useState(null);
+  const rerunRequestedRef = useRef(false);
+  const rerunFeedbackTimerRef = useRef(null);
+
+  function setRerunFeedbackTimed(kind, durationMs) {
+    setRerunFeedback(kind);
+    if (rerunFeedbackTimerRef.current) {
+      clearTimeout(rerunFeedbackTimerRef.current);
+    }
+    rerunFeedbackTimerRef.current = setTimeout(() => setRerunFeedback(null), durationMs);
+  }
+
+  // 再実行ボタン起点のロード完了時のみ成功/失敗フィードバックを出す（画像切替の通常ロードでは出さない）
+  function finishRerunFeedback(ok) {
+    if (!rerunRequestedRef.current) {
+      return;
+    }
+    rerunRequestedRef.current = false;
+    setRerunFeedbackTimed(ok ? "success" : "error", ok ? 600 : 1200);
+  }
+
+  useEffect(() => () => {
+    if (rerunFeedbackTimerRef.current) {
+      clearTimeout(rerunFeedbackTimerRef.current);
+    }
+  }, []);
   const [showUnlabeledOnly, setShowUnlabeledOnly] = useState(false);
   const [listMode, setListMode] = useState("table");
   const [previewSrc, setPreviewSrc] = useState("");
@@ -560,9 +587,11 @@ export default function LabelingView({
           engine: data?.predict_engine || predictParams?.engine || "",
           modelName: data?.predict_model_name || "",
         });
-        if (!prediction && data?.predict_error) {
+        const rerunFailed = !prediction && Boolean(data?.predict_error);
+        if (rerunFailed) {
           setOcrError(String(data.predict_error));
         }
+        finishRerunFeedback(!rerunFailed);
       } catch (error) {
         if (cancelled) {
           return;
@@ -573,6 +602,7 @@ export default function LabelingView({
         setOcrCandidate(null);
         setOcrMeta({ engine: predictParams?.engine || "", modelName: "" });
         setOcrError(String(error?.message || error || "不明なエラー"));
+        finishRerunFeedback(false);
       } finally {
         if (!cancelled) {
           setOcrLoading(false);
@@ -1034,12 +1064,34 @@ export default function LabelingView({
                 <Button
                   size="sm"
                   variant="secondary"
-                  className="h-6 px-2 text-[11px]"
-                  onClick={() => setOcrReloadTick((prev) => prev + 1)}
+                  className={`h-7 px-3 text-[11px] font-semibold !border-accent/60 !bg-accent/15 !text-blue-200 transition-[box-shadow,background-color,border-color] duration-200 hover:!bg-accent/25 ${
+                    rerunFeedback === "press"
+                      ? "shadow-[0_0_0_1px_rgba(96,165,250,0.55),0_0_10px_rgba(96,165,250,0.45)]"
+                      : rerunFeedback === "success"
+                        ? "!border-emerald-400/70 !text-emerald-200 shadow-[0_0_0_1px_rgba(52,211,153,0.55),0_0_10px_rgba(52,211,153,0.45)]"
+                        : rerunFeedback === "error"
+                          ? "!border-red-400/70 !text-red-200 shadow-[0_0_0_1px_rgba(248,113,113,0.55),0_0_12px_rgba(248,113,113,0.5)]"
+                          : ""
+                  }`}
+                  onClick={() => {
+                    rerunRequestedRef.current = true;
+                    setRerunFeedbackTimed("press", 300);
+                    setOcrReloadTick((prev) => prev + 1);
+                  }}
                   disabled={ocrLoading}
-                  title="現在画像に対して全スロットを再推論します"
+                  title="現在の画像でOCRを再実行します"
+                  aria-label="現在の画像でOCRを再実行"
                 >
-                  OCR再実行
+                  {ocrLoading ? (
+                    <>
+                      <span className="mr-1 inline-block animate-spin" aria-hidden="true">
+                        ↻
+                      </span>
+                      OCR実行中...
+                    </>
+                  ) : (
+                    <>↻ OCR再実行</>
+                  )}
                 </Button>
               </div>
             </div>
