@@ -1016,10 +1016,13 @@ def image_thumbnail(
             thumb.thumbnail((width, height), Image.Resampling.LANCZOS)
             thumb.save(cache_file, format="JPEG", quality=85)
 
+    # no-cache: キャッシュは保持しつつ毎回 ETag/Last-Modified で再検証させる（変更なしなら304）。
+    # 回転で画像が更新された後、リロード（URLの v= が初期値へ戻る）でも古い向きの
+    # キャッシュがそのまま表示される問題を防ぐ
     return FileResponse(
         cache_file,
         media_type="image/jpeg",
-        headers={"Cache-Control": "public, max-age=86400"},
+        headers={"Cache-Control": "no-cache"},
     )
 
 
@@ -1095,7 +1098,8 @@ def image_file(image_name: str, project_id: Optional[str] = Query(default="defau
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="image not found")
 
-    return FileResponse(path)
+    # 回転等でファイルが更新されても古いキャッシュが表示されないよう毎回再検証させる
+    return FileResponse(path, headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/images/{image_name}/processed")
@@ -1131,7 +1135,7 @@ def image_processed_file(
 
     for candidate in candidates:
         if candidate.exists() and candidate.is_file():
-            return FileResponse(candidate)
+            return FileResponse(candidate, headers={"Cache-Control": "no-cache"})
 
     try:
         preview = preview_preprocess(image_name=safe_name, project_id=resolved)
@@ -1139,7 +1143,7 @@ def image_processed_file(
         if processed_rel:
             processed_path = paths.root / str(processed_rel)
             if processed_path.exists() and processed_path.is_file():
-                return FileResponse(processed_path)
+                return FileResponse(processed_path, headers={"Cache-Control": "no-cache"})
     except Exception:  # noqa: BLE001
         pass
 
@@ -1159,7 +1163,7 @@ def image_interim_file(
     paths = ensure_project_directories(resolved)
     candidate = paths.interim / f"{Path(safe_name).stem}.png"
     if candidate.exists() and candidate.is_file():
-        return FileResponse(candidate)
+        return FileResponse(candidate, headers={"Cache-Control": "no-cache"})
     raise HTTPException(status_code=404, detail="interim image not found")
 
 
