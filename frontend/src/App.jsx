@@ -197,6 +197,10 @@ const DEFAULT_PREPROCESS_PARAMS = {
 const OCR_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 // Tesseract学習対象文字セット: A-Z / 0-9 / 小文字筆記体 k,l,t
 const TESSERACT_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt";
+// 学習回数の既定値。Tesseractは最大iterationとして扱われるためFine-tuning向けの1500を既定にする
+// （PaddleOCR等のEpoch既定30には影響しない。ユーザー変更済みの値は上書きしない）
+const OCR_EPOCHS_DEFAULT = 30;
+const TESSERACT_MAX_ITERATIONS_DEFAULT = 1500;
 // 推論・評価時whitelist既定（実運用で出現しうる文字。学習対象とは別概念）
 const TESSERACT_WHITELIST_DEFAULT = TESSERACT_CHARSET_DEFAULT;
 
@@ -374,7 +378,7 @@ export default function App() {
   const [trainRatio, setTrainRatio] = useState(0.7);
   const [valRatio, setValRatio] = useState(0.2);
   const [testRatio, setTestRatio] = useState(0.1);
-  const [epochs, setEpochs] = useState(30);
+  const [epochs, setEpochs] = useState(OCR_EPOCHS_DEFAULT);
   const [batchSize, setBatchSize] = useState(16);
   const [learningRate, setLearningRate] = useState(0.001);
   const [clsInitSourceType, setClsInitSourceType] = useState("imagenet");
@@ -1174,6 +1178,16 @@ export default function App() {
       setOcrCharset((prev) => (prev === OCR_CHARSET_DEFAULT ? TESSERACT_CHARSET_DEFAULT : prev));
     } else {
       setOcrCharset((prev) => (prev === TESSERACT_CHARSET_DEFAULT ? OCR_CHARSET_DEFAULT : prev));
+    }
+  }, [ocrEngine]);
+
+  // OCRタイプ切替時に学習回数の既定値を切替（Tesseract: 1500 iteration=Fine-tuning向け / その他: 30 epoch）。
+  // ユーザーが既定値以外へ変更した値は上書きしない（charset既定切替と同じ方式）
+  useEffect(() => {
+    if (ocrEngine === "tesseract") {
+      setEpochs((prev) => (String(prev) === String(OCR_EPOCHS_DEFAULT) ? TESSERACT_MAX_ITERATIONS_DEFAULT : prev));
+    } else {
+      setEpochs((prev) => (String(prev) === String(TESSERACT_MAX_ITERATIONS_DEFAULT) ? OCR_EPOCHS_DEFAULT : prev));
     }
   }, [ocrEngine]);
 

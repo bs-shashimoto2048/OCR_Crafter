@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Card from "../components/Card";
 import Button from "../components/Button";
 import { PADDLEOCR_OFFICIAL_MODELS_TOOLTIP } from "../lib/paddleocrOfficialTooltip";
+import { normalizeRatioInput, summarizeRatios } from "../lib/ratio";
 import {
   UI_TRAINING_STATE_LABELS,
   classifyLogLine,
@@ -282,17 +283,11 @@ export default function TrainingView({
     }
   }, [canToggleParams]);
 
-  const ratioSummary = useMemo(() => {
-    const train = Number(trainRatio);
-    const val = Number(valRatio);
-    const test = Number(testRatio);
-    if (!Number.isFinite(train) || !Number.isFinite(val) || !Number.isFinite(test)) {
-      return { total: "-", valid: false };
-    }
-    const total = train + val + test;
-    const valid = train > 0 && val >= 0 && test >= 0 && Math.abs(total - 1.0) < 1e-6;
-    return { total: total.toFixed(2), valid };
-  }, [trainRatio, valRatio, testRatio]);
+  // 合計1.0の検証は許容誤差つき（0.7+0.2+0.1の浮動小数点誤差を吸収。lib/ratio.js参照）
+  const ratioSummary = useMemo(
+    () => summarizeRatios(trainRatio, valRatio, testRatio),
+    [trainRatio, valRatio, testRatio]
+  );
 
   const clsTrainingMode = clsInitSourceType === "scratch" ? "scratch" : "finetune";
   const clsNeedsInitModel = clsInitSourceType === "classification_model";
@@ -847,7 +842,8 @@ export default function TrainingView({
 
                 <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">プロジェクト設定</p>
-                  <div className="grid grid-cols-2 gap-2">
+                  {/* 左3:右2。左のデータ分割は3入力横並びのため、サイドバー表示時にも潰れない幅を確保する */}
+                  <div className="grid grid-cols-[minmax(0,3fr)_minmax(0,2fr)] gap-2">
                     <div>
                       <label className="app-label">
                         プロジェクト
@@ -862,40 +858,42 @@ export default function TrainingView({
                       </label>
                       <input className="app-input" value={ocrDatasetDir} readOnly placeholder="データ作成後に自動設定されます" />
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <label className="app-label">
                         データ分割
-                        <InfoHint text="Train / Validation / Test の分割比率（合計1.00）。Tesseractでは Train→train.list / Validation→eval.list / Test→評価用 として使われます。" />
+                        <InfoHint text="Train / Validation / Test の分割比率（合計1.00）。0.1単位で変更できます。Tesseractでは Train→train.list / Validation→eval.list / Test→評価用 として使われます。" />
                       </label>
+                      {/* 0.1単位入力。スピナー操作の浮動小数点誤差は normalizeRatioInput で小数第1位へ丸める。
+                          minmax(0,1fr)×3 + min-w-0 でサイドバー表示時も入力欄が潰れない */}
                       <div className="grid grid-cols-3 gap-1">
                         <input
                           type="number"
                           min="0"
                           max="1"
-                          step="0.01"
+                          step="0.1"
                           value={trainRatio}
-                          onChange={(e) => setTrainRatio(e.target.value)}
-                          className="app-input"
+                          onChange={(e) => setTrainRatio(normalizeRatioInput(e.target.value))}
+                          className="app-input min-w-0 px-2"
                           title="Train 比率"
                         />
                         <input
                           type="number"
                           min="0"
                           max="1"
-                          step="0.01"
+                          step="0.1"
                           value={valRatio}
-                          onChange={(e) => setValRatio(e.target.value)}
-                          className="app-input"
+                          onChange={(e) => setValRatio(normalizeRatioInput(e.target.value))}
+                          className="app-input min-w-0 px-2"
                           title="Validation 比率"
                         />
                         <input
                           type="number"
                           min="0"
                           max="1"
-                          step="0.01"
+                          step="0.1"
                           value={testRatio}
-                          onChange={(e) => setTestRatio(e.target.value)}
-                          className="app-input"
+                          onChange={(e) => setTestRatio(normalizeRatioInput(e.target.value))}
+                          className="app-input min-w-0 px-2"
                           title="Test 比率"
                         />
                       </div>
@@ -918,7 +916,7 @@ export default function TrainingView({
                       />
                       <p className="mt-1 text-[11px] text-muted">
                         {isTesseractEngine
-                          ? "Tesseractでは Epoch ではなく Iteration として処理されます"
+                          ? "TesseractではEpochではなくIterationとして処理されます。1500はFine-tuning向けの初期値です。学習データ量と評価結果に応じて調整してください。"
                           : "Epochとして処理されます"}
                       </p>
                     </div>
