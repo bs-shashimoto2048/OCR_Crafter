@@ -27,6 +27,31 @@ const keyRows = [
 
 const ENGINE_LABELS = { tesseract: "Tesseract", paddleocr: "PaddleOCR", easyocr: "EasyOCR", custom: "カスタムモデル" };
 
+// 現在のラベルの文字位置（プロジェクト別に localStorage 保存。未設定=中央）
+const LABEL_TEXT_ALIGN_STORAGE_KEY = "ocr_label_text_align_by_project_v1";
+const LABEL_TEXT_ALIGN_VALUES = new Set(["left", "center", "right"]);
+
+function readLabelTextAlign(projectId) {
+  try {
+    const map = JSON.parse(localStorage.getItem(LABEL_TEXT_ALIGN_STORAGE_KEY) || "{}");
+    const value = map?.[projectId];
+    return LABEL_TEXT_ALIGN_VALUES.has(value) ? value : "center";
+  } catch {
+    return "center";
+  }
+}
+
+function writeLabelTextAlign(projectId, value) {
+  try {
+    const raw = localStorage.getItem(LABEL_TEXT_ALIGN_STORAGE_KEY);
+    const map = raw ? JSON.parse(raw) : {};
+    map[projectId] = value;
+    localStorage.setItem(LABEL_TEXT_ALIGN_STORAGE_KEY, JSON.stringify(map));
+  } catch {
+    // localStorage が使えない環境では保存なしで動作継続
+  }
+}
+
 function engineLabelOf(engine) {
   return ENGINE_LABELS[String(engine || "").toLowerCase()] || (engine ? String(engine) : "--");
 }
@@ -285,6 +310,8 @@ export default function LabelingView({
   const zoomLevels = [25, 50, 100, 150, 200];
   // "fit" = 高さ自動（3画像を表示領域内へ収める）。数値 = 従来の幅基準倍率（内部スクロール）
   const [zoomPercent, setZoomPercent] = useState("fit");
+  // 現在のラベルの文字位置（left/center/right。プロジェクト切替で復元）
+  const [labelTextAlign, setLabelTextAlign] = useState("center");
   const [showUnlabeledOnly, setShowUnlabeledOnly] = useState(false);
   const [listMode, setListMode] = useState("table");
   const [previewSrc, setPreviewSrc] = useState("");
@@ -307,6 +334,17 @@ export default function LabelingView({
   const savingRef = useRef(false);
   const [savingAndAdvancing, setSavingAndAdvancing] = useState(false);
   const selected = images[selectedIndex] || null;
+
+  // 文字位置をプロジェクト単位で復元・保存（リロード後も維持）
+  useEffect(() => {
+    setLabelTextAlign(readLabelTextAlign(projectId));
+  }, [projectId]);
+
+  function updateLabelTextAlign(value) {
+    const next = LABEL_TEXT_ALIGN_VALUES.has(value) ? value : "center";
+    setLabelTextAlign(next);
+    writeLabelTextAlign(projectId, next);
+  }
   const visibleEntries = useMemo(() => {
     const entries = images.map((item, originalIndex) => {
       const savedLabel = String(item.label ?? "").trim();
@@ -869,8 +907,24 @@ export default function LabelingView({
           </div>
         </div>
 
-        <div className="shrink-0 rounded-xl border border-border bg-card/60 p-3 backdrop-blur-md">
-          <label className="app-label">現在のラベル</label>
+        {/* 画像パネルと同じ p-2 余白にして、入力欄の左右位置を画像表示エリアと一致させる */}
+        <div className="shrink-0 rounded-xl border border-border bg-card/60 p-2 backdrop-blur-md">
+          <div className="mb-1 flex items-center justify-between gap-2 px-1">
+            <label className="app-label mb-0">現在のラベル</label>
+            <label className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted">
+              文字位置
+              <select
+                value={labelTextAlign}
+                onChange={(e) => updateLabelTextAlign(e.target.value)}
+                className="app-select h-6 w-auto px-1.5 py-0 text-xs"
+                title="現在のラベルの文字位置（プロジェクト単位で保存）"
+              >
+                <option value="left">左</option>
+                <option value="center">中央</option>
+                <option value="right">右</option>
+              </select>
+            </label>
+          </div>
           <input
             ref={labelInputRef}
             value={labelValue}
@@ -888,7 +942,8 @@ export default function LabelingView({
                 saveAndNext();
               }
             }}
-            className="app-input mb-2 h-12 font-mono text-[26px] font-semibold tracking-[0.12em]"
+            className="app-input mb-2 min-h-[64px] px-4 font-mono text-[32px] font-semibold tracking-[0.12em]"
+            style={{ textAlign: labelTextAlign }}
             placeholder="ラベル文字列を入力（Enterで保存して次へ）"
           />
 

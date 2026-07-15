@@ -100,6 +100,7 @@ localStorage（`try/catch` で不可環境でも動作継続）:
 | `ocr_model_eval_history_by_project_v1` | モデル評価履歴 | プロジェクト別 |
 | `ocr_include_lowercase_by_project_v1` | 小文字出力設定 | プロジェクト別 |
 | `ocr_candidate_dict_by_project_v1` | OCR候補辞書 | プロジェクト別 |
+| `ocr_label_text_align_by_project_v1` | ラベル編集の「現在のラベル」文字位置（left/center/right、既定center） | プロジェクト別 |
 | `ocr_detection_preprocess_by_project_v1` | YOLO検出用前処理 | プロジェクト別 |
 | `ocr_sidebar_collapsed_v1` | サイドバー折り畳み | 全体共通 |
 | `ocr_image_builder_last_state_v1` | 学習画像作成の最終状態 | 全体共通 |
