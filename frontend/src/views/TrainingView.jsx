@@ -776,8 +776,8 @@ export default function TrainingView({
                           {
                             value: "auto",
                             label: "Auto",
-                            // 選択可能なボタンは色付きで発光させる（Auto=青）
-                            glow: "border-accent/80 bg-card/60 text-blue-200 shadow-[0_0_10px_rgba(88,166,255,0.55)] hover:bg-accent/20",
+                            // 選択可能なボタンは色付きで発光させる（Auto=青）。未選択でも背景をカードより明るくし操作可能と分かるようにする
+                            glow: "border-accent/80 bg-slate-700/70 text-blue-200 shadow-[0_0_10px_rgba(88,166,255,0.55)] hover:bg-accent/20",
                             selectedClass: "border-accent bg-accent text-white shadow-[0_0_14px_rgba(88,166,255,0.75)]",
                             selectable: !isTesseractEngine && ocrEngine !== "easyocr",
                             hint: "GPUが利用可能ならGPUを使用します",
@@ -785,7 +785,7 @@ export default function TrainingView({
                           {
                             value: "cpu",
                             label: "CPU",
-                            glow: "border-cyan-400/80 bg-card/60 text-cyan-100 shadow-[0_0_10px_rgba(34,211,238,0.55)] hover:bg-cyan-400/15",
+                            glow: "border-cyan-400/80 bg-slate-700/70 text-cyan-100 shadow-[0_0_10px_rgba(34,211,238,0.55)] hover:bg-cyan-400/15",
                             selectedClass: "border-cyan-300 bg-cyan-500/80 text-white shadow-[0_0_14px_rgba(34,211,238,0.75)]",
                             selectable: ocrEngine !== "easyocr",
                             hint: "CPUで学習します",
@@ -793,7 +793,7 @@ export default function TrainingView({
                           {
                             value: "gpu",
                             label: "GPU",
-                            glow: "border-emerald-400/80 bg-card/60 text-emerald-100 shadow-[0_0_10px_rgba(52,211,153,0.6)] hover:bg-emerald-400/15",
+                            glow: "border-emerald-400/80 bg-slate-700/70 text-emerald-100 shadow-[0_0_10px_rgba(52,211,153,0.6)] hover:bg-emerald-400/15",
                             selectedClass: "border-emerald-300 bg-emerald-500/80 text-white shadow-[0_0_14px_rgba(52,211,153,0.8)]",
                             // GPUハードが検出されていれば選択可能として点灯する
                             // （torch/paddleのCUDA対応状況は実行時に解決されるためUIではブロックしない）
@@ -825,7 +825,8 @@ export default function TrainingView({
                                   ? opt.selectedClass
                                   : lit
                                     ? opt.glow
-                                    : "cursor-not-allowed border-border/50 bg-card/40 text-muted/40"
+                                    : // 無効: 暗い背景+低コントラスト+発光なし（未選択の発光ボタンと明確に区別）
+                                      "cursor-not-allowed border-slate-600 bg-slate-800/80 text-slate-500"
                               } ${!clickable && lit ? "cursor-default" : ""}`}
                             >
                               {opt.label}

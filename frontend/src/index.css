@@ -12,6 +12,20 @@
   html {
     scrollbar-gutter: stable;
     font-size: 17px;
+    /* ネイティブコントロール（数値スピナー・selectドロップダウン等）をダークテーマで描画し視認性を確保 */
+    color-scheme: dark;
+  }
+
+  /* チェックボックス・ラジオはアクセント色で塗り、操作対象と分かるようにする */
+  input[type="checkbox"],
+  input[type="radio"] {
+    accent-color: #22d3ee;
+    cursor: pointer;
+  }
+
+  input[type="checkbox"]:disabled,
+  input[type="radio"]:disabled {
+    cursor: not-allowed;
   }
 
   :where(button, [role="button"], input, select, textarea):focus-visible {
@@ -35,8 +49,19 @@
     @apply hover:-translate-y-0.5 hover:shadow-card hover:scale-[1.01];
   }
 
+  /* 入力欄はカード背景より一段明るくし、入力可能領域が背景に埋もれないようにする。
+     状態差別化: 通常=明るい背景+中間枠線 / hover=枠線明るく / focus=シアン枠+リング /
+     disabled=暗く低コントラスト+not-allowed / readOnly=少し暗いが文字は通常どおり読める（disabledと区別） */
   .app-input {
-    @apply h-8 w-full rounded-lg border border-border/80 bg-card/80 px-3 text-sm text-text outline-none transition placeholder:text-muted/75 focus:border-accent focus:bg-card/90 focus-visible:ring-2 focus-visible:ring-accent/55;
+    @apply h-8 w-full rounded-lg border border-slate-500 bg-slate-600/60 px-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-400 hover:border-slate-400 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/60 disabled:cursor-not-allowed disabled:border-slate-600 disabled:bg-slate-800/80 disabled:text-slate-500 disabled:opacity-70;
+  }
+
+  .app-input:read-only:not(:disabled) {
+    @apply cursor-default border-slate-600 bg-slate-800/60 text-slate-200 hover:border-slate-600;
+  }
+
+  .app-input:read-only:not(:disabled):focus {
+    @apply border-slate-500 ring-0;
   }
 
   /* ラベル編集「現在のラベル」入力欄。
@@ -54,8 +79,9 @@
     letter-spacing: 0.05em;
   }
 
+  /* セレクトも入力欄と同じ視認性へ統一（ドロップダウンは html の color-scheme: dark でダーク描画） */
   .app-select {
-    @apply h-8 w-full rounded-lg border border-border/80 bg-card/80 px-3 text-sm text-text outline-none transition focus:border-accent focus:bg-card/90 focus-visible:ring-2 focus-visible:ring-accent/55;
+    @apply h-8 w-full rounded-lg border border-slate-500 bg-slate-600/60 px-3 text-sm text-slate-100 outline-none transition hover:border-slate-400 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/60 disabled:cursor-not-allowed disabled:border-slate-600 disabled:bg-slate-800/80 disabled:text-slate-500 disabled:opacity-70;
   }
 
   .app-label {

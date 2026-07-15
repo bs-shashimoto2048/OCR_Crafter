@@ -1,10 +1,14 @@
 import { forwardRef } from "react";
 
+// 操作の重要度で配色を使い分ける（すべて同色にしない）:
+// primary=主要操作（既存アクセント維持）/ secondary=通常操作（カード・入力欄と同化しない明るめslate）/
+// danger=破壊的操作（赤系。枠線つきでカード背景から浮かせる）
 const variants = {
   primary: "bg-accent text-white shadow-[0_6px_18px_rgba(88,166,255,0.32)] hover:bg-[#79b8ff]",
-  secondary: "bg-[#3a434d]/88 text-text border border-border/80 backdrop-blur-md hover:bg-[#45505b]/90",
+  secondary:
+    "border border-slate-500 bg-slate-700/90 text-slate-100 backdrop-blur-md hover:border-slate-400 hover:bg-slate-600/90",
   ghost: "bg-transparent text-muted hover:bg-[#3a434d]/65 hover:text-text",
-  danger: "bg-danger text-white shadow-[0_6px_16px_rgba(248,81,73,0.28)] hover:bg-[#ff6a63]",
+  danger: "border border-red-600 bg-red-900/40 text-red-200 hover:bg-red-800/60",
 };
 
 const sizes = {
