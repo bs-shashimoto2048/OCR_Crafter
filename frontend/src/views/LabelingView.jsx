@@ -30,6 +30,9 @@ const ENGINE_LABELS = { tesseract: "Tesseract", paddleocr: "PaddleOCR", easyocr:
 // 現在のラベルの文字位置（プロジェクト別に localStorage 保存。未設定=中央）
 const LABEL_TEXT_ALIGN_STORAGE_KEY = "ocr_label_text_align_by_project_v1";
 const LABEL_TEXT_ALIGN_VALUES = new Set(["left", "center", "right"]);
+// 配置ボタンの循環順（中央→左→右→中央…）と表示名
+const LABEL_TEXT_ALIGN_ORDER = ["center", "left", "right"];
+const LABEL_TEXT_ALIGN_LABELS = { center: "中央", left: "左", right: "右" };
 
 function readLabelTextAlign(projectId) {
   try {
@@ -345,6 +348,29 @@ export default function LabelingView({
     setLabelTextAlign(next);
     writeLabelTextAlign(projectId, next);
   }
+
+  // 配置ボタン: 押すたびに 中央→左→右→中央 を循環。押下時は短く青発光する
+  const [alignFlash, setAlignFlash] = useState(false);
+  const alignFlashTimerRef = useRef(null);
+
+  function cycleLabelTextAlign() {
+    const currentIndex = LABEL_TEXT_ALIGN_ORDER.indexOf(labelTextAlign);
+    const next = LABEL_TEXT_ALIGN_ORDER[(currentIndex + 1) % LABEL_TEXT_ALIGN_ORDER.length];
+    updateLabelTextAlign(next);
+    setAlignFlash(true);
+    if (alignFlashTimerRef.current) {
+      clearTimeout(alignFlashTimerRef.current);
+    }
+    alignFlashTimerRef.current = setTimeout(() => setAlignFlash(false), 300);
+  }
+
+  useEffect(() => () => {
+    if (alignFlashTimerRef.current) {
+      clearTimeout(alignFlashTimerRef.current);
+    }
+  }, []);
+
+  const nextAlign = LABEL_TEXT_ALIGN_ORDER[(LABEL_TEXT_ALIGN_ORDER.indexOf(labelTextAlign) + 1) % 3];
   const visibleEntries = useMemo(() => {
     const entries = images.map((item, originalIndex) => {
       const savedLabel = String(item.label ?? "").trim();
@@ -845,8 +871,8 @@ export default function LabelingView({
         </div>
       </Card>
 
-      {/* 中央: プレビュー画像（主役）+ 入力 + 操作 */}
-      <div className="flex min-h-0 flex-col gap-2">
+      {/* 中央: プレビュー画像（主役）+ 入力 + 操作。gapを詰めて画像と入力ラベルを縦比較しやすくする */}
+      <div className="flex min-h-0 flex-col gap-1.5">
         <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-border bg-card/60 p-2 backdrop-blur-md">
           <div className="mb-1.5 flex shrink-0 flex-wrap items-center justify-between gap-2 px-1">
             <p className="truncate text-xs font-semibold text-text">
@@ -911,19 +937,20 @@ export default function LabelingView({
         <div className="shrink-0 rounded-xl border border-border bg-card/60 p-2 backdrop-blur-md">
           <div className="mb-1 flex items-center justify-between gap-2 px-1">
             <label className="app-label mb-0">現在のラベル</label>
-            <label className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted">
-              文字位置
-              <select
-                value={labelTextAlign}
-                onChange={(e) => updateLabelTextAlign(e.target.value)}
-                className="app-select h-6 w-auto px-1.5 py-0 text-xs"
-                title="現在のラベルの文字位置（プロジェクト単位で保存）"
-              >
-                <option value="left">左</option>
-                <option value="center">中央</option>
-                <option value="right">右</option>
-              </select>
-            </label>
+            <Button
+              size="sm"
+              variant="secondary"
+              className={`h-6 shrink-0 px-2 text-[11px] transition-shadow duration-200 ${
+                alignFlash
+                  ? "!border-accent/70 !text-blue-200 shadow-[0_0_0_1px_rgba(96,165,250,0.55),0_0_10px_rgba(96,165,250,0.45)]"
+                  : ""
+              }`}
+              onClick={cycleLabelTextAlign}
+              title={`現在は${LABEL_TEXT_ALIGN_LABELS[labelTextAlign]}揃えです。押すと${LABEL_TEXT_ALIGN_LABELS[nextAlign]}揃えに変更します。`}
+              aria-label={`現在は${LABEL_TEXT_ALIGN_LABELS[labelTextAlign]}揃えです。押すと${LABEL_TEXT_ALIGN_LABELS[nextAlign]}揃えに変更します。`}
+            >
+              ≡ 配置: {LABEL_TEXT_ALIGN_LABELS[labelTextAlign]}
+            </Button>
           </div>
           <input
             ref={labelInputRef}
@@ -942,7 +969,7 @@ export default function LabelingView({
                 saveAndNext();
               }
             }}
-            className="app-input mb-2 min-h-[64px] px-4 font-mono text-[32px] font-semibold tracking-[0.12em]"
+            className="app-input mb-2 min-h-[64px] !bg-[#f4f5f7] px-4 font-mono text-[32px] font-bold tracking-[0.12em] !text-[#111827] placeholder:!text-slate-400"
             style={{ textAlign: labelTextAlign }}
             placeholder="ラベル文字列を入力（Enterで保存して次へ）"
           />
@@ -1085,7 +1112,13 @@ export default function LabelingView({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <Button onClick={saveAndNext} disabled={savingAndAdvancing} title="ラベルを保存して次の画像へ (Enter)">
+            <Button
+              size="lg"
+              className="px-6"
+              onClick={saveAndNext}
+              disabled={savingAndAdvancing}
+              title="ラベルを保存して次の画像へ (Enter)"
+            >
               保存して次へ
             </Button>
             <Button variant="secondary" onClick={onSave} title="ラベルを保存 (Ctrl+S)">
@@ -1107,7 +1140,7 @@ export default function LabelingView({
               <span className="text-[10px] text-muted transition-transform group-open:rotate-90" aria-hidden="true">
                 ▶
               </span>
-              ソフトキーボード
+              ⌨ ソフトキーボード
             </summary>
             <div className="space-y-1.5 px-2.5 pb-2.5">
               <div className="grid grid-cols-10 gap-1.5">

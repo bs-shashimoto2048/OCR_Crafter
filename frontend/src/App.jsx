@@ -1522,6 +1522,10 @@ export default function App() {
       }
 
       if (key === " ") {
+        // ボタンフォーカス中のSpaceはボタン操作（クリック）を優先する（配置切替ボタン等）
+        if (target instanceof HTMLElement && target.tagName === "BUTTON") {
+          return;
+        }
         event.preventDefault();
         setLabelDrafts((prev) => ({
           ...prev,
