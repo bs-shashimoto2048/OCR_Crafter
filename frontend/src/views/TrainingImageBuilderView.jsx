@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Button from "../components/Button";
 import Card from "../components/Card";
 import { request } from "../lib/api";
+import { formatDetectFailureMessage, formatDetectResultMessage, isModelMissing } from "../lib/detectModel";
 
 const RESIZE_OPTIONS = [640, 1280, 1536, 1920, 2048];
 const IMAGE_BUILDER_STATE_STORAGE_KEY = "ocr_image_builder_last_state_v1";
@@ -151,6 +152,8 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
   const [selectedUiIds, setSelectedUiIds] = useState([]);
   const clickTimerRef = useRef(null);
   const dragStateRef = useRef(null);
+  // YOLO検出のリクエスト連番。画像・プロジェクト切替後に古いレスポンスを反映しないためのガード
+  const detectSeqRef = useRef(0);
 
   const [file, setFile] = useState(null);
   const [fileName, setFileName] = useState("");
@@ -342,15 +345,10 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
         if (ignore) return;
         setYoloModels(data);
         if (Array.isArray(data.items) && data.items.length > 0) {
-          setModelSelection((prev) => {
-            if (!prev) {
-              return data.items[0];
-            }
-            if (prev === "__custom__") {
-              return prev;
-            }
-            return data.items.includes(prev) ? prev : data.items[0];
-          });
+          // 保存済み選択が一覧に無い場合でも黙って別モデルへ置き換えない
+          // （汎用モデルへ暗黙フォールバックすると「検出0件」になり原因が分からなくなるため。
+          //  一覧に無い選択は select 内で「（見つかりません）」表示＋警告を出す）
+          setModelSelection((prev) => (prev ? prev : data.items[0]));
         }
       } catch (e) {
         if (!ignore) {
@@ -371,6 +369,12 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       }
     };
   }, [rawPreviewUrl]);
+
+  // 画像・プロジェクトが変わったら実行中のYOLO検出結果を無効化（古い画像の結果を新しい画像へ反映しない）
+  useEffect(() => {
+    detectSeqRef.current += 1;
+    setDetecting(false);
+  }, [file, projectId]);
 
   const selectedCount = useMemo(() => detections.filter((row) => row.selected).length, [detections]);
   const seriesCounts = useMemo(() => {
@@ -899,6 +903,14 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       setFail("YOLOモデルを選択してください");
       return;
     }
+    if (isModelMissing(modelSelection, yoloModels.items)) {
+      setFail(
+        `YOLO検出に失敗しました。理由: 選択中のモデル「${modelSelection}」が見つかりません（プロジェクトの models/yolo または共通 models/yolo に配置するか、別のモデルを選択してください）`
+      );
+      return;
+    }
+    // 画像・プロジェクト切替や再実行後に古いレスポンスを反映しないための連番ガード
+    const seq = ++detectSeqRef.current;
     setDetecting(true);
     try {
       const form = new FormData();
@@ -920,24 +932,33 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
         body: form,
       });
       if (!res.ok) {
-        throw new Error((await res.text()) || "YOLO検出に失敗しました");
+        // 「検出0件（正常）」と「処理失敗」を明確に区別して表示する
+        throw new Error(formatDetectFailureMessage(await res.text()));
       }
       const data = await res.json();
+      if (seq !== detectSeqRef.current) {
+        // 画像・プロジェクトが切り替わった後に届いた古い結果は破棄（正常レスポンスでも反映しない）
+        return;
+      }
       setDetectResult(data);
       // クロップ出力時に同じ前処理を適用するため、検出時点の設定を保持
       setDetectUsedPreprocess(detectPreprocessPayload);
       setDetections((data.detections || []).map((row) => ({ ...row, selected: row.selected !== false })));
       setSeriesFilter(SERIES_FILTER_ALL);
       setBboxUndoStack([]);
-    setBboxRedoStack([]);
+      setBboxRedoStack([]);
       setEditingBboxId(null);
       setFocusedBboxId(null);
       setExportResult(null);
-      setOk(`検出完了: ${data.count}件`);
+      setOk(formatDetectResultMessage(data.count));
     } catch (e) {
-      setFail(e.message);
+      if (seq === detectSeqRef.current) {
+        setFail(e.message);
+      }
     } finally {
-      setDetecting(false);
+      if (seq === detectSeqRef.current) {
+        setDetecting(false);
+      }
     }
   }
 
@@ -1725,8 +1746,18 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                         {name}
                       </option>
                     ))}
+                    {/* 保存済み選択が一覧から消えた場合は黙って置き換えず、見つからないことを明示する */}
+                    {isModelMissing(modelSelection, yoloModels.items) ? (
+                      <option value={modelSelection}>{modelSelection}（見つかりません）</option>
+                    ) : null}
                     <option value="__custom__">カスタムパスを入力</option>
                   </select>
+                  {isModelMissing(modelSelection, yoloModels.items) ? (
+                    <p className="mt-1 text-xs text-amber-100">
+                      選択中のモデルが見つかりません。プロジェクトの models/yolo または共通 models/yolo（リポジトリ直下）へ
+                      配置するか、別のモデルを選択してください。
+                    </p>
+                  ) : null}
                 </div>
                 {modelSelection === "__custom__" ? (
                   <div>

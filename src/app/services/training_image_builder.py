@@ -8,8 +8,13 @@ from typing import Any, Optional
 import numpy as np
 from PIL import Image, UnidentifiedImageError
 
+from ..paths import PROJECT_ROOT
 from ..project_paths import ensure_project_directories, get_project_paths
 from .detection_preprocess import apply_detection_preprocess, invert_detection_bbox
+
+# 全プロジェクト共通のYOLOモデル置き場（リポジトリ直下 models/yolo）。
+# プロジェクト内 data/projects/<id>/models/yolo が優先され、ここは共通モデルの検索先として追加される
+COMMON_YOLO_MODELS_DIR = PROJECT_ROOT / "models" / "yolo"
 
 RESIZE_LONG_SIDE_OPTIONS = [640, 1280, 1536, 1920, 2048]
 RESIZE_AXES = {"long", "width", "height"}
@@ -171,6 +176,13 @@ def _resolve_model_name(model_name: str, project_id: str) -> str:
     if model_path.exists():
         return str(model_path.resolve())
 
+    # 共通モデル置き場（リポジトリ直下 models/yolo）。プロジェクト内に無い場合のみ参照する
+    common_path = COMMON_YOLO_MODELS_DIR / candidate
+    if common_path.exists() and common_path.is_file():
+        return str(common_path.resolve())
+
+    # ここまでで解決できない場合は名前をそのまま返す
+    # （yolo11n.pt 等のビルトイン名は ultralytics が自動ダウンロードで解決する）
     return candidate
 
 
@@ -189,14 +201,31 @@ def list_yolo_models(project_id: str) -> dict[str, Any]:
     paths = get_project_paths(project_id)
     yolo_dir = paths.models / "yolo"
     local_models = sorted([p.name for p in yolo_dir.glob("*.pt") if p.is_file()]) if yolo_dir.exists() else []
+    # 共通モデル置き場（リポジトリ直下 models/yolo）も一覧へ含める。
+    # ここに置いた学習済みモデルが一覧から消え、汎用ビルトインへ黙って置き換わる不具合の修正
+    common_models = (
+        sorted([p.name for p in COMMON_YOLO_MODELS_DIR.glob("*.pt") if p.is_file()])
+        if COMMON_YOLO_MODELS_DIR.exists()
+        else []
+    )
     builtins = ["yolo11n.pt", "yolov8n.pt", "yolov8s.pt"]
+
+    # ユーザーモデル（プロジェクト内→共通）を先頭にし、重複名は先勝ち（プロジェクト内優先）
+    items: list[str] = []
+    seen: set[str] = set()
+    for name in local_models + common_models + builtins:
+        if name not in seen:
+            seen.add(name)
+            items.append(name)
 
     return {
         "project_id": project_id,
         "local_dir": str(yolo_dir.resolve()),
+        "common_dir": str(COMMON_YOLO_MODELS_DIR.resolve()),
         "builtin_models": builtins,
         "local_models": local_models,
-        "items": builtins + local_models,
+        "common_models": common_models,
+        "items": items,
     }
 
 
@@ -253,7 +282,15 @@ def detect_bboxes_with_yolo(
 
     resolved_model = _resolve_model_name(model_name, project_id)
     YOLO = _load_ultralytics_yolo()
-    model = YOLO(resolved_model)
+    try:
+        model = YOLO(resolved_model)
+    except FileNotFoundError as e:
+        # 「検出0件」と区別できる明示エラーにする（main.py で404へ変換）
+        raise FileNotFoundError(
+            f"YOLOモデルが見つかりません: {model_name}"
+            f"（プロジェクト内 models/yolo と共通 models/yolo を検索しました。"
+            f"モデルファイルの配置またはカスタムパス指定を確認してください）"
+        ) from e
     result = model.predict(source=image_np, conf=float(conf_threshold), verbose=False)[0]
 
     detections: list[dict[str, Any]] = []

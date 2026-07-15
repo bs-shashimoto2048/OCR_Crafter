@@ -38,6 +38,7 @@ flowchart TD
 | 箇所 | 不変条件 | 根拠 |
 |---|---|---|
 | 検出前処理 → クロップ | クロップは**必ず元画像から**。検出前処理画像を学習画像として保存しない | `training_image_builder.py`（`export_selected_crops`）、`docs/15_CHANGELOG_AI.md` |
+| YOLOモデル解決 | 「絶対/相対パス実在 → プロジェクト内 `data/projects/<id>/models/yolo/` → 共通 `models/yolo/`（リポジトリ直下）→ 名前をそのまま ultralytics へ（ビルトインは自動DL）」の順 | `training_image_builder.py`（`_resolve_model_name` / `COMMON_YOLO_MODELS_DIR`） |
 | 検出前処理 / OCR前処理 | 完全に独立（モジュール・設定・保存が別） | `detection_preprocess.py` / `preprocess.py` |
 | OCR前処理 | 元画像（raw/）は変更しない。手動マスク・照明補正は派生画像にのみ作用 | `preprocess.py`, `manual_mask.py` |
 | 辞書候補 | 表示のみ。OCRエンジンの学習・推論内部へ注入しない | `candidateDictionary.js` |
