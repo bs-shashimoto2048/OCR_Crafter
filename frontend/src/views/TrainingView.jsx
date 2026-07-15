@@ -8,10 +8,10 @@ import {
   computeEtaSeconds,
   computeProgressPercent,
   deriveUiTrainingState,
-  extractImportantEvents,
   formatDuration,
   isImportantLogLine,
   parseTrainingProgress,
+  summarizeImportantEvents,
 } from "../lib/trainingLog";
 
 const OCR_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -156,7 +156,17 @@ export default function TrainingView({
     trainingProgress.maxFromLog ?? (Number.isFinite(Number(jobInfo?.epochs)) && Number(jobInfo?.epochs) > 0 ? Number(jobInfo.epochs) : null);
   const progressPercent = computeProgressPercent(trainingProgress.iteration, maxIterations);
   const etaSeconds = computeEtaSeconds(trainingProgress.samples, maxIterations);
-  const importantEvents = useMemo(() => extractImportantEvents(logs), [logs]);
+  // 縦型タイムライン用の整形済み重要イベント（生ログ全文は詳細ログで確認）
+  const importantEvents = useMemo(() => summarizeImportantEvents(logs, maxIterations), [logs, maxIterations]);
+  // 進捗バーの色: 実行中=青 / 完了=緑 / 失敗=赤 / 停止=黄
+  const progressBarClass =
+    uiTrainingState === "completed"
+      ? "bg-success"
+      : uiTrainingState === "failed"
+        ? "bg-danger"
+        : uiTrainingState === "cancelled"
+          ? "bg-amber-400"
+          : "bg-accent";
 
   // 経過時間（実行中のみ5秒ごとに更新）
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -175,6 +185,23 @@ export default function TrainingView({
     return Number.isFinite(parsed) ? parsed : null;
   }, [jobInfo?.created_at]);
   const elapsedSeconds = isRunning && jobStartedAtMs ? Math.max(0, Math.round((nowMs - jobStartedAtMs) / 1000)) : null;
+  // 学習時間: 実行中=経過時間 / 終了済み=開始→最終更新の実時間 / それ以外=null（--表示）
+  const displayDurationSeconds = useMemo(() => {
+    if (isRunning) {
+      return elapsedSeconds;
+    }
+    if (!jobStartedAtMs || !jobInfo?.updated_at) {
+      return null;
+    }
+    if (!["completed", "failed", "stopped"].includes(String(jobInfo?.status || jobStatus))) {
+      return null;
+    }
+    const ended = Date.parse(String(jobInfo.updated_at));
+    if (!Number.isFinite(ended) || ended < jobStartedAtMs) {
+      return null;
+    }
+    return Math.round((ended - jobStartedAtMs) / 1000);
+  }, [isRunning, elapsedSeconds, jobStartedAtMs, jobInfo?.updated_at, jobInfo?.status, jobStatus]);
 
   let trainingVariant = "secondary";
   let trainingClassName = "";
@@ -335,9 +362,12 @@ export default function TrainingView({
         : "border-border bg-card/70 text-muted";
 
   return (
+    // ページ全体は縦スクロールのみ（横スクロール禁止）。1400px未満は縦積みへ切替
     <div
-      className={`grid h-[calc(100vh-175px)] min-h-[560px] items-stretch gap-4 ${
-        paramsCollapsed ? "grid-cols-1" : "grid-cols-[3fr_7fr]"
+      className={`grid items-start gap-4 overflow-x-hidden ${
+        paramsCollapsed
+          ? "grid-cols-1"
+          : "grid-cols-1 min-[1400px]:grid-cols-[minmax(420px,35fr)_minmax(0,65fr)]"
       }`}
     >
       {!paramsCollapsed ? (
@@ -350,29 +380,64 @@ export default function TrainingView({
                 ? "実験機能（分割学習）の学習を実行します"
                 : "分類モデルとOCRモデルを切り替えて学習できます"
           }
-          className="flex min-h-0 flex-col"
+          className="min-w-0"
         >
-          <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto pr-1">
-            <div className="relative overflow-hidden rounded-xl border border-border/80 bg-gradient-to-br from-[#4a5d73]/45 via-[#394553]/70 to-[#2f3943]/90 p-3 shadow-card">
-              <div className="pointer-events-none absolute -right-10 -top-10 h-28 w-28 rounded-full bg-accent/20 blur-2xl" />
-              <div className="relative">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-200/90">Model Build Dashboard</p>
-                <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
-                  <div className="rounded-lg border border-white/10 bg-black/15 px-2 py-2">
-                    <p className="text-[10px] uppercase tracking-wide text-slate-300/80">方式</p>
-                    <p className="mt-1 text-sm font-semibold text-slate-100">{trainingFamilyLabel}</p>
-                  </div>
-                  <div className={`rounded-lg border px-2 py-2 ${statusToneClass}`}>
-                    <p className="text-[10px] uppercase tracking-wide text-slate-200/80">状態</p>
-                    <p className="mt-1 text-sm font-semibold">{statusLabel}</p>
-                  </div>
-                  <div className="rounded-lg border border-white/10 bg-black/15 px-2 py-2">
-                    <p className="text-[10px] uppercase tracking-wide text-slate-300/80">残り時間</p>
-                    <p className="mt-1 text-sm font-semibold text-slate-100">{formatDuration(etaSeconds)}</p>
-                  </div>
-                </div>
+          <div className="space-y-2.5">
+            {/* 実行概要（2列グリッド・日本語統一） */}
+            <div className="rounded-xl border border-border/80 bg-card/55 p-3">
+              <p className="text-[15px] font-semibold text-text">実行概要</p>
+              <div className="mt-2 grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-1 text-sm">
+                <span className="text-muted">方式</span>
+                <span className="font-semibold text-text">{trainingFamilyLabel}</span>
+                <span className="text-muted">状態</span>
+                <span>
+                  <span className={`rounded-full border px-2 py-0.5 text-sm font-semibold ${statusToneClass}`}>{statusLabel}</span>
+                </span>
+                <span className="text-muted">学習時間</span>
+                <span className="font-semibold text-text">{formatDuration(displayDurationSeconds)}</span>
               </div>
             </div>
+
+            {/* 実行時設定（ジョブ開始時のスナップショット・読み取り専用） */}
+            {jobInfo ? (
+              <div className="rounded-xl border border-border/80 bg-card/55 p-3">
+                <p className="text-[15px] font-semibold text-text">
+                  実行時設定
+                  <span className="ml-2 text-[11px] font-normal text-muted">このジョブ開始時の値（読み取り専用）</span>
+                </p>
+                <div className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+                  <span className="text-muted">OCRタイプ</span>
+                  <span className="font-semibold text-text">
+                    {String(jobInfo.engine || "") === "tesseract" ? "Tesseract" : String(jobInfo.engine || "") === "paddleocr" ? "PaddleOCR" : jobInfo.engine || "--"}
+                  </span>
+                  <span className="text-muted">Base Model</span>
+                  <span className="min-w-0 truncate text-text" title={String(jobInfo.init_source_value || "")}>
+                    {jobInfo.init_source_value || "--"}
+                  </span>
+                  {String(jobInfo.engine || "") === "tesseract" ? (
+                    <>
+                      <span className="text-muted">PSM</span>
+                      <span className="text-text">{jobInfo.max_text_length ?? "--"}</span>
+                      <span className="text-muted">最大iteration</span>
+                      <span className="text-text">{Number(jobInfo.epochs || 0).toLocaleString() || "--"}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-muted">最大文字数</span>
+                      <span className="text-text">{jobInfo.max_text_length ?? "--"}</span>
+                      <span className="text-muted">エポック数</span>
+                      <span className="text-text">{Number(jobInfo.epochs || 0).toLocaleString() || "--"}</span>
+                    </>
+                  )}
+                  <span className="text-muted">Charset</span>
+                  <span className="min-w-0 break-all font-mono text-[12px] text-text">{jobInfo.charset || "--"}</span>
+                  <span className="text-muted">データセット</span>
+                  <span className="min-w-0 truncate font-mono text-[12px] text-text" title={String(jobInfo.dataset_dir || "")}>
+                    {String(jobInfo.dataset_dir || "--").split(/[\\/]/).slice(-1)[0] || "--"}
+                  </span>
+                </div>
+              </div>
+            ) : null}
 
             {trainingMode === "all" ? (
               <div className="rounded-xl border border-border/80 bg-card/50 p-3">
@@ -603,6 +668,20 @@ export default function TrainingView({
               </>
             ) : (
               <>
+                {/* 次回学習に使う編集設定。実行時設定（スナップショット）と区別するため折り畳みに分離。
+                    未開始時のみ初期展開し、ジョブ閲覧中は閉じておく */}
+                <details
+                  open={uiTrainingState === "idle" && !jobInfo}
+                  className="group rounded-xl border border-border/80 bg-card/45"
+                >
+                  <summary className="flex cursor-pointer select-none items-center gap-1.5 rounded-xl px-3 py-2 text-[15px] font-semibold text-text transition hover:bg-card/70 [&::-webkit-details-marker]:hidden">
+                    <span className="text-xs text-muted transition-transform group-open:rotate-90" aria-hidden="true">▶</span>
+                    次回学習の設定
+                    <span className="ml-auto text-[11px] font-normal text-muted">
+                      {settingsLocked ? "学習実行中は変更できません" : "データ準備・エンジン設定・学習パラメータ"}
+                    </span>
+                  </summary>
+                  <div className="space-y-2.5 px-2.5 pb-2.5">
                 {/* preparing/training/stopping 中は設定変更を禁止（fieldsetで配下の入力を一括無効化） */}
                 <fieldset
                   disabled={settingsLocked}
@@ -1139,11 +1218,13 @@ export default function TrainingView({
                   </div>
                 </details>
                 </fieldset>
+                  </div>
+                </details>
 
                 {ocrEngine !== "easyocr" ? (
                   <>
                     <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">3. 実行状態</p>
+                      <p className="text-[15px] font-semibold text-text">実行操作</p>
 
                       {/* 主ボタン: UI状態（idle/preparing/training/stopping/completed/failed/cancelled）に連動 */}
                       {!ocrDatasetReady ? (
@@ -1235,45 +1316,11 @@ export default function TrainingView({
                         <p className="text-xs text-amber-100">OCR Fine-tuneを選択中です。初期モデルを指定してください。</p>
                       ) : null}
 
-                      {/* 実行状態カード（未開始時は非表示） */}
-                      {uiTrainingState !== "idle" ? (
-                        <div className="space-y-1 rounded-lg border border-border/70 bg-card/55 p-2 text-xs">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-muted">状態</span>
-                            <span className="font-semibold text-text">{statusLabel}</span>
-                          </div>
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-muted">進捗</span>
-                            <span className="font-semibold text-text">
-                              {trainingProgress.iteration !== null
-                                ? `${trainingProgress.iteration.toLocaleString()} / ${maxIterations ? maxIterations.toLocaleString() : "--"}`
-                                : uiTrainingState === "preparing"
-                                  ? "学習準備中"
-                                  : "--"}
-                            </span>
-                          </div>
-                          {progressPercent !== null ? (
-                            <div className="h-1.5 rounded-full bg-[#3f4854]/65">
-                              <div className="h-1.5 rounded-full bg-accent transition-all duration-500" style={{ width: `${progressPercent}%` }} />
-                            </div>
-                          ) : null}
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-muted">経過時間</span>
-                            <span className="font-semibold text-text">{elapsedSeconds !== null ? formatDuration(elapsedSeconds) : "--"}</span>
-                          </div>
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-muted">推定残り時間</span>
-                            <span className="font-semibold text-text">{formatDuration(etaSeconds)}</span>
-                          </div>
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-muted">Job ID</span>
-                            <span className="max-w-[180px] truncate font-mono text-[11px] text-text" title={jobId || ""}>{jobId || "--"}</span>
-                          </div>
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-muted">開始日時</span>
-                            <span className="text-text">{jobInfo?.created_at ? String(jobInfo.created_at).replace("T", " ").slice(0, 19) : "--"}</span>
-                          </div>
-                        </div>
+                      {/* 開始日時のみ表示（状態・進捗の詳細は右の「学習状況」カードに集約し重複表示しない） */}
+                      {uiTrainingState !== "idle" && jobInfo?.created_at ? (
+                        <p className="text-xs text-muted">
+                          開始日時: {String(jobInfo.created_at).replace("T", " ").slice(0, 19)}
+                        </p>
                       ) : null}
 
                       {isRunning || uiTrainingState === "stopping" ? (
@@ -1335,7 +1382,7 @@ export default function TrainingView({
       <Card
         title="学習状況"
         subtitle="要約・重要イベント・詳細ログ"
-        className="flex h-full min-h-0 flex-col"
+        className="min-w-0"
         actions={
           <div className="flex items-center gap-2">
             {isRunning || uiTrainingState === "stopping" ? (
@@ -1372,83 +1419,94 @@ export default function TrainingView({
           </div>
         }
       >
-        {/* 学習状況サマリー（取得できない項目は -- 表示） */}
-        <div className="mb-2 grid shrink-0 grid-cols-2 gap-x-4 gap-y-1 rounded-xl border border-border/80 bg-card/55 p-2.5 text-xs lg:grid-cols-4">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-muted">状態</span>
-            <span className={`rounded-full border px-2 py-0.5 font-semibold ${statusToneClass}`}>{statusLabel}</span>
-          </div>
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-muted">iteration</span>
-            <span className="font-semibold text-text">
-              {trainingProgress.iteration !== null
-                ? `${trainingProgress.iteration.toLocaleString()} / ${maxIterations ? maxIterations.toLocaleString() : "--"}`
-                : "--"}
-            </span>
-          </div>
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-muted">経過時間</span>
-            <span className="font-semibold text-text">{elapsedSeconds !== null ? formatDuration(elapsedSeconds) : "--"}</span>
-          </div>
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-muted">推定残り時間</span>
-            <span className="font-semibold text-text">{formatDuration(etaSeconds)}</span>
-          </div>
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-muted">最新BCER</span>
-            <span className="font-semibold text-text">{trainingProgress.bcer !== null ? `${trainingProgress.bcer}%` : "--"}</span>
-          </div>
-          <div className="col-span-2 flex min-w-0 items-center justify-between gap-2">
-            <span className="shrink-0 text-muted">最新checkpoint</span>
-            <span className="truncate font-mono text-[10px] text-text" title={trainingProgress.checkpoint || ""}>
-              {trainingProgress.checkpoint || "--"}
-            </span>
-          </div>
-          <div className="flex min-w-0 items-center justify-between gap-2">
-            <span className="shrink-0 text-muted">Job ID</span>
-            <span className="truncate font-mono text-[10px] text-text" title={jobId || ""}>{jobId || "--"}</span>
+        {/* 学習状況サマリー（コンパクト構成。取得できない項目は -- 表示） */}
+        <div className="mb-3 rounded-xl border border-border/80 bg-card/55 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[15px] font-semibold text-text">
+              進捗
+              <span className="ml-3 font-mono text-sm text-text">
+                {trainingProgress.iteration !== null
+                  ? `${trainingProgress.iteration.toLocaleString()} / ${maxIterations ? maxIterations.toLocaleString() : "--"}`
+                  : uiTrainingState === "preparing"
+                    ? "学習準備中"
+                    : "--"}
+              </span>
+            </p>
+            <span className={`shrink-0 rounded-full border px-2.5 py-0.5 text-sm font-semibold ${statusToneClass}`}>{statusLabel}</span>
           </div>
           {progressPercent !== null ? (
-            <div className="col-span-2 lg:col-span-4">
-              <div className="h-1.5 rounded-full bg-[#3f4854]/65">
-                <div className="h-1.5 rounded-full bg-accent transition-all duration-500" style={{ width: `${progressPercent}%` }} />
+            <div className="mt-2">
+              <div className="h-2 rounded-full bg-[#3f4854]/65">
+                <div
+                  className={`h-2 rounded-full transition-all duration-500 ${progressBarClass}`}
+                  style={{ width: `${progressPercent}%` }}
+                />
               </div>
-              <p className="mt-0.5 text-right text-[10px] text-muted">{progressPercent.toFixed(1)}%</p>
+              <p className="mt-0.5 text-right text-xs text-muted">{progressPercent.toFixed(1)}%</p>
             </div>
-          ) : uiTrainingState === "preparing" ? (
-            <p className="col-span-2 text-[11px] text-muted lg:col-span-4">学習準備中（iteration取得前のため進捗率は表示しません）</p>
           ) : null}
+          <div className="mt-2 grid min-w-0 grid-cols-2 gap-x-6 gap-y-1.5 text-sm xl:grid-cols-4">
+            <div className="min-w-0">
+              <p className="text-xs text-muted">最新BCER</p>
+              <p className="font-semibold text-text">{trainingProgress.bcer !== null ? `${trainingProgress.bcer}%` : "--"}</p>
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs text-muted">経過時間</p>
+              <p className="font-semibold text-text">{formatDuration(displayDurationSeconds)}</p>
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs text-muted">推定残り時間</p>
+              <p className="font-semibold text-text">{isRunning ? formatDuration(etaSeconds) : "--"}</p>
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs text-muted">Job ID</p>
+              <p className="truncate font-mono text-xs text-text" title={jobId || ""}>{jobId || "--"}</p>
+            </div>
+            <div className="col-span-2 min-w-0 xl:col-span-4">
+              <p className="text-xs text-muted">最終checkpoint</p>
+              <p className="break-all font-mono text-xs text-text">{trainingProgress.checkpoint || "--"}</p>
+            </div>
+          </div>
         </div>
 
-        {/* 重要イベント（意味のあるイベントのみ抽出） */}
-        <div className="mb-2 shrink-0 rounded-xl border border-border/80 bg-card/55 p-2.5">
-          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">重要イベント</p>
-          <div className="max-h-36 overflow-y-auto font-mono text-[11px] leading-5">
+        {/* 重要イベント（縦型タイムライン。生ログ全文は詳細ログへ） */}
+        <div className="mb-3 rounded-xl border border-border/80 bg-card/55 p-3">
+          <p className="mb-2 text-[15px] font-semibold text-text">重要イベント</p>
+          <div className="max-h-[420px] min-w-0 overflow-y-auto">
             {importantEvents.length === 0 ? (
-              <p className="text-muted">イベントはまだありません。</p>
+              <p className="text-sm text-muted">イベントはまだありません。</p>
             ) : (
-              importantEvents.slice(-12).map((event, idx) => {
-                const level = classifyLogLine(event.text);
-                return (
-                  <div key={`${event.time}-${idx}`} className="flex gap-2 whitespace-nowrap">
-                    <span className="shrink-0 text-muted/80">{event.time || "--:--:--"}</span>
-                    <span
-                      className={`truncate ${
-                        level === "error" ? "text-red-300" : level === "warn" ? "text-amber-300" : level === "success" ? "text-emerald-300" : "text-slate-200"
+              importantEvents.slice(-30).map((event, idx) => (
+                <div key={`${event.time}-${idx}`} className="flex gap-3 border-b border-border/40 py-1.5 last:border-b-0">
+                  <span className="w-16 shrink-0 pt-0.5 font-mono text-xs text-muted/80">{event.time || "--:--:--"}</span>
+                  <div className="min-w-0 flex-1">
+                    <p
+                      className={`text-sm font-semibold ${
+                        event.level === "error"
+                          ? "text-red-300"
+                          : event.level === "warn"
+                            ? "text-amber-300"
+                            : event.level === "success"
+                              ? "text-emerald-300"
+                              : "text-slate-100"
                       }`}
-                      title={event.text}
                     >
-                      {event.text}
-                    </span>
+                      {event.kind}
+                    </p>
+                    {event.details.map((detail, detailIdx) => (
+                      <p key={detailIdx} className="break-words text-xs leading-5 text-muted">
+                        {detail}
+                      </p>
+                    ))}
                   </div>
-                );
-              })
+                </div>
+              ))
             )}
           </div>
         </div>
 
         {/* 詳細ログ（ターミナル形式・初期は閉じる。トラブル調査用に全行保持） */}
-        <details className="group flex min-h-0 flex-1 flex-col rounded-xl border border-border/80 bg-card/55">
+        <details className="group min-w-0 rounded-xl border border-border/80 bg-card/55">
           <summary className="flex cursor-pointer select-none items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-text transition hover:bg-card/70 [&::-webkit-details-marker]:hidden">
             <span className="text-[10px] text-muted transition-transform group-open:rotate-90" aria-hidden="true">▶</span>
             詳細ログ
@@ -1485,6 +1543,17 @@ export default function TrainingView({
               >
                 最新行へ
               </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="h-5 px-1.5 text-[10px]"
+                title="表示中のログをクリップボードへコピーします"
+                onClick={() => {
+                  navigator.clipboard?.writeText(filteredLogs.join("\n")).catch(() => null);
+                }}
+              >
+                コピー
+              </Button>
               <span className="text-[10px] text-muted">
                 {filteredLogs.length} / {logs.length}件
               </span>
@@ -1492,7 +1561,7 @@ export default function TrainingView({
           </summary>
           <div
             ref={logContainerRef}
-            className="min-h-[160px] flex-1 select-text overflow-auto border-t border-border/60 bg-[#1d2229] px-2 py-1.5 font-mono text-[11px] leading-5"
+            className="h-[380px] select-text overflow-auto border-t border-border/60 bg-[#1d2229] px-2.5 py-2 font-mono text-[12px] leading-[18px]"
           >
             {filteredLogs.length === 0 ? (
               <p className="text-muted">ログはまだありません。</p>

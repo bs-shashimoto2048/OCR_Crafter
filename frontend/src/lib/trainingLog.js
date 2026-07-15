@@ -214,3 +214,84 @@ export function extractImportantEvents(lines) {
   }
   return events;
 }
+
+// Windowsパス等を除去して短くする（重要イベント表示用。全文は詳細ログで確認できる）
+function stripPaths(text) {
+  return String(text || "")
+    .replace(/[A-Za-z]:[\\/][^\s,]+/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+// 生ログ1行を利用者向けの短い日本語イベントへ整形する。
+// 戻り値: { kind: 種別（短い日本語）, details: 表示行の配列（2〜3行まで） }
+export function summarizeEventText(text, maxIterations = null) {
+  const line = String(text || "");
+
+  // Tesseract: At iteration a/b/c, mean rms=..., BCER train=..., (New best BCER = V wrote best model:...)
+  const iter = line.match(/At iteration\s+\d+\/(\d+)\/\d+/i);
+  if (iter) {
+    const current = Number(iter[1]);
+    const bcerTrain = line.match(/BCER train=([\d.]+)%/i);
+    const bcerEval = line.match(/BCER eval=([\d.]+)%/i);
+    const newBest = line.match(/New best BCER\s*=\s*([\d.]+)/i);
+    const wroteCheckpoint = /checkpoint/i.test(line);
+    const details = [
+      `iteration ${current.toLocaleString()}${maxIterations ? ` / ${Number(maxIterations).toLocaleString()}` : ""}`,
+    ];
+    if (bcerTrain) details.push(`BCER train: ${bcerTrain[1]}%`);
+    if (bcerEval) details.push(`BCER eval: ${bcerEval[1]}%`);
+    if (newBest && details.length < 3) details.push(`最良BCER: ${newBest[1]}%${wroteCheckpoint ? "（checkpoint保存）" : ""}`);
+    return { kind: newBest ? "最良モデル更新" : "学習進捗", details: details.slice(0, 3) };
+  }
+
+  // Tesseract: 2 Percent improvement time=127, best error was 4.069 @ 1044
+  const improve = line.match(/Percent improvement time=(\d+).*best error was ([\d.]+)\s*@\s*(\d+)/i);
+  if (improve) {
+    return {
+      kind: "評価改善",
+      details: [`最良誤差: ${improve[2]}%`, `処理時間: ${improve[1]}秒`, `iteration: ${Number(improve[3]).toLocaleString()}`],
+    };
+  }
+
+  // PaddleOCR: epoch: [n/m] ...
+  const epoch = line.match(/epoch:\s*\[(\d+)\/(\d+)\]/i);
+  if (epoch) {
+    return { kind: "学習進捗", details: [`epoch ${epoch[1]} / ${epoch[2]}`] };
+  }
+
+  if (/Extracting|展開/i.test(line) && /traineddata|components/i.test(line)) {
+    return { kind: "ベースモデル展開", details: [] };
+  }
+  if (/lstmtraining/i.test(line)) {
+    return { kind: "学習コマンド起動", details: ["lstmtraining を開始しました"] };
+  }
+  if (/traineddata/i.test(line) && /(生成|作成|combine|wrote)/i.test(line)) {
+    return { kind: "traineddata生成", details: [] };
+  }
+  if (/(completed|完了)/i.test(line)) {
+    return { kind: "完了", details: [stripPaths(line)].filter(Boolean).slice(0, 2) };
+  }
+  if (/(stopped|停止)/i.test(line)) {
+    return { kind: "停止", details: [stripPaths(line)].filter(Boolean).slice(0, 2) };
+  }
+  if (/(failed|error|失敗|エラー|例外)/i.test(line)) {
+    return { kind: "エラー", details: [stripPaths(line)].filter(Boolean).slice(0, 3) };
+  }
+  if (/学習ステータス/.test(line)) {
+    return { kind: "ステータス変更", details: [line.replace(/^学習ステータス:\s*/, "")] };
+  }
+
+  // その他の重要行: パスを除去し120文字までに短縮
+  const cleaned = stripPaths(line);
+  return { kind: "イベント", details: cleaned ? [cleaned.slice(0, 120)] : [] };
+}
+
+// 縦型タイムライン用: 重要イベントを整形して返す [{ time, kind, details, level }]
+export function summarizeImportantEvents(lines, maxIterations = null) {
+  return extractImportantEvents(lines).map(({ time, text }) => ({
+    time,
+    level: classifyLogLine(text),
+    ...summarizeEventText(text, maxIterations),
+  }));
+}

@@ -12,6 +12,8 @@ import {
   formatDuration,
   isImportantLogLine,
   parseTrainingProgress,
+  summarizeEventText,
+  summarizeImportantEvents,
 } from "../src/lib/trainingLog.js";
 
 const TESS_LINE_1 =
@@ -152,4 +154,40 @@ test("重要イベントを抽出し、生パス行を含めない", () => {
 test("isImportantLogLine は空行をfalseにする", () => {
   assert.equal(isImportantLogLine(""), false);
   assert.equal(isImportantLogLine("   "), false);
+});
+
+// ---- 重要イベントの日本語整形（縦型タイムライン用） ----
+
+test("At iteration行（New best付き）を「最良モデル更新」へ整形する", () => {
+  const event = summarizeEventText(
+    "At iteration 422/800/800, mean rms=1.284%, delta=3.459%, BCER train=17.178%, BWER train=46.750%, New best BCER = 17.178 wrote best model:C:\\proj\\finetune_17.178_422_800.checkpoint wrote checkpoint.",
+    1000
+  );
+  assert.equal(event.kind, "最良モデル更新");
+  assert.ok(event.details[0].includes("800") && event.details[0].includes("1,000"));
+  assert.ok(event.details.some((d) => d.includes("17.178")));
+  assert.ok(event.details.length <= 3);
+  assert.ok(!event.details.join("").includes("C:\\")); // パスは含めない
+});
+
+test("Percent improvement行を「評価改善」へ整形する", () => {
+  const event = summarizeEventText("2 Percent improvement time=127, best error was 4.069 @ 1044");
+  assert.equal(event.kind, "評価改善");
+  assert.deepEqual(event.details, ["最良誤差: 4.069%", "処理時間: 127秒", "iteration: 1,044"]);
+});
+
+test("完了行はWindowsパスを除去して整形する", () => {
+  const events = summarizeImportantEvents(
+    ["[2026/07/15 13:20:00] tesseract training completed C:\\Users\\x\\model.traineddata"],
+    null
+  );
+  assert.equal(events[0].kind, "完了");
+  assert.equal(events[0].time, "13:20:00");
+  assert.ok(!events[0].details.join("").includes("C:\\"));
+});
+
+test("展開・epoch・不明行も種別付きで整形する", () => {
+  assert.equal(summarizeEventText("Extracting traineddata components...").kind, "ベースモデル展開");
+  assert.deepEqual(summarizeEventText("epoch: [3/50], global_step: 120").details, ["epoch 3 / 50"]);
+  assert.equal(summarizeEventText("train/eval 分割 800/100").kind, "イベント");
 });
