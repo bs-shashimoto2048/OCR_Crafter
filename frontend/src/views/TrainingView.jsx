@@ -146,8 +146,12 @@ export default function TrainingView({
   // 「次回学習の設定」の開閉。ユーザー操作後はポーリング・状態変化でも開閉を維持する（null=未操作）
   const [settingsToggled, setSettingsToggled] = useState(null);
   const nextSettingsOpen = settingsToggled ?? (uiTrainingState === "idle" && !jobInfo);
+  // 実行時設定（ジョブスナップショット）の開閉。低い画面でも次回学習設定の高さを確保するため初期は閉じる
+  const [runtimeSettingsOpen, setRuntimeSettingsOpen] = useState(false);
   // 詳細ログの開閉。開時は右ペインの高さを重要イベントと分割する（右カード全体の高さは変えない）
   const [detailLogOpen, setDetailLogOpen] = useState(false);
+  // OCR学習画面(ocr-training)のみビューポート固定レイアウトを適用（親App側のFlex残り高さを継承する）
+  const fitViewport = trainingMode === "ocr";
   const eventsRef = useRef(null);
   useEffect(() => {
     if (!UI_TRAINING_STATE_LABELS[uiTrainingState] || uiTrainingState === "unknown") {
@@ -379,13 +383,17 @@ export default function TrainingView({
         : "border-border bg-card/70 text-muted";
 
   return (
-    // デスクトップ(1400px以上)は表示領域高さへ固定し内部スクロールのみ（ページ縦スクロールなし）。
-    // 1400px未満は縦積み+ページ縦スクロール。横スクロールは詳細ログ内のみ
+    // デスクトップ(xl=1280px以上)は親section(Flex)の残り高さを継承して内部スクロールのみ（ページ縦スクロールなし）。
+    // 固定px差し引き(calc)は環境で狂うため使わない。1280px未満は縦積み+ページ縦スクロール。横スクロールは詳細ログ内のみ
     <div
-      className={`grid items-start gap-4 overflow-x-hidden min-[1400px]:h-[calc(100vh-175px)] min-[1400px]:min-h-[520px] min-[1400px]:items-stretch min-[1400px]:overflow-hidden ${
+      className={`grid items-start gap-4 overflow-x-hidden ${
+        fitViewport
+          ? "xl:min-h-0 xl:flex-1 xl:grid-rows-[minmax(0,1fr)] xl:items-stretch xl:overflow-hidden"
+          : ""
+      } ${
         paramsCollapsed
           ? "grid-cols-1"
-          : "grid-cols-1 min-[1400px]:grid-cols-[minmax(420px,35fr)_minmax(0,65fr)]"
+          : "grid-cols-1 xl:grid-cols-[minmax(420px,35fr)_minmax(0,65fr)]"
       }`}
     >
       {!paramsCollapsed ? (
@@ -398,7 +406,7 @@ export default function TrainingView({
                 ? "実験機能（分割学習）の学習を実行します"
                 : "分類モデルとOCRモデルを切り替えて学習できます"
           }
-          className="flex min-h-0 min-w-0 flex-col"
+          className={`flex min-h-0 min-w-0 flex-col ${fitViewport ? "xl:overflow-hidden" : ""}`}
         >
           {/* 左ペイン: 実行概要/実行時設定/学習方式/実行操作=固定、次回学習の設定=残り高さで内部スクロール */}
           <div className="flex min-h-0 flex-1 flex-col space-y-2.5">
@@ -417,14 +425,35 @@ export default function TrainingView({
               </div>
             </div>
 
-            {/* 実行時設定（ジョブ開始時のスナップショット・読み取り専用） */}
+            {/* 実行時設定（ジョブ開始時のスナップショット・読み取り専用）。
+                低い画面でも次回学習設定の高さを確保するため折り畳み可能（初期は閉・1行サマリー表示。情報は開けば全て見える） */}
             {jobInfo ? (
-              <div className="shrink-0 rounded-xl border border-border/80 bg-card/55 p-3">
-                <p className="text-[15px] font-semibold text-text">
+              <div className="shrink-0 rounded-xl border border-border/80 bg-card/55">
+                <button
+                  type="button"
+                  onClick={() => setRuntimeSettingsOpen((prev) => !prev)}
+                  className="flex w-full cursor-pointer select-none items-center gap-1.5 rounded-xl px-3 py-2 text-left text-[15px] font-semibold text-text transition hover:bg-card/70"
+                >
+                  <span
+                    className={`text-xs text-muted transition-transform ${runtimeSettingsOpen ? "rotate-90" : ""}`}
+                    aria-hidden="true"
+                  >
+                    ▶
+                  </span>
                   実行時設定
-                  <span className="ml-2 text-[11px] font-normal text-muted">このジョブ開始時の値（読み取り専用）</span>
-                </p>
-                <div className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+                  <span className="ml-auto min-w-0 truncate text-[11px] font-normal text-muted">
+                    {runtimeSettingsOpen
+                      ? "このジョブ開始時の値（読み取り専用）"
+                      : `${
+                          String(jobInfo.engine || "") === "tesseract"
+                            ? "Tesseract"
+                            : String(jobInfo.engine || "") === "paddleocr"
+                              ? "PaddleOCR"
+                              : jobInfo.engine || "--"
+                        }・${String(jobInfo.dataset_dir || "--").split(/[\\/]/).slice(-1)[0] || "--"}`}
+                  </span>
+                </button>
+                <div className={runtimeSettingsOpen ? "grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 px-3 pb-3 text-sm" : "hidden"}>
                   <span className="text-muted">OCRタイプ</span>
                   <span className="font-semibold text-text">
                     {String(jobInfo.engine || "") === "tesseract" ? "Tesseract" : String(jobInfo.engine || "") === "paddleocr" ? "PaddleOCR" : jobInfo.engine || "--"}
@@ -458,6 +487,8 @@ export default function TrainingView({
               </div>
             ) : null}
 
+            {/* 学習方式の固定表示は実行概要の「方式」行と重複するため、切替が必要なallモードのみ表示
+                （低い画面で次回学習設定の高さを確保するための統合。タスク仕様） */}
             {trainingMode === "all" ? (
               <div className="shrink-0 rounded-xl border border-border/80 bg-card/50 p-3">
                 <label className="app-label">学習方式</label>
@@ -466,14 +497,7 @@ export default function TrainingView({
                   <option value="ocr">OCR認識モデル（ocr）</option>
                 </select>
               </div>
-            ) : (
-              <div className="shrink-0 rounded-xl border border-border/80 bg-card/60 p-3 text-sm text-text">
-                学習方式:{" "}
-                <span className="font-semibold">
-                  {trainingMode === "ocr" ? "OCR認識モデル（ocr）" : "分類モデル（classification）"}
-                </span>
-              </div>
-            )}
+            ) : null}
 
             {trainingFamily === "classification" ? (
               <>
@@ -688,27 +712,39 @@ export default function TrainingView({
             ) : (
               <>
                 {/* 次回学習に使う編集設定。実行時設定（スナップショット）と区別するため折り畳みに分離。
-                    開時は左ペインの残り高さを使い、この中だけ内部スクロールする（閉時は他領域が詰まる） */}
-                <details
-                  open={nextSettingsOpen}
-                  className={`group min-w-0 rounded-xl border border-border/80 bg-card/45 ${
-                    nextSettingsOpen ? "flex min-h-0 min-[1400px]:flex-1 flex-col" : "shrink-0"
+                    detailsはFlex子として本文へ高さが伝わらない（Chromiumの内部スロット構造）ため、
+                    button+Flex本文のstate制御アコーディオンで実装する。
+                    開時は左ペインの残り高さ(flex-1)を本文が受け取り、この本文だけ内部スクロールする（閉時は他領域が詰まる） */}
+                <section
+                  className={`min-w-0 rounded-xl border border-border/80 bg-card/45 ${
+                    nextSettingsOpen
+                      ? `flex min-h-0 flex-col ${fitViewport ? "xl:min-h-[160px] xl:flex-1 xl:overflow-hidden" : ""}`
+                      : "shrink-0"
                   }`}
                 >
-                  <summary
-                    onClick={(e) => {
-                      e.preventDefault();
-                      setSettingsToggled(!nextSettingsOpen);
-                    }}
-                    className="flex shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-xl px-3 py-2 text-[15px] font-semibold text-text transition hover:bg-card/70 [&::-webkit-details-marker]:hidden"
+                  <button
+                    type="button"
+                    onClick={() => setSettingsToggled(!nextSettingsOpen)}
+                    className="flex w-full shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-xl px-3 py-2 text-left text-[15px] font-semibold text-text transition hover:bg-card/70"
                   >
-                    <span className="text-xs text-muted transition-transform group-open:rotate-90" aria-hidden="true">▶</span>
+                    <span
+                      className={`text-xs text-muted transition-transform ${nextSettingsOpen ? "rotate-90" : ""}`}
+                      aria-hidden="true"
+                    >
+                      ▶
+                    </span>
                     次回学習の設定
                     <span className="ml-auto text-[11px] font-normal text-muted">
                       {settingsLocked ? "学習実行中は変更できません" : "データ準備・エンジン設定・学習パラメータ"}
                     </span>
-                  </summary>
-                  <div className="scroll-stable min-h-[180px] min-w-0 flex-1 space-y-2.5 overflow-y-auto overflow-x-hidden px-2.5 pb-2.5 dark-scroll">
+                  </button>
+                  <div
+                    className={
+                      nextSettingsOpen
+                        ? "next-training-settings-body scroll-stable dark-scroll min-h-0 min-w-0 flex-1 space-y-2.5 overflow-y-auto overflow-x-hidden px-2.5 pb-2.5"
+                        : "hidden"
+                    }
+                  >
                 {/* preparing/training/stopping 中は設定変更を禁止（fieldsetで配下の入力を一括無効化） */}
                 <fieldset
                   disabled={settingsLocked}
@@ -1246,7 +1282,7 @@ export default function TrainingView({
                 </details>
                 </fieldset>
                   </div>
-                </details>
+                </section>
 
                 {ocrEngine !== "easyocr" ? (
                   <>
@@ -1387,16 +1423,14 @@ export default function TrainingView({
                     </div>
 
                     {ocrDatasetInfo ? (
-                      <div className="shrink-0 rounded-xl border border-accent/30 bg-accent/10 p-3 text-xs text-blue-100">
-                        <p>作成済みデータ: {ocrDatasetInfo.dataset_root || "-"}</p>
-                        {ocrDatasetInfo.counts ? (
-                          <p>
-                            件数 train/val/test: {ocrDatasetInfo.counts?.train ?? 0}/{ocrDatasetInfo.counts?.val ?? 0}/
-                            {ocrDatasetInfo.counts?.test ?? 0}
-                          </p>
-                        ) : (
-                          <p>件数: {ocrDatasetInfo.count ?? 0}</p>
-                        )}
+                      // 1行表示で左ペインの固定領域を節約（フルパスはTooltipで確認できる）
+                      <div className="shrink-0 rounded-xl border border-accent/30 bg-accent/10 px-3 py-2 text-xs text-blue-100">
+                        <p className="truncate" title={String(ocrDatasetInfo.dataset_root || "-")}>
+                          作成済みデータ: {String(ocrDatasetInfo.dataset_root || "-").split(/[\\/]/).slice(-1)[0] || "-"}
+                          {ocrDatasetInfo.counts
+                            ? `（train/val/test: ${ocrDatasetInfo.counts?.train ?? 0}/${ocrDatasetInfo.counts?.val ?? 0}/${ocrDatasetInfo.counts?.test ?? 0}）`
+                            : `（件数: ${ocrDatasetInfo.count ?? 0}）`}
+                        </p>
                       </div>
                     ) : null}
                   </>
@@ -1410,7 +1444,7 @@ export default function TrainingView({
       <Card
         title="学習状況"
         subtitle="要約・重要イベント・詳細ログ"
-        className="flex min-h-0 min-w-0 flex-col"
+        className={`flex min-h-0 min-w-0 flex-col ${fitViewport ? "xl:overflow-hidden" : ""}`}
         actions={
           <div className="flex items-center gap-2">
             {isRunning || uiTrainingState === "stopping" ? (
@@ -1500,11 +1534,11 @@ export default function TrainingView({
         </div>
 
         {/* 重要イベント（縦型タイムライン・右ペインの残り高さへ伸縮。生ログ全文は詳細ログへ） */}
-        <div className="mb-3 flex min-h-0 min-w-0 flex-col rounded-xl border border-border/80 bg-card/55 p-3 min-[1400px]:flex-1">
+        <div className="mb-3 flex min-h-0 min-w-0 flex-col rounded-xl border border-border/80 bg-card/55 p-3 xl:flex-1">
           <p className="mb-2 shrink-0 text-[15px] font-semibold text-text">重要イベント</p>
           <div
             ref={eventsRef}
-            className="scroll-stable dark-scroll max-h-[50vh] min-h-[180px] min-w-0 flex-1 overflow-y-auto overflow-x-hidden min-[1400px]:max-h-none"
+            className="scroll-stable dark-scroll max-h-[50vh] min-h-[180px] min-w-0 flex-1 overflow-y-auto overflow-x-hidden xl:max-h-none"
           >
             {importantEvents.length === 0 ? (
               <p className="text-sm text-muted">イベントはまだありません。</p>
@@ -1538,23 +1572,28 @@ export default function TrainingView({
           </div>
         </div>
 
-        {/* 詳細ログ（ターミナル形式・初期は閉じる。開時は右ペイン内で高さを分割し、右カード全体は伸ばさない） */}
-        <details
-          open={detailLogOpen}
-          className={`group min-w-0 rounded-xl border border-border/80 bg-card/55 ${
-            detailLogOpen ? "flex min-h-[160px] flex-col min-[1400px]:flex-[0_1_45%]" : "shrink-0"
+        {/* 詳細ログ（ターミナル形式・初期は閉じる。開時は右ペイン内で高さを分割し、右カード全体は伸ばさない）。
+            detailsはFlex子として本文へ高さが伝わらないため、button+Flex本文のstate制御アコーディオンで実装する */}
+        <section
+          className={`min-w-0 rounded-xl border border-border/80 bg-card/55 ${
+            detailLogOpen ? "flex min-h-[160px] flex-col overflow-hidden xl:flex-[0_1_45%]" : "shrink-0"
           }`}
         >
-          <summary
-            onClick={(e) => {
-              e.preventDefault();
-              setDetailLogOpen(!detailLogOpen);
-            }}
-            className="flex shrink-0 cursor-pointer select-none items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-text transition hover:bg-card/70 [&::-webkit-details-marker]:hidden"
-          >
-            <span className="text-[10px] text-muted transition-transform group-open:rotate-90" aria-hidden="true">▶</span>
-            詳細ログ
-            <span className="ml-auto flex items-center gap-2 font-normal" onClick={(e) => e.stopPropagation()}>
+          <div className="flex shrink-0 flex-wrap items-center gap-2 px-2.5 py-1.5 text-xs font-semibold text-text">
+            <button
+              type="button"
+              onClick={() => setDetailLogOpen(!detailLogOpen)}
+              className="flex shrink-0 cursor-pointer select-none items-center gap-1.5 whitespace-nowrap text-left transition hover:text-blue-200"
+            >
+              <span
+                className={`text-[10px] text-muted transition-transform ${detailLogOpen ? "rotate-90" : ""}`}
+                aria-hidden="true"
+              >
+                ▶
+              </span>
+              詳細ログ
+            </button>
+            <span className="ml-auto flex flex-wrap items-center gap-2 font-normal">
               <span className="inline-flex rounded-lg border border-border bg-card/45 p-0.5">
                 {[
                   ["all", "すべて"],
@@ -1602,10 +1641,14 @@ export default function TrainingView({
                 {filteredLogs.length} / {logs.length}件
               </span>
             </span>
-          </summary>
+          </div>
           <div
             ref={logContainerRef}
-            className="dark-scroll h-[320px] min-h-0 select-text overflow-auto border-t border-border/60 bg-[#1d2229] px-2.5 py-2 font-mono text-[12px] leading-[18px] min-[1400px]:h-auto min-[1400px]:flex-1"
+            className={
+              detailLogOpen
+                ? "dark-scroll h-[320px] min-h-0 select-text overflow-auto overscroll-contain border-t border-border/60 bg-[#1d2229] px-2.5 py-2 font-mono text-[12px] leading-[18px] xl:h-auto xl:flex-1"
+                : "hidden"
+            }
           >
             {filteredLogs.length === 0 ? (
               <p className="text-muted">ログはまだありません。</p>
@@ -1631,7 +1674,7 @@ export default function TrainingView({
               })
             )}
           </div>
-        </details>
+        </section>
       </Card>
     </div>
   );

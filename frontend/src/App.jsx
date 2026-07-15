@@ -3355,6 +3355,9 @@ export default function App() {
   ].includes(activeView);
   const suppressRapidOcrInferenceNotice =
     activeView === "rapid-ocr" && /^推論結果:\s*/.test(String(notice?.text || ""));
+  // OCR学習画面はデスクトップ(xl=1280px以上。1366×768等の低解像度もカバー)でビューポート内へ収める（ページ縦スクロールなし・内部スクロールのみ）。
+  // 固定px差し引き(calc)ではなく main→section→ビュー の親Flex残り高さ継承で実現する
+  const fitViewport = activeView === "ocr-training";
 
   return (
     <div className="min-h-screen bg-transparent text-text">
@@ -3366,24 +3369,35 @@ export default function App() {
         onToggleCollapse={toggleSidebarCollapsed}
       />
 
-      <main className={`${sidebarCollapsed ? "ml-14" : "ml-64"} min-h-screen px-6 py-4 transition-[margin-left] duration-200`}>
-        <Header
-          title={currentMeta.title}
-          subtitle={`${currentMeta.subtitle} / プロジェクト: ${projectId}`}
-          status={jobStatus}
-          labelProgress={
-            activeView === "labeling"
-              ? {
-                  labeled: labeledCount,
-                  total: images.length,
-                }
-              : null
-          }
-        />
-        {showWorkflow ? <WorkflowProgress steps={workflowSteps} activeView={activeView} onNavigate={setActiveView} /> : null}
-        {EXPERIMENTAL_VIEWS.has(activeView) ? <ExperimentalNotice className="mt-4" /> : null}
+      <main
+        className={`${sidebarCollapsed ? "ml-14" : "ml-64"} ${
+          fitViewport ? "xl:flex xl:h-dvh xl:min-h-0 xl:flex-col xl:overflow-hidden" : ""
+        } min-h-screen px-6 py-4 transition-[margin-left] duration-200`}
+      >
+        {/* タイトル行・ワークフローは固定領域（ビューポート固定時に縮めない） */}
+        <div className={fitViewport ? "xl:shrink-0" : ""}>
+          <Header
+            title={currentMeta.title}
+            subtitle={`${currentMeta.subtitle} / プロジェクト: ${projectId}`}
+            status={jobStatus}
+            labelProgress={
+              activeView === "labeling"
+                ? {
+                    labeled: labeledCount,
+                    total: images.length,
+                  }
+                : null
+            }
+          />
+          {showWorkflow ? <WorkflowProgress steps={workflowSteps} activeView={activeView} onNavigate={setActiveView} /> : null}
+          {EXPERIMENTAL_VIEWS.has(activeView) ? <ExperimentalNotice className="mt-4" /> : null}
+        </div>
 
-        <section className="mt-6">
+        <section
+          className={`mt-6 ${
+            fitViewport ? "xl:mt-4 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col xl:overflow-hidden" : ""
+          }`}
+        >
           {/* 1画面の例外でアプリ全体が消えないよう画面単位で捕捉（key=画面IDで切替時に自動リセット） */}
           <ViewErrorBoundary
             key={activeView}
