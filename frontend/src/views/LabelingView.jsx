@@ -207,7 +207,7 @@ function PreprocessSummary({ params }) {
 
 // 中央プレビューの1段分（元画像 / 中間画像 / 最終画像）。倍率は3段共通。
 // zoomPercent="fit" のときは表示領域の高さを3段で分け合い、縦横比を保ってフィット表示する
-function StageImage({ title, description, src, zoomPercent }) {
+function StageImage({ title, description, src, zoomPercent, imgRef }) {
   const fit = zoomPercent === "fit";
   return (
     <div className={fit ? "flex min-h-0 flex-1 flex-col" : ""}>
@@ -218,16 +218,27 @@ function StageImage({ title, description, src, zoomPercent }) {
       {src ? (
         fit ? (
           <div className="min-h-0 flex-1">
-            <img src={src} alt={title} className="h-full w-full rounded-md object-contain" />
+            <img ref={imgRef} src={src} alt={title} className="h-full w-full rounded-md object-contain" />
           </div>
         ) : (
-          <img src={src} alt={title} className="h-auto max-w-none rounded-md" style={{ width: `${zoomPercent}%` }} />
+          <img ref={imgRef} src={src} alt={title} className="h-auto max-w-none rounded-md" style={{ width: `${zoomPercent}%` }} />
         )
       ) : (
         <p className="px-0.5 py-2 text-xs text-muted">画像がありません</p>
       )}
     </div>
   );
+}
+
+// object-fit: contain を考慮した画像の実描画幅（px）。
+// fit表示: 要素ボックス内で contain 縮尺した幅 / 倍率表示: h-auto でボックス比=画像比のため同式で要素幅に一致する
+function renderedImageWidth(img) {
+  if (!img || !img.naturalWidth || !img.naturalHeight) return null;
+  const boxWidth = img.clientWidth;
+  const boxHeight = img.clientHeight;
+  if (!boxWidth || !boxHeight) return null;
+  const scale = Math.min(boxWidth / img.naturalWidth, boxHeight / img.naturalHeight);
+  return img.naturalWidth * scale;
 }
 
 // スロット1〜3共通の候補行（高さ固定の1行構成）。成功=採用ボタン付き / dimmed=再推論中の前回値
@@ -318,6 +329,9 @@ export default function LabelingView({
   const [zoomPercent, setZoomPercent] = useState("fit");
   // 現在のラベルの文字位置（left/center/right。プロジェクト切替で復元）
   const [labelTextAlign, setLabelTextAlign] = useState("center");
+  // 最終画像の実描画幅（px）。入力欄の幅をこれへ追従させる（nullの間はカード全幅）
+  const finalImageRef = useRef(null);
+  const [finalImageWidth, setFinalImageWidth] = useState(null);
   const [showUnlabeledOnly, setShowUnlabeledOnly] = useState(false);
   const [listMode, setListMode] = useState("table");
   const [previewSrc, setPreviewSrc] = useState("");
@@ -345,6 +359,25 @@ export default function LabelingView({
   useEffect(() => {
     setLabelTextAlign(readLabelTextAlign(projectId));
   }, [projectId]);
+
+  // 最終画像の実描画幅を追跡（読込完了・倍率変更・ウィンドウ/サイドバー等のリサイズで再計算）。
+  // 倍率切替でimg要素が作り直されるため、依存に画像・倍率・srcを含めて監視を張り直す
+  useEffect(() => {
+    const img = finalImageRef.current;
+    if (!img) {
+      setFinalImageWidth(null);
+      return undefined;
+    }
+    const update = () => setFinalImageWidth(renderedImageWidth(img));
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(img);
+    img.addEventListener("load", update);
+    return () => {
+      observer.disconnect();
+      img.removeEventListener("load", update);
+    };
+  }, [selected?.image, zoomPercent, previewSrc]);
 
   function updateLabelTextAlign(value) {
     const next = LABEL_TEXT_ALIGN_VALUES.has(value) ? value : "center";
@@ -932,6 +965,7 @@ export default function LabelingView({
               description="OCR推論へ入力される最終処理画像"
               src={previewSrc || processedImageUrl(selected.image, projectId, imageVersion, selected.type || "")}
               zoomPercent={zoomPercent}
+              imgRef={finalImageRef}
             />
           </div>
         </div>
@@ -955,27 +989,36 @@ export default function LabelingView({
               ≡ 配置: {LABEL_TEXT_ALIGN_LABELS[labelTextAlign]}
             </Button>
           </div>
-          <input
-            ref={labelInputRef}
-            value={labelValue}
-            onChange={(e) => onLabelChange(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.nativeEvent?.isComposing) {
-                return;
-              }
-              if (e.key === "Enter" || e.key === "NumpadEnter") {
-                e.preventDefault();
-                e.stopPropagation();
-                if (e.repeat) {
-                  return; // 長押しrepeatは無視（連打での多重実行防止）
+          {/* 入力欄は最終画像の実描画幅に合わせて中央配置（画像と左右端を揃えて比較しやすくする） */}
+          <div className="mb-2 flex justify-center">
+            <input
+              ref={labelInputRef}
+              value={labelValue}
+              onChange={(e) => onLabelChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.nativeEvent?.isComposing) {
+                  return;
                 }
-                saveAndNext();
-              }
-            }}
-            className="app-input mb-2 min-h-[64px] !bg-[#f4f5f7] px-4 font-mono text-[32px] font-bold tracking-[0.12em] !text-[#111827] placeholder:!text-slate-400"
-            style={{ textAlign: labelTextAlign }}
-            placeholder="ラベル文字列を入力（Enterで保存して次へ）"
-          />
+                if (e.key === "Enter" || e.key === "NumpadEnter") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (e.repeat) {
+                    return; // 長押しrepeatは無視（連打での多重実行防止）
+                  }
+                  saveAndNext();
+                }
+              }}
+              className="app-input min-h-[64px] !bg-[#f4f5f7] px-4 font-mono text-[32px] font-bold tracking-[0.12em] !text-[#111827] placeholder:!text-slate-400"
+              style={{
+                textAlign: labelTextAlign,
+                // 実描画幅が取れるまではカード全幅。小画像でも入力しやすいよう最低320px（親幅は超えない）
+                width: finalImageWidth ? `${Math.round(finalImageWidth)}px` : "100%",
+                minWidth: "min(320px, 100%)",
+                maxWidth: "100%",
+              }}
+              placeholder="ラベル文字列を入力（Enterで保存して次へ）"
+            />
+          </div>
 
           <div className="mb-2">
             <div className="mb-1 flex items-center justify-between gap-2">
