@@ -911,12 +911,17 @@ def _predict_with_tesseract(
         "reason": None if valid else ("empty_text" if not cleaned else "invalid_character_removed"),
         "charset": charset,
     }
-    char_scores = _build_char_scores(predicted, None, confidence)
+    # confidence=None は「取得不能」（whitelist指定時のTesseract既知挙動等）。
+    # 0.0へ偽装せず None のまま伝播し、UIでは "--" 表示にする
+    if confidence is None:
+        char_scores: list[float] = []
+    else:
+        char_scores = _build_char_scores(predicted, None, confidence)
     normalized_char_scores = _normalize_char_confidence(char_scores)
     return {
         "text": predicted,
         "prediction": predicted,
-        "confidence": float(confidence),
+        "confidence": float(confidence) if confidence is not None else None,
         "engine": "tesseract",
         "model_name": model_name,
         "model_type": "ocr",

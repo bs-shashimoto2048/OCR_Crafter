@@ -12,6 +12,7 @@
 | OCRモデル評価はTesseract専用 | `build_recognizer` が tesseract 以外を `ValueError` で拒否 | `services/ocr_evaluation.py` |
 | OCR学習APIはPaddleOCRのみ | `POST /api/ocr/train/start` は engine=paddleocr のみ許可（Tesseractは別エンドポイント） | `main.py` |
 | PaddleOCRの推論時whitelist不可 | 3.x系APIに実行時whitelistがなく、小文字OFFは出力後の大文字化で実現 | `predict.py`（`_apply_latin_case_to_results` のコメント） |
+| Tesseractのwhitelist指定時は信頼度が取得不能 | Tesseract 5.x のLSTMは `tessedit_char_whitelist` 指定時に信頼度を計算せず conf=0 を返す（実測: v5.3.3）。本アプリのTesseract推論は常にwhitelistを使うため Confidence は null（UI表示 `--`）になる | `tesseract_pipeline.py`（`aggregate_word_confidences`）、`docs/15_CHANGELOG_AI.md` |
 | 未exportモデルは推論拒否 | `STRICT_OCR_EXPORT_REQUIRED = True` | `predict.py` |
 | 認証なし | 全エンドポイント無認証（ローカル実行前提） | `main.py` |
 | アップロードサイズ上限なし | `/predict` 等は `await file.read()` のみでサイズ検証なし（一覧APIの `limit<=1000` のみ） | `main.py` |

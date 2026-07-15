@@ -73,9 +73,11 @@ export default function InferenceView({
             ? "Tesseract最新モデル"
             : tesseractModel
           : "EasyOCR";
-  const confidenceValue = Number(result?.confidence || 0);
-  const confidencePercent = (confidenceValue * 100).toFixed(1);
-  const isLowConfidence = confidenceValue < 0.9;
+  // null=取得不能（whitelist指定時のTesseract等）。0%へ偽装せず "--" 表示にする
+  const confidenceAvailable = typeof result?.confidence === "number" && Number.isFinite(result.confidence);
+  const confidenceValue = confidenceAvailable ? result.confidence : 0;
+  const confidencePercentLabel = confidenceAvailable ? `${(confidenceValue * 100).toFixed(1)}%` : "--";
+  const isLowConfidence = confidenceAvailable && confidenceValue < 0.9;
   const isValid = result ? Boolean(result.valid ?? true) : true;
   const validationReason = result?.validation?.reason || null;
   const resultText = String(result?.text ?? result?.prediction ?? "");
@@ -272,7 +274,7 @@ export default function InferenceView({
                     isLowConfidence ? "bg-amber-500/20 text-amber-300" : "bg-sky-500/20 text-sky-300"
                   }`}
                 >
-                  信頼度 {confidencePercent}%
+                  信頼度 {confidencePercentLabel}
                 </span>
               </div>
             </div>
@@ -280,12 +282,12 @@ export default function InferenceView({
             <div>
               <div className="mb-2 flex justify-between text-sm text-muted">
                 <span>信頼度</span>
-                <span>{confidencePercent}%</span>
+                <span>{confidencePercentLabel}</span>
               </div>
               <div className="h-2 rounded-full bg-[#3f4854]/65">
                 <div
                   className={`h-2 rounded-full transition-all duration-200 ${isLowConfidence ? "bg-amber-400" : "bg-accent"}`}
-                  style={{ width: `${Math.max(4, confidenceValue * 100)}%` }}
+                  style={{ width: `${confidenceAvailable ? Math.max(4, confidenceValue * 100) : 0}%` }}
                 />
               </div>
             </div>

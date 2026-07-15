@@ -5,6 +5,7 @@ import Card from "../components/Card";
 import EditableHeatmap from "../components/EditableHeatmap";
 import LowercaseToggle from "../components/LowercaseToggle";
 import { API_BASE, imageUrl, request } from "../lib/api";
+import { formatConfidencePercent } from "../lib/confidence";
 import { lowercaseToggleApplicable } from "../lib/lowercase";
 
 const BUSINESS_PATTERN = /^[A-Z0-9]{8}$/;
@@ -548,7 +549,7 @@ export default function RapidOCRView({
       image_path: currentName,
       predicted_text: predicted,
       corrected_text: skipped || corrected === predicted ? null : corrected,
-      confidence: Number(ocr.confidence || 0),
+      confidence: typeof ocr.confidence === "number" ? ocr.confidence : null,
       is_valid: skipped ? false : validation.valid,
       reason: skipped ? "skipped" : validation.reason || (ocr.validation?.reason ?? null),
       model_name: ocr.model_name || null,
@@ -658,7 +659,8 @@ export default function RapidOCRView({
           engineLabel: currentEngineLabel,
           model: currentModelLabel === "-" ? "" : currentModelLabel,
           prediction: toHalfWidthAlnum(currentResultText, { keepCase }),
-          confidence: Number(currentResult?.confidence || 0),
+          // null=取得不能（0%へ偽装せず "--" 表示にする）
+          confidence: typeof currentResult?.confidence === "number" ? currentResult.confidence : null,
         },
       ]
     : []
@@ -893,8 +895,11 @@ export default function RapidOCRView({
                     <span className="min-w-0 flex-1 truncate font-mono text-lg font-semibold text-text">
                       {candidate.prediction || "--"}
                     </span>
-                    <span className="shrink-0 text-[11px] font-semibold text-accent">
-                      {(candidate.confidence * 100).toFixed(1)}%
+                    <span
+                      className="shrink-0 text-[11px] font-semibold text-accent"
+                      title="各OCRエンジンが返す推論信頼度です。エンジン間で算出方式は異なります。"
+                    >
+                      {formatConfidencePercent(candidate.confidence)}
                     </span>
                     <Button
                       size="sm"
@@ -1030,8 +1035,12 @@ export default function RapidOCRView({
               ) : null}
               <div className="flex items-center justify-between gap-2">
                 <span className="text-muted">Confidence</span>
-                <span className="font-semibold text-accent">
-                  {(Number(currentResult?.confidence || 0) * 100).toFixed(1)}%{!isDraftAligned ? "（元推論）" : ""}
+                <span
+                  className="font-semibold text-accent"
+                  title="各OCRエンジンが返す推論信頼度です。取得できない場合は -- 表示になります。"
+                >
+                  {formatConfidencePercent(currentResult?.confidence)}
+                  {!isDraftAligned ? "（元推論）" : ""}
                 </span>
               </div>
               <div className="flex items-center justify-between gap-2">

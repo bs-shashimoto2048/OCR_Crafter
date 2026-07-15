@@ -112,6 +112,55 @@ def ensure_tesseract_inference_tool(config: Optional[dict[str, Any]] = None) -> 
     return tools["tesseract"]
 
 
+def parse_tsv_words(stdout: str) -> list[tuple[str, float]]:
+    """Tesseract TSV出力からword行（level=5相当のtext付き行）を (text, raw_conf) で抽出する。
+
+    - ヘッダ行・列数不足行はスキップ
+    - textが空の構造行（conf=-1のlevel 1〜4行など）は含めない
+    - conf は raw のまま返す（0〜100想定。数値化できない場合は -1.0）
+    """
+    words: list[tuple[str, float]] = []
+    for line in str(stdout or "").splitlines():
+        parts = line.split("\t")
+        if len(parts) < 12 or parts[0] == "level":
+            continue
+        text = parts[11].strip()
+        if not text:
+            continue
+        try:
+            conf = float(parts[10])
+        except ValueError:
+            conf = -1.0
+        words.append((text, conf))
+    return words
+
+
+def aggregate_word_confidences(
+    words: list[tuple[str, float]],
+    whitelist_applied: bool = False,
+) -> Optional[float]:
+    """word一覧 (text, raw_conf 0〜100) を文字列全体の信頼度（0.0〜1.0）へ集約する。
+
+    - conf < 0（構造行・数値化失敗）のwordは集約に含めない
+    - 複数wordは文字数加重平均（短いノイズwordの影響を抑える）
+    - 有効confが1件もない場合は None（取得不能）
+    - whitelist指定時に全wordの conf が 0.0 の場合も None。
+      Tesseract 5.x のLSTMは tessedit_char_whitelist 指定時に信頼度を計算せず
+      0.000000 を返す既知挙動があり、これは「本当の0%」ではなく取得不能として扱う
+      （whitelist未指定での conf=0 は実測値として 0.0 のまま返す）
+    """
+    valid = [(text, conf) for text, conf in words if text.strip() and conf >= 0]
+    if not valid:
+        return None
+    if whitelist_applied and all(conf == 0.0 for _, conf in valid):
+        return None
+    total_chars = sum(len(text) for text, _ in valid)
+    if total_chars <= 0:
+        return None
+    weighted = sum((conf / 100.0) * len(text) for text, conf in valid)
+    return float(weighted / total_chars)
+
+
 def recognize_line(
     tesseract_cmd: str,
     image_path: str,
@@ -119,12 +168,14 @@ def recognize_line(
     lang: str,
     charset: str = "",
     psm: int = 7,
-) -> tuple[str, float]:
-    """単一行画像を tesseract で認識し (text, mean_confidence) を返す。
+) -> tuple[str, Optional[float]]:
+    """単一行画像を tesseract で認識し (text, confidence) を返す。
 
     推論(`predict.py`)と同一条件（TSV出力・whitelist・単一行PSM）で、
     評価でも共通に利用できる再利用ヘルパ。charset が空文字の場合は
     whitelist なし（探索制約なし）で実行する。
+    confidence は 0.0〜1.0。取得不能（有効word無し / whitelist指定時の
+    Tesseract既知挙動で信頼度が全て0）の場合は None を返す。
     """
     cmd = [
         tesseract_cmd,
@@ -146,25 +197,10 @@ def recognize_line(
     if int(result.returncode or 0) != 0:
         raise RuntimeError(f"tesseract recognition failed (exit={result.returncode}): {result.stderr.strip()}")
 
-    tokens: list[str] = []
-    confidences: list[float] = []
-    for line in str(result.stdout or "").splitlines():
-        parts = line.split("\t")
-        if len(parts) < 12 or parts[0] == "level":
-            continue
-        text = parts[11].strip()
-        if not text:
-            continue
-        try:
-            conf = float(parts[10])
-        except ValueError:
-            conf = -1.0
-        tokens.append(text)
-        if conf >= 0:
-            confidences.append(conf / 100.0)
-    predicted = "".join(tokens)
-    mean_conf = sum(confidences) / len(confidences) if confidences else 0.0
-    return predicted, float(mean_conf)
+    words = parse_tsv_words(result.stdout)
+    predicted = "".join(text for text, _ in words)
+    confidence = aggregate_word_confidences(words, whitelist_applied=bool(charset))
+    return predicted, confidence
 
 
 def _candidate_tessdata_dirs(config: dict[str, Any], tesseract_cmd: str) -> list[Path]:

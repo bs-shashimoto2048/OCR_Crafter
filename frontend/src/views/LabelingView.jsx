@@ -249,7 +249,10 @@ function CandidateRow({ index, engine, modelName, prediction, confidence, curren
       <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap">
         <DiffText candidate={prediction} current={current} />
       </span>
-      <span className="shrink-0 text-[11px] font-semibold text-accent">
+      <span
+        className="shrink-0 text-[11px] font-semibold text-accent"
+        title="各OCRエンジンが返す推論信頼度です。エンジン間で算出方式は異なります。取得できない場合（Tesseractのwhitelist指定時等）は -- 表示になります。"
+      >
         {typeof confidence === "number" ? `${(confidence * 100).toFixed(1)}%` : "--"}
       </span>
       <span className="shrink-0 rounded-md border border-accent/50 bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold text-blue-200">

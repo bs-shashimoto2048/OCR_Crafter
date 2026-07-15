@@ -165,7 +165,8 @@ def evaluate_ocr(
                         "engine": rec["engine"],
                         "model": rec["model"],
                         "prediction": prediction,
-                        "confidence": round(float(confidence), 4),
+                        # None=取得不能（whitelist指定時のTesseract既知挙動）。0へ偽装しない
+                        "confidence": round(float(confidence), 4) if confidence is not None else None,
                         "match": bool(match),
                     }
                 )

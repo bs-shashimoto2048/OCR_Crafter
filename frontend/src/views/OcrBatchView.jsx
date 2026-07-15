@@ -78,6 +78,8 @@ function resolveBatchValid(row) {
 }
 
 function formatConfidencePercent(value) {
+  // null/undefined=取得不能。Number(null)=0 になるため先に弾き、0%へ偽装しない
+  if (value === null || value === undefined) return "-";
   const num = Number(value);
   if (!Number.isFinite(num)) return "-";
   const ratio = num <= 1 ? num : num / 100;
