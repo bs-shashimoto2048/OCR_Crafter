@@ -45,6 +45,44 @@ def test_list_includes_common_models(temp_projects, monkeypatch):
         assert builtin in result["items"]
 
 
+def test_list_models_have_source_and_path(temp_projects, monkeypatch):
+    """modelsへ取得元（project/common/builtin）とパスが付与される。"""
+    _setup_common_dir(temp_projects["tmp"], monkeypatch, names=["common_a.pt"])
+    from src.app.project_paths import ensure_project_directories
+
+    paths = ensure_project_directories("p1")
+    yolo_dir = paths.models / "yolo"
+    yolo_dir.mkdir(parents=True, exist_ok=True)
+    (yolo_dir / "proj_a.pt").write_bytes(b"dummy")
+
+    result = tib.list_yolo_models(project_id="p1")
+    by_name = {row["name"]: row for row in result["models"]}
+    assert by_name["proj_a.pt"]["source"] == "project"
+    assert by_name["proj_a.pt"]["path"]  # パスあり
+    assert by_name["common_a.pt"]["source"] == "common"
+    assert by_name["common_a.pt"]["path"]
+    assert by_name["yolo11n.pt"]["source"] == "builtin"
+    assert by_name["yolo11n.pt"]["path"] is None
+    # items と models の名前集合は一致（重複2件表示しない）
+    assert [row["name"] for row in result["models"]] == result["items"]
+
+
+def test_list_models_same_name_project_wins(temp_projects, monkeypatch):
+    """同名モデルはproject優先のsourceが付与され、1件のみ表示される。"""
+    _setup_common_dir(temp_projects["tmp"], monkeypatch, names=["dup.pt"])
+    from src.app.project_paths import ensure_project_directories
+
+    paths = ensure_project_directories("p1")
+    yolo_dir = paths.models / "yolo"
+    yolo_dir.mkdir(parents=True, exist_ok=True)
+    (yolo_dir / "dup.pt").write_bytes(b"dummy")
+
+    result = tib.list_yolo_models(project_id="p1")
+    rows = [row for row in result["models"] if row["name"] == "dup.pt"]
+    assert len(rows) == 1
+    assert rows[0]["source"] == "project"
+
+
 def test_list_without_common_dir_keeps_builtins(temp_projects, monkeypatch):
     """共通ディレクトリが無い場合は従来どおりビルトインのみ（後方互換）。"""
     monkeypatch.setattr(tib, "COMMON_YOLO_MODELS_DIR", temp_projects["tmp"] / "not_exist")
@@ -131,6 +169,12 @@ def test_detect_zero_detections_is_normal_response(temp_projects, monkeypatch):
     assert result["raw_count"] == 0
     assert result["original_size"] == [64, 32]
     assert isinstance(result["resized_size"], list) and len(result["resized_size"]) == 2
+    # 0件でも実行情報（モデル名・取得元・処理時間・前処理適用）を返す
+    assert result["model_name"] == str(BUILTIN_MODEL_FILE)
+    assert result["model_source"] == "path"  # 絶対パス指定のため
+    assert isinstance(result["inference_time_ms"], int) and result["inference_time_ms"] >= 0
+    assert isinstance(result["total_time_ms"], int) and result["total_time_ms"] >= result["inference_time_ms"]
+    assert result["preprocess_applied"] is False
 
 
 @pytest.mark.skipif(not BUILTIN_MODEL_FILE.exists(), reason="yolo11n.pt がリポジトリ直下に無い")
@@ -152,6 +196,47 @@ def test_detect_with_preprocess_rotation(temp_projects, monkeypatch):
     # 64x32 を90°回転 → 32x64（前処理後サイズが original_size として返る）
     assert result["original_size"] == [32, 64]
     assert result["count"] >= 0
+    # 有効な前処理（回転90°）は preprocess_applied=True
+    assert result["preprocess_applied"] is True
+
+
+@pytest.mark.skipif(not BUILTIN_MODEL_FILE.exists(), reason="yolo11n.pt がリポジトリ直下に無い")
+def test_detect_noop_preprocess_is_not_applied(temp_projects, monkeypatch):
+    """設定オブジェクトが存在しても無変換（noop）なら preprocess_applied=False（既存noop判定を使用）。"""
+    _setup_common_dir(temp_projects["tmp"], monkeypatch)
+    result = tib.detect_bboxes_with_yolo(
+        image_bytes=_png_bytes(64, 32),
+        long_side=640,
+        use_resize=True,
+        resize_axis="long",
+        model_name=str(BUILTIN_MODEL_FILE),
+        conf_threshold=0.25,
+        merge_overlaps=True,
+        merge_iou_threshold=0.5,
+        project_id="p1",
+        detect_preprocess={"rotation": 0, "brightness": 1.0},
+    )
+    assert result["preprocess_applied"] is False
+
+
+@pytest.mark.skipif(not REAL_MODEL_FILE.exists(), reason="共通models/yoloの実モデルが無い環境ではスキップ")
+def test_detect_common_model_source(temp_projects, monkeypatch):
+    """共通 models/yolo のモデルをbare名で指定すると model_source=common で解決される（読み取りのみ）。"""
+    monkeypatch.setattr(tib, "COMMON_YOLO_MODELS_DIR", REAL_MODEL_FILE.parent)
+    result = tib.detect_bboxes_with_yolo(
+        image_bytes=_png_bytes(64, 32),
+        long_side=640,
+        use_resize=True,
+        resize_axis="long",
+        model_name=REAL_MODEL_FILE.name,
+        conf_threshold=0.25,
+        merge_overlaps=True,
+        merge_iou_threshold=0.5,
+        project_id="p1",
+    )
+    assert result["model_source"] == "common"
+    assert result["model_name"] == REAL_MODEL_FILE.name
+    assert Path(result["resolved_model"]) == REAL_MODEL_FILE.resolve()
 
 
 @pytest.mark.skipif(

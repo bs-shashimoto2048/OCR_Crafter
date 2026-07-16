@@ -44,3 +44,55 @@ export function formatDetectResultMessage(count) {
   }
   return `検出完了: ${num}件`;
 }
+
+// モデル取得元（source）の短い表示名。select内バッジ・Step3スナップショット用
+export function modelSourceLabel(source) {
+  switch (source) {
+    case "project":
+      return "プロジェクト";
+    case "common":
+      return "共通";
+    case "builtin":
+      return "標準";
+    case "path":
+      return "パス指定";
+    default:
+      return "不明";
+  }
+}
+
+// モデル取得元の説明的な表示名（使用モデル情報カード用）
+export function modelSourceCardLabel(source) {
+  switch (source) {
+    case "project":
+      return "プロジェクトモデル";
+    case "common":
+      return "共通モデル";
+    case "builtin":
+      return "Ultralytics標準モデル";
+    case "path":
+      return "カスタムパス指定";
+    default:
+      return "不明";
+  }
+}
+
+// モデル一覧（yolo-models の models）から名前で取得元情報を引く。無ければ null
+export function findModelInfo(name, models) {
+  if (!name || !Array.isArray(models)) {
+    return null;
+  }
+  return models.find((row) => row && row.name === name) || null;
+}
+
+// ミリ秒を「0.72秒」形式へ整形（null/undefined/非数値は "--"。Number(null)=0 の誤変換を防ぐ）
+export function formatMillisAsSeconds(ms) {
+  if (ms === null || ms === undefined || ms === "") {
+    return "--";
+  }
+  const num = Number(ms);
+  if (!Number.isFinite(num) || num < 0) {
+    return "--";
+  }
+  return `${(num / 1000).toFixed(2)}秒`;
+}

@@ -4,9 +4,13 @@ import assert from "node:assert/strict";
 
 import {
   extractDetectErrorDetail,
+  findModelInfo,
   formatDetectFailureMessage,
   formatDetectResultMessage,
+  formatMillisAsSeconds,
   isModelMissing,
+  modelSourceCardLabel,
+  modelSourceLabel,
 } from "../src/lib/detectModel.js";
 
 test("isModelMissing: 一覧に無い保存済み選択はmissing", () => {
@@ -48,4 +52,39 @@ test("formatDetectResultMessage: 0件は正常終了と明示し、処理失敗�
   assert.match(formatDetectResultMessage(0), /0件/);
   assert.match(formatDetectResultMessage(0), /正常終了/);
   assert.equal(formatDetectResultMessage(14), "検出完了: 14件");
+});
+
+test("modelSourceLabel: 取得元の短い表示名（不明はフォールバック）", () => {
+  assert.equal(modelSourceLabel("project"), "プロジェクト");
+  assert.equal(modelSourceLabel("common"), "共通");
+  assert.equal(modelSourceLabel("builtin"), "標準");
+  assert.equal(modelSourceLabel("path"), "パス指定");
+  assert.equal(modelSourceLabel(null), "不明");
+  assert.equal(modelSourceLabel("unexpected"), "不明");
+});
+
+test("modelSourceCardLabel: 情報カード用の説明的表示名", () => {
+  assert.equal(modelSourceCardLabel("project"), "プロジェクトモデル");
+  assert.equal(modelSourceCardLabel("common"), "共通モデル");
+  assert.equal(modelSourceCardLabel("builtin"), "Ultralytics標準モデル");
+  assert.equal(modelSourceCardLabel(undefined), "不明");
+});
+
+test("findModelInfo: 名前で取得元情報を引く（無ければnull）", () => {
+  const models = [
+    { name: "a.pt", source: "project", path: "data/projects/p/models/yolo/a.pt" },
+    { name: "b.pt", source: "common", path: "models/yolo/b.pt" },
+  ];
+  assert.deepEqual(findModelInfo("b.pt", models), models[1]);
+  assert.equal(findModelInfo("c.pt", models), null);
+  assert.equal(findModelInfo("a.pt", null), null);
+  assert.equal(findModelInfo("", models), null);
+});
+
+test("formatMillisAsSeconds: ミリ秒を秒表示へ整形（不明は--）", () => {
+  assert.equal(formatMillisAsSeconds(720), "0.72秒");
+  assert.equal(formatMillisAsSeconds(0), "0.00秒");
+  assert.equal(formatMillisAsSeconds(1543), "1.54秒");
+  assert.equal(formatMillisAsSeconds(null), "--");
+  assert.equal(formatMillisAsSeconds("abc"), "--");
 });

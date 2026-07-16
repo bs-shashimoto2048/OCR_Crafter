@@ -2,6 +2,7 @@ import base64
 import io
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -10,7 +11,11 @@ from PIL import Image, UnidentifiedImageError
 
 from ..paths import PROJECT_ROOT
 from ..project_paths import ensure_project_directories, get_project_paths
-from .detection_preprocess import apply_detection_preprocess, invert_detection_bbox
+from .detection_preprocess import (
+    apply_detection_preprocess,
+    invert_detection_bbox,
+    is_detection_preprocess_noop,
+)
 
 # 全プロジェクト共通のYOLOモデル置き場（リポジトリ直下 models/yolo）。
 # プロジェクト内 data/projects/<id>/models/yolo が優先され、ここは共通モデルの検索先として追加される
@@ -162,28 +167,36 @@ def _merge_overlapping_detections(
     return merged
 
 
-def _resolve_model_name(model_name: str, project_id: str) -> str:
+def _resolve_model_with_source(model_name: str, project_id: str) -> tuple[str, str]:
+    """モデル名を実パスへ解決し、取得元（path/project/common/builtin）と共に返す。
+
+    解決優先順: 明示された実在パス → プロジェクト専用 → 共通 models/yolo → ultralytics標準名。
+    """
     candidate = (model_name or "").strip()
     if not candidate:
         raise ValueError("model is required")
 
     if Path(candidate).exists():
-        return str(Path(candidate).resolve())
+        return str(Path(candidate).resolve()), "path"
 
     paths = get_project_paths(project_id)
     model_dir = paths.models / "yolo"
     model_path = model_dir / candidate
     if model_path.exists():
-        return str(model_path.resolve())
+        return str(model_path.resolve()), "project"
 
     # 共通モデル置き場（リポジトリ直下 models/yolo）。プロジェクト内に無い場合のみ参照する
     common_path = COMMON_YOLO_MODELS_DIR / candidate
     if common_path.exists() and common_path.is_file():
-        return str(common_path.resolve())
+        return str(common_path.resolve()), "common"
 
     # ここまでで解決できない場合は名前をそのまま返す
     # （yolo11n.pt 等のビルトイン名は ultralytics が自動ダウンロードで解決する）
-    return candidate
+    return candidate, "builtin"
+
+
+def _resolve_model_name(model_name: str, project_id: str) -> str:
+    return _resolve_model_with_source(model_name, project_id)[0]
 
 
 def _load_ultralytics_yolo() -> Any:
@@ -210,13 +223,35 @@ def list_yolo_models(project_id: str) -> dict[str, Any]:
     )
     builtins = ["yolo11n.pt", "yolov8n.pt", "yolov8s.pt"]
 
-    # ユーザーモデル（プロジェクト内→共通）を先頭にし、重複名は先勝ち（プロジェクト内優先）
+    # ユーザーモデル（プロジェクト内→共通）を先頭にし、重複名は先勝ち（プロジェクト内優先・2件表示しない）。
+    # models には取得元（source: project/common/builtin）と相対パスを付与する
     items: list[str] = []
+    models: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for name in local_models + common_models + builtins:
-        if name not in seen:
-            seen.add(name)
-            items.append(name)
+
+    def _relative_to_repo(path: Path) -> str:
+        try:
+            return path.resolve().relative_to(PROJECT_ROOT).as_posix()
+        except ValueError:
+            return str(path.resolve())
+
+    for name, source, path in (
+        [(n, "project", yolo_dir / n) for n in local_models]
+        + [(n, "common", COMMON_YOLO_MODELS_DIR / n) for n in common_models]
+        + [(n, "builtin", None) for n in builtins]
+    ):
+        if name in seen:
+            continue
+        seen.add(name)
+        items.append(name)
+        models.append(
+            {
+                "name": name,
+                "source": source,
+                # 絶対パスをUIへ常時出さないようリポジトリ相対で返す（builtinはパスなし）
+                "path": _relative_to_repo(path) if path is not None else None,
+            }
+        )
 
     return {
         "project_id": project_id,
@@ -226,6 +261,7 @@ def list_yolo_models(project_id: str) -> dict[str, Any]:
         "local_models": local_models,
         "common_models": common_models,
         "items": items,
+        "models": models,
     }
 
 
@@ -267,8 +303,13 @@ def detect_bboxes_with_yolo(
     if not (0.0 <= float(merge_iou_threshold) <= 1.0):
         raise ValueError("merge_iou_threshold must be between 0 and 1")
 
+    # total_time_ms: 画像デコード・前処理・モデル読込・推論・レスポンス整形を含む全体時間
+    total_started = time.perf_counter()
+
     original = _decode_image_bytes(image_bytes)
-    # 検出前処理はリサイズ前に適用（プレビュー・出力と同一の座標系を保つ）
+    # 検出前処理はリサイズ前に適用（プレビュー・出力と同一の座標系を保つ）。
+    # preprocess_applied は「設定が存在するか」ではなく noop 判定で決める（無変換設定はOFF扱い）
+    preprocess_applied = detect_preprocess is not None and not is_detection_preprocess_noop(detect_preprocess)
     if detect_preprocess:
         original = apply_detection_preprocess(original, detect_preprocess)
     resized = _prepare_image(original, long_side, use_resize, resize_axis)
@@ -280,7 +321,7 @@ def detect_bboxes_with_yolo(
     yolo_config_dir.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("YOLO_CONFIG_DIR", str(yolo_config_dir.resolve()))
 
-    resolved_model = _resolve_model_name(model_name, project_id)
+    resolved_model, model_source = _resolve_model_with_source(model_name, project_id)
     YOLO = _load_ultralytics_yolo()
     try:
         model = YOLO(resolved_model)
@@ -291,7 +332,10 @@ def detect_bboxes_with_yolo(
             f"（プロジェクト内 models/yolo と共通 models/yolo を検索しました。"
             f"モデルファイルの配置またはカスタムパス指定を確認してください）"
         ) from e
+    # inference_time_ms: model.predict（YOLO推論）のみの時間
+    inference_started = time.perf_counter()
     result = model.predict(source=image_np, conf=float(conf_threshold), verbose=False)[0]
+    inference_time_ms = int(round((time.perf_counter() - inference_started) * 1000))
 
     detections: list[dict[str, Any]] = []
     boxes = result.boxes
@@ -334,6 +378,9 @@ def detect_bboxes_with_yolo(
         "resize_long_side": long_side,
         "resize_axis": resize_axis,
         "model": model_name,
+        "model_name": model_name,
+        # 取得元: path=明示パス / project=プロジェクト専用 / common=共通models/yolo / builtin=ultralytics標準
+        "model_source": model_source,
         "resolved_model": resolved_model,
         "conf_threshold": float(conf_threshold),
         "merge_overlaps": bool(merge_overlaps),
@@ -345,6 +392,9 @@ def detect_bboxes_with_yolo(
         "merged_count": merged_count,
         "detections": detections,
         "count": len(detections),
+        "inference_time_ms": inference_time_ms,
+        "total_time_ms": int(round((time.perf_counter() - total_started) * 1000)),
+        "preprocess_applied": preprocess_applied,
     }
 
 

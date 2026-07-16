@@ -3,7 +3,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Button from "../components/Button";
 import Card from "../components/Card";
 import { request } from "../lib/api";
-import { formatDetectFailureMessage, formatDetectResultMessage, isModelMissing } from "../lib/detectModel";
+import {
+  findModelInfo,
+  formatDetectFailureMessage,
+  formatDetectResultMessage,
+  formatMillisAsSeconds,
+  isModelMissing,
+  modelSourceCardLabel,
+  modelSourceLabel,
+} from "../lib/detectModel";
 
 const RESIZE_OPTIONS = [640, 1280, 1536, 1920, 2048];
 const IMAGE_BUILDER_STATE_STORAGE_KEY = "ocr_image_builder_last_state_v1";
@@ -171,6 +179,9 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
   const [detectPreviewLoading, setDetectPreviewLoading] = useState(false);
   // 検出実行時に使用した前処理（クロップ出力の座標整合のため保持）
   const [detectUsedPreprocess, setDetectUsedPreprocess] = useState(null);
+  // 検出実行時のスナップショット（使用モデル・取得元・処理時間・前処理適用・件数）。
+  // Step3以降は現在の設定値ではなくこの値を表示する（検出後にモデル選択を変えても変わらない）
+  const [detectRunInfo, setDetectRunInfo] = useState(null);
 
   useEffect(() => {
     try {
@@ -943,6 +954,16 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       setDetectResult(data);
       // クロップ出力時に同じ前処理を適用するため、検出時点の設定を保持
       setDetectUsedPreprocess(detectPreprocessPayload);
+      // 検出実行時のスナップショット（Step2サマリー・Step3の「検出モデル」表示に使用）
+      setDetectRunInfo({
+        modelName: String(data.model_name || modelName),
+        modelSource: data.model_source || null,
+        resolvedModel: String(data.resolved_model || ""),
+        inferenceTimeMs: Number.isFinite(Number(data.inference_time_ms)) ? Number(data.inference_time_ms) : null,
+        totalTimeMs: Number.isFinite(Number(data.total_time_ms)) ? Number(data.total_time_ms) : null,
+        preprocessApplied: Boolean(data.preprocess_applied),
+        detectedCount: Number(data.count) || 0,
+      });
       setDetections((data.detections || []).map((row) => ({ ...row, selected: row.selected !== false })));
       setSeriesFilter(SERIES_FILTER_ALL);
       setBboxUndoStack([]);
@@ -953,7 +974,9 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       setOk(formatDetectResultMessage(data.count));
     } catch (e) {
       if (seq === detectSeqRef.current) {
-        setFail(e.message);
+        // 失敗時は成功サマリーを消し、使用モデルを添えて表示（成功表示との混同防止）
+        setDetectRunInfo(null);
+        setFail(`${e.message}［使用モデル: ${modelName || "未選択"}］`);
       }
     } finally {
       if (seq === detectSeqRef.current) {
@@ -1741,11 +1764,15 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                     value={modelSelection}
                     onChange={(e) => setModelSelection(e.target.value)}
                   >
-                    {(yoloModels.items || []).map((name) => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
+                    {/* 取得元（プロジェクト/共通/標準）をプレフィックスで明示 */}
+                    {(yoloModels.items || []).map((name) => {
+                      const info = findModelInfo(name, yoloModels.models);
+                      return (
+                        <option key={name} value={name}>
+                          {info ? `[${modelSourceLabel(info.source)}] ${name}` : name}
+                        </option>
+                      );
+                    })}
                     {/* 保存済み選択が一覧から消えた場合は黙って置き換えず、見つからないことを明示する */}
                     {isModelMissing(modelSelection, yoloModels.items) ? (
                       <option value={modelSelection}>{modelSelection}（見つかりません）</option>
@@ -1758,6 +1785,52 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                       配置するか、別のモデルを選択してください。
                     </p>
                   ) : null}
+                </div>
+                {/* 使用モデル情報カード（選択中モデルの取得元・相対パスをコンパクト表示。絶対パスはTooltipのみ） */}
+                <div className="rounded-lg border border-border/70 bg-card/55 px-2.5 py-2 text-xs">
+                  <p className="text-[11px] font-semibold text-muted">使用モデル</p>
+                  {modelSelection === "__custom__" ? (
+                    customModelPath.trim() ? (
+                      <>
+                        <p className="mt-0.5 truncate font-semibold text-text" title={customModelPath}>
+                          {customModelPath.trim().split(/[\\/]/).slice(-1)[0]}
+                        </p>
+                        <p className="text-muted">取得元: カスタムパス指定</p>
+                        <p className="truncate text-muted" title={customModelPath}>
+                          {customModelPath}
+                        </p>
+                      </>
+                    ) : (
+                      <p className="mt-0.5 text-muted">使用モデルを選択してください（モデルパス未入力）</p>
+                    )
+                  ) : isModelMissing(modelSelection, yoloModels.items) ? (
+                    <p className="mt-0.5 text-amber-100">選択中のモデルが見つかりません</p>
+                  ) : modelSelection ? (
+                    (() => {
+                      const info = findModelInfo(modelSelection, yoloModels.models);
+                      const sourceTone =
+                        info?.source === "project"
+                          ? "text-blue-200"
+                          : info?.source === "common"
+                            ? "text-emerald-200"
+                            : "text-muted";
+                      return (
+                        <>
+                          <p className="mt-0.5 truncate font-semibold text-text" title={modelSelection}>
+                            {modelSelection}
+                          </p>
+                          <p className={sourceTone}>取得元: {modelSourceCardLabel(info?.source ?? "builtin")}</p>
+                          {info?.path ? (
+                            <p className="truncate text-muted" title={info.path}>
+                              {info.path}
+                            </p>
+                          ) : null}
+                        </>
+                      );
+                    })()
+                  ) : (
+                    <p className="mt-0.5 text-muted">使用モデルを選択してください</p>
+                  )}
                 </div>
                 {modelSelection === "__custom__" ? (
                   <div>
@@ -1819,13 +1892,41 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                     次へ
                   </Button>
                 </div>
-                {detectResult ? (
-                  <p className="text-xs text-muted">
-                    検出件数: {detectResult.count}
-                    {typeof detectResult.raw_count === "number" && typeof detectResult.merged_count === "number"
-                      ? ` (統合前 ${detectResult.raw_count} → 統合後 ${detectResult.merged_count})`
-                      : ""}
-                  </p>
+                {/* 検出結果サマリー（検出実行時のスナップショット。0件も正常終了として表示し、失敗時は表示しない） */}
+                {detectRunInfo ? (
+                  <div className="rounded-lg border border-border/70 bg-card/55 px-2.5 py-2 text-xs">
+                    <p className="text-[11px] font-semibold text-muted">検出結果</p>
+                    <div className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 tabular-nums">
+                      <span className="text-muted">検出件数</span>
+                      <span className="font-semibold text-text">
+                        {detectRunInfo.detectedCount}件
+                        {detectResult &&
+                        typeof detectResult.raw_count === "number" &&
+                        typeof detectResult.merged_count === "number" &&
+                        detectResult.raw_count !== detectResult.merged_count
+                          ? `（統合前 ${detectResult.raw_count} → 統合後 ${detectResult.merged_count}）`
+                          : ""}
+                      </span>
+                      <span className="text-muted">処理時間</span>
+                      <span className="text-text">
+                        {formatMillisAsSeconds(detectRunInfo.totalTimeMs)}
+                        {detectRunInfo.inferenceTimeMs !== null
+                          ? `（うち推論 ${formatMillisAsSeconds(detectRunInfo.inferenceTimeMs)}）`
+                          : ""}
+                      </span>
+                      <span className="text-muted">使用モデル</span>
+                      <span className="min-w-0 truncate text-text" title={detectRunInfo.resolvedModel || detectRunInfo.modelName}>
+                        {detectRunInfo.modelName}
+                      </span>
+                      <span className="text-muted">取得元</span>
+                      <span className="text-text">{modelSourceCardLabel(detectRunInfo.modelSource)}</span>
+                      <span className="text-muted">検出前処理</span>
+                      <span className="text-text">{detectRunInfo.preprocessApplied ? "ON" : "OFF"}</span>
+                    </div>
+                    {detectRunInfo.detectedCount === 0 ? (
+                      <p className="mt-1 text-muted">処理は正常に完了しましたが、対象は検出されませんでした。</p>
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
             </Card>
@@ -1837,6 +1938,15 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
               subtitle={step3Done ? "完了" : "保存対象をチェック"}
               className="flex min-h-0 flex-1 flex-col"
             >
+              {/* 検出時に実際に使用したモデルのスナップショット（検出後にモデル選択を変えても変わらない） */}
+              {detectRunInfo ? (
+                <p
+                  className="mb-1 truncate text-[11px] text-muted"
+                  title={detectRunInfo.resolvedModel || detectRunInfo.modelName}
+                >
+                  検出モデル: {detectRunInfo.modelName}（{modelSourceLabel(detectRunInfo.modelSource)}）
+                </p>
+              ) : null}
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 <Button
                   size="sm"

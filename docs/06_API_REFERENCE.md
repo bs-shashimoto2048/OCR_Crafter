@@ -109,9 +109,9 @@
 
 | Method / Path | リクエスト | レスポンス主要キー | 概要 |
 |---|---|---|---|
-| GET `/image-builder/yolo-models` | Query: `project_id?` | モデル一覧（`items` / `local_models` / `common_models` / `builtin_models`） | 利用可能なYOLOモデル一覧。プロジェクト内 `models/yolo` → 共通 `models/yolo`（リポジトリ直下）→ ビルトインの順で列挙（同名はプロジェクト内優先） |
+| GET `/image-builder/yolo-models` | Query: `project_id?` | モデル一覧（`items` / `local_models` / `common_models` / `builtin_models` / `models`=`{name, source, path}`。`source`は`project`/`common`/`builtin`、`path`はリポジトリ相対・builtinはnull） | 利用可能なYOLOモデル一覧。プロジェクト内 `models/yolo` → 共通 `models/yolo`（リポジトリ直下）→ ビルトインの順で列挙（同名はプロジェクト内優先・重複表示なし） |
 | POST `/image-builder/resize-preview` | Form: `file`, `resize_long_side`, `use_resize`, `resize_axis`, `detect_preprocess_json` | プレビュー | リサイズ/検出前処理プレビュー |
-| POST `/image-builder/detect` | Form: 上記 + `model`, `conf_threshold`, `merge_overlaps`, `merge_iou_threshold` | 検出結果 | YOLO BBox検出 |
+| POST `/image-builder/detect` | Form: 上記 + `model`, `conf_threshold`, `merge_overlaps`, `merge_iou_threshold` | 検出結果（従来キーに加え `model_name` / `model_source`=path・project・common・builtin / `inference_time_ms`=YOLO推論のみ / `total_time_ms`=デコード〜レスポンス整形の全体 / `preprocess_applied`=noop判定でON/OFF） | YOLO BBox検出 |
 | POST `/image-builder/export` | Form: 上記 + `boxes_json`, `output_dir`, `crop_height` | 出力結果 | 選択BBoxを元画像から切出して出力 |
 
 ## 評価 / チューニング出力
