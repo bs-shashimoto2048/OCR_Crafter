@@ -78,11 +78,57 @@ export function modelSourceCardLabel(source) {
 }
 
 // モデル一覧（yolo-models の models）から名前で取得元情報を引く。無ければ null
+// （project→common→builtin の並び順のため、同名は project 優先で見つかる）
 export function findModelInfo(name, models) {
   if (!name || !Array.isArray(models)) {
     return null;
   }
   return models.find((row) => row && row.name === name) || null;
+}
+
+// 取得元＋名前で厳密に引く（同名モデルが複数取得元にある場合は選択した取得元を必ず使用する）
+export function findModelBySource(models, source, name) {
+  if (!name || !source || !Array.isArray(models)) {
+    return null;
+  }
+  return models.find((row) => row && row.name === name && row.source === source) || null;
+}
+
+// select の option value（取得元と名前の組。取得元をまたぐ同名モデルを区別する）
+export function buildModelValue(source, name) {
+  return `${source || ""}|${name || ""}`;
+}
+
+// option value から {source, name} を復元。区切りが無い旧形式は source 未確定として扱う
+export function parseModelValue(value) {
+  const text = String(value ?? "");
+  const index = text.indexOf("|");
+  if (index < 0) {
+    return { source: "", name: text };
+  }
+  return { source: text.slice(0, index), name: text.slice(index + 1) };
+}
+
+// 取得元ごとにグループ化（select の optgroup 表示用）
+export function groupModelsBySource(models) {
+  const groups = { project: [], common: [], builtin: [] };
+  for (const row of Array.isArray(models) ? models : []) {
+    if (row && groups[row.source]) {
+      groups[row.source].push(row);
+    }
+  }
+  return groups;
+}
+
+// そのモデルで検出を実行できるか（標準モデルは取得済みのときだけ使用可能）
+export function canDetectWithModel(info) {
+  if (!info) {
+    return false;
+  }
+  if (info.source === "builtin") {
+    return info.downloaded === true;
+  }
+  return true;
 }
 
 // ミリ秒を「0.72秒」形式へ整形（null/undefined/非数値は "--"。Number(null)=0 の誤変換を防ぐ）

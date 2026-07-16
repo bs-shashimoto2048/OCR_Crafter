@@ -52,6 +52,7 @@ from .schemas import (
     OcrEvaluateRequest,
     OcrLogSaveRequest,
     OcrTrainStartRequest,
+    BuiltinYoloDownloadRequest,
     OcrTuningExportRequest,
     PreprocessPreviewRequest,
     PreprocessRequest,
@@ -100,7 +101,10 @@ from .services.tesseract_pipeline import (
 )
 from .services.detection_preprocess import parse_detection_preprocess_json
 from .services.training_image_builder import (
+    BuiltinYoloDownloadInProgressError,
+    BuiltinYoloModelNotDownloadedError,
     detect_bboxes_with_yolo,
+    download_builtin_yolo_model,
     export_selected_crops,
     list_yolo_models,
     make_resize_preview,
@@ -2389,6 +2393,7 @@ async def image_builder_detect(
     use_resize: bool = Form(True),
     resize_axis: str = Form("long"),
     model: str = Form(...),
+    model_source: str = Form(""),
     conf_threshold: float = Form(0.25),
     merge_overlaps: bool = Form(True),
     merge_iou_threshold: float = Form(0.5),
@@ -2411,9 +2416,26 @@ async def image_builder_detect(
             merge_iou_threshold=float(merge_iou_threshold),
             project_id=resolved,
             detect_preprocess=detect_preprocess,
+            model_source=str(model_source or ""),
         )
+    except BuiltinYoloModelNotDownloadedError as e:
+        # 検出API実行中は外部通信（自動ダウンロード）を行わない。未取得標準モデルは409で明示する
+        raise HTTPException(status_code=409, detail=str(e)) from e
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/image-builder/yolo-models/builtin/download")
+def image_builder_download_builtin_yolo_model(req: BuiltinYoloDownloadRequest) -> dict[str, Any]:
+    """Ultralytics標準モデルの明示取得（許可リスト内の名前のみ。取得済みなら再ダウンロードしない）。"""
+    try:
+        return download_builtin_yolo_model(req.model_name)
+    except BuiltinYoloDownloadInProgressError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except RuntimeError as e:

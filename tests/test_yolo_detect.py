@@ -26,12 +26,20 @@ def _png_bytes(width=64, height=32, color=(255, 255, 255)):
     return buf.getvalue()
 
 
-def _setup_common_dir(tmp_path, monkeypatch, names=()):
+def _setup_common_dir(tmp_path, monkeypatch, names=(), builtin_downloaded=()):
+    """共通/標準モデルの検索先を一時ディレクトリへ隔離する（実リポジトリのモデルを見ない）。"""
     common = tmp_path / "common_yolo"
     common.mkdir(parents=True, exist_ok=True)
     for name in names:
         (common / name).write_bytes(b"dummy")
+    builtin_dir = tmp_path / "builtin_yolo"
+    builtin_dir.mkdir(parents=True, exist_ok=True)
+    for name in builtin_downloaded:
+        (builtin_dir / name).write_bytes(b"dummy")
     monkeypatch.setattr(tib, "COMMON_YOLO_MODELS_DIR", common)
+    monkeypatch.setattr(tib, "BUILTIN_YOLO_MODELS_DIR", builtin_dir)
+    # 旧自動ダウンロード（リポジトリ直下）の互換検索も一時側へ向ける
+    monkeypatch.setattr(tib, "PROJECT_ROOT", tmp_path)
     return common
 
 
@@ -45,9 +53,9 @@ def test_list_includes_common_models(temp_projects, monkeypatch):
         assert builtin in result["items"]
 
 
-def test_list_models_have_source_and_path(temp_projects, monkeypatch):
-    """modelsへ取得元（project/common/builtin）とパスが付与される。"""
-    _setup_common_dir(temp_projects["tmp"], monkeypatch, names=["common_a.pt"])
+def test_list_models_have_source_downloaded_and_path(temp_projects, monkeypatch):
+    """modelsへ取得元（project/common/builtin）・取得済み状態・パスが付与される。"""
+    _setup_common_dir(temp_projects["tmp"], monkeypatch, names=["common_a.pt"], builtin_downloaded=["yolo11n.pt"])
     from src.app.project_paths import ensure_project_directories
 
     paths = ensure_project_directories("p1")
@@ -56,19 +64,19 @@ def test_list_models_have_source_and_path(temp_projects, monkeypatch):
     (yolo_dir / "proj_a.pt").write_bytes(b"dummy")
 
     result = tib.list_yolo_models(project_id="p1")
-    by_name = {row["name"]: row for row in result["models"]}
-    assert by_name["proj_a.pt"]["source"] == "project"
-    assert by_name["proj_a.pt"]["path"]  # パスあり
-    assert by_name["common_a.pt"]["source"] == "common"
-    assert by_name["common_a.pt"]["path"]
-    assert by_name["yolo11n.pt"]["source"] == "builtin"
-    assert by_name["yolo11n.pt"]["path"] is None
-    # items と models の名前集合は一致（重複2件表示しない）
-    assert [row["name"] for row in result["models"]] == result["items"]
+    by_key = {(row["source"], row["name"]): row for row in result["models"]}
+    assert by_key[("project", "proj_a.pt")]["downloaded"] is True
+    assert by_key[("project", "proj_a.pt")]["path"]
+    assert by_key[("common", "common_a.pt")]["downloaded"] is True
+    # 取得済み標準モデルは downloaded=True＋パスあり、未取得は downloaded=False＋パスなし
+    assert by_key[("builtin", "yolo11n.pt")]["downloaded"] is True
+    assert by_key[("builtin", "yolo11n.pt")]["path"]
+    assert by_key[("builtin", "yolov8n.pt")]["downloaded"] is False
+    assert by_key[("builtin", "yolov8n.pt")]["path"] is None
 
 
-def test_list_models_same_name_project_wins(temp_projects, monkeypatch):
-    """同名モデルはproject優先のsourceが付与され、1件のみ表示される。"""
+def test_list_models_same_name_kept_per_source(temp_projects, monkeypatch):
+    """同名モデルは取得元ごとに独立して列挙され、後方互換のitemsではproject優先の1件になる。"""
     _setup_common_dir(temp_projects["tmp"], monkeypatch, names=["dup.pt"])
     from src.app.project_paths import ensure_project_directories
 
@@ -78,9 +86,9 @@ def test_list_models_same_name_project_wins(temp_projects, monkeypatch):
     (yolo_dir / "dup.pt").write_bytes(b"dummy")
 
     result = tib.list_yolo_models(project_id="p1")
-    rows = [row for row in result["models"] if row["name"] == "dup.pt"]
-    assert len(rows) == 1
-    assert rows[0]["source"] == "project"
+    sources = sorted(row["source"] for row in result["models"] if row["name"] == "dup.pt")
+    assert sources == ["common", "project"]
+    assert result["items"].count("dup.pt") == 1
 
 
 def test_list_without_common_dir_keeps_builtins(temp_projects, monkeypatch):
@@ -126,10 +134,117 @@ def test_resolve_common_model(temp_projects, monkeypatch):
     assert Path(resolved) == (common / "custom_a.pt").resolve()
 
 
-def test_resolve_unknown_returns_candidate(temp_projects, monkeypatch):
-    """どこにも無い名前はそのまま返す（ビルトイン名のultralytics自動解決を維持）。"""
+def test_resolve_source_project_only_no_fallback(temp_projects, monkeypatch):
+    """source=projectはプロジェクト内のみ解決し、共通へ暗黙フォールバックしない（404相当）。"""
+    _setup_common_dir(temp_projects["tmp"], monkeypatch, names=["only_common.pt"])
+    with pytest.raises(FileNotFoundError):
+        tib.resolve_yolo_model(project_id="p1", model_name="only_common.pt", model_source="project")
+
+
+def test_resolve_source_common_only_no_fallback(temp_projects, monkeypatch):
+    """source=commonは共通のみ解決し、プロジェクト内へ暗黙フォールバックしない。"""
     _setup_common_dir(temp_projects["tmp"], monkeypatch)
-    assert tib._resolve_model_name("yolo11n.pt", "p1") == "yolo11n.pt"
+    from src.app.project_paths import ensure_project_directories
+
+    paths = ensure_project_directories("p1")
+    yolo_dir = paths.models / "yolo"
+    yolo_dir.mkdir(parents=True, exist_ok=True)
+    (yolo_dir / "only_project.pt").write_bytes(b"dummy")
+    with pytest.raises(FileNotFoundError):
+        tib.resolve_yolo_model(project_id="p1", model_name="only_project.pt", model_source="common")
+
+
+def test_resolve_source_common_used_even_if_project_has_same_name(temp_projects, monkeypatch):
+    """同名モデルが複数取得元にあっても、UIで選択した取得元（common）を必ず使用する。"""
+    common = _setup_common_dir(temp_projects["tmp"], monkeypatch, names=["dup.pt"])
+    from src.app.project_paths import ensure_project_directories
+
+    paths = ensure_project_directories("p1")
+    yolo_dir = paths.models / "yolo"
+    yolo_dir.mkdir(parents=True, exist_ok=True)
+    (yolo_dir / "dup.pt").write_bytes(b"dummy")
+    resolved, source = tib.resolve_yolo_model(project_id="p1", model_name="dup.pt", model_source="common")
+    assert source == "common"
+    assert Path(resolved) == (common / "dup.pt").resolve()
+
+
+def test_resolve_builtin_not_downloaded_raises_dedicated_error(temp_projects, monkeypatch):
+    """source=builtinで未取得なら専用エラー（検出APIでは409。自動ダウンロードしない）。"""
+    _setup_common_dir(temp_projects["tmp"], monkeypatch)
+    with pytest.raises(tib.BuiltinYoloModelNotDownloadedError):
+        tib.resolve_yolo_model(project_id="p1", model_name="yolo11n.pt", model_source="builtin")
+
+
+def test_resolve_builtin_downloaded_resolves(temp_projects, monkeypatch):
+    """取得済み標準モデルは builtin ディレクトリから解決される。"""
+    _setup_common_dir(temp_projects["tmp"], monkeypatch, builtin_downloaded=["yolo11n.pt"])
+    resolved, source = tib.resolve_yolo_model(project_id="p1", model_name="yolo11n.pt", model_source="builtin")
+    assert source == "builtin"
+    assert Path(resolved).name == "yolo11n.pt"
+
+
+def test_resolve_builtin_rejects_unknown_name(temp_projects, monkeypatch):
+    """許可リスト外の標準モデル名は拒否する（任意名・任意URL不可）。"""
+    _setup_common_dir(temp_projects["tmp"], monkeypatch)
+    with pytest.raises(ValueError):
+        tib.resolve_yolo_model(project_id="p1", model_name="evil_model.pt", model_source="builtin")
+
+
+def test_legacy_resolution_does_not_auto_download(temp_projects, monkeypatch):
+    """model_source未指定の後方互換順でも、未取得標準モデルは自動ダウンロードせず専用エラー。"""
+    _setup_common_dir(temp_projects["tmp"], monkeypatch)
+    with pytest.raises(tib.BuiltinYoloModelNotDownloadedError):
+        tib.resolve_yolo_model(project_id="p1", model_name="yolo11n.pt", model_source="")
+    # 標準モデル名でもない未知の名前は明示エラー（そのままultralyticsへ渡さない）
+    with pytest.raises(FileNotFoundError):
+        tib.resolve_yolo_model(project_id="p1", model_name="unknown_model.pt", model_source="")
+
+
+def test_download_builtin_rejects_unknown_name(temp_projects, monkeypatch):
+    """取得APIは許可リスト外の名前を拒否する。"""
+    _setup_common_dir(temp_projects["tmp"], monkeypatch)
+    with pytest.raises(ValueError):
+        tib.download_builtin_yolo_model("../../evil.pt")
+
+
+def test_download_builtin_already_downloaded_returns_without_network(temp_projects, monkeypatch):
+    """取得済みなら再ダウンロードせずそのまま返す（外部通信なし）。"""
+    _setup_common_dir(temp_projects["tmp"], monkeypatch, builtin_downloaded=["yolo11n.pt"])
+    result = tib.download_builtin_yolo_model("yolo11n.pt")
+    assert result["downloaded"] is True
+    assert result["already_downloaded"] is True
+    assert result["source"] == "builtin"
+
+
+def test_download_builtin_in_progress_raises(temp_projects, monkeypatch):
+    """同名モデルの取得進行中は専用エラー（二重ダウンロード防止）。"""
+    _setup_common_dir(temp_projects["tmp"], monkeypatch)
+    with tib._builtin_download_lock:
+        tib._builtin_downloads_in_progress.add("yolo11n.pt")
+    try:
+        with pytest.raises(tib.BuiltinYoloDownloadInProgressError):
+            tib.download_builtin_yolo_model("yolo11n.pt")
+    finally:
+        with tib._builtin_download_lock:
+            tib._builtin_downloads_in_progress.discard("yolo11n.pt")
+
+
+def test_detect_builtin_not_downloaded_raises_before_inference(temp_projects, monkeypatch):
+    """検出APIは未取得標準モデルで外部通信（自動ダウンロード）せず、推論前に専用エラーを返す。"""
+    _setup_common_dir(temp_projects["tmp"], monkeypatch)
+    with pytest.raises(tib.BuiltinYoloModelNotDownloadedError):
+        tib.detect_bboxes_with_yolo(
+            image_bytes=_png_bytes(64, 32),
+            long_side=640,
+            use_resize=True,
+            resize_axis="long",
+            model_name="yolo11n.pt",
+            conf_threshold=0.25,
+            merge_overlaps=True,
+            merge_iou_threshold=0.5,
+            project_id="p1",
+            model_source="builtin",
+        )
 
 
 def test_detect_invalid_image_raises_value_error(temp_projects, monkeypatch):

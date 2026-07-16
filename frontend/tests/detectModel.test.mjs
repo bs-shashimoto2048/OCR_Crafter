@@ -3,14 +3,19 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildModelValue,
+  canDetectWithModel,
   extractDetectErrorDetail,
+  findModelBySource,
   findModelInfo,
   formatDetectFailureMessage,
   formatDetectResultMessage,
   formatMillisAsSeconds,
+  groupModelsBySource,
   isModelMissing,
   modelSourceCardLabel,
   modelSourceLabel,
+  parseModelValue,
 } from "../src/lib/detectModel.js";
 
 test("isModelMissing: 一覧に無い保存済み選択はmissing", () => {
@@ -87,4 +92,43 @@ test("formatMillisAsSeconds: ミリ秒を秒表示へ整形（不明は--）", (
   assert.equal(formatMillisAsSeconds(1543), "1.54秒");
   assert.equal(formatMillisAsSeconds(null), "--");
   assert.equal(formatMillisAsSeconds("abc"), "--");
+});
+
+test("buildModelValue / parseModelValue: 取得元と名前の往復（旧形式はsource未確定）", () => {
+  assert.equal(buildModelValue("common", "a.pt"), "common|a.pt");
+  assert.deepEqual(parseModelValue("common|a.pt"), { source: "common", name: "a.pt" });
+  assert.deepEqual(parseModelValue("a.pt"), { source: "", name: "a.pt" });
+  assert.deepEqual(parseModelValue(""), { source: "", name: "" });
+});
+
+test("groupModelsBySource: 取得元ごとにグループ化する", () => {
+  const models = [
+    { name: "p.pt", source: "project" },
+    { name: "c.pt", source: "common" },
+    { name: "b.pt", source: "builtin", downloaded: false },
+    { name: "x.pt", source: "unexpected" },
+  ];
+  const groups = groupModelsBySource(models);
+  assert.equal(groups.project.length, 1);
+  assert.equal(groups.common.length, 1);
+  assert.equal(groups.builtin.length, 1);
+  assert.deepEqual(groupModelsBySource(null), { project: [], common: [], builtin: [] });
+});
+
+test("findModelBySource: 同名でも指定した取得元の行を返す", () => {
+  const models = [
+    { name: "dup.pt", source: "project" },
+    { name: "dup.pt", source: "common" },
+  ];
+  assert.equal(findModelBySource(models, "common", "dup.pt").source, "common");
+  assert.equal(findModelBySource(models, "builtin", "dup.pt"), null);
+  assert.equal(findModelBySource(models, "", "dup.pt"), null);
+});
+
+test("canDetectWithModel: 標準モデルは取得済みのときだけ使用可能", () => {
+  assert.equal(canDetectWithModel({ source: "builtin", downloaded: true }), true);
+  assert.equal(canDetectWithModel({ source: "builtin", downloaded: false }), false);
+  assert.equal(canDetectWithModel({ source: "project" }), true);
+  assert.equal(canDetectWithModel({ source: "common" }), true);
+  assert.equal(canDetectWithModel(null), false);
 });

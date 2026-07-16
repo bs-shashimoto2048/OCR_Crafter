@@ -93,6 +93,15 @@ class AppShutdownRequest(BaseModel):
     frontend_port: Optional[int] = Field(default=None, description="フロントエンド開発サーバーのポート")
 
 
+class BuiltinYoloDownloadRequest(BaseModel):
+    """Ultralytics標準モデルの明示取得リクエスト（許可リスト内の名前のみ）。"""
+
+    # pydantic v2 の model_ 名前空間警告を抑止（APIキー名は model_name を維持）
+    model_config = {"protected_namespaces": ()}
+
+    model_name: str = Field(description="取得する標準モデル名（例: yolo11n.pt）")
+
+
 class OcrTuningExportRequest(BaseModel):
     project_id: Optional[str] = Field(default="default", description="プロジェクトID")
     engine: str = Field(default="both", description="easyocr / paddleocr / both")

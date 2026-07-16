@@ -18,6 +18,7 @@ import TrainingImageBuilderView from "./views/TrainingImageBuilderView";
 import RapidOCRView from "./views/RapidOCRView";
 import OcrBatchView from "./views/OcrBatchView";
 import { API_BASE, imageUrl, request } from "./lib/api";
+import { viewBoundaryKey } from "./lib/viewKey";
 import { lowercaseToggleApplicable } from "./lib/lowercase";
 
 const viewMeta = {
@@ -3412,9 +3413,10 @@ export default function App() {
             fitViewport ? "xl:mt-4 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col xl:overflow-hidden" : ""
           }`}
         >
-          {/* 1画面の例外でアプリ全体が消えないよう画面単位で捕捉（key=画面IDで切替時に自動リセット） */}
+          {/* 1画面の例外でアプリ全体が消えないよう画面単位で捕捉（key=画面IDで切替時に自動リセット）。
+              学習画像作成のStep1〜4は同一コンポーネントのため単一key（Step遷移で選択画像・検出結果を消さない） */}
           <ViewErrorBoundary
-            key={activeView}
+            key={viewBoundaryKey(activeView)}
             viewName={viewMeta[activeView]?.title || activeView}
             onBackToDashboard={() => setActiveView("dashboard")}
           >

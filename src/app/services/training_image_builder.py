@@ -2,6 +2,8 @@ import base64
 import io
 import json
 import os
+import shutil
+import threading
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -20,6 +22,38 @@ from .detection_preprocess import (
 # 全プロジェクト共通のYOLOモデル置き場（リポジトリ直下 models/yolo）。
 # プロジェクト内 data/projects/<id>/models/yolo が優先され、ここは共通モデルの検索先として追加される
 COMMON_YOLO_MODELS_DIR = PROJECT_ROOT / "models" / "yolo"
+
+# Ultralytics標準モデルの保存先（明示ダウンロード専用。共通モデルとはメタデータ上も区別する）
+BUILTIN_YOLO_MODELS_DIR = PROJECT_ROOT / "models" / "yolo" / "builtin"
+# 取得を許可する標準モデル名（任意名・任意URLは受け付けない）
+BUILTIN_YOLO_MODEL_NAMES = ["yolo11n.pt", "yolov8n.pt", "yolov8s.pt"]
+
+# 標準モデルの二重ダウンロード防止（プロセス内ロック）
+_builtin_download_lock = threading.Lock()
+_builtin_downloads_in_progress: set[str] = set()
+
+
+class BuiltinYoloModelNotDownloadedError(Exception):
+    """標準モデルが未取得（検出APIは外部通信しないため409で返す）。"""
+
+
+class BuiltinYoloDownloadInProgressError(Exception):
+    """同じ標準モデルのダウンロードが進行中（二重取得防止）。"""
+
+
+def _builtin_model_local_path(model_name: str) -> Optional[Path]:
+    """取得済み標準モデルのローカルパス。未取得なら None。
+
+    旧バージョンの自動ダウンロードでリポジトリ直下に置かれたファイルも取得済みとして扱う
+    （再ダウンロード不要にするための読み取り専用の互換確認）。
+    """
+    target = BUILTIN_YOLO_MODELS_DIR / model_name
+    if target.exists() and target.is_file():
+        return target
+    legacy = PROJECT_ROOT / model_name
+    if legacy.exists() and legacy.is_file():
+        return legacy
+    return None
 
 RESIZE_LONG_SIDE_OPTIONS = [640, 1280, 1536, 1920, 2048]
 RESIZE_AXES = {"long", "width", "height"}
@@ -167,36 +201,157 @@ def _merge_overlapping_detections(
     return merged
 
 
-def _resolve_model_with_source(model_name: str, project_id: str) -> tuple[str, str]:
-    """モデル名を実パスへ解決し、取得元（path/project/common/builtin）と共に返す。
+def resolve_project_yolo_model(project_id: str, model_name: str) -> str:
+    """プロジェクト専用モデルのみ解決（他の取得元へフォールバックしない）。"""
+    paths = get_project_paths(project_id)
+    model_path = paths.models / "yolo" / model_name
+    if model_path.exists() and model_path.is_file():
+        return str(model_path.resolve())
+    raise FileNotFoundError(
+        f"プロジェクトモデルが見つかりません: {model_name}"
+        f"（data/projects/{project_id}/models/yolo/ に配置してください）"
+    )
 
-    解決優先順: 明示された実在パス → プロジェクト専用 → 共通 models/yolo → ultralytics標準名。
+
+def resolve_common_yolo_model(model_name: str) -> str:
+    """共通モデル（リポジトリ直下 models/yolo）のみ解決（他の取得元へフォールバックしない）。"""
+    common_path = COMMON_YOLO_MODELS_DIR / model_name
+    if common_path.exists() and common_path.is_file():
+        return str(common_path.resolve())
+    raise FileNotFoundError(
+        f"共通モデルが見つかりません: {model_name}（models/yolo/ に配置してください）"
+    )
+
+
+def resolve_builtin_yolo_model(model_name: str) -> str:
+    """取得済みのUltralytics標準モデルのみ解決。未取得なら専用エラー（自動ダウンロードしない）。"""
+    if model_name not in BUILTIN_YOLO_MODEL_NAMES:
+        raise ValueError(f"許可されていない標準モデル名です: {model_name}")
+    local = _builtin_model_local_path(model_name)
+    if local is not None:
+        return str(local.resolve())
+    raise BuiltinYoloModelNotDownloadedError(
+        f"標準モデル {model_name} は未取得です。先にモデルを取得してください。"
+    )
+
+
+def resolve_yolo_model(*, project_id: str, model_name: str, model_source: str = "") -> tuple[str, str]:
+    """取得元を明示してモデルを解決し (実パス, 取得元) を返す。
+
+    model_source を無視した別種別への暗黙フォールバックは行わない。
+    - "path": 明示された実在パスのみ
+    - "project" / "common" / "builtin": 各取得元のみ
+    - 未指定(""): 後方互換の従来順（パス実在→プロジェクト→共通→取得済み標準）。
+      いずれも自動ダウンロードは行わない（検出API実行中に外部通信しない）
     """
     candidate = (model_name or "").strip()
     if not candidate:
         raise ValueError("model is required")
+    source = (model_source or "").strip()
 
+    if source == "path":
+        if Path(candidate).exists():
+            return str(Path(candidate).resolve()), "path"
+        raise FileNotFoundError(f"モデルファイルが見つかりません: {candidate}")
+    if source == "project":
+        return resolve_project_yolo_model(project_id, candidate), "project"
+    if source == "common":
+        return resolve_common_yolo_model(candidate), "common"
+    if source == "builtin":
+        return resolve_builtin_yolo_model(candidate), "builtin"
+    if source:
+        raise ValueError(f"不明な model_source です: {source}")
+
+    # 後方互換（model_source未指定）: 従来の探索順。ただし未取得標準モデルの自動ダウンロードはしない
     if Path(candidate).exists():
         return str(Path(candidate).resolve()), "path"
-
     paths = get_project_paths(project_id)
-    model_dir = paths.models / "yolo"
-    model_path = model_dir / candidate
-    if model_path.exists():
+    model_path = paths.models / "yolo" / candidate
+    if model_path.exists() and model_path.is_file():
         return str(model_path.resolve()), "project"
-
-    # 共通モデル置き場（リポジトリ直下 models/yolo）。プロジェクト内に無い場合のみ参照する
     common_path = COMMON_YOLO_MODELS_DIR / candidate
     if common_path.exists() and common_path.is_file():
         return str(common_path.resolve()), "common"
+    if candidate in BUILTIN_YOLO_MODEL_NAMES:
+        local = _builtin_model_local_path(candidate)
+        if local is not None:
+            return str(local.resolve()), "builtin"
+        raise BuiltinYoloModelNotDownloadedError(
+            f"標準モデル {candidate} は未取得です。先にモデルを取得してください。"
+        )
+    raise FileNotFoundError(
+        f"YOLOモデルが見つかりません: {candidate}"
+        f"（プロジェクト内 models/yolo・共通 models/yolo・取得済み標準モデルを検索しました）"
+    )
 
-    # ここまでで解決できない場合は名前をそのまま返す
-    # （yolo11n.pt 等のビルトイン名は ultralytics が自動ダウンロードで解決する）
-    return candidate, "builtin"
+
+def _resolve_model_with_source(model_name: str, project_id: str) -> tuple[str, str]:
+    """後方互換用の旧エントリポイント（model_source未指定の従来順で解決）。"""
+    return resolve_yolo_model(project_id=project_id, model_name=model_name, model_source="")
 
 
 def _resolve_model_name(model_name: str, project_id: str) -> str:
     return _resolve_model_with_source(model_name, project_id)[0]
+
+
+def download_builtin_yolo_model(model_name: str) -> dict[str, Any]:
+    """Ultralytics標準モデルを明示的に取得する（専用API用。検出APIからは呼ばない）。
+
+    - 許可リスト外の名前は拒否（任意URL・任意ファイル名は受け付けない）
+    - 取得済みなら再ダウンロードせずそのまま返す
+    - 進行中の同名取得があれば専用エラー（二重ダウンロード防止）
+    - 失敗時は不完全ファイルを残さない（一時ディレクトリへ取得後に移動）
+    """
+    name = (model_name or "").strip()
+    if name not in BUILTIN_YOLO_MODEL_NAMES:
+        raise ValueError(f"許可されていない標準モデル名です: {name or '(空)'}")
+
+    existing = _builtin_model_local_path(name)
+    if existing is not None:
+        return {
+            "model_name": name,
+            "source": "builtin",
+            "downloaded": True,
+            "path": str(existing.resolve()),
+            "size_bytes": existing.stat().st_size,
+            "already_downloaded": True,
+        }
+
+    with _builtin_download_lock:
+        if name in _builtin_downloads_in_progress:
+            raise BuiltinYoloDownloadInProgressError(f"標準モデル {name} は取得中です。完了までお待ちください。")
+        _builtin_downloads_in_progress.add(name)
+
+    tmp_dir = BUILTIN_YOLO_MODELS_DIR / ".tmp"
+    tmp_target = tmp_dir / name
+    target = BUILTIN_YOLO_MODELS_DIR / name
+    try:
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        tmp_target.unlink(missing_ok=True)
+        try:
+            from ultralytics.utils.downloads import attempt_download_asset  # type: ignore
+
+            downloaded = Path(str(attempt_download_asset(str(tmp_target))))
+        except Exception as e:  # noqa: BLE001 ネットワーク不通・アセット不在等
+            raise RuntimeError(
+                f"標準モデルの取得に失敗しました（ネットワーク接続を確認してください）: {e}"
+            ) from e
+        if not downloaded.exists() or downloaded.stat().st_size <= 0:
+            raise RuntimeError(f"標準モデルの取得に失敗しました: {name}")
+        BUILTIN_YOLO_MODELS_DIR.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(downloaded), str(target))
+        return {
+            "model_name": name,
+            "source": "builtin",
+            "downloaded": True,
+            "path": str(target.resolve()),
+            "size_bytes": target.stat().st_size,
+            "already_downloaded": False,
+        }
+    finally:
+        tmp_target.unlink(missing_ok=True)
+        with _builtin_download_lock:
+            _builtin_downloads_in_progress.discard(name)
 
 
 def _load_ultralytics_yolo() -> Any:
@@ -216,18 +371,13 @@ def list_yolo_models(project_id: str) -> dict[str, Any]:
     local_models = sorted([p.name for p in yolo_dir.glob("*.pt") if p.is_file()]) if yolo_dir.exists() else []
     # 共通モデル置き場（リポジトリ直下 models/yolo）も一覧へ含める。
     # ここに置いた学習済みモデルが一覧から消え、汎用ビルトインへ黙って置き換わる不具合の修正
+    # 共通モデル一覧では標準モデル保存先（builtin/ サブディレクトリ）を混在させない
     common_models = (
         sorted([p.name for p in COMMON_YOLO_MODELS_DIR.glob("*.pt") if p.is_file()])
         if COMMON_YOLO_MODELS_DIR.exists()
         else []
     )
-    builtins = ["yolo11n.pt", "yolov8n.pt", "yolov8s.pt"]
-
-    # ユーザーモデル（プロジェクト内→共通）を先頭にし、重複名は先勝ち（プロジェクト内優先・2件表示しない）。
-    # models には取得元（source: project/common/builtin）と相対パスを付与する
-    items: list[str] = []
-    models: list[dict[str, Any]] = []
-    seen: set[str] = set()
+    builtins = list(BUILTIN_YOLO_MODEL_NAMES)
 
     def _relative_to_repo(path: Path) -> str:
         try:
@@ -235,28 +385,51 @@ def list_yolo_models(project_id: str) -> dict[str, Any]:
         except ValueError:
             return str(path.resolve())
 
-    for name, source, path in (
-        [(n, "project", yolo_dir / n) for n in local_models]
-        + [(n, "common", COMMON_YOLO_MODELS_DIR / n) for n in common_models]
-        + [(n, "builtin", None) for n in builtins]
-    ):
-        if name in seen:
-            continue
-        seen.add(name)
-        items.append(name)
+    # models: 取得元ごとの完全な一覧（project/common/builtin は独立。取得元間の暗黙統合はしない）。
+    # builtin は取得済み状態（downloaded）を付与し、未取得はパスなし
+    models: list[dict[str, Any]] = []
+    for name in local_models:
         models.append(
             {
                 "name": name,
-                "source": source,
-                # 絶対パスをUIへ常時出さないようリポジトリ相対で返す（builtinはパスなし）
-                "path": _relative_to_repo(path) if path is not None else None,
+                "source": "project",
+                "downloaded": True,
+                "path": _relative_to_repo(yolo_dir / name),
             }
         )
+    for name in common_models:
+        models.append(
+            {
+                "name": name,
+                "source": "common",
+                "downloaded": True,
+                "path": _relative_to_repo(COMMON_YOLO_MODELS_DIR / name),
+            }
+        )
+    for name in builtins:
+        local = _builtin_model_local_path(name)
+        models.append(
+            {
+                "name": name,
+                "source": "builtin",
+                "downloaded": local is not None,
+                "path": _relative_to_repo(local) if local is not None else None,
+            }
+        )
+
+    # items: 後方互換の平坦リスト（重複名は project 優先の先勝ち）
+    items: list[str] = []
+    seen: set[str] = set()
+    for name in local_models + common_models + builtins:
+        if name not in seen:
+            seen.add(name)
+            items.append(name)
 
     return {
         "project_id": project_id,
         "local_dir": str(yolo_dir.resolve()),
         "common_dir": str(COMMON_YOLO_MODELS_DIR.resolve()),
+        "builtin_dir": str(BUILTIN_YOLO_MODELS_DIR.resolve()),
         "builtin_models": builtins,
         "local_models": local_models,
         "common_models": common_models,
@@ -297,6 +470,7 @@ def detect_bboxes_with_yolo(
     merge_iou_threshold: float,
     project_id: str,
     detect_preprocess: Optional[dict[str, Any]] = None,
+    model_source: str = "",
 ) -> dict[str, Any]:
     if not (0.0 <= float(conf_threshold) <= 1.0):
         raise ValueError("conf_threshold must be between 0 and 1")
@@ -321,7 +495,10 @@ def detect_bboxes_with_yolo(
     yolo_config_dir.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("YOLO_CONFIG_DIR", str(yolo_config_dir.resolve()))
 
-    resolved_model, model_source = _resolve_model_with_source(model_name, project_id)
+    # 取得元を明示して解決（暗黙フォールバック・自動ダウンロードなし。未取得標準モデルはここで専用エラー）
+    resolved_model, resolved_source = resolve_yolo_model(
+        project_id=project_id, model_name=model_name, model_source=model_source
+    )
     YOLO = _load_ultralytics_yolo()
     try:
         model = YOLO(resolved_model)
@@ -329,8 +506,7 @@ def detect_bboxes_with_yolo(
         # 「検出0件」と区別できる明示エラーにする（main.py で404へ変換）
         raise FileNotFoundError(
             f"YOLOモデルが見つかりません: {model_name}"
-            f"（プロジェクト内 models/yolo と共通 models/yolo を検索しました。"
-            f"モデルファイルの配置またはカスタムパス指定を確認してください）"
+            f"（モデルファイルの配置またはカスタムパス指定を確認してください）"
         ) from e
     # inference_time_ms: model.predict（YOLO推論）のみの時間
     inference_started = time.perf_counter()
@@ -380,7 +556,9 @@ def detect_bboxes_with_yolo(
         "model": model_name,
         "model_name": model_name,
         # 取得元: path=明示パス / project=プロジェクト専用 / common=共通models/yolo / builtin=ultralytics標準
-        "model_source": model_source,
+        "model_source": resolved_source,
+        # 標準モデル使用時は取得済み（未取得なら実行前に専用エラーで弾かれている）。他取得元はnull
+        "builtin_downloaded": True if resolved_source == "builtin" else None,
         "resolved_model": resolved_model,
         "conf_threshold": float(conf_threshold),
         "merge_overlaps": bool(merge_overlaps),

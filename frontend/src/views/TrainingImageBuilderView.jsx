@@ -4,13 +4,17 @@ import Button from "../components/Button";
 import Card from "../components/Card";
 import { request } from "../lib/api";
 import {
+  buildModelValue,
+  canDetectWithModel,
+  findModelBySource,
   findModelInfo,
   formatDetectFailureMessage,
   formatDetectResultMessage,
   formatMillisAsSeconds,
-  isModelMissing,
+  groupModelsBySource,
   modelSourceCardLabel,
   modelSourceLabel,
+  parseModelValue,
 } from "../lib/detectModel";
 
 const RESIZE_OPTIONS = [640, 1280, 1536, 1920, 2048];
@@ -84,6 +88,7 @@ function loadImageBuilderState() {
     resizeAxis: "width",
     useResize: true,
     modelSelection: "yolo11n.pt",
+    modelSource: "",
     customModelPath: "",
     confThreshold: 0.25,
     mergeOverlaps: true,
@@ -107,6 +112,11 @@ function loadImageBuilderState() {
       typeof parsed?.modelSelection === "string" && parsed.modelSelection.trim()
         ? parsed.modelSelection
         : defaults.modelSelection;
+    // 取得元（project/common/builtin）。旧保存データには無い追加フィールド（一覧ロード後に補完される）
+    const modelSource =
+      typeof parsed?.modelSource === "string" && ["project", "common", "builtin"].includes(parsed.modelSource)
+        ? parsed.modelSource
+        : defaults.modelSource;
     const customModelPath = typeof parsed?.customModelPath === "string" ? parsed.customModelPath : defaults.customModelPath;
     const confThresholdNum = Number(parsed?.confThreshold);
     const confThreshold =
@@ -130,6 +140,7 @@ function loadImageBuilderState() {
       resizeAxis,
       useResize,
       modelSelection,
+      modelSource,
       customModelPath,
       confThreshold,
       mergeOverlaps,
@@ -253,7 +264,13 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
 
   const [yoloModels, setYoloModels] = useState({ items: [], local_models: [], builtin_models: [], local_dir: "" });
   const [modelSelection, setModelSelection] = useState(initialState.modelSelection);
+  // 選択中モデルの取得元（project/common/builtin）。同名モデルが複数取得元にあっても選択した取得元を必ず使用する
+  const [modelSource, setModelSource] = useState(initialState.modelSource);
   const [customModelPath, setCustomModelPath] = useState(initialState.customModelPath);
+  // モデル一覧の再取得トリガー（標準モデル取得成功後に+1して一覧を更新する）
+  const [modelListVersion, setModelListVersion] = useState(0);
+  // 標準モデルのダウンロード中フラグ（二重取得防止・ボタン無効化）
+  const [downloadingBuiltinName, setDownloadingBuiltinName] = useState("");
   const [confThreshold, setConfThreshold] = useState(initialState.confThreshold);
   const [mergeOverlaps, setMergeOverlaps] = useState(initialState.mergeOverlaps);
   const [mergeIouThreshold, setMergeIouThreshold] = useState(initialState.mergeIouThreshold);
@@ -323,6 +340,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
         resizeAxis,
         useResize,
         modelSelection,
+        modelSource,
         customModelPath,
         confThreshold,
         mergeOverlaps,
@@ -339,6 +357,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
     resizeAxis,
     useResize,
     modelSelection,
+    modelSource,
     customModelPath,
     confThreshold,
     mergeOverlaps,
@@ -371,7 +390,27 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
     return () => {
       ignore = true;
     };
-  }, [projectId]);
+  }, [projectId, modelListVersion]);
+
+  // 取得元（modelSource）の補完・検証。旧保存データ（取得元なし）や一覧変化時に、
+  // 現在の選択名が実在する取得元（project→common→builtin の優先順）を割り当てる。
+  // 有効な組み合わせが既にある場合は変更しない（選択した取得元を必ず使用する）
+  useEffect(() => {
+    if (!modelSelection || modelSelection === "__custom__") {
+      return;
+    }
+    const models = yoloModels.models;
+    if (!Array.isArray(models) || models.length === 0) {
+      return;
+    }
+    if (modelSource && findModelBySource(models, modelSource, modelSelection)) {
+      return;
+    }
+    const fallback = findModelInfo(modelSelection, models);
+    if (fallback && fallback.source !== modelSource) {
+      setModelSource(fallback.source);
+    }
+  }, [yoloModels, modelSelection, modelSource]);
 
   useEffect(() => {
     return () => {
@@ -386,6 +425,36 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
     detectSeqRef.current += 1;
     setDetecting(false);
   }, [file, projectId]);
+
+  // プロジェクト切替時はすべてクリア（選択画像・プレビュー・検出結果・スナップショット）。
+  // Step移動ではクリアしない（クリア条件: 別画像選択 / プロジェクト切替のみ）
+  const prevProjectIdRef = useRef(projectId);
+  useEffect(() => {
+    if (prevProjectIdRef.current === projectId) {
+      return;
+    }
+    prevProjectIdRef.current = projectId;
+    setFile(null);
+    setFileName("");
+    setRawPreviewUrl((prev) => {
+      if (prev && prev.startsWith("blob:")) {
+        URL.revokeObjectURL(prev);
+      }
+      return "";
+    });
+    setOriginalSize(null);
+    setResizePreview(null);
+    setDetectResult(null);
+    setDetectRunInfo(null);
+    setDetectUsedPreprocess(null);
+    setDetections([]);
+    setSeriesFilter(SERIES_FILTER_ALL);
+    setBboxUndoStack([]);
+    setBboxRedoStack([]);
+    setEditingBboxId(null);
+    setFocusedBboxId(null);
+    setExportResult(null);
+  }, [projectId]);
 
   const selectedCount = useMemo(() => detections.filter((row) => row.selected).length, [detections]);
   const seriesCounts = useMemo(() => {
@@ -762,6 +831,9 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
     setRawPreviewUrl("");
     setResizePreview(null);
     setDetectResult(null);
+    // 別画像を選択した場合のみ旧画像由来の検出結果・スナップショットをクリア（Step移動ではクリアしない）
+    setDetectRunInfo(null);
+    setDetectUsedPreprocess(null);
     setDetections([]);
     setSeriesFilter(SERIES_FILTER_ALL);
     setBboxUndoStack([]);
@@ -887,7 +959,9 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       }
       const data = await res.json();
       setResizePreview(data);
+      // リサイズ変更は座標系が変わるため旧検出結果を無効化する
       setDetectResult(null);
+      setDetectRunInfo(null);
       setDetections([]);
       setSeriesFilter(SERIES_FILTER_ALL);
       setExportResult(null);
@@ -906,19 +980,32 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       return;
     }
     if (!file) {
-      setFail("画像を選択してください");
+      setFail("YOLO検出を実行できません。Step1で検出対象画像を選択してください。");
       return;
     }
-    const modelName = modelSelection === "__custom__" ? customModelPath.trim() : modelSelection;
+    const isCustomModel = modelSelection === "__custom__";
+    const modelName = isCustomModel ? customModelPath.trim() : modelSelection;
+    // カスタムパスは path、それ以外は選択中の取得元を明示送信（取得元をまたぐ暗黙フォールバックはしない）
+    const requestModelSource = isCustomModel ? "path" : modelSource || "";
     if (!modelName) {
       setFail("YOLOモデルを選択してください");
       return;
     }
-    if (isModelMissing(modelSelection, yoloModels.items)) {
-      setFail(
-        `YOLO検出に失敗しました。理由: 選択中のモデル「${modelSelection}」が見つかりません（プロジェクトの models/yolo または共通 models/yolo に配置するか、別のモデルを選択してください）`
-      );
-      return;
+    if (!isCustomModel && Array.isArray(yoloModels.models) && yoloModels.models.length > 0) {
+      const info =
+        findModelBySource(yoloModels.models, modelSource, modelSelection) ||
+        (!modelSource ? findModelInfo(modelSelection, yoloModels.models) : null);
+      if (!info) {
+        setFail(
+          `YOLO検出に失敗しました。理由: 選択中のモデル「${modelSelection}」（${modelSourceLabel(modelSource)}）が見つかりません（モデルファイルを配置するか、別のモデルを選択してください）`
+        );
+        return;
+      }
+      if (!canDetectWithModel(info)) {
+        // 標準モデルの選択と取得は分離: 未取得のまま検出は実行しない（自動ダウンロードもしない）
+        setFail(`標準モデル ${modelSelection} は未取得です。「取得」ボタンでモデルを取得してから検出を実行してください。`);
+        return;
+      }
     }
     // 画像・プロジェクト切替や再実行後に古いレスポンスを反映しないための連番ガード
     const seq = ++detectSeqRef.current;
@@ -930,6 +1017,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       form.append("use_resize", String(useResize));
       form.append("resize_axis", String(resizeAxis));
       form.append("model", modelName);
+      form.append("model_source", requestModelSource);
       form.append("conf_threshold", String(confThreshold));
       form.append("merge_overlaps", String(mergeOverlaps));
       form.append("merge_iou_threshold", String(mergeIouThreshold));
@@ -959,6 +1047,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
         modelName: String(data.model_name || modelName),
         modelSource: data.model_source || null,
         resolvedModel: String(data.resolved_model || ""),
+        builtinDownloaded: data.builtin_downloaded ?? null,
         inferenceTimeMs: Number.isFinite(Number(data.inference_time_ms)) ? Number(data.inference_time_ms) : null,
         totalTimeMs: Number.isFinite(Number(data.total_time_ms)) ? Number(data.total_time_ms) : null,
         preprocessApplied: Boolean(data.preprocess_applied),
@@ -982,6 +1071,38 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       if (seq === detectSeqRef.current) {
         setDetecting(false);
       }
+    }
+  }
+
+  // Ultralytics標準モデルの明示取得。選択しただけではダウンロードせず、この操作でのみ外部通信する
+  async function downloadBuiltinModel(name) {
+    if (downloadingBuiltinName) {
+      return;
+    }
+    const confirmed = window.confirm(
+      `Ultralytics標準モデルを取得します\n\nモデル: ${name}\n外部通信: 発生します\n保存先: models/yolo/builtin/\n\n取得しますか？`
+    );
+    if (!confirmed) {
+      return;
+    }
+    setDownloadingBuiltinName(name);
+    try {
+      const data = await request("/image-builder/yolo-models/builtin/download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model_name: name }),
+      });
+      setModelListVersion((v) => v + 1);
+      const sizeMb = data?.size_bytes ? `（${(data.size_bytes / 1024 / 1024).toFixed(1)}MB）` : "";
+      setOk(
+        data?.already_downloaded
+          ? `標準モデルは取得済みです: ${name}${sizeMb}`
+          : `標準モデルを取得しました: ${name}${sizeMb}`
+      );
+    } catch (e) {
+      setFail(`標準モデルの取得に失敗しました: ${e.message}`);
+    } finally {
+      setDownloadingBuiltinName("");
     }
   }
 
@@ -1531,6 +1652,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                       setUseResize(nextValue);
                       setResizePreview(null);
                       setDetectResult(null);
+                      setDetectRunInfo(null);
                       setDetections([]);
                       setExportResult(null);
                     }}
@@ -1759,34 +1881,79 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                   <div className="space-y-3 px-2.5 pb-2.5">
                 <div>
                   <label className="app-label">YOLOモデル</label>
-                  <select
-                    className="app-select"
-                    value={modelSelection}
-                    onChange={(e) => setModelSelection(e.target.value)}
-                  >
-                    {/* 取得元（プロジェクト/共通/標準）をプレフィックスで明示 */}
-                    {(yoloModels.items || []).map((name) => {
-                      const info = findModelInfo(name, yoloModels.models);
-                      return (
-                        <option key={name} value={name}>
-                          {info ? `[${modelSourceLabel(info.source)}] ${name}` : name}
-                        </option>
-                      );
-                    })}
-                    {/* 保存済み選択が一覧から消えた場合は黙って置き換えず、見つからないことを明示する */}
-                    {isModelMissing(modelSelection, yoloModels.items) ? (
-                      <option value={modelSelection}>{modelSelection}（見つかりません）</option>
-                    ) : null}
-                    <option value="__custom__">カスタムパスを入力</option>
-                  </select>
-                  {isModelMissing(modelSelection, yoloModels.items) ? (
-                    <p className="mt-1 text-xs text-amber-100">
-                      選択中のモデルが見つかりません。プロジェクトの models/yolo または共通 models/yolo（リポジトリ直下）へ
-                      配置するか、別のモデルを選択してください。
-                    </p>
-                  ) : null}
+                  {/* 取得元ごとにグループ表示（プロジェクト/共通/標準は独立した取得経路。value=取得元|名前）。
+                      標準モデルは取得済み/未取得を表示し、選択しただけではダウンロードしない */}
+                  {(() => {
+                    const groups = groupModelsBySource(yoloModels.models);
+                    const selectionValue =
+                      modelSelection === "__custom__" ? "__custom__" : buildModelValue(modelSource, modelSelection);
+                    const comboMissing =
+                      modelSelection &&
+                      modelSelection !== "__custom__" &&
+                      Array.isArray(yoloModels.models) &&
+                      yoloModels.models.length > 0 &&
+                      !findModelBySource(yoloModels.models, modelSource, modelSelection);
+                    return (
+                      <>
+                        <select
+                          className="app-select"
+                          value={selectionValue}
+                          onChange={(e) => {
+                            if (e.target.value === "__custom__") {
+                              setModelSelection("__custom__");
+                              return;
+                            }
+                            const { source, name } = parseModelValue(e.target.value);
+                            setModelSelection(name);
+                            setModelSource(source);
+                          }}
+                        >
+                          {groups.project.length > 0 ? (
+                            <optgroup label="プロジェクトモデル">
+                              {groups.project.map((row) => (
+                                <option key={buildModelValue(row.source, row.name)} value={buildModelValue(row.source, row.name)}>
+                                  {row.name}
+                                </option>
+                              ))}
+                            </optgroup>
+                          ) : null}
+                          {groups.common.length > 0 ? (
+                            <optgroup label="共通モデル">
+                              {groups.common.map((row) => (
+                                <option key={buildModelValue(row.source, row.name)} value={buildModelValue(row.source, row.name)}>
+                                  {row.name}
+                                </option>
+                              ))}
+                            </optgroup>
+                          ) : null}
+                          {groups.builtin.length > 0 ? (
+                            <optgroup label="Ultralytics標準モデル">
+                              {groups.builtin.map((row) => (
+                                <option key={buildModelValue(row.source, row.name)} value={buildModelValue(row.source, row.name)}>
+                                  {row.name}
+                                  {row.downloaded ? "　取得済み" : "　未取得"}
+                                </option>
+                              ))}
+                            </optgroup>
+                          ) : null}
+                          {/* 保存済み選択が一覧から消えた場合は黙って置き換えず、見つからないことを明示する */}
+                          {comboMissing ? (
+                            <option value={selectionValue}>
+                              {modelSelection}（{modelSourceLabel(modelSource)}・見つかりません）
+                            </option>
+                          ) : null}
+                          <option value="__custom__">カスタムパスを入力</option>
+                        </select>
+                        {comboMissing ? (
+                          <p className="mt-1 text-xs text-amber-100">
+                            選択中のモデルが見つかりません。モデルファイルを配置するか、別のモデルを選択してください。
+                          </p>
+                        ) : null}
+                      </>
+                    );
+                  })()}
                 </div>
-                {/* 使用モデル情報カード（選択中モデルの取得元・相対パスをコンパクト表示。絶対パスはTooltipのみ） */}
+                {/* 使用モデル情報カード（選択中モデルの取得元・状態・相対パスをコンパクト表示。絶対パスはTooltipのみ） */}
                 <div className="rounded-lg border border-border/70 bg-card/55 px-2.5 py-2 text-xs">
                   <p className="text-[11px] font-semibold text-muted">使用モデル</p>
                   {modelSelection === "__custom__" ? (
@@ -1803,27 +1970,46 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                     ) : (
                       <p className="mt-0.5 text-muted">使用モデルを選択してください（モデルパス未入力）</p>
                     )
-                  ) : isModelMissing(modelSelection, yoloModels.items) ? (
-                    <p className="mt-0.5 text-amber-100">選択中のモデルが見つかりません</p>
                   ) : modelSelection ? (
                     (() => {
-                      const info = findModelInfo(modelSelection, yoloModels.models);
+                      const info = findModelBySource(yoloModels.models, modelSource, modelSelection);
+                      if (!info) {
+                        return <p className="mt-0.5 text-amber-100">選択中のモデルが見つかりません</p>;
+                      }
                       const sourceTone =
-                        info?.source === "project"
+                        info.source === "project"
                           ? "text-blue-200"
-                          : info?.source === "common"
+                          : info.source === "common"
                             ? "text-emerald-200"
                             : "text-muted";
+                      const usable = canDetectWithModel(info);
                       return (
                         <>
                           <p className="mt-0.5 truncate font-semibold text-text" title={modelSelection}>
                             {modelSelection}
                           </p>
-                          <p className={sourceTone}>取得元: {modelSourceCardLabel(info?.source ?? "builtin")}</p>
-                          {info?.path ? (
+                          <p className={sourceTone}>取得元: {modelSourceCardLabel(info.source)}</p>
+                          {info.source === "builtin" ? (
+                            <p className={usable ? "text-emerald-200" : "text-amber-100"}>
+                              状態: {usable ? "取得済み（使用可能）" : "未取得（使用不可）"}
+                            </p>
+                          ) : null}
+                          {info.path ? (
                             <p className="truncate text-muted" title={info.path}>
                               {info.path}
                             </p>
+                          ) : null}
+                          {info.source === "builtin" && !usable ? (
+                            <div className="mt-1.5">
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                disabled={Boolean(downloadingBuiltinName)}
+                                onClick={() => downloadBuiltinModel(info.name)}
+                              >
+                                {downloadingBuiltinName === info.name ? "取得中..." : "取得"}
+                              </Button>
+                            </div>
                           ) : null}
                         </>
                       );
@@ -1884,6 +2070,12 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                   </div>
                 </details>
 
+                {/* 画像未保持時はボタンを無反応にせず理由を明示する（正常に選択済みなら表示しない） */}
+                {!file ? (
+                  <p className="text-xs text-amber-100">
+                    YOLO検出を実行できません。Step1で検出対象画像を選択してください。
+                  </p>
+                ) : null}
                 <div className="flex gap-2">
                   <Button onClick={runDetect} disabled={!file || detecting}>
                     {detecting ? "検出中..." : "検出実行"}

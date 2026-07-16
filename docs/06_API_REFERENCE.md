@@ -109,9 +109,10 @@
 
 | Method / Path | リクエスト | レスポンス主要キー | 概要 |
 |---|---|---|---|
-| GET `/image-builder/yolo-models` | Query: `project_id?` | モデル一覧（`items` / `local_models` / `common_models` / `builtin_models` / `models`=`{name, source, path}`。`source`は`project`/`common`/`builtin`、`path`はリポジトリ相対・builtinはnull） | 利用可能なYOLOモデル一覧。プロジェクト内 `models/yolo` → 共通 `models/yolo`（リポジトリ直下）→ ビルトインの順で列挙（同名はプロジェクト内優先・重複表示なし） |
+| GET `/image-builder/yolo-models` | Query: `project_id?` | モデル一覧（`items` / `local_models` / `common_models` / `builtin_models` / `builtin_dir` / `models`=`{name, source, downloaded, path}`。`source`は`project`/`common`/`builtin`で**取得元ごとに独立列挙**（同名も各取得元に表示）。builtinは取得済み状態`downloaded`付き・未取得は`path=null`） | 利用可能なYOLOモデル一覧。取得元は project=`data/projects/<id>/models/yolo/` / common=`models/yolo/` / builtin=`models/yolo/builtin/`（旧自動DLのリポジトリ直下も取得済みとして互換認識） |
+| POST `/image-builder/yolo-models/builtin/download` | JSON: `{model_name}` | `{model_name, source, downloaded, path, size_bytes, already_downloaded}` | Ultralytics標準モデルの**明示取得**（許可リスト内の名前のみ・任意名/URL拒否=400、取得済みなら再DLせず返却、同名取得進行中=409、失敗時は不完全ファイルを残さない）。外部通信はこのAPIのみで発生 |
 | POST `/image-builder/resize-preview` | Form: `file`, `resize_long_side`, `use_resize`, `resize_axis`, `detect_preprocess_json` | プレビュー | リサイズ/検出前処理プレビュー |
-| POST `/image-builder/detect` | Form: 上記 + `model`, `conf_threshold`, `merge_overlaps`, `merge_iou_threshold` | 検出結果（従来キーに加え `model_name` / `model_source`=path・project・common・builtin / `inference_time_ms`=YOLO推論のみ / `total_time_ms`=デコード〜レスポンス整形の全体 / `preprocess_applied`=noop判定でON/OFF） | YOLO BBox検出 |
+| POST `/image-builder/detect` | Form: 上記 + `model`, `model_source?`（path/project/common/builtin。未指定は後方互換の従来順）, `conf_threshold`, `merge_overlaps`, `merge_iou_threshold` | 検出結果（従来キーに加え `model_name` / `model_source` / `builtin_downloaded` / `inference_time_ms`=YOLO推論のみ / `total_time_ms`=デコード〜レスポンス整形の全体 / `preprocess_applied`=noop判定でON/OFF） | YOLO BBox検出。**指定された取得元の中だけで解決し暗黙フォールバックしない**（見つからない=404）。**実行中の外部通信（自動ダウンロード）は行わず**、未取得標準モデルは**409** |
 | POST `/image-builder/export` | Form: 上記 + `boxes_json`, `output_dir`, `crop_height` | 出力結果 | 選択BBoxを元画像から切出して出力 |
 
 ## 評価 / チューニング出力
