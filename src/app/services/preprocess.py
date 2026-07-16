@@ -941,6 +941,46 @@ def run_preprocess(
     }
 
 
+def preview_preprocess_image(
+    img: Image.Image,
+    project_id: Optional[str] = None,
+    overrides: Optional[dict[str, Any]] = None,
+    preview_stem: str = "adhoc",
+) -> dict[str, Any]:
+    """登録画像に依存しない前処理プレビュー（評価用画像・アップロード画像用）。
+
+    preview_preprocess と同じ前処理系（_build_preprocess_config / _process_image）を共通利用する。
+    raw/ に存在しない画像が対象のため、画像名に紐づく手動マスクは適用しない。
+    EXIF Orientation はここで1回だけ反映する（呼び出し側で回転済みのPNG等はEXIFなしのため影響しない）。
+    """
+    paths = ensure_project_directories(project_id)
+    cfg = _build_preprocess_config(overrides)
+    oriented = ImageOps.exif_transpose(img)
+    width, height = oriented.size
+    image_type, interim_arr, processed_arr, pipeline, ratio = _process_image(oriented, cfg)
+
+    preview_dir = paths.outputs / "previews"
+    preview_dir.mkdir(parents=True, exist_ok=True)
+    safe_stem = "".join(ch for ch in str(preview_stem) if ch.isalnum() or ch in "-_") or "adhoc"
+    interim_preview = preview_dir / f"{safe_stem}_{image_type}_interim.png"
+    processed_preview = preview_dir / f"{safe_stem}_{image_type}_processed.png"
+    Image.fromarray(interim_arr, mode="L").save(interim_preview)
+    Image.fromarray(processed_arr, mode="L").save(processed_preview)
+
+    return {
+        "project_id": paths.project_id,
+        "image": safe_stem,
+        "type": image_type,
+        "original_size": [width, height],
+        "ratio": round(ratio, 4),
+        "pipeline": pipeline,
+        "interim_preview": str(interim_preview.relative_to(paths.root)),
+        "processed_preview": str(processed_preview.relative_to(paths.root)),
+        "interim_data_url": _to_data_url(interim_arr),
+        "processed_data_url": _to_data_url(processed_arr),
+    }
+
+
 def preview_preprocess(
     image_name: str,
     project_id: Optional[str] = None,

@@ -182,7 +182,15 @@ function formatConfidence(value) {
   return num.toFixed(2);
 }
 
-export default function TrainingImageBuilderView({ projectId, activeStep = 1, onStepChange }) {
+export default function TrainingImageBuilderView({
+  projectId,
+  activeStep = 1,
+  onStepChange,
+  labelingPreprocessOverrides = null,
+  labelingPredictParams = null,
+  labelingExtraPredictParams = [],
+  candidateDict = null,
+}) {
   const initialState = useMemo(() => loadImageBuilderState(), []);
   const bboxItemRefs = useRef(new Map());
   const pendingFocusBboxIdRef = useRef(null);
@@ -1658,7 +1666,17 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
 
   // Step5（評価用データ作成）は独立コンポーネント（Step1〜4のstateはこのコンポーネント内で維持される）
   if (activeStep === 5) {
-    return <EvaluationDatasetBuilder projectId={projectId} stepProgress={stepProgress} onStepChange={goStep} />;
+    return (
+      <EvaluationDatasetBuilder
+        projectId={projectId}
+        stepProgress={stepProgress}
+        onStepChange={goStep}
+        preprocessOverrides={labelingPreprocessOverrides}
+        predictParams={labelingPredictParams}
+        extraPredictParams={labelingExtraPredictParams}
+        candidateDict={candidateDict}
+      />
+    );
   }
 
   return (

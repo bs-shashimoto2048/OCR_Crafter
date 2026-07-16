@@ -119,6 +119,7 @@
 | GET `/image-builder/evaluation/crop` | Query: `export_id`, `filename`, `rotation?`, `max_side?`, `project_id?` | PNG | 評価候補クロップのプレビュー/サムネイル（回転はその場適用・元ファイル不変。マニフェスト記載ファイルのみ解決=トラバーサル防止） |
 | GET/POST `/image-builder/evaluation/state` | Query/JSON: `project_id`, `state` | 編集状態 | Step5の途中保存（`evaluation/editing_state.json`。ラベル・回転・評価対象・フィルタ・データセット名。上限2MB） |
 | POST `/image-builder/evaluation/create` | JSON: `{project_id, dataset_name, items:[{export_id, filename, label, rotation, series, source_image, bbox_id}], editing_state?}` | `{dataset_id, dataset_dir, image_dir, csv_path, image_count}` | 評価データセット作成（`evaluation/<dataset_id>/` へ画像コピー+回転焼き込み+ground_truth.csv+metadata.json。未入力ラベル=400・重複名=400・欠損ソース=404・失敗時は不完全ディレクトリを残さない） |
+| POST `/api/ocr/preview-file` | multipart: `file?`（アップロード画像）または `export_id`+`filename`+`rotation`（サーバー管理下の評価候補）, `project_id`, `overrides_json?`, `engine`, `model`, `model_type?`, `easyocr_langs`, `include_lowercase` | `/preprocess/preview` 互換（`type` / `interim_data_url` / `processed_data_url` / `prediction` / `confidence` / `predict_engine` / `predict_model_name` / `predict_error` 等） | 登録前・評価用画像のOCR前処理＋推論プレビュー（Step5のOCR候補用）。前処理・推論・小文字制御・Confidence正規化は既存サービスを共通利用。任意のサーバーパスは受け付けない（評価候補はマニフェスト記載ファイルのみ解決・回転はサーバー側で適用してから前処理） |
 
 ## 評価 / チューニング出力
 

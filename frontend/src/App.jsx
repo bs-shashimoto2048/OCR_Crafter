@@ -3346,6 +3346,11 @@ export default function App() {
           const nextView = `image-builder-step${step}`;
           setActiveView(nextView);
         }}
+        // Step5（評価用データ作成）のOCR候補・辞書候補用（既存ラベル編集と同じ設定を参照）
+        labelingPreprocessOverrides={labelingPreprocessOverrides}
+        labelingPredictParams={labelingPredictParams}
+        labelingExtraPredictParams={labelingExtraPredictParams}
+        candidateDict={candidateDict}
       />
     );
   }

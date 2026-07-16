@@ -229,6 +229,22 @@ def test_crop_preview_rotation_does_not_modify_source(temp_projects):
     assert source_path.read_bytes() == before
 
 
+def test_preview_preprocess_image_uses_rotated_input(temp_projects):
+    """評価画像のOCRプレビューは回転後の画像を入力とし、前処理系は既存サービスを共通利用する。"""
+    from src.app.services.preprocess import preview_preprocess_image
+
+    result = _run_export(temp_projects)
+    # ユーザー回転90°を適用した評価画像を入力（回転前を渡さない）
+    rotated = eval_ds.load_export_crop_image("p1", result["export_id"], "1.png", rotation=90)
+    preview = preview_preprocess_image(rotated, project_id="p1", overrides=None, preview_stem="eval_test")
+    assert preview["original_size"] == [rotated.width, rotated.height]
+    assert preview["type"] in {"single", "wide"}
+    assert preview["interim_data_url"].startswith("data:image/")
+    assert preview["processed_data_url"].startswith("data:image/")
+    # プレビュー保存名はサニタイズされる（パス区切り等を含まない）
+    assert "/" not in preview["image"] and "\\" not in preview["image"]
+
+
 def test_crop_path_traversal_rejected(temp_projects):
     result = _run_export(temp_projects)
     with pytest.raises((FileNotFoundError, ValueError)):

@@ -95,7 +95,13 @@ from .services.ocr_pipeline import (
     save_ocr_prediction_log,
 )
 from .services.manual_mask import extract_black_region, load_manual_masks, save_manual_masks_for_image
-from .services.preprocess import build_preprocess_config, preview_preprocess, preprocess_image_for_model, run_preprocess
+from .services.preprocess import (
+    build_preprocess_config,
+    preview_preprocess,
+    preview_preprocess_image,
+    preprocess_image_for_model,
+    run_preprocess,
+)
 from .services.tesseract_pipeline import (
     TESSERACT_TARGET_CHARSET,
     ensure_tesseract_training_tools,
@@ -1249,6 +1255,70 @@ def preprocess_preview_post(req: PreprocessPreviewRequest) -> dict[str, Any]:
             model_type=req.model_type,
             easyocr_langs=req.easyocr_langs,
             include_lowercase=req.include_lowercase,
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/api/ocr/preview-file")
+async def api_ocr_preview_file(
+    file: Optional[UploadFile] = File(default=None),
+    project_id: str = Form("default"),
+    export_id: str = Form(""),
+    filename: str = Form(""),
+    rotation: int = Form(0),
+    overrides_json: str = Form(""),
+    engine: str = Form("custom"),
+    model: str = Form("latest"),
+    model_type: str = Form(""),
+    easyocr_langs: str = Form("en"),
+    include_lowercase: bool = Form(True),
+) -> dict[str, Any]:
+    """登録前・評価用画像のOCR前処理＋推論プレビュー（/preprocess/preview のファイル入力版）。
+
+    入力は「アップロード画像」または「サーバー管理下の評価候補（export_id+filename+rotation）」のみ。
+    任意のサーバーパスは受け付けない（評価候補はマニフェスト記載ファイルのみ解決）。
+    前処理・推論・小文字制御・Confidence正規化は既存サービスを共通利用する。
+    """
+    resolved = _resolve_project_id(project_id)
+    try:
+        overrides: Optional[dict[str, Any]] = None
+        overrides_text = str(overrides_json or "").strip()
+        if overrides_text:
+            try:
+                parsed_overrides = json.loads(overrides_text)
+            except (TypeError, ValueError) as e:
+                raise ValueError(f"invalid overrides_json: {e}") from e
+            if not isinstance(parsed_overrides, dict):
+                raise ValueError("overrides_json must be an object")
+            overrides = parsed_overrides
+
+        if file is not None:
+            content = await file.read()
+            try:
+                with Image.open(io.BytesIO(content)) as opened:
+                    img = opened.convert("RGB")
+            except Exception as e:  # noqa: BLE001
+                raise ValueError("unsupported or unreadable image format") from e
+            stem = f"upload_{Path(str(file.filename or 'image')).stem}"
+        elif str(export_id or "").strip() and str(filename or "").strip():
+            # Step5評価候補: 現在のユーザー回転を適用した状態でOCRへ入力する（回転前の画像を渡さない）
+            img = load_export_crop_image(resolved, export_id, filename, rotation=int(rotation))
+            stem = f"eval_{export_id}_{Path(filename).stem}_r{int(rotation)}"
+        else:
+            raise ValueError("file または export_id+filename のいずれかを指定してください")
+
+        preview = preview_preprocess_image(img, project_id=resolved, overrides=overrides, preview_stem=stem)
+        return _attach_preview_prediction(
+            preview,
+            resolved,
+            engine=engine,
+            model=model,
+            model_type=(model_type or None),
+            easyocr_langs=easyocr_langs,
+            include_lowercase=bool(include_lowercase),
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e

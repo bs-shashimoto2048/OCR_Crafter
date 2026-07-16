@@ -1,83 +1,29 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Card from "../components/Card";
 import Button from "../components/Button";
+import {
+  CandidateMessageRow,
+  CandidateRow,
+  renderedImageWidth,
+  StageImage,
+} from "../components/labeling/CandidateParts";
+import { DictionaryCandidatesSection, OcrRerunButton } from "../components/labeling/CandidateParts";
+import LabelMainInput from "../components/labeling/LabelMainInput";
+import SoftKeyboardPanel from "../components/labeling/SoftKeyboardPanel";
+import useLabelingShortcuts from "../components/labeling/useLabelingShortcuts";
 import { imageUrl, processedImageUrl, request } from "../lib/api";
 import {
   DICT_FILE_MAX_BYTES,
   parseCandidateDictionary,
   searchDictionaryCandidates,
 } from "../lib/candidateDictionary";
+import {
+  LABELING_ALIGN_STORAGE_KEY,
+  readLabelTextAlign,
+  writeLabelTextAlign,
+} from "../lib/labelAlign";
 import { decideNextImageIndex } from "../lib/labelNavigation";
-import { lowercaseToggleApplicable } from "../lib/lowercase";
-
-// 候補ヘッダーへ付ける「小文字: ON/OFF」表示（EasyOCR/PaddleOCR × ラテン言語時のみ）
-function lowercaseLabelOf(fields) {
-  if (!lowercaseToggleApplicable(fields?.engine, fields?.easyocr_langs)) {
-    return "";
-  }
-  return fields?.include_lowercase !== false ? "小文字: ON" : "小文字: OFF";
-}
-
-const keyRows = [
-  ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
-  ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
-  ["a", "s", "d", "f", "g", "h", "j", "k", "l"],
-  ["z", "x", "c", "v", "b", "n", "m"],
-];
-
-const ENGINE_LABELS = { tesseract: "Tesseract", paddleocr: "PaddleOCR", easyocr: "EasyOCR", custom: "カスタムモデル" };
-
-// 現在のラベルの文字位置（プロジェクト別に localStorage 保存。未設定=中央）
-const LABEL_TEXT_ALIGN_STORAGE_KEY = "ocr_label_text_align_by_project_v1";
-const LABEL_TEXT_ALIGN_VALUES = new Set(["left", "center", "right"]);
-// 配置ボタンの循環順（中央→左→右→中央…）と表示名
-const LABEL_TEXT_ALIGN_ORDER = ["center", "left", "right"];
-const LABEL_TEXT_ALIGN_LABELS = { center: "中央", left: "左", right: "右" };
-
-function readLabelTextAlign(projectId) {
-  try {
-    const map = JSON.parse(localStorage.getItem(LABEL_TEXT_ALIGN_STORAGE_KEY) || "{}");
-    const value = map?.[projectId];
-    return LABEL_TEXT_ALIGN_VALUES.has(value) ? value : "center";
-  } catch {
-    return "center";
-  }
-}
-
-function writeLabelTextAlign(projectId, value) {
-  try {
-    const raw = localStorage.getItem(LABEL_TEXT_ALIGN_STORAGE_KEY);
-    const map = raw ? JSON.parse(raw) : {};
-    map[projectId] = value;
-    localStorage.setItem(LABEL_TEXT_ALIGN_STORAGE_KEY, JSON.stringify(map));
-  } catch {
-    // localStorage が使えない環境では保存なしで動作継続
-  }
-}
-
-function engineLabelOf(engine) {
-  return ENGINE_LABELS[String(engine || "").toLowerCase()] || (engine ? String(engine) : "--");
-}
-
-// OCR候補と現在ラベルの差分を1文字ずつ色付け表示する。
-// highlightClass で差分文字の色を変更できる（既定=黄。辞書候補では蛍光緑を使用）
-function DiffText({ candidate, current, highlightClass = "text-amber-300" }) {
-  const chars = String(candidate || "").split("");
-  const base = String(current || "");
-  return (
-    <span className="font-mono text-lg font-semibold tracking-wide">
-      {chars.map((ch, idx) => (
-        <span key={idx} className={ch === base[idx] ? "text-text" : highlightClass}>
-          {ch}
-        </span>
-      ))}
-      {base.length > chars.length ? <span className={`opacity-70 ${highlightClass}`}>…</span> : null}
-    </span>
-  );
-}
-
-// 辞書からの近似候補の差分文字色（蛍光緑。軽いグローで注目しやすくする）
-const DICT_DIFF_HIGHLIGHT_CLASS = "text-[#adff5d] drop-shadow-[0_0_4px_rgba(173,255,93,0.55)]";
+import { engineLabelOf, lowercaseLabelOf } from "../lib/ocrCandidates";
 
 // 右ペイン「現在の前処理設定」のカテゴリ（読み取り専用）。OFF値は薄く表示
 function SummarySection({ title, defaultOpen = false, items }) {
@@ -205,99 +151,6 @@ function PreprocessSummary({ params }) {
   );
 }
 
-// 中央プレビューの1段分（元画像 / 中間画像 / 最終画像）。倍率は3段共通。
-// zoomPercent="fit" のときは表示領域の高さを3段で分け合い、縦横比を保ってフィット表示する
-function StageImage({ title, description, src, zoomPercent, imgRef }) {
-  const fit = zoomPercent === "fit";
-  return (
-    <div className={fit ? "flex min-h-0 flex-1 flex-col" : ""}>
-      <div className="mb-1 flex shrink-0 flex-wrap items-baseline gap-2 px-0.5">
-        <p className="shrink-0 text-[11px] font-semibold text-text">{title}</p>
-        <p className="truncate text-[10px] text-muted" title={description}>{description}</p>
-      </div>
-      {src ? (
-        fit ? (
-          <div className="min-h-0 flex-1">
-            <img ref={imgRef} src={src} alt={title} className="h-full w-full rounded-md object-contain" />
-          </div>
-        ) : (
-          <img ref={imgRef} src={src} alt={title} className="h-auto max-w-none rounded-md" style={{ width: `${zoomPercent}%` }} />
-        )
-      ) : (
-        <p className="px-0.5 py-2 text-xs text-muted">画像がありません</p>
-      )}
-    </div>
-  );
-}
-
-// object-fit: contain を考慮した画像の実描画幅（px）。
-// fit表示: 要素ボックス内で contain 縮尺した幅 / 倍率表示: h-auto でボックス比=画像比のため同式で要素幅に一致する
-function renderedImageWidth(img) {
-  if (!img || !img.naturalWidth || !img.naturalHeight) return null;
-  const boxWidth = img.clientWidth;
-  const boxHeight = img.clientHeight;
-  if (!boxWidth || !boxHeight) return null;
-  const scale = Math.min(boxWidth / img.naturalWidth, boxHeight / img.naturalHeight);
-  return img.naturalWidth * scale;
-}
-
-// スロット1〜3共通の候補行（高さ固定の1行構成）。成功=採用ボタン付き / dimmed=再推論中の前回値
-function CandidateRow({ index, engine, modelName, prediction, confidence, current, onAdopt, dimmed, lowercaseLabel = "" }) {
-  const header = `${engineLabelOf(engine)}${modelName ? ` / ${modelName}` : ""}${lowercaseLabel ? ` / ${lowercaseLabel}` : ""}`;
-  return (
-    <button
-      type="button"
-      onClick={() => onAdopt?.(prediction)}
-      title={`${header} の候補をクリックで現在ラベルへ反映`}
-      className={`flex h-10 w-full items-center gap-2 rounded-lg border border-border bg-card/60 px-2.5 text-left backdrop-blur-md transition hover:border-accent/60 hover:bg-accent/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 ${
-        dimmed ? "opacity-50" : ""
-      }`}
-    >
-      <span className="w-4 shrink-0 text-[10px] text-muted">{index}.</span>
-      <span className="w-44 shrink-0 truncate text-[10px] text-muted" title={header}>
-        {header}
-      </span>
-      <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap">
-        <DiffText candidate={prediction} current={current} />
-      </span>
-      <span
-        className="shrink-0 text-[11px] font-semibold text-accent"
-        title="各OCRエンジンが返す推論信頼度です。エンジン間で算出方式は異なります。取得できない場合（Tesseractのwhitelist指定時等）は -- 表示になります。"
-      >
-        {typeof confidence === "number" ? `${(confidence * 100).toFixed(1)}%` : "--"}
-      </span>
-      <span className="shrink-0 rounded-md border border-accent/50 bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold text-blue-200">
-        採用
-      </span>
-    </button>
-  );
-}
-
-// 候補行と同じ高さのメッセージ行（実行中 / エラー / スキップ / 候補なし / 未設定）
-function CandidateMessageRow({ index, header, message, tone = "muted" }) {
-  const toneClass =
-    tone === "danger"
-      ? "border-danger/40 bg-danger/10 text-danger"
-      : tone === "amber"
-        ? "border-amber-400/40 bg-amber-400/10 text-amber-200"
-        : tone === "empty"
-          ? "border-dashed border-border/40 text-muted/50"
-          : "border-border bg-card/45 text-muted";
-  return (
-    <div className={`flex h-10 items-center gap-2 rounded-lg border px-2.5 ${toneClass}`}>
-      {index ? <span className="w-4 shrink-0 text-[10px] text-muted">{index}.</span> : null}
-      {header ? (
-        <span className="w-44 shrink-0 truncate text-[10px] text-muted" title={header}>
-          {header}
-        </span>
-      ) : null}
-      <span className="min-w-0 flex-1 truncate text-xs" title={message}>
-        {message}
-      </span>
-    </div>
-  );
-}
-
 export default function LabelingView({
   projectId,
   imageVersion,
@@ -384,7 +237,7 @@ export default function LabelingView({
 
   // 文字位置をプロジェクト単位で復元・保存（リロード後も維持）
   useEffect(() => {
-    setLabelTextAlign(readLabelTextAlign(projectId));
+    setLabelTextAlign(readLabelTextAlign(LABELING_ALIGN_STORAGE_KEY, projectId));
   }, [projectId]);
 
   // 最終画像の実描画幅を追跡（読込完了・倍率変更・ウィンドウ/サイドバー等のリサイズで再計算）。
@@ -406,34 +259,12 @@ export default function LabelingView({
     };
   }, [selected?.image, zoomPercent, previewSrc]);
 
+  // 配置変更はLabelMainInput（共通部品）から通知される。保存はプロジェクト単位のlocalStorage
   function updateLabelTextAlign(value) {
-    const next = LABEL_TEXT_ALIGN_VALUES.has(value) ? value : "center";
-    setLabelTextAlign(next);
-    writeLabelTextAlign(projectId, next);
+    setLabelTextAlign(value);
+    writeLabelTextAlign(LABELING_ALIGN_STORAGE_KEY, projectId, value);
   }
 
-  // 配置ボタン: 押すたびに 中央→左→右→中央 を循環。押下時は短く青発光する
-  const [alignFlash, setAlignFlash] = useState(false);
-  const alignFlashTimerRef = useRef(null);
-
-  function cycleLabelTextAlign() {
-    const currentIndex = LABEL_TEXT_ALIGN_ORDER.indexOf(labelTextAlign);
-    const next = LABEL_TEXT_ALIGN_ORDER[(currentIndex + 1) % LABEL_TEXT_ALIGN_ORDER.length];
-    updateLabelTextAlign(next);
-    setAlignFlash(true);
-    if (alignFlashTimerRef.current) {
-      clearTimeout(alignFlashTimerRef.current);
-    }
-    alignFlashTimerRef.current = setTimeout(() => setAlignFlash(false), 300);
-  }
-
-  useEffect(() => () => {
-    if (alignFlashTimerRef.current) {
-      clearTimeout(alignFlashTimerRef.current);
-    }
-  }, []);
-
-  const nextAlign = LABEL_TEXT_ALIGN_ORDER[(LABEL_TEXT_ALIGN_ORDER.indexOf(labelTextAlign) + 1) % 3];
   const visibleEntries = useMemo(() => {
     const entries = images.map((item, originalIndex) => {
       const savedLabel = String(item.label ?? "").trim();
@@ -744,65 +575,16 @@ export default function LabelingView({
     adoptText(top);
   }
 
-  // ⑧ キーボードショートカット: Ctrl+S=保存 / Ctrl+←→=画像移動 / Esc=OCR候補採用
-  useEffect(() => {
-    function handleKeyDown(event) {
-      if (event.isComposing) {
-        return;
-      }
-      if (event.ctrlKey && !event.altKey && (event.key === "s" || event.key === "S")) {
-        event.preventDefault();
-        onSave();
-        return;
-      }
-      if (event.ctrlKey && event.key === "ArrowRight") {
-        event.preventDefault();
-        onNext();
-        return;
-      }
-      if (event.ctrlKey && event.key === "ArrowLeft") {
-        event.preventDefault();
-        onPrev();
-        return;
-      }
-      // Enter=保存して次へ（ボタンクリックと同じ saveAndNext に一本化）。
-      // 入力欄フォーカス時は入力欄自身の onKeyDown が処理するためここでは扱わない
-      if ((event.key === "Enter" || event.key === "NumpadEnter") && !event.ctrlKey) {
-        const target = event.target;
-        const isEditableTarget =
-          target instanceof HTMLElement &&
-          (target.isContentEditable ||
-            target.tagName === "INPUT" ||
-            target.tagName === "TEXTAREA" ||
-            target.tagName === "SELECT");
-        if (isEditableTarget) {
-          return;
-        }
-        if (target instanceof HTMLElement && target.tagName === "BUTTON") {
-          return; // ボタン上のEnterはクリックとして発火するため二重実行しない
-        }
-        if (event.repeat) {
-          return; // 長押しrepeatは無視
-        }
-        event.preventDefault();
-        saveAndNext();
-        return;
-      }
-      // Alt+1〜5: 辞書からの近似候補を採用（Esc=OCR候補採用とは競合しない）
-      if (event.altKey && !event.ctrlKey && !event.metaKey && /^[1-5]$/.test(event.key)) {
-        const candidate = dictionaryCandidates?.[Number(event.key) - 1];
-        if (candidate) {
-          event.preventDefault();
-          adoptText(candidate.entry);
-        }
-        return;
-      }
-      if (event.key === "Escape") {
-        adoptTopCandidate();
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+  // キーボードショートカット（共通hook）: Ctrl+S=保存 / Ctrl+←→=画像移動 / Enter=保存して次へ /
+  // Esc=OCR候補採用 / Alt+1〜5=辞書候補採用
+  useLabelingShortcuts({
+    onSave,
+    onPrev,
+    onNext,
+    onSaveAndNext: saveAndNext,
+    onAdoptTopCandidate: adoptTopCandidate,
+    dictionaryCandidates,
+    onAdoptText: adoptText,
   });
 
   if (!selected) {
@@ -1002,57 +784,15 @@ export default function LabelingView({
 
         {/* 画像パネルと同じ p-2 余白にして、入力欄の左右位置を画像表示エリアと一致させる */}
         <div className="shrink-0 rounded-xl border border-border bg-card/60 p-2 backdrop-blur-md">
-          <div className="mb-1 flex items-center justify-between gap-2 px-1">
-            <label className="app-label mb-0">現在のラベル</label>
-            <Button
-              size="sm"
-              variant="secondary"
-              className={`h-6 shrink-0 px-2 text-[11px] transition-shadow duration-200 ${
-                alignFlash
-                  ? "!border-accent/70 !text-blue-200 shadow-[0_0_0_1px_rgba(96,165,250,0.55),0_0_10px_rgba(96,165,250,0.45)]"
-                  : ""
-              }`}
-              onClick={cycleLabelTextAlign}
-              title={`現在は${LABEL_TEXT_ALIGN_LABELS[labelTextAlign]}揃えです。押すと${LABEL_TEXT_ALIGN_LABELS[nextAlign]}揃えに変更します。`}
-              aria-label={`現在は${LABEL_TEXT_ALIGN_LABELS[labelTextAlign]}揃えです。押すと${LABEL_TEXT_ALIGN_LABELS[nextAlign]}揃えに変更します。`}
-            >
-              ≡ 配置: {LABEL_TEXT_ALIGN_LABELS[labelTextAlign]}
-            </Button>
-          </div>
-          {/* 入力欄は最終画像の実描画幅に合わせて中央配置（画像と左右端を揃えて比較しやすくする） */}
-          <div className="mb-2 flex justify-center">
-            <input
-              ref={labelInputRef}
-              value={labelValue}
-              onChange={(e) => onLabelChange(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.nativeEvent?.isComposing) {
-                  return;
-                }
-                if (e.key === "Enter" || e.key === "NumpadEnter") {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  if (e.repeat) {
-                    return; // 長押しrepeatは無視（連打での多重実行防止）
-                  }
-                  saveAndNext();
-                }
-              }}
-              className="app-input label-main-input min-h-[72px] !bg-[#f4f5f7] px-4 font-mono !text-[#111827] placeholder:!text-slate-400"
-              style={{
-                textAlign: labelTextAlign,
-                // 実描画幅が取れるまではカード全幅。小画像でも入力しやすいよう最低320px（親幅は超えない）
-                width: finalImageWidth ? `${Math.round(finalImageWidth)}px` : "100%",
-                minWidth: "min(320px, 100%)",
-                maxWidth: "100%",
-                // プレースホルダーだけ入力欄幅に応じて縮小（16〜28px。入力済み文字は38px固定）
-                "--label-placeholder-size": `${Math.round(
-                  Math.max(16, Math.min(28, (finalImageWidth || 560) * 0.05))
-                )}px`,
-              }}
-              placeholder="ラベル文字列を入力"
-            />
-          </div>
+          <LabelMainInput
+            value={labelValue}
+            onChange={onLabelChange}
+            onSubmit={saveAndNext}
+            align={labelTextAlign}
+            onAlignChange={updateLabelTextAlign}
+            widthPx={finalImageWidth}
+            inputRef={labelInputRef}
+          />
 
           <div className="mb-2">
             <div className="mb-1 flex items-center justify-between gap-2">
@@ -1061,38 +801,15 @@ export default function LabelingView({
                 <span className="hidden text-[10px] text-muted lg:inline">
                   差分は<span className="text-amber-300">黄色</span> / Escで最上位の有効候補を採用
                 </span>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className={`h-7 px-3 text-[11px] font-semibold !border-accent/60 !bg-accent/15 !text-blue-200 transition-[box-shadow,background-color,border-color] duration-200 hover:!bg-accent/25 ${
-                    rerunFeedback === "press"
-                      ? "shadow-[0_0_0_1px_rgba(96,165,250,0.55),0_0_10px_rgba(96,165,250,0.45)]"
-                      : rerunFeedback === "success"
-                        ? "!border-emerald-400/70 !text-emerald-200 shadow-[0_0_0_1px_rgba(52,211,153,0.55),0_0_10px_rgba(52,211,153,0.45)]"
-                        : rerunFeedback === "error"
-                          ? "!border-red-400/70 !text-red-200 shadow-[0_0_0_1px_rgba(248,113,113,0.55),0_0_12px_rgba(248,113,113,0.5)]"
-                          : ""
-                  }`}
+                <OcrRerunButton
+                  loading={ocrLoading}
+                  feedback={rerunFeedback}
                   onClick={() => {
                     rerunRequestedRef.current = true;
                     setRerunFeedbackTimed("press", 300);
                     setOcrReloadTick((prev) => prev + 1);
                   }}
-                  disabled={ocrLoading}
-                  title="現在の画像でOCRを再実行します"
-                  aria-label="現在の画像でOCRを再実行"
-                >
-                  {ocrLoading ? (
-                    <>
-                      <span className="mr-1 inline-block animate-spin" aria-hidden="true">
-                        ↻
-                      </span>
-                      OCR実行中...
-                    </>
-                  ) : (
-                    <>↻ OCR再実行</>
-                  )}
-                </Button>
+                />
               </div>
             </div>
             {/* 常に3行分の高さで固定表示（成功/実行中/エラー/未設定でも画面が揺れない） */}
@@ -1167,50 +884,13 @@ export default function LabelingView({
               })}
             </div>
 
-            {/* 辞書からの近似候補（OCR候補辞書を選択している場合のみ表示） */}
-            {dictionaryCandidates !== null ? (
-              <div className="mt-2 border-t border-border pt-2">
-                <div className="mb-1 flex items-center justify-between gap-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">辞書からの近似候補</p>
-                  <span className="truncate text-[10px] text-muted" title={candidateDict?.source_name}>
-                    {candidateDict?.source_name || ""}
-                  </span>
-                </div>
-                {ocrLoading ? (
-                  <p className="px-1 text-xs text-muted">OCR実行中...</p>
-                ) : dictionaryCandidates.length === 0 ? (
-                  <p className="px-1 text-xs text-muted">辞書内に近い候補はありません</p>
-                ) : (
-                  <div className="space-y-1.5">
-                    {dictionaryCandidates.map((candidate, index) => (
-                      <button
-                        key={candidate.entry}
-                        type="button"
-                        onClick={() => adoptText(candidate.entry)}
-                        title={`辞書候補をクリックで現在ラベルへ反映 (Alt+${index + 1})。差分はOCR結果（${candidate.sourceText}）との比較`}
-                        className="flex h-10 w-full items-center gap-2 rounded-lg border border-border bg-card/60 px-2.5 text-left backdrop-blur-md transition hover:border-accent/60 hover:bg-accent/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
-                      >
-                        <span className="w-4 shrink-0 text-[10px] text-muted">{index + 1}.</span>
-                        <span className="w-44 shrink-0 truncate text-[10px] text-muted" title={`元候補: ${candidate.source}`}>
-                          類似度 {(candidate.score * 100).toFixed(1)}%{candidate.source ? ` / ${candidate.source}` : ""}
-                        </span>
-                        <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap">
-                          <DiffText
-                            candidate={candidate.entry}
-                            current={candidate.sourceText}
-                            highlightClass={DICT_DIFF_HIGHLIGHT_CLASS}
-                          />
-                        </span>
-                        <span className="shrink-0 text-[10px] text-muted">Alt+{index + 1}</span>
-                        <span className="shrink-0 rounded-md border border-accent/50 bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold text-blue-200">
-                          採用
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ) : null}
+            {/* 辞書からの近似候補（OCR候補辞書を選択している場合のみ表示。共通部品） */}
+            <DictionaryCandidatesSection
+              dictionaryCandidates={dictionaryCandidates}
+              sourceName={candidateDict?.source_name}
+              loading={ocrLoading}
+              onAdopt={adoptText}
+            />
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -1237,103 +917,13 @@ export default function LabelingView({
             </span>
           </div>
 
-          <details className="group mt-2 rounded-lg border border-border/80 bg-card/45">
-            <summary className="flex cursor-pointer select-none items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-text transition hover:bg-card/70 [&::-webkit-details-marker]:hidden">
-              <span className="text-[10px] text-muted transition-transform group-open:rotate-90" aria-hidden="true">
-                ▶
-              </span>
-              ⌨ ソフトキーボード
-            </summary>
-            <div className="space-y-1.5 px-2.5 pb-2.5">
-              <div className="grid grid-cols-10 gap-1.5">
-                {keyRows[0].map((key) => (
-                  <Button
-                    key={key}
-                    size="sm"
-                    variant="secondary"
-                    className="h-8 px-0 text-xs"
-                    onClick={() => onAppendChar(key)}
-                  >
-                    {key}
-                  </Button>
-                ))}
-              </div>
-              <div className="grid grid-cols-10 gap-1.5 pl-3">
-                {keyRows[1].map((key) => {
-                  const label = isUppercase ? key.toUpperCase() : key.toLowerCase();
-                  return (
-                    <Button
-                      key={key}
-                      size="sm"
-                      variant="secondary"
-                      className="h-8 px-0 text-xs"
-                      onClick={() => onAppendChar(label)}
-                    >
-                      {label}
-                    </Button>
-                  );
-                })}
-              </div>
-              <div className="grid grid-cols-10 gap-1.5 pl-8">
-                {keyRows[2].map((key) => {
-                  const label = isUppercase ? key.toUpperCase() : key.toLowerCase();
-                  return (
-                    <Button
-                      key={key}
-                      size="sm"
-                      variant="secondary"
-                      className="h-8 px-0 text-xs"
-                      onClick={() => onAppendChar(label)}
-                    >
-                      {label}
-                    </Button>
-                  );
-                })}
-              </div>
-              <div className="grid grid-cols-12 gap-1.5">
-                <Button
-                  size="sm"
-                  variant={isUppercase ? "primary" : "secondary"}
-                  className="col-span-2 h-8 text-xs"
-                  onClick={onToggleCase}
-                >
-                  {isUppercase ? "ABC" : "abc"}
-                </Button>
-                <div className="col-span-8 grid grid-cols-7 gap-1.5">
-                  {keyRows[3].map((key) => {
-                    const label = isUppercase ? key.toUpperCase() : key.toLowerCase();
-                    return (
-                      <Button
-                        key={key}
-                        size="sm"
-                        variant="secondary"
-                        className="h-8 px-0 text-xs"
-                        onClick={() => onAppendChar(label)}
-                      >
-                        {label}
-                      </Button>
-                    );
-                  })}
-                </div>
-                <Button size="sm" variant="secondary" className="col-span-2 h-8 text-xs" onClick={onBackspace}>
-                  戻す
-                </Button>
-              </div>
-              <div className="grid grid-cols-12 gap-1.5">
-                <Button size="sm" variant="secondary" className="col-span-2 h-8 text-xs" onClick={onClear}>
-                  クリア
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="col-span-10 h-8 text-xs tracking-wide"
-                  onClick={() => onAppendChar(" ")}
-                >
-                  スペース
-                </Button>
-              </div>
-            </div>
-          </details>
+          <SoftKeyboardPanel
+            isUppercase={isUppercase}
+            onAppendChar={onAppendChar}
+            onBackspace={onBackspace}
+            onClear={onClear}
+            onToggleCase={onToggleCase}
+          />
         </div>
       </div>
 
