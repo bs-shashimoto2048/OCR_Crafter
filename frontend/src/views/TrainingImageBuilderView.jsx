@@ -6,6 +6,7 @@ import { request } from "../lib/api";
 import {
   buildModelValue,
   canDetectWithModel,
+  confidenceToneClass,
   findModelBySource,
   findModelInfo,
   formatDetectFailureMessage,
@@ -41,6 +42,26 @@ const DETECT_PREPROCESS_DEFAULTS = {
   grayscale: false,
 };
 const DETECT_PREPROCESS_STORAGE_KEY = "ocr_detection_preprocess_by_project_v1";
+// Step3 編集パネル幅（%）。ドラッグで変更しlocalStorageへ保存する
+const STEP3_PANEL_STORAGE_KEY = "ocr_image_builder_step3_panel_v1";
+const STEP3_PANEL_DEFAULT_PCT = 22;
+const STEP3_PANEL_MIN_PCT = 18;
+const STEP3_PANEL_MAX_PCT = 35;
+
+function clampPanelPct(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return STEP3_PANEL_DEFAULT_PCT;
+  return Math.min(STEP3_PANEL_MAX_PCT, Math.max(STEP3_PANEL_MIN_PCT, num));
+}
+
+function loadStep3PanelPct() {
+  try {
+    const raw = localStorage.getItem(STEP3_PANEL_STORAGE_KEY);
+    return raw ? clampPanelPct(Number(raw)) : STEP3_PANEL_DEFAULT_PCT;
+  } catch {
+    return STEP3_PANEL_DEFAULT_PCT;
+  }
+}
 
 // サーバー送信用の設定オブジェクトを構築。無変換設定なら null（=従来どおり元画像で処理）
 function buildDetectPreprocessPayload(p) {
@@ -289,7 +310,15 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
   const [editingBboxId, setEditingBboxId] = useState(null);
   const [bboxUndoStack, setBboxUndoStack] = useState([]);
   const [bboxRedoStack, setBboxRedoStack] = useState([]);
-  const [step3PaneHeight, setStep3PaneHeight] = useState(0);
+  // Step3 画像ビューポートの実測サイズ（ズーム100%時のフィット表示に使用）
+  const [step3ViewportSize, setStep3ViewportSize] = useState({ width: 0, height: 0 });
+  // Step3 編集パネル幅（%）: ドラッグで18〜35%、localStorageへ保存
+  const [step3PanelPct, setStep3PanelPct] = useState(() => loadStep3PanelPct());
+  // Step3 操作説明の開閉（初期は閉じる）
+  const [helpOpen, setHelpOpen] = useState(false);
+  // パネル幅ドラッグ中の情報（コンテナ矩形）。null=非ドラッグ
+  const panelDragRef = useRef(null);
+  const step3RowRef = useRef(null);
   const [imageZoom, setImageZoom] = useState(1);
   const [copiedBboxes, setCopiedBboxes] = useState([]);
   const [seriesFilter, setSeriesFilter] = useState(SERIES_FILTER_ALL);
@@ -755,6 +784,18 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
     if (!point) {
       return;
     }
+    insertNewBboxAt(point);
+  }
+
+  // ツールバーの「追加」: 画像中央へ新規BBOXを追加（ダブルクリック追加と同一の生成ロジック）
+  function addBboxAtCenter() {
+    if (!editMode || !currentImageSize) {
+      return;
+    }
+    insertNewBboxAt({ x: currentImageSize[0] / 2, y: currentImageSize[1] / 2 });
+  }
+
+  function insertNewBboxAt(point) {
     // Added ROI should start as a horizontal box for OCR text strings.
     const defaultH = Math.max(20, currentImageSize[1] * 0.08);
     const defaultW = Math.max(defaultH * 2.8, currentImageSize[0] * 0.18, 56);
@@ -798,6 +839,36 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
     setDetections((prev) => [...prev, next]);
     setEditingBboxId(nextId);
     focusBboxCard(nextId);
+  }
+
+  // Step3 編集パネル幅のドラッグ変更（18〜35%。mouseupでlocalStorageへ保存）
+  function startPanelResize(e) {
+    e.preventDefault();
+    const row = step3RowRef.current;
+    if (!row) return;
+    panelDragRef.current = { rect: row.getBoundingClientRect() };
+
+    const onMove = (ev) => {
+      const drag = panelDragRef.current;
+      if (!drag) return;
+      const pct = ((drag.rect.right - ev.clientX) / drag.rect.width) * 100;
+      setStep3PanelPct(clampPanelPct(pct));
+    };
+    const onUp = () => {
+      panelDragRef.current = null;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      setStep3PanelPct((current) => {
+        try {
+          localStorage.setItem(STEP3_PANEL_STORAGE_KEY, String(current));
+        } catch {
+          // 保存できない環境でも動作継続
+        }
+        return current;
+      });
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
   }
 
   function focusBboxCard(id) {
@@ -1218,7 +1289,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
 
   useEffect(() => {
     if (activeStep !== 3) {
-      setStep3PaneHeight(0);
+      setStep3ViewportSize({ width: 0, height: 0 });
       return;
     }
 
@@ -1227,28 +1298,30 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       return;
     }
 
-    const updateHeight = () => {
-      const next = Math.round(target.getBoundingClientRect().height);
-      if (next > 0) {
-        setStep3PaneHeight(next);
+    const updateSize = () => {
+      const rect = target.getBoundingClientRect();
+      const width = Math.round(rect.width);
+      const height = Math.round(rect.height);
+      if (width > 0 && height > 0) {
+        setStep3ViewportSize((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
       }
     };
 
-    updateHeight();
+    updateSize();
 
     let observer = null;
     if (typeof ResizeObserver !== "undefined") {
-      observer = new ResizeObserver(() => updateHeight());
+      observer = new ResizeObserver(() => updateSize());
       observer.observe(target);
     } else {
-      window.addEventListener("resize", updateHeight);
+      window.addEventListener("resize", updateSize);
     }
 
     return () => {
       if (observer) {
         observer.disconnect();
       } else {
-        window.removeEventListener("resize", updateHeight);
+        window.removeEventListener("resize", updateSize);
       }
     };
   }, [activeStep]);
@@ -1467,15 +1540,22 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
     ? `${fileName}  |  元: ${originalSizeLabel}  /  リサイズ後: ${resizedSizeLabel}`
     : "画像未選択";
   const isStep3Active = activeStep === 3;
-  const rightPaneClass = isStep3Active ? "flex min-h-0 flex-col gap-3 overflow-hidden" : "space-y-3";
-  const rightPaneContentClass = isStep3Active
-    ? "flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1"
+  // Step3: 編集パネルは幅指定（ドラッグ可変・localStorage保存）。スクロールは一覧のみ
+  const rightPaneClass = isStep3Active
+    ? "flex min-h-0 min-w-[280px] shrink-0 flex-col gap-2 overflow-hidden"
     : "space-y-3";
-  const rightPaneStyle = isStep3Active && step3PaneHeight > 0 ? { height: `${step3PaneHeight}px` } : undefined;
+  const rightPaneContentClass = isStep3Active
+    ? "flex min-h-0 flex-1 flex-col overflow-hidden"
+    : "space-y-3";
+  const rightPaneStyle = isStep3Active ? { width: `${step3PanelPct}%` } : undefined;
   const imageRenderWidth =
     isStep3Active && currentImageSize
       ? `${Math.max(1, Math.round(Number(currentImageSize[0]) * imageZoom))}px`
       : undefined;
+  // ズーム100%時は画像をビューポート内へ収める（スクロールなしで最大表示）。
+  // ズーム操作時は従来どおり実寸×倍率（スクロール可）
+  const imageFitMaxWidth = step3ViewportSize.width > 0 ? `${Math.max(160, step3ViewportSize.width - 26)}px` : "100%";
+  const imageFitMaxHeight = step3ViewportSize.height > 0 ? `${Math.max(160, step3ViewportSize.height - 26)}px` : "70vh";
 
   useEffect(() => {
     if (seriesFilter === SERIES_FILTER_ALL) {
@@ -1487,8 +1567,17 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
   }, [seriesFilter, seriesOptions]);
 
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_560px] gap-4">
-      <div>
+    // Step3は「大きな画像（75〜80%）+ 編集パネル（22%・ドラッグ可変）+ 下部ステータスバー」の
+    // 作業特化レイアウト（xl以上はビューポート内固定・ページスクロールなし）。他Stepは従来の2カラム
+    <div
+      className={
+        isStep3Active
+          ? "flex min-h-0 flex-col gap-2 xl:h-full xl:flex-1 xl:overflow-hidden"
+          : "grid grid-cols-[minmax(0,1fr)_560px] gap-4"
+      }
+    >
+      <div ref={step3RowRef} className={isStep3Active ? "flex min-h-0 min-w-0 flex-1 gap-0" : "contents"}>
+      <div className={isStep3Active ? "flex min-h-0 min-w-0 flex-1 flex-col" : undefined}>
         <Card
           title="作業画像"
           subtitle={imageSubtitle}
@@ -1520,23 +1609,104 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
               </div>
             </div>
           }
+          className={isStep3Active ? "flex min-h-0 flex-1 flex-col" : ""}
         >
+          {/* Step3 編集ツールバー（画像上部・横一列・高さ固定）。既存機能のボタンを一覧から移設 */}
+          {isStep3Active ? (
+            <div className="mb-2 flex h-9 shrink-0 items-center gap-1.5 overflow-x-auto whitespace-nowrap rounded-lg border border-border bg-card/45 px-2">
+              <Button
+                size="sm"
+                className="px-2"
+                variant={editMode ? "primary" : "secondary"}
+                onClick={() => {
+                  setEditMode((prev) => !prev);
+                  if (editMode) {
+                    setEditingBboxId(null);
+                  }
+                }}
+              >
+                {editMode ? "編集: ON" : "編集: OFF"}
+              </Button>
+              <span className="mx-0.5 h-5 w-px shrink-0 bg-border/70" aria-hidden="true" />
+              <Button size="sm" className="px-2" variant="secondary" onClick={undoDetections} disabled={bboxUndoStack.length === 0} title="元に戻す（Ctrl/Cmd+Z）">
+                ↩ 元に戻す
+              </Button>
+              <Button size="sm" className="px-2" variant="secondary" onClick={redoDetections} disabled={bboxRedoStack.length === 0} title="やり直す（Ctrl+Y / Ctrl/Cmd+Shift+Z）">
+                ↪ やり直す
+              </Button>
+              <span className="mx-0.5 h-5 w-px shrink-0 bg-border/70" aria-hidden="true" />
+              <Button size="sm" className="px-2" variant="secondary" onClick={copyBboxes} disabled={detections.length === 0} title="コピー（Ctrl/Cmd+C）">
+                コピー
+              </Button>
+              <Button size="sm" className="px-2" variant="secondary" onClick={pasteBboxes} disabled={copiedBboxes.length === 0} title="貼り付け（Ctrl/Cmd+V）">
+                貼り付け
+              </Button>
+              <span className="mx-0.5 h-5 w-px shrink-0 bg-border/70" aria-hidden="true" />
+              <Button
+                size="sm"
+                className="px-2"
+                variant="secondary"
+                onClick={addBboxAtCenter}
+                disabled={!editMode || !currentImageSize}
+                title={editMode ? "画像中央に新規BBOXを追加（ダブルクリックでも追加できます）" : "編集モードON時のみ追加できます"}
+              >
+                ＋ 追加
+              </Button>
+              <Button size="sm" className="px-2" variant="secondary" onClick={() => setSelectedUiIds(detections.map((row) => row.id))} disabled={detections.length === 0}>
+                すべて選択
+              </Button>
+              <Button size="sm" className="px-2" variant="secondary" onClick={() => setSelectedUiIds([])} disabled={selectedUiIds.length === 0}>
+                選択解除
+              </Button>
+              <Button
+                size="sm"
+                className="px-2"
+                variant="danger"
+                onClick={deleteSelectedBboxes}
+                disabled={selectedUiIds.length === 0}
+                title="選択中のBBOXをまとめて削除します（元に戻すで復元可能）"
+              >
+                削除
+              </Button>
+              <span className="ml-auto shrink-0" />
+              <Button
+                size="sm"
+                className="px-2"
+                variant={helpOpen ? "primary" : "ghost"}
+                onClick={() => setHelpOpen((prev) => !prev)}
+                title="操作方法を表示"
+              >
+                ？
+              </Button>
+            </div>
+          ) : null}
           <div
             ref={imageViewportRef}
-            className="max-h-[78vh] overflow-auto rounded-xl border border-border bg-card/55 p-3"
+            className={
+              isStep3Active
+                ? "dark-scroll max-h-[70vh] min-h-0 overflow-auto rounded-xl border border-border bg-card/55 p-3 xl:max-h-none xl:flex-1"
+                : "max-h-[78vh] overflow-auto rounded-xl border border-border bg-card/55 p-3"
+            }
           >
             {displayImageDataUrl ? (
               <div
-                className={isStep3Active ? "relative w-max" : "relative mx-auto w-full max-w-[980px]"}
-                style={isStep3Active ? { width: imageRenderWidth } : undefined}
+                className={isStep3Active ? "relative mx-auto w-max max-w-none" : "relative mx-auto w-full max-w-[980px]"}
+                style={isStep3Active && imageZoom !== 1 ? { width: imageRenderWidth } : undefined}
                 onDoubleClick={handleCanvasDoubleClick}
               >
                 <img
                   ref={imageRef}
                   src={displayImageDataUrl}
                   alt="preview"
-                  className={isStep3Active ? "block h-auto rounded-md" : "block h-auto w-full rounded-md"}
-                  style={isStep3Active ? { width: "100%", maxWidth: "none" } : undefined}
+                  className={isStep3Active ? "block rounded-md" : "block h-auto w-full rounded-md"}
+                  style={
+                    isStep3Active
+                      ? imageZoom === 1
+                        ? // ズーム100%はビューポート内へ収めて最大表示（スクロールなし）
+                          { width: "auto", height: "auto", maxWidth: imageFitMaxWidth, maxHeight: imageFitMaxHeight }
+                        : { width: "100%", maxWidth: "none" }
+                      : undefined
+                  }
                   draggable={false}
                 />
                 {detections.map((row) => {
@@ -1602,12 +1772,20 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
             ) : (
               <div className="py-20 text-center text-sm text-muted">右側ステップ1で画像を選択してください</div>
             )}
-            {isStep3Active ? (
-              <p className="mt-2 text-xs text-muted">Ctrl + スクロール: 拡大/縮小（{Math.round(imageZoom * 100)}%）</p>
-            ) : null}
           </div>
         </Card>
       </div>
+
+      {/* Step3 パネル幅リサイズ用ディバイダ（18〜35%・localStorage保存） */}
+      {isStep3Active ? (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          onMouseDown={startPanelResize}
+          className="mx-1 w-1.5 shrink-0 cursor-col-resize rounded-full bg-border/40 transition hover:bg-accent/60"
+          title="ドラッグで編集パネル幅を変更"
+        />
+      ) : null}
 
       <div className={rightPaneClass} style={rightPaneStyle}>
         <div className="grid grid-cols-4 gap-2 rounded-xl border border-border bg-card/45 p-2">
@@ -2133,100 +2311,74 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
               {/* 検出時に実際に使用したモデルのスナップショット（検出後にモデル選択を変えても変わらない） */}
               {detectRunInfo ? (
                 <p
-                  className="mb-1 truncate text-[11px] text-muted"
+                  className="mb-1 shrink-0 truncate text-[11px] text-muted"
                   title={detectRunInfo.resolvedModel || detectRunInfo.modelName}
                 >
                   検出モデル: {detectRunInfo.modelName}（{modelSourceLabel(detectRunInfo.modelSource)}）
                 </p>
               ) : null}
-              <div className="mb-2 flex flex-wrap items-center gap-2">
-                <Button
-                  size="sm"
-                  className="whitespace-nowrap px-2"
-                  variant={editMode ? "primary" : "secondary"}
-                  onClick={() => {
-                    setEditMode((prev) => !prev);
-                    if (editMode) {
-                      setEditingBboxId(null);
-                    }
-                  }}
-                >
-                  {editMode ? "編集モード: ON" : "編集モード: OFF"}
-                </Button>
-                <Button
-                  size="sm"
-                  className="whitespace-nowrap px-2"
-                  variant="secondary"
-                  onClick={undoDetections}
-                  disabled={bboxUndoStack.length === 0}
-                  title="元に戻す（Ctrl/Cmd+Z）"
-                >
-                  元に戻す
-                </Button>
-                <Button
-                  size="sm"
-                  className="whitespace-nowrap px-2"
-                  variant="secondary"
-                  onClick={redoDetections}
-                  disabled={bboxRedoStack.length === 0}
-                  title="やり直す（Ctrl+Y / Ctrl/Cmd+Shift+Z）"
-                >
-                  やり直す
-                </Button>
-                <Button
-                  size="sm"
-                  className="whitespace-nowrap px-2"
-                  variant="secondary"
-                  onClick={copyBboxes}
-                  disabled={detections.length === 0}
-                >
-                  コピー
-                </Button>
-                <Button
-                  size="sm"
-                  className="whitespace-nowrap px-2"
-                  variant="secondary"
-                  onClick={pasteBboxes}
-                  disabled={copiedBboxes.length === 0}
-                >
-                  貼り付け
-                </Button>
-                <Button
-                  size="sm"
-                  className="whitespace-nowrap px-2"
-                  variant="secondary"
-                  onClick={() => setSelectedUiIds(detections.map((row) => row.id))}
-                  disabled={detections.length === 0}
-                >
-                  すべて選択
-                </Button>
-                <Button
-                  size="sm"
-                  className="whitespace-nowrap px-2"
-                  variant="secondary"
-                  onClick={() => setSelectedUiIds([])}
-                  disabled={selectedUiIds.length === 0}
-                >
-                  選択解除
-                </Button>
-                <Button
-                  size="sm"
-                  className="whitespace-nowrap px-2"
-                  variant="danger"
-                  onClick={deleteSelectedBboxes}
-                  disabled={selectedUiIds.length === 0}
-                  title="選択中のBBOXをまとめて削除します（元に戻すで復元可能）"
-                >
-                  選択中を削除
-                </Button>
-                <span className="text-xs text-muted">
-                  選択: {selectedUiIds.length} / 有効: {selectedCount} / 総数: {detections.length}
-                </span>
-              </div>
-              <div className="mb-2 flex items-center gap-2">
-                <label className="text-xs text-muted">Series Filter</label>
+
+              {/* 選択中パネル（フォーカス中または最後に選択したBBOX） */}
+              {(() => {
+                const selectedRowId = focusedBboxId ?? selectedUiIds[selectedUiIds.length - 1] ?? null;
+                const selectedRow = detections.find((row) => row.id === selectedRowId) || null;
+                return (
+                  <div className="mb-2 shrink-0 rounded-lg border border-border bg-card/45 px-2.5 py-2 text-xs">
+                    <p className="text-[11px] font-semibold text-muted">選択中</p>
+                    {selectedRow ? (
+                      <>
+                        <div className="mt-1 flex items-center justify-between gap-2">
+                          <span className="truncate font-semibold text-text">
+                            #{selectedRow.id} {selectedRow.label}
+                          </span>
+                          <span className={`shrink-0 font-semibold tabular-nums ${confidenceToneClass(selectedRow.confidence)}`}>
+                            {formatConfidence(selectedRow.confidence)}
+                          </span>
+                        </div>
+                        <div className="mt-1.5 flex items-center gap-2">
+                          <label className="inline-flex items-center gap-1.5 text-xs text-text">
+                            <input
+                              type="checkbox"
+                              checked={!!selectedRow.selected}
+                              onChange={() => handleBoxEnabledChange(selectedRow.id)}
+                              title={selectedRow.selected ? "このBBOXを無効にする" : "このBBOXを有効にする"}
+                            />
+                            有効
+                          </label>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            className="h-6 px-2 text-[11px]"
+                            onClick={() => {
+                              setEditMode(true);
+                              setEditingBboxId(selectedRow.id);
+                              focusBboxCard(selectedRow.id);
+                            }}
+                          >
+                            編集
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="danger"
+                            className="h-6 px-2 text-[11px]"
+                            onClick={() => deleteBbox(selectedRow.id)}
+                          >
+                            削除
+                          </Button>
+                        </div>
+                      </>
+                    ) : (
+                      <p className="mt-1 text-muted">未選択（画像または一覧でBBOXをクリック）</p>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Series Filter（コンパクト・固定行） */}
+              <div className="mb-2 flex shrink-0 items-center gap-2">
+                <label className="shrink-0 text-xs text-muted">Series</label>
                 <select
-                  className="app-select h-8 max-w-[260px] py-0 text-xs"
+                  className="app-select h-7 min-w-0 flex-1 py-0 text-xs"
                   value={seriesFilter}
                   onChange={(e) => setSeriesFilter(e.target.value)}
                 >
@@ -2238,10 +2390,9 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                   ))}
                 </select>
               </div>
-              <p className="mb-2 text-xs text-muted">
-                画像上のクリックは選択のみ（有効／無効は変わりません）。有効／無効は一覧右端のチェックボックスでのみ切り替えます。
-              </p>
-              <div className="min-h-0 flex-1 space-y-1 overflow-auto rounded-lg border border-border bg-card/45 p-2">
+
+              {/* BBox一覧（一覧のみスクロール。行クリック=選択・チェック=有効/無効・Confidenceは色分け） */}
+              <div className="dark-scroll min-h-0 flex-1 space-y-1 overflow-y-auto overflow-x-hidden rounded-lg border border-border bg-card/45 p-2">
                 {filteredDetections.length === 0 ? (
                   <p className="text-xs text-muted">検出結果がありません</p>
                 ) : (
@@ -2256,75 +2407,71 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                         }
                       }}
                       tabIndex={-1}
-                      className={`flex items-center justify-between rounded-md border px-2 py-1 text-xs ${
+                      onClick={(e) => {
+                        // 一覧クリックで画像側も選択状態にする（Ctrl/Cmdで複数選択）
+                        handleBoxSelect(row.id, Boolean(e.ctrlKey || e.metaKey));
+                        setFocusedBboxId(row.id);
+                      }}
+                      className={`flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1 text-xs ${
                         focusedBboxId === row.id
                           ? "border-accent/80 ring-2 ring-accent/60"
                           : row.selected
-                            ? "border-emerald-400/60 text-emerald-200"
-                            : "border-red-400/60 text-red-200"
+                            ? "border-emerald-400/60"
+                            : "border-red-400/60 opacity-80"
                       } ${selectedUiIds.includes(row.id) ? "bg-accent/10" : ""}`}
                     >
-                      <span className="truncate">
+                      <input
+                        type="checkbox"
+                        checked={!!row.selected}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={() => handleBoxEnabledChange(row.id)}
+                        aria-label={row.selected ? `#${row.id} このBBOXを無効にする` : `#${row.id} このBBOXを有効にする`}
+                        title={row.selected ? "このBBOXを無効にする" : "このBBOXを有効にする"}
+                      />
+                      <span className={`min-w-0 flex-1 truncate ${row.selected ? "text-text" : "text-muted line-through"}`}>
                         #{row.id} {row.label}
                       </span>
-                      <span className="ml-2">{formatConfidence(row.confidence)}</span>
-                      <div className="ml-2 flex items-center gap-1">
-                        <button
-                          type="button"
-                          className="rounded border border-border px-1 text-[10px] text-slate-200"
-                          onClick={() => {
-                            setEditMode(true);
-                            setEditingBboxId(row.id);
-                            focusBboxCard(row.id);
-                          }}
-                        >
-                          編集
-                        </button>
-                        <button
-                          type="button"
-                          className="rounded border border-danger/50 px-1 text-[10px] text-danger"
-                          onClick={() => deleteBbox(row.id)}
-                        >
-                          削除
-                        </button>
-                        <input
-                          type="checkbox"
-                          checked={!!row.selected}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={() => handleBoxEnabledChange(row.id)}
-                          aria-label={row.selected ? `#${row.id} このBBOXを無効にする` : `#${row.id} このBBOXを有効にする`}
-                          title={row.selected ? "このBBOXを無効にする" : "このBBOXを有効にする"}
-                        />
-                      </div>
+                      <span className={`shrink-0 tabular-nums ${confidenceToneClass(row.confidence)}`}>
+                        {formatConfidence(row.confidence)}
+                      </span>
                     </div>
                   ))
                 )}
               </div>
-              <div className="mt-3 rounded-lg border border-border bg-card/45 px-3 py-2 text-xs text-muted">
-                <p className="mb-1 font-semibold text-slate-200">操作方法</p>
-                <ul className="list-disc space-y-1 pl-4">
-                  <li>クリック: BBOXの選択／選択解除</li>
-                  <li>Ctrl/Cmd + クリック: 複数選択</li>
-                  <li>ダブルクリック: 編集開始（有効状態は変わりません）</li>
-                  <li>編集モードONで画像の空白部分をダブルクリック: 新規BBOX追加</li>
-                  <li>ドラッグ: BBOXを移動</li>
-                  <li>四隅ハンドル: サイズ変更</li>
-                  <li>Ctrl/Cmd + C: コピー / Ctrl/Cmd + V: 貼り付け</li>
-                  <li>Tab / Shift + Tab: 次／前のBBOXへ移動（編集モードON時・表示中のみ・循環）</li>
-                  <li>Ctrl/Cmd + Z: 元に戻す / Ctrl + Y・Ctrl/Cmd + Shift + Z: やり直す</li>
-                  <li>Delete: 編集中・フォーカス中のBBOXを削除（無ければ選択中を確認のうえ一括削除）</li>
-                  <li>有効／無効: 一覧右端のチェックボックスでのみ切替（Undo/Redo対象）</li>
-                </ul>
-              </div>
-              <div className="mt-3">
-                <div className="flex items-center justify-between gap-2">
-                  <Button size="sm" className="whitespace-nowrap px-2" onClick={() => goStep(4)} disabled={!step3Done}>
-                    次へ
-                  </Button>
-                  <Button size="sm" className="whitespace-nowrap px-2" variant="secondary" onClick={() => goStep(2)}>
-                    戻る
-                  </Button>
+
+              {/* 操作方法（？ボタンで開閉・初期は閉）。開いても一覧を潰しすぎないよう高さ制限 */}
+              {helpOpen ? (
+                <div className="dark-scroll mt-2 max-h-[30vh] shrink-0 overflow-y-auto rounded-lg border border-border bg-card/45 px-3 py-2 text-xs text-muted">
+                  <div className="mb-1 flex items-center justify-between">
+                    <p className="font-semibold text-slate-200">操作方法</p>
+                    <Button size="sm" variant="ghost" className="h-5 px-1.5 text-[10px]" onClick={() => setHelpOpen(false)}>
+                      閉じる
+                    </Button>
+                  </div>
+                  <ul className="list-disc space-y-1 pl-4">
+                    <li>クリック: BBOXの選択／選択解除</li>
+                    <li>Ctrl/Cmd + クリック: 複数選択</li>
+                    <li>ダブルクリック: 編集開始（有効状態は変わりません）</li>
+                    <li>編集モードONで画像の空白部分をダブルクリック: 新規BBOX追加</li>
+                    <li>ドラッグ: BBOXを移動 / 四隅ハンドル: サイズ変更</li>
+                    <li>Ctrl + スクロール: 画像の拡大/縮小</li>
+                    <li>Ctrl/Cmd + C: コピー / Ctrl/Cmd + V: 貼り付け</li>
+                    <li>Tab / Shift + Tab: 次／前のBBOXへ移動（編集モードON時・表示中のみ・循環）</li>
+                    <li>Ctrl/Cmd + Z: 元に戻す / Ctrl + Y・Ctrl/Cmd + Shift + Z: やり直す</li>
+                    <li>Delete: 編集中・フォーカス中のBBOXを削除（無ければ選択中を確認のうえ一括削除）</li>
+                    <li>有効／無効: 一覧のチェックボックスでのみ切替（Undo/Redo対象・画像クリックでは変わりません）</li>
+                  </ul>
                 </div>
+              ) : null}
+
+              {/* 下部固定の操作ボタン */}
+              <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
+                <Button size="sm" className="whitespace-nowrap px-3" onClick={() => goStep(4)} disabled={!step3Done}>
+                  次へ
+                </Button>
+                <Button size="sm" className="whitespace-nowrap px-3" variant="secondary" onClick={() => goStep(2)}>
+                  戻る
+                </Button>
               </div>
             </Card>
           ) : null}
@@ -2399,6 +2546,35 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
           )}
         </div>
       </div>
+      </div>
+
+      {/* Step3 ステータスバー（最下部固定・常時表示・高さ固定。数値はtabular-numsで揺れ防止） */}
+      {isStep3Active ? (
+        <div className="flex h-9 shrink-0 items-center gap-4 overflow-x-auto whitespace-nowrap rounded-lg border border-border bg-card/60 px-3 text-xs text-muted tabular-nums">
+          <span>
+            検出数 <span className="font-semibold text-text">{detections.length}</span>
+          </span>
+          <span>
+            有効 <span className="font-semibold text-emerald-300">{selectedCount}</span>
+          </span>
+          <span>
+            無効 <span className="font-semibold text-red-300">{detections.length - selectedCount}</span>
+          </span>
+          <span>
+            選択中 <span className="font-semibold text-text">{selectedUiIds.length}</span>
+          </span>
+          <span>
+            表示 <span className="font-semibold text-text">{filteredDetections.length}</span>
+          </span>
+          <span>
+            ズーム <span className="font-semibold text-text">{Math.round(imageZoom * 100)}%</span>
+            <span className="ml-1 text-[10px]">（Ctrl+スクロール）</span>
+          </span>
+          <span className="min-w-0 truncate" title={fileName || ""}>
+            画像 <span className="text-text">{fileName || "--"}</span>
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }

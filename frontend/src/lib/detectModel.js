@@ -131,6 +131,20 @@ export function canDetectWithModel(info) {
   return true;
 }
 
+// Confidence値の色分けクラス（Step3のBBox一覧・選択中パネル用）。
+// 0.90以上=緑 / 0.70〜0.89=水色 / 0.50〜0.69=黄 / 0.30〜0.49=オレンジ / 0.29以下=赤 / 不明=muted
+export function confidenceToneClass(value) {
+  const num = Number(value);
+  if (value === null || value === undefined || value === "" || !Number.isFinite(num)) {
+    return "text-muted";
+  }
+  if (num >= 0.9) return "text-emerald-300";
+  if (num >= 0.7) return "text-sky-300";
+  if (num >= 0.5) return "text-yellow-300";
+  if (num >= 0.3) return "text-orange-300";
+  return "text-red-300";
+}
+
 // ミリ秒を「0.72秒」形式へ整形（null/undefined/非数値は "--"。Number(null)=0 の誤変換を防ぐ）
 export function formatMillisAsSeconds(ms) {
   if (ms === null || ms === undefined || ms === "") {

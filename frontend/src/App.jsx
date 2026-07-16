@@ -3370,9 +3370,10 @@ export default function App() {
   ].includes(activeView);
   const suppressRapidOcrInferenceNotice =
     activeView === "rapid-ocr" && /^推論結果:\s*/.test(String(notice?.text || ""));
-  // OCR学習画面はデスクトップ(xl=1280px以上。1366×768等の低解像度もカバー)でビューポート内へ収める（ページ縦スクロールなし・内部スクロールのみ）。
+  // OCR学習画面と学習画像作成Step3はデスクトップ(xl=1280px以上)でビューポート内へ収める
+  // （ページ縦スクロールなし・内部スクロールのみ。Step3は画像領域を最大化するため）。
   // 固定px差し引き(calc)ではなく main→section→ビュー の親Flex残り高さ継承で実現する
-  const fitViewport = activeView === "ocr-training";
+  const fitViewport = activeView === "ocr-training" || activeView === "image-builder-step3";
 
   return (
     <div className="min-h-screen bg-transparent text-text">

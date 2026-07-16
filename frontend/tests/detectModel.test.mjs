@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import {
   buildModelValue,
   canDetectWithModel,
+  confidenceToneClass,
   extractDetectErrorDetail,
   findModelBySource,
   findModelInfo,
@@ -123,6 +124,21 @@ test("findModelBySource: 同名でも指定した取得元の行を返す", () =
   assert.equal(findModelBySource(models, "common", "dup.pt").source, "common");
   assert.equal(findModelBySource(models, "builtin", "dup.pt"), null);
   assert.equal(findModelBySource(models, "", "dup.pt"), null);
+});
+
+test("confidenceToneClass: Confidence帯ごとに色分けする（Step3一覧・選択中パネル）", () => {
+  assert.equal(confidenceToneClass(0.95), "text-emerald-300");
+  assert.equal(confidenceToneClass(0.9), "text-emerald-300");
+  assert.equal(confidenceToneClass(0.89), "text-sky-300");
+  assert.equal(confidenceToneClass(0.7), "text-sky-300");
+  assert.equal(confidenceToneClass(0.69), "text-yellow-300");
+  assert.equal(confidenceToneClass(0.5), "text-yellow-300");
+  assert.equal(confidenceToneClass(0.49), "text-orange-300");
+  assert.equal(confidenceToneClass(0.3), "text-orange-300");
+  assert.equal(confidenceToneClass(0.29), "text-red-300");
+  assert.equal(confidenceToneClass(0), "text-red-300");
+  assert.equal(confidenceToneClass(null), "text-muted");
+  assert.equal(confidenceToneClass("abc"), "text-muted");
 });
 
 test("canDetectWithModel: 標準モデルは取得済みのときだけ使用可能", () => {
