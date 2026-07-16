@@ -8,6 +8,7 @@
 """
 
 import csv
+import hashlib
 import json
 import re
 import shutil
@@ -17,7 +18,8 @@ from typing import Any, Optional
 
 from PIL import Image
 
-from ..project_paths import get_project_paths
+from ..paths import IMAGE_EXTENSIONS
+from ..project_paths import get_project_paths, safe_rmtree
 
 # データセット名: 英数字・ハイフン・アンダースコアのみ（パストラバーサル防止）
 _DATASET_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -162,6 +164,175 @@ def save_editing_state(project_id: str, state: dict[str, Any]) -> dict[str, Any]
     root.mkdir(parents=True, exist_ok=True)
     (root / "editing_state.json").write_text(text, encoding="utf-8")
     return {"saved": True}
+
+
+def _load_dataset_metadata(dataset_dir: Path) -> Optional[dict[str, Any]]:
+    metadata_path = dataset_dir / "metadata.json"
+    if not metadata_path.exists():
+        return None
+    try:
+        data = json.loads(metadata_path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def list_evaluation_datasets(project_id: str) -> dict[str, Any]:
+    """作成済み評価データセットの一覧（モデル評価画面の選択候補）。metadata.jsonを根拠にする。"""
+    root = _evaluation_dir(project_id)
+    datasets: list[dict[str, Any]] = []
+    if root.exists():
+        for dataset_dir in sorted(root.iterdir()):
+            if not dataset_dir.is_dir():
+                continue
+            metadata = _load_dataset_metadata(dataset_dir)
+            if metadata is None:
+                continue
+            images = metadata.get("images") or []
+            series = sorted({str(row.get("series") or "") for row in images if str(row.get("series") or "")})
+            label_count = sum(1 for row in images if str(row.get("label") or "").strip())
+            rotated_count = sum(1 for row in images if int(row.get("rotation") or 0) % 360 != 0)
+            csv_file = str(metadata.get("csv_file") or "ground_truth.csv")
+            datasets.append(
+                {
+                    "id": dataset_dir.name,
+                    "name": str(metadata.get("dataset_id") or dataset_dir.name),
+                    "created_at": str(metadata.get("created_at") or ""),
+                    "image_count": int(metadata.get("image_count") or len(images)),
+                    "label_count": label_count,
+                    "series": series,
+                    "rotated_count": rotated_count,
+                    "dataset_dir": str(dataset_dir.resolve()),
+                    "image_dir": str((dataset_dir / "images").resolve()),
+                    "csv_path": str((dataset_dir / csv_file).resolve()),
+                }
+            )
+    datasets.sort(key=lambda row: row.get("created_at") or "", reverse=True)
+    return {"project_id": project_id, "datasets": datasets}
+
+
+def _resolve_dataset_dir(project_id: str, dataset_id: str) -> Path:
+    safe_id = Path(str(dataset_id or "")).name
+    if not safe_id or safe_id != dataset_id or not _DATASET_ID_PATTERN.match(safe_id):
+        raise ValueError("invalid dataset_id")
+    dataset_dir = _evaluation_dir(project_id) / safe_id
+    if not dataset_dir.exists() or not dataset_dir.is_dir():
+        raise FileNotFoundError(f"評価データセットが見つかりません: {dataset_id}")
+    return dataset_dir
+
+
+def delete_evaluation_dataset(project_id: str, dataset_id: str) -> dict[str, Any]:
+    """評価データセット一式（images/CSV/metadata/editing_state）を削除する。safe_rmtreeで配下検証。"""
+    dataset_dir = _resolve_dataset_dir(project_id, dataset_id)
+    safe_rmtree(dataset_dir, allowed_roots=[_evaluation_dir(project_id)], label="evaluation dataset")
+    return {"deleted": True, "dataset_id": dataset_id}
+
+
+def rename_evaluation_dataset(project_id: str, dataset_id: str, new_name: str) -> dict[str, Any]:
+    """データセット名を変更する。CSV・画像はディレクトリ内相対参照のため壊れない。metadataは更新する。"""
+    dataset_dir = _resolve_dataset_dir(project_id, dataset_id)
+    next_id = sanitize_dataset_id(new_name)
+    if next_id == dataset_id:
+        return {"dataset_id": dataset_id, "renamed": False}
+    target = _evaluation_dir(project_id) / next_id
+    if target.exists():
+        raise ValueError(f"同名の評価データセットが既に存在します: {next_id}")
+    dataset_dir.rename(target)
+    metadata = _load_dataset_metadata(target) or {}
+    metadata["dataset_id"] = next_id
+    (target / "metadata.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"dataset_id": next_id, "renamed": True, "dataset_dir": str(target.resolve())}
+
+
+def _sha256_of(path: Path) -> Optional[str]:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def _iter_training_images(project_id: str, max_files: int = 20000) -> list[Path]:
+    """学習データ（OCRデータ作成の出力 outputs/ocr_dataset/*/{train,val,test}）の画像一覧。"""
+    root = get_project_paths(project_id).outputs / "ocr_dataset"
+    files: list[Path] = []
+    if not root.exists():
+        return files
+    for dataset_dir in root.iterdir():
+        if not dataset_dir.is_dir():
+            continue
+        for split in ("train", "val", "test"):
+            split_dir = dataset_dir / split
+            if not split_dir.exists():
+                continue
+            for path in split_dir.rglob("*"):
+                if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS:
+                    files.append(path)
+                    if len(files) >= max_files:
+                        return files
+    return files
+
+
+def check_training_overlap(project_id: str, dataset_id: str) -> dict[str, Any]:
+    """評価データセットと学習データの重複を判定する（評価値の過大化防止のための警告用）。
+
+    判定優先順位: ①sha256完全一致 → ②元画像+BBoxID（学習画像のsha256をStep4マニフェストへ
+    引き当てて出自を特定し、回転等でバイトが変わっても同一クロップを検出）→ ③元ファイル名。
+    """
+    dataset_dir = _resolve_dataset_dir(project_id, dataset_id)
+    metadata = _load_dataset_metadata(dataset_dir) or {}
+    images_dir = dataset_dir / "images"
+    eval_images = metadata.get("images") or []
+
+    training_files = _iter_training_images(project_id)
+    training_shas: set[str] = set()
+    training_names: set[str] = set()
+    for path in training_files:
+        training_names.add(path.name)
+        sha = _sha256_of(path)
+        if sha:
+            training_shas.add(sha)
+
+    # Step4マニフェスト: sha256 → (元画像, BBoxID)。学習画像がStep4出力由来なら出自を引き当てられる
+    sha_to_source: dict[str, tuple[str, Any]] = {}
+    exports_root = _exports_dir(project_id)
+    if exports_root.exists():
+        for manifest_path in exports_root.glob("*/manifest.json"):
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            source_image = str(manifest.get("source_image") or "")
+            for crop in manifest.get("crops") or []:
+                sha = str(crop.get("sha256") or "")
+                if sha:
+                    sha_to_source[sha] = (source_image, crop.get("bbox_id"))
+    training_sources = {sha_to_source[sha] for sha in training_shas if sha in sha_to_source}
+
+    overlaps: list[dict[str, Any]] = []
+    for row in eval_images:
+        filename = str(row.get("filename") or "")
+        matched_by = ""
+        sha = _sha256_of(images_dir / filename) if filename else None
+        if sha and sha in training_shas:
+            matched_by = "sha256"
+        elif (
+            (str(row.get("source_image") or ""), row.get("source_bbox_id")) in training_sources
+            and str(row.get("source_image") or "")
+        ):
+            matched_by = "source_bbox"
+        elif str(row.get("source_filename") or "") and str(row.get("source_filename")) in training_names:
+            matched_by = "filename"
+        if matched_by:
+            overlaps.append({"filename": filename, "matched_by": matched_by})
+
+    return {
+        "project_id": project_id,
+        "dataset_id": dataset_id,
+        "training_image_count": len(training_files),
+        "evaluation_image_count": len(eval_images),
+        "overlap_count": len(overlaps),
+        "overlaps": overlaps[:100],
+    }
 
 
 def create_evaluation_dataset(

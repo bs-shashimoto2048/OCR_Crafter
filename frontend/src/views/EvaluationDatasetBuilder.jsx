@@ -102,6 +102,7 @@ export default function EvaluationDatasetBuilder({
   predictParams = null,
   extraPredictParams = [],
   candidateDict = null,
+  onOpenEvaluation = null,
 }) {
   const [items, setItems] = useState([]);
   // 画像単位の編集状態: {label, rotation, checked}。バックエンドの editing_state.json と同期
@@ -1008,9 +1009,17 @@ export default function EvaluationDatasetBuilder({
               </p>
             ) : null}
             {createdResult ? (
-              <p className="truncate text-[11px] text-emerald-200" title={createdResult.dataset_dir}>
-                作成完了: {createdResult.dataset_id}（{createdResult.image_count}件）
-              </p>
+              <>
+                <p className="truncate text-[11px] text-emerald-200" title={createdResult.dataset_dir}>
+                  作成完了: {createdResult.dataset_id}（{createdResult.image_count}件）
+                </p>
+                {/* 作成したデータセットを自動選択した状態でモデル評価画面を開く（Phase3導線） */}
+                {onOpenEvaluation ? (
+                  <Button size="sm" className="w-full" onClick={() => onOpenEvaluation(createdResult)}>
+                    モデル評価へ
+                  </Button>
+                ) : null}
+              </>
             ) : null}
             <Button size="sm" variant="secondary" className="w-full" onClick={() => onStepChange(4)}>
               Step4へ戻る

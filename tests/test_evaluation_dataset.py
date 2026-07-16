@@ -8,6 +8,7 @@
 
 import io
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -227,6 +228,92 @@ def test_crop_preview_rotation_does_not_modify_source(temp_projects):
     with Image.open(source_path) as src:
         assert (img.width, img.height) == (src.height, src.width)
     assert source_path.read_bytes() == before
+
+
+def test_list_evaluation_datasets(temp_projects):
+    """一覧はmetadata.jsonを根拠に件数・Series・回転済み数・パスを返す。"""
+    result = _run_export(temp_projects)
+    eval_ds.create_evaluation_dataset("p1", "eval_list_a", _items_from_export(result, rotations=(90, 0)))
+    listing = eval_ds.list_evaluation_datasets("p1")
+    assert len(listing["datasets"]) == 1
+    entry = listing["datasets"][0]
+    assert entry["id"] == "eval_list_a"
+    assert entry["image_count"] == 2
+    assert entry["label_count"] == 2
+    assert entry["rotated_count"] == 1
+    assert entry["series"] == ["nmb", "tube"]
+    assert Path(entry["csv_path"]).exists()
+    assert Path(entry["image_dir"]).exists()
+    # 別プロジェクトには出ない
+    assert eval_ds.list_evaluation_datasets("p2")["datasets"] == []
+
+
+def test_delete_evaluation_dataset(temp_projects):
+    """削除はCSV・metadata・images・editing_stateをまとめて消す（safe_rmtree配下検証）。"""
+    result = _run_export(temp_projects)
+    created = eval_ds.create_evaluation_dataset("p1", "eval_del", _items_from_export(result), editing_state={"x": 1})
+    dataset_dir = Path(created["dataset_dir"])
+    assert dataset_dir.exists()
+    eval_ds.delete_evaluation_dataset("p1", "eval_del")
+    assert not dataset_dir.exists()
+    with pytest.raises(FileNotFoundError):
+        eval_ds.delete_evaluation_dataset("p1", "eval_del")
+    with pytest.raises(ValueError):
+        eval_ds.delete_evaluation_dataset("p1", "../evil")
+
+
+def test_rename_evaluation_dataset(temp_projects):
+    """名前変更後もmetadata・CSV・画像参照が壊れない（ディレクトリ内相対参照）。"""
+    result = _run_export(temp_projects)
+    eval_ds.create_evaluation_dataset("p1", "eval_old", _items_from_export(result))
+    renamed = eval_ds.rename_evaluation_dataset("p1", "eval_old", "eval_new")
+    assert renamed["dataset_id"] == "eval_new"
+    listing = eval_ds.list_evaluation_datasets("p1")
+    assert [d["id"] for d in listing["datasets"]] == ["eval_new"]
+    entry = listing["datasets"][0]
+    assert entry["name"] == "eval_new"
+    # CSVは新パスでそのまま既存評価が読める
+    gt = _read_gt_csv(entry["csv_path"])
+    assert len(gt) == 2
+    for name in gt:
+        assert (Path(entry["image_dir"]) / name).exists()
+    # 重複名は拒否
+    eval_ds.create_evaluation_dataset("p1", "eval_other", _items_from_export(result))
+    with pytest.raises(ValueError, match="既に存在"):
+        eval_ds.rename_evaluation_dataset("p1", "eval_other", "eval_new")
+
+
+def test_check_training_overlap_priority(temp_projects):
+    """重複判定は sha256 → 元画像+BBoxID（マニフェスト引き当て）の優先順で検出する。"""
+    from src.app.project_paths import get_project_paths
+
+    result = _run_export(temp_projects)
+    # 評価データ: 1.png は回転90（バイト不一致になる）、2.png は無回転（バイト一致する）
+    eval_ds.create_evaluation_dataset("p1", "eval_ovl", _items_from_export(result, rotations=(90, 0)))
+
+    # 学習データ: outputs/ocr_dataset/<ts>/train へStep4クロップと同一ファイルを配置
+    train_dir = get_project_paths("p1").outputs / "ocr_dataset" / "20260716_000000" / "train"
+    train_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(result["files"][0], train_dir / "crop_a.png")  # 1.png と同一バイト（=回転前）
+    shutil.copyfile(result["files"][1], train_dir / "crop_b.png")  # 2.png と同一バイト
+
+    overlap = eval_ds.check_training_overlap("p1", "eval_ovl")
+    assert overlap["training_image_count"] == 2
+    assert overlap["evaluation_image_count"] == 2
+    assert overlap["overlap_count"] == 2
+    by_name = {row["filename"]: row["matched_by"] for row in overlap["overlaps"]}
+    # 無回転コピーはsha256一致、回転済みはマニフェスト経由の元画像+BBoxIDで検出
+    assert by_name[f"{result['export_id']}_2.png"] == "sha256"
+    assert by_name[f"{result['export_id']}_1.png"] == "source_bbox"
+
+
+def test_check_training_overlap_none(temp_projects):
+    """学習データが無ければ重複0（正常応答）。"""
+    result = _run_export(temp_projects)
+    eval_ds.create_evaluation_dataset("p1", "eval_no_ovl", _items_from_export(result))
+    overlap = eval_ds.check_training_overlap("p1", "eval_no_ovl")
+    assert overlap["overlap_count"] == 0
+    assert overlap["training_image_count"] == 0
 
 
 def test_preview_preprocess_image_uses_rotated_input(temp_projects):

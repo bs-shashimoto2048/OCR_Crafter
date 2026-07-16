@@ -474,6 +474,25 @@ export default function App() {
   const [inferTesseractModel, setInferTesseractModel] = useState("latest");
   const [ocrEvalImageDir, setOcrEvalImageDir] = useState("");
   const [ocrEvalGtCsv, setOcrEvalGtCsv] = useState("");
+  // 評価データセット（Step5で作成）の一覧・選択・学習データ重複チェック
+  const [ocrEvalDatasets, setOcrEvalDatasets] = useState([]);
+  const [ocrEvalDatasetId, setOcrEvalDatasetId] = useState("");
+  const [ocrEvalOverlap, setOcrEvalOverlap] = useState(null);
+
+  // プロジェクト切替時は評価データセットの選択・一覧をリセット（他プロジェクトのデータを混在させない）
+  useEffect(() => {
+    setOcrEvalDatasets([]);
+    setOcrEvalDatasetId("");
+    setOcrEvalOverlap(null);
+  }, [projectId]);
+
+  // モデル評価画面を開いたときに一覧を取得（削除・作成後の再表示にも追従）
+  useEffect(() => {
+    if (activeView === "ocr-eval") {
+      loadOcrEvalDatasets();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeView, projectId]);
   const [ocrEvalTrainedModel, setOcrEvalTrainedModel] = useState("latest");
   const [ocrEvalIncludeBase, setOcrEvalIncludeBase] = useState(true);
   const [ocrEvalWhitelistMode, setOcrEvalWhitelistMode] = useState("default"); // default | none | custom
@@ -2654,6 +2673,88 @@ export default function App() {
     }
   }
 
+  // 評価データセット一覧の取得（モデル評価画面の選択候補）
+  async function loadOcrEvalDatasets() {
+    if (!projectId) return [];
+    try {
+      const data = await request(`/api/evaluation/datasets?project_id=${encodeURIComponent(projectId)}`);
+      const list = Array.isArray(data?.datasets) ? data.datasets : [];
+      setOcrEvalDatasets(list);
+      return list;
+    } catch {
+      setOcrEvalDatasets([]);
+      return [];
+    }
+  }
+
+  // 選択で image_dir / gt_csv を自動反映し、学習データとの重複チェックを実行
+  async function selectOcrEvalDataset(datasetId, presetEntry = null) {
+    setOcrEvalDatasetId(datasetId || "");
+    setOcrEvalOverlap(null);
+    if (!datasetId) {
+      return;
+    }
+    const entry = presetEntry || ocrEvalDatasets.find((row) => row.id === datasetId) || null;
+    if (entry) {
+      setOcrEvalImageDir(entry.image_dir || "");
+      setOcrEvalGtCsv(entry.csv_path || "");
+    }
+    try {
+      const overlap = await request(
+        `/api/evaluation/datasets/${encodeURIComponent(datasetId)}/overlap?project_id=${encodeURIComponent(projectId)}`
+      );
+      setOcrEvalOverlap(overlap);
+    } catch {
+      setOcrEvalOverlap(null);
+    }
+  }
+
+  async function deleteOcrEvalDataset(datasetId) {
+    try {
+      await request(
+        `/api/evaluation/datasets/${encodeURIComponent(datasetId)}?project_id=${encodeURIComponent(projectId)}`,
+        { method: "DELETE" }
+      );
+      notify("success", `評価データセットを削除しました: ${datasetId}`);
+      if (ocrEvalDatasetId === datasetId) {
+        setOcrEvalDatasetId("");
+        setOcrEvalOverlap(null);
+      }
+      await loadOcrEvalDatasets();
+    } catch (error) {
+      notify("error", `削除に失敗しました: ${error.message}`);
+    }
+  }
+
+  async function renameOcrEvalDataset(datasetId, newName) {
+    try {
+      const data = await request(`/api/evaluation/datasets/${encodeURIComponent(datasetId)}/rename`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_id: projectId, new_name: newName }),
+      });
+      notify("success", `名前を変更しました: ${data.dataset_id}`);
+      const list = await loadOcrEvalDatasets();
+      if (ocrEvalDatasetId === datasetId) {
+        // 選択中データセットの改名はパス参照も更新する
+        await selectOcrEvalDataset(data.dataset_id, list.find((row) => row.id === data.dataset_id) || null);
+      }
+    } catch (error) {
+      notify("error", `名前変更に失敗しました: ${error.message}`);
+    }
+  }
+
+  // Step5「モデル評価へ」導線: 作成したデータセットを自動選択した状態で評価画面を開く
+  async function openEvaluationWithDataset(created) {
+    setActiveView("ocr-eval");
+    if (created?.image_dir) setOcrEvalImageDir(created.image_dir);
+    if (created?.csv_path) setOcrEvalGtCsv(created.csv_path);
+    const list = await loadOcrEvalDatasets();
+    if (created?.dataset_id) {
+      await selectOcrEvalDataset(created.dataset_id, list.find((row) => row.id === created.dataset_id) || null);
+    }
+  }
+
   async function runOcrEvaluation() {
     if (!projectId) {
       notify("error", "プロジェクトを作成または選択してください");
@@ -2690,14 +2791,32 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      setOcrEvalResult(data);
-      // モデル管理画面向けに、モデル別の評価結果を記録（評価セットは画像フォルダ名で区別）
+      // 評価結果へ使用データセット情報を紐付ける（履歴・比較用のスナップショット）
+      const selectedDataset = ocrEvalDatasetId
+        ? ocrEvalDatasets.find((row) => row.id === ocrEvalDatasetId) || null
+        : null;
+      const resultWithDataset = selectedDataset
+        ? {
+            ...data,
+            dataset: {
+              dataset_id: selectedDataset.id,
+              dataset_name: selectedDataset.name,
+              image_count: selectedDataset.image_count,
+              created_at: selectedDataset.created_at,
+            },
+          }
+        : data;
+      setOcrEvalResult(resultWithDataset);
+      // モデル管理画面向けに、モデル別の評価結果を記録
+      // （評価セットはデータセットID優先。手動パス指定時は従来どおり画像フォルダ名で区別）
       try {
         const datasetLabel =
+          selectedDataset?.id ||
           String(ocrEvalImageDir || "")
             .replace(/[\\/]+$/, "")
             .split(/[\\/]/)
-            .pop() || "eval";
+            .pop() ||
+          "eval";
         setModelEvalHistory((prev) => {
           const next = { ...prev };
           for (const target of data?.targets || []) {
@@ -3324,6 +3443,13 @@ export default function App() {
         loading={ocrEvalLoading}
         result={ocrEvalResult}
         onExportCsv={exportOcrEvalCsv}
+        datasets={ocrEvalDatasets}
+        selectedDatasetId={ocrEvalDatasetId}
+        onSelectDataset={selectOcrEvalDataset}
+        onDeleteDataset={deleteOcrEvalDataset}
+        onRenameDataset={renameOcrEvalDataset}
+        overlap={ocrEvalOverlap}
+        evalHistory={modelEvalHistory}
       />
     );
   }
@@ -3347,6 +3473,7 @@ export default function App() {
           setActiveView(nextView);
         }}
         // Step5（評価用データ作成）のOCR候補・辞書候補用（既存ラベル編集と同じ設定を参照）
+        onOpenEvaluation={openEvaluationWithDataset}
         labelingPreprocessOverrides={labelingPreprocessOverrides}
         labelingPredictParams={labelingPredictParams}
         labelingExtraPredictParams={labelingExtraPredictParams}

@@ -112,6 +112,11 @@ class EvaluationDatasetItem(BaseModel):
     bbox_id: Optional[int] = Field(default=None)
 
 
+class EvaluationDatasetRenameRequest(BaseModel):
+    project_id: Optional[str] = Field(default="default")
+    new_name: str = Field(..., description="新しいデータセット名（英数字・ハイフン・アンダースコア）")
+
+
 class EvaluationDatasetCreateRequest(BaseModel):
     project_id: Optional[str] = Field(default="default")
     dataset_name: str = Field(default="", description="データセット名（未入力は日時ベースの既定名）")

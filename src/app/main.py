@@ -54,6 +54,7 @@ from .schemas import (
     OcrTrainStartRequest,
     BuiltinYoloDownloadRequest,
     EvaluationDatasetCreateRequest,
+    EvaluationDatasetRenameRequest,
     EvaluationStateSaveRequest,
     OcrTuningExportRequest,
     PreprocessPreviewRequest,
@@ -109,10 +110,14 @@ from .services.tesseract_pipeline import (
 )
 from .services.detection_preprocess import parse_detection_preprocess_json
 from .services.evaluation_dataset import (
+    check_training_overlap,
     create_evaluation_dataset,
+    delete_evaluation_dataset,
+    list_evaluation_datasets,
     list_export_candidates,
     load_editing_state,
     load_export_crop_image,
+    rename_evaluation_dataset,
     save_editing_state,
 )
 from .services.training_image_builder import (
@@ -2642,6 +2647,53 @@ def image_builder_evaluation_state_save(req: EvaluationStateSaveRequest) -> dict
     resolved = _resolve_project_id(req.project_id)
     try:
         return save_editing_state(resolved, req.state)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.get("/api/evaluation/datasets")
+def api_evaluation_datasets(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+    """作成済み評価データセット一覧（モデル評価画面の選択候補）。"""
+    resolved = _resolve_project_id(project_id)
+    return list_evaluation_datasets(resolved)
+
+
+@app.delete("/api/evaluation/datasets/{dataset_id}")
+def api_evaluation_dataset_delete(
+    dataset_id: str, project_id: Optional[str] = Query(default="default")
+) -> dict[str, Any]:
+    """評価データセット一式（images/CSV/metadata/editing_state）を削除。"""
+    resolved = _resolve_project_id(project_id)
+    try:
+        return delete_evaluation_dataset(resolved, dataset_id)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/api/evaluation/datasets/{dataset_id}/rename")
+def api_evaluation_dataset_rename(dataset_id: str, req: EvaluationDatasetRenameRequest) -> dict[str, Any]:
+    """評価データセット名の変更（CSV・画像参照はディレクトリ内相対のため壊れない）。"""
+    resolved = _resolve_project_id(req.project_id)
+    try:
+        return rename_evaluation_dataset(resolved, dataset_id, req.new_name)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.get("/api/evaluation/datasets/{dataset_id}/overlap")
+def api_evaluation_dataset_overlap(
+    dataset_id: str, project_id: Optional[str] = Query(default="default")
+) -> dict[str, Any]:
+    """学習データ（outputs/ocr_dataset）との重複チェック（sha256→元画像+BBoxID→ファイル名）。"""
+    resolved = _resolve_project_id(project_id)
+    try:
+        return check_training_overlap(resolved, dataset_id)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 

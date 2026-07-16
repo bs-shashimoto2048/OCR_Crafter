@@ -190,6 +190,7 @@ export default function TrainingImageBuilderView({
   labelingPredictParams = null,
   labelingExtraPredictParams = [],
   candidateDict = null,
+  onOpenEvaluation = null,
 }) {
   const initialState = useMemo(() => loadImageBuilderState(), []);
   const bboxItemRefs = useRef(new Map());
@@ -1675,6 +1676,7 @@ export default function TrainingImageBuilderView({
         predictParams={labelingPredictParams}
         extraPredictParams={labelingExtraPredictParams}
         candidateDict={candidateDict}
+        onOpenEvaluation={onOpenEvaluation}
       />
     );
   }
