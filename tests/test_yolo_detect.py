@@ -26,6 +26,16 @@ def _png_bytes(width=64, height=32, color=(255, 255, 255)):
     return buf.getvalue()
 
 
+def _jpeg_bytes_with_exif_orientation(width=64, height=32, orientation=6):
+    """EXIF Orientation付きJPEG（スマホ縦撮り相当。6=90°回転して表示すべき画像）。"""
+    img = Image.new("RGB", (width, height), (255, 255, 255))
+    exif = img.getexif()
+    exif[274] = orientation  # 274 = Orientation タグ
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", exif=exif)
+    return buf.getvalue()
+
+
 def _setup_common_dir(tmp_path, monkeypatch, names=(), builtin_downloaded=()):
     """共通/標準モデルの検索先を一時ディレクトリへ隔離する（実リポジトリのモデルを見ない）。"""
     common = tmp_path / "common_yolo"
@@ -227,6 +237,33 @@ def test_download_builtin_in_progress_raises(temp_projects, monkeypatch):
     finally:
         with tib._builtin_download_lock:
             tib._builtin_downloads_in_progress.discard("yolo11n.pt")
+
+
+def test_decode_applies_exif_orientation_once():
+    """EXIF Orientation は読込時に1回だけ反映される（ブラウザ表示=Step1 と同じ向きになる）。
+
+    反映しないと Step1（ブラウザがEXIFを自動適用）と Step2以降（サーバー生成画像）で
+    画像の向きが90°ずれる不具合になる。
+    """
+    # Orientation=6（90°CW回転して表示）: 64x32 のピクセルは表示上 32x64（縦）になるべき
+    decoded = tib._decode_image_bytes(_jpeg_bytes_with_exif_orientation(64, 32, orientation=6))
+    assert (decoded.width, decoded.height) == (32, 64)
+    # Orientation=1（回転なし）やEXIFなしは従来どおり
+    decoded_plain = tib._decode_image_bytes(_png_bytes(64, 32))
+    assert (decoded_plain.width, decoded_plain.height) == (64, 32)
+    decoded_o1 = tib._decode_image_bytes(_jpeg_bytes_with_exif_orientation(64, 32, orientation=1))
+    assert (decoded_o1.width, decoded_o1.height) == (64, 32)
+
+
+def test_resize_preview_uses_exif_orientation():
+    """Step1/Step2プレビューのoriginal_sizeがEXIF反映後（ブラウザと同じ向き）で返る。"""
+    result = tib.make_resize_preview(
+        _jpeg_bytes_with_exif_orientation(64, 32, orientation=6),
+        long_side=640,
+        use_resize=False,
+        resize_axis="long",
+    )
+    assert result["original_size"] == [32, 64]
 
 
 def test_detect_builtin_not_downloaded_raises_before_inference(temp_projects, monkeypatch):

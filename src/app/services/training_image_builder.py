@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from ..paths import PROJECT_ROOT
 from ..project_paths import ensure_project_directories, get_project_paths
@@ -71,7 +71,12 @@ except Exception:
 def _decode_image_bytes(image_bytes: bytes) -> Image.Image:
     try:
         with Image.open(io.BytesIO(image_bytes)) as img:
-            return img.convert("RGB")
+            # EXIF Orientation は読込時に1回だけ反映し、以降の全工程
+            # （Step1プレビュー・Step2検出・Step3表示・Step4クロップ）で同じ向きを使用する。
+            # ブラウザの<img>はEXIFを自動適用するため、ここで反映しないと
+            # Step1（ブラウザ表示）とStep2以降（サーバー生成画像）で向きが90°ずれる
+            oriented = ImageOps.exif_transpose(img)
+            return oriented.convert("RGB")
     except UnidentifiedImageError as e:
         hint = ""
         if not HEIF_DECODER_READY:
