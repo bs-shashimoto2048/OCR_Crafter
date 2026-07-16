@@ -443,6 +443,43 @@ def list_yolo_models(project_id: str) -> dict[str, Any]:
     }
 
 
+# モデルのclass一覧キャッシュ（key: 解決済みパス+更新時刻。プロセス内のみ）
+_yolo_class_cache: dict[str, list[str]] = {}
+
+
+def get_yolo_model_classes(*, project_id: str, model_name: str, model_source: str = "") -> dict[str, Any]:
+    """YOLOモデルのclass名一覧（検出対象Seriesの候補）を返す。
+
+    モデル解決は検出APIと同一（暗黙フォールバック・自動ダウンロードなし。未取得標準モデルは専用エラー）。
+    モデル読込が発生するため、解決済みパス＋更新時刻でプロセス内キャッシュする。
+    """
+    resolved_model, resolved_source = resolve_yolo_model(
+        project_id=project_id, model_name=model_name, model_source=model_source
+    )
+    try:
+        mtime = Path(resolved_model).stat().st_mtime_ns
+    except OSError:
+        mtime = 0
+    cache_key = f"{resolved_model}::{mtime}"
+    classes = _yolo_class_cache.get(cache_key)
+    if classes is None:
+        YOLO = _load_ultralytics_yolo()
+        try:
+            model = YOLO(resolved_model)
+        except FileNotFoundError as e:
+            raise FileNotFoundError(f"YOLOモデルが見つかりません: {model_name}") from e
+        names = getattr(model, "names", None) or {}
+        # names は {class_id: name}。class_id順の一覧にする
+        classes = [str(names[key]) for key in sorted(names.keys())] if isinstance(names, dict) else [str(n) for n in names]
+        _yolo_class_cache[cache_key] = classes
+    return {
+        "model_name": model_name,
+        "model_source": resolved_source,
+        "resolved_model": resolved_model,
+        "classes": classes,
+    }
+
+
 def make_resize_preview(
     image_bytes: bytes,
     long_side: int,
@@ -476,6 +513,7 @@ def detect_bboxes_with_yolo(
     project_id: str,
     detect_preprocess: Optional[dict[str, Any]] = None,
     model_source: str = "",
+    series: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     if not (0.0 <= float(conf_threshold) <= 1.0):
         raise ValueError("conf_threshold must be between 0 and 1")
@@ -544,6 +582,21 @@ def detect_bboxes_with_yolo(
                 }
             )
 
+    # 推論の生検出数（Series絞り込み・重複統合の前）
+    inference_count = len(detections)
+
+    # 検出対象Series（class名）での絞り込み。None=フィルタなし（従来動作・後方互換）
+    selected_series: Optional[list[str]] = None
+    if series is not None:
+        selected_series = [str(name) for name in series]
+        allowed = set(selected_series)
+        detections = [row for row in detections if str(row.get("label")) in allowed]
+        # 絞り込みでIDが飛び番になるため振り直す（従来と同じ連番仕様を維持）
+        for idx, row in enumerate(detections, start=1):
+            row["id"] = idx
+    series_filtered_count = len(detections)
+
+    # raw_count は後方互換キー（統合前件数。Series指定時は絞込後・未指定時は従来どおり推論数と同値）
     raw_count = len(detections)
     if merge_overlaps:
         detections = _merge_overlapping_detections(
@@ -573,6 +626,10 @@ def detect_bboxes_with_yolo(
         "image_data_url": _image_to_data_url(resized),
         "raw_count": raw_count,
         "merged_count": merged_count,
+        "inference_count": inference_count,
+        "series_filtered_count": series_filtered_count,
+        # 適用した検出対象Series（null=フィルタなし=全class対象）
+        "selected_series": selected_series,
         "detections": detections,
         "count": len(detections),
         "inference_time_ms": inference_time_ms,

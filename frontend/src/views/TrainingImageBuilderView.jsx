@@ -291,6 +291,10 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
   const [customModelPath, setCustomModelPath] = useState(initialState.customModelPath);
   // モデル一覧の再取得トリガー（標準モデル取得成功後に+1して一覧を更新する）
   const [modelListVersion, setModelListVersion] = useState(0);
+  // 検出対象Series（選択中モデルのclass一覧）。null=未取得・対象外（カスタムパス等。フィルタなしで検出）
+  const [seriesClasses, setSeriesClasses] = useState(null);
+  const [selectedSeries, setSelectedSeries] = useState([]);
+  const [seriesLoading, setSeriesLoading] = useState(false);
   // 標準モデルのダウンロード中フラグ（二重取得防止・ボタン無効化）
   const [downloadingBuiltinName, setDownloadingBuiltinName] = useState("");
   const [confThreshold, setConfThreshold] = useState(initialState.confThreshold);
@@ -438,6 +442,50 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       ignore = true;
     };
   }, [projectId, modelListVersion]);
+
+  // 選択中モデルのclass一覧（検出対象Series候補）を取得。
+  // モデル変更時は新モデルのclass一覧へ入れ替え、全選択で初期化する（旧モデルの選択は持ち越さない）
+  useEffect(() => {
+    let ignore = false;
+    async function loadClasses() {
+      if (!projectId || !modelSelection || modelSelection === "__custom__" || !modelSource) {
+        setSeriesClasses(null);
+        setSelectedSeries([]);
+        return;
+      }
+      const info = findModelBySource(yoloModels.models, modelSource, modelSelection);
+      if (!info || !canDetectWithModel(info)) {
+        // 未取得標準モデル・一覧未取得時はSeries UIを出さない（検出も不可のため）
+        setSeriesClasses(null);
+        setSelectedSeries([]);
+        return;
+      }
+      setSeriesLoading(true);
+      try {
+        const data = await request(
+          `/image-builder/yolo-models/classes?project_id=${encodeURIComponent(projectId)}&model=${encodeURIComponent(modelSelection)}&model_source=${encodeURIComponent(modelSource)}`
+        );
+        if (ignore) return;
+        const classes = Array.isArray(data?.classes) ? data.classes.map(String) : [];
+        setSeriesClasses(classes);
+        setSelectedSeries(classes);
+      } catch {
+        if (!ignore) {
+          // class一覧が取れない場合はフィルタなし（従来どおり全class対象）で検出できるようにする
+          setSeriesClasses(null);
+          setSelectedSeries([]);
+        }
+      } finally {
+        if (!ignore) {
+          setSeriesLoading(false);
+        }
+      }
+    }
+    loadClasses();
+    return () => {
+      ignore = true;
+    };
+  }, [projectId, modelSelection, modelSource, yoloModels]);
 
   // 取得元（modelSource）の補完・検証。旧保存データ（取得元なし）や一覧変化時に、
   // 現在の選択名が実在する取得元（project→common→builtin の優先順）を割り当てる。
@@ -1094,6 +1142,12 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
         return;
       }
     }
+    // 検出対象Series: class一覧を取得済みの場合は1件以上の選択が必須
+    const seriesFilterActive = Array.isArray(seriesClasses) && seriesClasses.length > 0;
+    if (seriesFilterActive && selectedSeries.length === 0) {
+      setFail("検出対象Seriesを1つ以上選択してください");
+      return;
+    }
     // 画像・プロジェクト切替や再実行後に古いレスポンスを反映しないための連番ガード
     const seq = ++detectSeqRef.current;
     setDetecting(true);
@@ -1112,6 +1166,10 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       // 検出前処理が有効な場合のみ適用（無変換設定なら従来どおり元画像で検出）
       if (detectPreprocessPayload) {
         form.append("detect_preprocess_json", JSON.stringify(detectPreprocessPayload));
+      }
+      // 検出対象Series（class一覧取得済みの場合のみ送信。未取得時は従来どおり全class対象）
+      if (seriesFilterActive) {
+        form.append("series_json", JSON.stringify(selectedSeries));
       }
       const res = await fetch(`${import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000"}/image-builder/detect`, {
         method: "POST",
@@ -1139,6 +1197,9 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
         totalTimeMs: Number.isFinite(Number(data.total_time_ms)) ? Number(data.total_time_ms) : null,
         preprocessApplied: Boolean(data.preprocess_applied),
         detectedCount: Number(data.count) || 0,
+        inferenceCount: Number.isFinite(Number(data.inference_count)) ? Number(data.inference_count) : null,
+        seriesFilteredCount: Number.isFinite(Number(data.series_filtered_count)) ? Number(data.series_filtered_count) : null,
+        selectedSeries: Array.isArray(data.selected_series) ? data.selected_series.map(String) : null,
       });
       setDetections((data.detections || []).map((row) => ({ ...row, selected: row.selected !== false })));
       setSeriesFilter(SERIES_FILTER_ALL);
@@ -2228,6 +2289,68 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                     </div>
                   </div>
                 ) : null}
+                {/* 検出対象Series（選択中モデルのclass一覧から複数選択。モデル変更で入れ替え・初期は全選択） */}
+                {Array.isArray(seriesClasses) ? (
+                  <div>
+                    <label className="app-label">検出対象Series</label>
+                    <div className="rounded-lg border border-border/70 bg-card/55 p-2">
+                      <div className="mb-1.5 flex items-center gap-1.5">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="h-6 px-2 text-[11px]"
+                          onClick={() => setSelectedSeries([...seriesClasses])}
+                          disabled={selectedSeries.length === seriesClasses.length}
+                        >
+                          すべて選択
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="h-6 px-2 text-[11px]"
+                          onClick={() => setSelectedSeries([])}
+                          disabled={selectedSeries.length === 0}
+                        >
+                          すべて解除
+                        </Button>
+                        <span className="ml-auto text-[11px] tabular-nums text-muted">
+                          {selectedSeries.length} / {seriesClasses.length}
+                        </span>
+                      </div>
+                      {/* Series数が多い場合はこの部分だけ内部スクロール */}
+                      <div className="dark-scroll max-h-36 space-y-0.5 overflow-y-auto">
+                        {seriesClasses.length === 0 ? (
+                          <p className="text-xs text-muted">このモデルにはclass情報がありません</p>
+                        ) : (
+                          seriesClasses.map((name) => (
+                            <label
+                              key={name}
+                              className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-sm text-text hover:bg-card/70"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedSeries.includes(name)}
+                                onChange={() =>
+                                  setSelectedSeries((prev) =>
+                                    prev.includes(name) ? prev.filter((v) => v !== name) : [...prev, name]
+                                  )
+                                }
+                              />
+                              <span className="min-w-0 truncate">{name}</span>
+                            </label>
+                          ))
+                        )}
+                      </div>
+                      {seriesClasses.length > 0 && selectedSeries.length === 0 ? (
+                        <p className="mt-1 text-xs text-amber-100">検出対象Seriesを1つ以上選択してください</p>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : seriesLoading ? (
+                  <p className="text-xs text-muted">検出対象Seriesを読み込み中...</p>
+                ) : modelSelection === "__custom__" ? (
+                  <p className="text-xs text-muted">カスタムパス指定ではSeries絞り込みを使用できません（全class対象で検出します）</p>
+                ) : null}
                 <div>
                   <label className="app-label">検出閾値: {confThreshold.toFixed(2)}</label>
                   <input
@@ -2271,7 +2394,19 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                   </p>
                 ) : null}
                 <div className="flex gap-2">
-                  <Button onClick={runDetect} disabled={!file || detecting}>
+                  <Button
+                    onClick={runDetect}
+                    disabled={
+                      !file ||
+                      detecting ||
+                      (Array.isArray(seriesClasses) && seriesClasses.length > 0 && selectedSeries.length === 0)
+                    }
+                    title={
+                      Array.isArray(seriesClasses) && seriesClasses.length > 0 && selectedSeries.length === 0
+                        ? "検出対象Seriesを1つ以上選択してください"
+                        : undefined
+                    }
+                  >
                     {detecting ? "検出中..." : "検出実行"}
                   </Button>
                   <Button onClick={() => goStep(3)} disabled={!step2Done}>
@@ -2283,16 +2418,26 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                   <div className="rounded-lg border border-border/70 bg-card/55 px-2.5 py-2 text-xs">
                     <p className="text-[11px] font-semibold text-muted">検出結果</p>
                     <div className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 tabular-nums">
-                      <span className="text-muted">検出件数</span>
+                      <span className="text-muted">推論検出数</span>
                       <span className="font-semibold text-text">
-                        {detectRunInfo.detectedCount}件
-                        {detectResult &&
-                        typeof detectResult.raw_count === "number" &&
-                        typeof detectResult.merged_count === "number" &&
-                        detectResult.raw_count !== detectResult.merged_count
-                          ? `（統合前 ${detectResult.raw_count} → 統合後 ${detectResult.merged_count}）`
-                          : ""}
+                        {detectRunInfo.inferenceCount ?? detectRunInfo.detectedCount}件
                       </span>
+                      {detectRunInfo.selectedSeries ? (
+                        <>
+                          <span className="text-muted">Series絞込後</span>
+                          <span className="font-semibold text-text">{detectRunInfo.seriesFilteredCount ?? "--"}件</span>
+                        </>
+                      ) : null}
+                      <span className="text-muted">重複統合後</span>
+                      <span className="font-semibold text-text">{detectRunInfo.detectedCount}件</span>
+                      {detectRunInfo.selectedSeries ? (
+                        <>
+                          <span className="text-muted">選択Series</span>
+                          <span className="min-w-0 truncate text-text" title={detectRunInfo.selectedSeries.join(", ")}>
+                            {detectRunInfo.selectedSeries.join(", ")}
+                          </span>
+                        </>
+                      ) : null}
                       <span className="text-muted">処理時間</span>
                       <span className="text-text">
                         {formatMillisAsSeconds(detectRunInfo.totalTimeMs)}
@@ -2331,6 +2476,15 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                   title={detectRunInfo.resolvedModel || detectRunInfo.modelName}
                 >
                   検出モデル: {detectRunInfo.modelName}（{modelSourceLabel(detectRunInfo.modelSource)}）
+                </p>
+              ) : null}
+              {/* 検出時に指定したSeries（スナップショット。Step3には選択SeriesのBBoxのみが渡されている） */}
+              {detectRunInfo?.selectedSeries ? (
+                <p
+                  className="mb-1 shrink-0 truncate text-[11px] text-muted"
+                  title={detectRunInfo.selectedSeries.join(", ")}
+                >
+                  検出Series: {detectRunInfo.selectedSeries.join(", ")}
                 </p>
               ) : null}
 

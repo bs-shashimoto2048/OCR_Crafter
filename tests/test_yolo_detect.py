@@ -391,6 +391,61 @@ def test_detect_common_model_source(temp_projects, monkeypatch):
     assert Path(result["resolved_model"]) == REAL_MODEL_FILE.resolve()
 
 
+@pytest.mark.skipif(not REAL_MODEL_FILE.exists(), reason="実モデルが無い環境ではスキップ")
+def test_get_yolo_model_classes_returns_class_names(temp_projects, monkeypatch):
+    """モデルのclass一覧（検出対象Series候補）を返す。解決規則は検出APIと同一。"""
+    monkeypatch.setattr(tib, "COMMON_YOLO_MODELS_DIR", REAL_MODEL_FILE.parent)
+    result = tib.get_yolo_model_classes(
+        project_id="p1", model_name=REAL_MODEL_FILE.name, model_source="common"
+    )
+    assert result["model_source"] == "common"
+    assert isinstance(result["classes"], list) and len(result["classes"]) > 0
+    assert all(isinstance(name, str) for name in result["classes"])
+
+
+def test_get_yolo_model_classes_builtin_not_downloaded(temp_projects, monkeypatch):
+    """未取得標準モデルのclass一覧要求は専用エラー（自動ダウンロードしない）。"""
+    _setup_common_dir(temp_projects["tmp"], monkeypatch)
+    with pytest.raises(tib.BuiltinYoloModelNotDownloadedError):
+        tib.get_yolo_model_classes(project_id="p1", model_name="yolo11n.pt", model_source="builtin")
+
+
+@pytest.mark.skipif(
+    not (REAL_MODEL_FILE.exists() and REAL_IMAGE_FILE.exists()),
+    reason="実モデル/実画像が無い環境ではスキップ（読み取りのみ・書き込みなし）",
+)
+def test_detect_series_filter_limits_labels(temp_projects, monkeypatch):
+    """検出対象Seriesを指定すると、そのclassのBBoxだけが返る（未指定は従来動作）。"""
+    _setup_common_dir(temp_projects["tmp"], monkeypatch)
+    common = {
+        "image_bytes": REAL_IMAGE_FILE.read_bytes(),
+        "long_side": 1280,
+        "use_resize": True,
+        "resize_axis": "width",
+        "model_name": str(REAL_MODEL_FILE),
+        "conf_threshold": 0.25,
+        "merge_overlaps": True,
+        "merge_iou_threshold": 0.5,
+        "project_id": "p1",
+    }
+    baseline = tib.detect_bboxes_with_yolo(**common)
+    assert baseline["selected_series"] is None
+    assert baseline["inference_count"] == baseline["series_filtered_count"]
+
+    filtered = tib.detect_bboxes_with_yolo(**common, series=["tube"])
+    assert filtered["selected_series"] == ["tube"]
+    assert filtered["inference_count"] == baseline["inference_count"]
+    assert filtered["series_filtered_count"] <= filtered["inference_count"]
+    assert all(row["label"] == "tube" for row in filtered["detections"])
+    # 絞り込み後もIDは1からの連番（従来仕様を維持）
+    assert [row["id"] for row in filtered["detections"]] == list(range(1, len(filtered["detections"]) + 1))
+
+    none_matched = tib.detect_bboxes_with_yolo(**common, series=["no_such_class"])
+    assert none_matched["count"] == 0
+    assert none_matched["inference_count"] == baseline["inference_count"]
+    assert none_matched["series_filtered_count"] == 0
+
+
 @pytest.mark.skipif(
     not (REAL_MODEL_FILE.exists() and REAL_IMAGE_FILE.exists()),
     reason="実モデル/実画像が無い環境ではスキップ（読み取りのみ・書き込みなし）",

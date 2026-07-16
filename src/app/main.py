@@ -106,6 +106,7 @@ from .services.training_image_builder import (
     detect_bboxes_with_yolo,
     download_builtin_yolo_model,
     export_selected_crops,
+    get_yolo_model_classes,
     list_yolo_models,
     make_resize_preview,
 )
@@ -2399,12 +2400,26 @@ async def image_builder_detect(
     merge_iou_threshold: float = Form(0.5),
     project_id: str = Form("default"),
     detect_preprocess_json: str = Form(""),
+    series_json: str = Form(""),
 ) -> dict[str, Any]:
     resolved = _resolve_project_id(project_id)
     content = await file.read()
     try:
         # 前処理が無指定または無変換設定の場合は None（従来どおり元画像で検出）
         detect_preprocess = parse_detection_preprocess_json(detect_preprocess_json)
+        # 検出対象Series（class名のJSON配列）。空文字=未指定（従来どおり全class対象）
+        series: Optional[list[str]] = None
+        series_text = str(series_json or "").strip()
+        if series_text:
+            try:
+                parsed_series = json.loads(series_text)
+            except (TypeError, ValueError) as e:
+                raise ValueError(f"invalid series_json: {e}") from e
+            if not isinstance(parsed_series, list) or not all(isinstance(v, str) for v in parsed_series):
+                raise ValueError("series_json must be an array of strings")
+            if len(parsed_series) == 0:
+                raise ValueError("検出対象Seriesを1つ以上選択してください")
+            series = parsed_series
         return detect_bboxes_with_yolo(
             image_bytes=content,
             long_side=int(resize_long_side),
@@ -2417,9 +2432,30 @@ async def image_builder_detect(
             project_id=resolved,
             detect_preprocess=detect_preprocess,
             model_source=str(model_source or ""),
+            series=series,
         )
     except BuiltinYoloModelNotDownloadedError as e:
         # 検出API実行中は外部通信（自動ダウンロード）を行わない。未取得標準モデルは409で明示する
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.get("/image-builder/yolo-models/classes")
+def image_builder_yolo_model_classes(
+    model: str = Query(...),
+    model_source: str = Query(""),
+    project_id: Optional[str] = Query(default="default"),
+) -> dict[str, Any]:
+    """YOLOモデルのclass名一覧（Step2の検出対象Series候補）。解決規則は検出APIと同一。"""
+    resolved = _resolve_project_id(project_id)
+    try:
+        return get_yolo_model_classes(project_id=resolved, model_name=model, model_source=str(model_source or ""))
+    except BuiltinYoloModelNotDownloadedError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
