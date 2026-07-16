@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import Button from "../components/Button";
 import Card from "../components/Card";
+import EvaluationDatasetBuilder from "./EvaluationDatasetBuilder";
 import { request } from "../lib/api";
 import { nextSelectionAfterDelete } from "../lib/bboxSelection";
 import {
@@ -593,6 +594,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
     { id: 2, label: "YOLO検出", done: step2Done },
     { id: 3, label: "BBox選択", done: step3Done },
     { id: 4, label: "出力", done: step4Done },
+    { id: 5, label: "評価データ", done: false },
   ];
 
   function setFail(msg) {
@@ -1584,6 +1586,17 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       form.append("boxes_json", JSON.stringify(selectedBoxes));
       form.append("output_dir", outputDir.trim());
       form.append("crop_height", String(cropHeight));
+      // Step5（評価用データ作成）が参照するマニフェスト用の確定情報（画像名からの推測をしない）
+      form.append("project_id", projectId || "");
+      form.append(
+        "export_context_json",
+        JSON.stringify({
+          source_image: fileName || "",
+          model_name: detectRunInfo?.modelName || "",
+          model_source: detectRunInfo?.modelSource || "",
+          selected_series: detectRunInfo?.selectedSeries ?? null,
+        })
+      );
       // 検出時に使用した前処理と同一設定でBBOX座標系を一致させる
       if (detectUsedPreprocess) {
         form.append("detect_preprocess_json", JSON.stringify(detectUsedPreprocess));
@@ -1642,6 +1655,11 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       setSeriesFilter(SERIES_FILTER_ALL);
     }
   }, [seriesFilter, seriesOptions]);
+
+  // Step5（評価用データ作成）は独立コンポーネント（Step1〜4のstateはこのコンポーネント内で維持される）
+  if (activeStep === 5) {
+    return <EvaluationDatasetBuilder projectId={projectId} stepProgress={stepProgress} onStepChange={goStep} />;
+  }
 
   return (
     // Step3は「大きな画像（75〜80%）+ 編集パネル（22%・ドラッグ可変）+ 下部ステータスバー」の
@@ -2689,7 +2707,7 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                   </Button>
                 </div>
                 {exportResult ? (
-                  <div className="space-y-1 text-xs text-muted">
+                  <div className="space-y-2 text-xs text-muted">
                     <p>
                       出力: {exportResult.count}枚 / 桁数: {exportResult.digits} / 保存先: {exportResult.output_dir}
                     </p>
@@ -2699,6 +2717,10 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                         元画像範囲外のためスキップしたBBOX: #{exportResult.skipped_invalid_bbox.join(", #")}
                       </p>
                     ) : null}
+                    {/* Step5への導線（出力画像からモデル評価用データセットを作成） */}
+                    <Button size="sm" onClick={() => goStep(5)}>
+                      評価用データを作成（Step5へ）
+                    </Button>
                   </div>
                 ) : null}
               </div>

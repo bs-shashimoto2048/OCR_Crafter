@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from PIL import Image
@@ -53,6 +53,8 @@ from .schemas import (
     OcrLogSaveRequest,
     OcrTrainStartRequest,
     BuiltinYoloDownloadRequest,
+    EvaluationDatasetCreateRequest,
+    EvaluationStateSaveRequest,
     OcrTuningExportRequest,
     PreprocessPreviewRequest,
     PreprocessRequest,
@@ -100,6 +102,13 @@ from .services.tesseract_pipeline import (
     run_tesseract_training,
 )
 from .services.detection_preprocess import parse_detection_preprocess_json
+from .services.evaluation_dataset import (
+    create_evaluation_dataset,
+    list_export_candidates,
+    load_editing_state,
+    load_export_crop_image,
+    save_editing_state,
+)
 from .services.training_image_builder import (
     BuiltinYoloDownloadInProgressError,
     BuiltinYoloModelNotDownloadedError,
@@ -2488,10 +2497,23 @@ async def image_builder_export(
     output_dir: str = Form(...),
     crop_height: int = Form(32),
     detect_preprocess_json: str = Form(""),
+    project_id: str = Form(""),
+    export_context_json: str = Form(""),
 ) -> dict[str, Any]:
     content = await file.read()
     try:
         detect_preprocess = parse_detection_preprocess_json(detect_preprocess_json)
+        # Step5（評価用データ作成）が参照する確定情報（元画像名・モデル・Series）。空=マニフェスト情報なし
+        export_context: Optional[dict[str, Any]] = None
+        context_text = str(export_context_json or "").strip()
+        if context_text:
+            try:
+                parsed_context = json.loads(context_text)
+            except (TypeError, ValueError) as e:
+                raise ValueError(f"invalid export_context_json: {e}") from e
+            if not isinstance(parsed_context, dict):
+                raise ValueError("export_context_json must be an object")
+            export_context = parsed_context
         return export_selected_crops(
             image_bytes=content,
             long_side=int(resize_long_side),
@@ -2501,7 +2523,72 @@ async def image_builder_export(
             output_dir=output_dir,
             crop_height=int(crop_height),
             detect_preprocess=detect_preprocess,
+            project_id=_resolve_project_id(project_id) if str(project_id or "").strip() else "",
+            export_context=export_context,
         )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.get("/image-builder/evaluation/candidates")
+def image_builder_evaluation_candidates(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+    """Step4出力マニフェストから評価候補（クロップ一覧）を返す。"""
+    resolved = _resolve_project_id(project_id)
+    return list_export_candidates(resolved)
+
+
+@app.get("/image-builder/evaluation/crop")
+def image_builder_evaluation_crop(
+    export_id: str = Query(...),
+    filename: str = Query(...),
+    rotation: int = Query(0),
+    max_side: int = Query(0),
+    project_id: Optional[str] = Query(default="default"),
+) -> Response:
+    """評価候補クロップのプレビュー/サムネイル（回転はその場で適用。元ファイルは変更しない）。"""
+    resolved = _resolve_project_id(project_id)
+    try:
+        img = load_export_crop_image(resolved, export_id, filename, rotation=int(rotation))
+        if int(max_side) > 0:
+            img.thumbnail((int(max_side), int(max_side)))
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return Response(content=buf.getvalue(), media_type="image/png", headers={"Cache-Control": "no-cache"})
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.get("/image-builder/evaluation/state")
+def image_builder_evaluation_state(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+    """Step5の途中保存状態（プロジェクト単位）。"""
+    resolved = _resolve_project_id(project_id)
+    return {"project_id": resolved, "state": load_editing_state(resolved)}
+
+
+@app.post("/image-builder/evaluation/state")
+def image_builder_evaluation_state_save(req: EvaluationStateSaveRequest) -> dict[str, Any]:
+    resolved = _resolve_project_id(req.project_id)
+    try:
+        return save_editing_state(resolved, req.state)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/image-builder/evaluation/create")
+def image_builder_evaluation_create(req: EvaluationDatasetCreateRequest) -> dict[str, Any]:
+    """評価データセットを作成（画像コピー＋回転焼き込み＋ground_truth.csv＋metadata.json）。"""
+    resolved = _resolve_project_id(req.project_id)
+    try:
+        return create_evaluation_dataset(
+            project_id=resolved,
+            dataset_name=req.dataset_name,
+            items=[item.model_dump() for item in req.items],
+            editing_state=req.editing_state,
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 

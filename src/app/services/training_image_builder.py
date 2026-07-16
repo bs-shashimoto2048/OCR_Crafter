@@ -1,10 +1,12 @@
 import base64
+import hashlib
 import io
 import json
 import os
 import shutil
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -678,6 +680,8 @@ def export_selected_crops(
     output_dir: str,
     crop_height: int = 32,
     detect_preprocess: Optional[dict[str, Any]] = None,
+    project_id: str = "",
+    export_context: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     if crop_height <= 0:
         raise ValueError("crop_height must be positive")
@@ -713,8 +717,10 @@ def export_selected_crops(
     digits = len(str(total))
     outputs: list[str] = []
     skipped: list[int] = []
+    crop_records: list[dict[str, Any]] = []
     for idx, box in enumerate(selected_boxes, start=1):
         target_box = box
+        original_xyxy: Optional[list[float]] = None
         if detect_preprocess:
             inverted = invert_detection_bbox(
                 (
@@ -731,14 +737,89 @@ def export_selected_crops(
                 skipped.append(int(box.get("id") or idx))
                 continue
             target_box = {"x1": inverted[0], "y1": inverted[1], "x2": inverted[2], "y2": inverted[3]}
+            original_xyxy = [float(v) for v in inverted]
+        else:
+            # 前処理なし: クロップはリサイズ画像から。参考情報として元画像座標も記録する
+            orig_scale_x = source.width / crop_image.width if crop_image.width else 1.0
+            orig_scale_y = source.height / crop_image.height if crop_image.height else 1.0
+            original_xyxy = [
+                float(box.get("x1", 0)) * orig_scale_x,
+                float(box.get("y1", 0)) * orig_scale_y,
+                float(box.get("x2", 0)) * orig_scale_x,
+                float(box.get("y2", 0)) * orig_scale_y,
+            ]
         cropped = _crop_and_resize(crop_image, target_box, crop_height)
         filename = f"{len(outputs) + 1:0{digits}d}.png"
         target = out_dir / filename
         cropped.save(target, format="PNG")
         outputs.append(str(target.resolve()))
+        # 対応関係は「出力時の確定情報」として記録する（画像名からの推測をしない）
+        crop_records.append(
+            {
+                "crop_id": f"crop_{len(outputs):0{digits}d}",
+                "filename": filename,
+                "bbox_id": box.get("id"),
+                "series": str(box.get("label") or ""),
+                "confidence": box.get("confidence"),
+                "bbox_step3_xyxy": [
+                    float(box.get("x1", 0)),
+                    float(box.get("y1", 0)),
+                    float(box.get("x2", 0)),
+                    float(box.get("y2", 0)),
+                ],
+                "bbox_original_xyxy": original_xyxy,
+                "sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+            }
+        )
 
     if not outputs:
         raise ValueError("すべてのBBOXが元画像範囲外のため出力できませんでした（逆変換スキップ）")
+
+    # Step5（評価用データ作成）が参照するマニフェスト。出力フォルダとプロジェクト配下の両方へ保存する
+    context = export_context or {}
+    export_id = ""
+    if project_id:
+        exports_root = get_project_paths(project_id).root / "image_builder_exports"
+        export_id = f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        suffix = 1
+        while (exports_root / export_id).exists():
+            suffix += 1
+            export_id = f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{suffix}"
+        manifest = {
+            "version": 1,
+            "project_id": project_id,
+            "export_id": export_id,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "source_image": str(context.get("source_image") or ""),
+            "model_name": str(context.get("model_name") or ""),
+            "model_source": str(context.get("model_source") or ""),
+            "selected_series": context.get("selected_series"),
+            "output_dir": str(out_dir.resolve()),
+            "crop_height": int(crop_height),
+            "crop_source": "original" if detect_preprocess else "resized",
+            "crops": crop_records,
+        }
+        state_snapshot = {
+            "resize_long_side": long_side,
+            "use_resize": bool(use_resize),
+            "resize_axis": resize_axis,
+            "crop_height": int(crop_height),
+            "detect_preprocess": detect_preprocess,
+            "box_count": len(selected_boxes),
+            "skipped_invalid_bbox": skipped,
+        }
+        export_dir = exports_root / export_id
+        export_dir.mkdir(parents=True, exist_ok=True)
+        manifest_text = json.dumps(manifest, ensure_ascii=False, indent=2)
+        (export_dir / "manifest.json").write_text(manifest_text, encoding="utf-8")
+        (export_dir / "state.json").write_text(
+            json.dumps(state_snapshot, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        # 出力フォルダ側にも同内容を残す（外部フォルダ単体でも対応関係を追跡できるように）
+        try:
+            (out_dir / "manifest.json").write_text(manifest_text, encoding="utf-8")
+        except OSError:
+            pass  # 出力先が書込不可でもプロジェクト側の記録があれば追跡可能
 
     return {
         "use_resize": bool(use_resize),
@@ -751,4 +832,6 @@ def export_selected_crops(
         "crop_source": "original" if detect_preprocess else "resized",
         "skipped_invalid_bbox": skipped,
         "files": outputs,
+        "export_id": export_id,
+        "crops": crop_records,
     }

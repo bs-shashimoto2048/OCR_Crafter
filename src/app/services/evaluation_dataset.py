@@ -1,0 +1,281 @@
+"""学習画像作成 Step5（評価用データ作成）のバックエンド。
+
+- Step4出力のマニフェスト（image_builder_exports/<export_id>/manifest.json）を候補として読み込み、
+  評価データセット（data/projects/<project_id>/evaluation/<dataset_id>/）を作成する。
+- 学習用クロップ（Step4出力）は変更せず、評価用コピーへのみ回転を焼き込む。
+- CSVは既存モデル評価（services/ocr_evaluation.py の _read_gt_csv）が読める
+  「filename,label」形式（utf-8-sig・csv.writer・case-sensitive）で出力する。
+"""
+
+import csv
+import json
+import re
+import shutil
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Optional
+
+from PIL import Image
+
+from ..project_paths import get_project_paths
+
+# データセット名: 英数字・ハイフン・アンダースコアのみ（パストラバーサル防止）
+_DATASET_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_VALID_ROTATIONS = {0, 90, 180, 270}
+# editing_state.json の上限（画像データ等の巨大JSON書き込み防止）
+_STATE_MAX_BYTES = 2 * 1024 * 1024
+
+
+def _exports_dir(project_id: str) -> Path:
+    return get_project_paths(project_id).root / "image_builder_exports"
+
+
+def _evaluation_dir(project_id: str) -> Path:
+    return get_project_paths(project_id).root / "evaluation"
+
+
+def sanitize_dataset_id(name: str) -> str:
+    """データセット名を検証して返す。未入力は日時ベースの既定名を生成。"""
+    candidate = str(name or "").strip()
+    if not candidate:
+        return f"eval_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    if not _DATASET_ID_PATTERN.match(candidate):
+        raise ValueError(
+            "データセット名は英数字・ハイフン・アンダースコア（64文字以内）のみ使用できます"
+        )
+    return candidate
+
+
+def list_export_candidates(project_id: str) -> dict[str, Any]:
+    """Step4出力マニフェストから評価候補（クロップ一覧）を返す。
+
+    対応関係は画像名からの推測ではなく、出力時に保存された manifest.json を根拠とする。
+    出力先（外部フォルダ）のファイルが消えている場合は exists=False で返す。
+    """
+    exports_root = _exports_dir(project_id)
+    exports: list[dict[str, Any]] = []
+    if exports_root.exists():
+        for manifest_path in sorted(exports_root.glob("*/manifest.json")):
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if str(manifest.get("project_id") or "") != str(project_id):
+                continue
+            output_dir = Path(str(manifest.get("output_dir") or ""))
+            crops = []
+            missing = 0
+            for crop in manifest.get("crops") or []:
+                filename = str(crop.get("filename") or "")
+                if not filename:
+                    continue
+                source = output_dir / filename
+                exists = source.exists() and source.is_file()
+                if not exists:
+                    missing += 1
+                crops.append(
+                    {
+                        "export_id": str(manifest.get("export_id") or ""),
+                        "filename": filename,
+                        "series": str(crop.get("series") or ""),
+                        "bbox_id": crop.get("bbox_id"),
+                        "exists": exists,
+                    }
+                )
+            exports.append(
+                {
+                    "export_id": str(manifest.get("export_id") or ""),
+                    "created_at": str(manifest.get("created_at") or ""),
+                    "source_image": str(manifest.get("source_image") or ""),
+                    "model_name": str(manifest.get("model_name") or ""),
+                    "model_source": str(manifest.get("model_source") or ""),
+                    "selected_series": manifest.get("selected_series"),
+                    "output_dir": str(output_dir),
+                    "crop_count": len(crops),
+                    "missing_count": missing,
+                    "crops": crops,
+                }
+            )
+    # 新しい出力を先頭へ
+    exports.sort(key=lambda row: row.get("created_at") or "", reverse=True)
+    return {"project_id": project_id, "exports": exports}
+
+
+def resolve_export_crop_path(project_id: str, export_id: str, filename: str) -> Path:
+    """マニフェストに記録されたクロップだけを解決する（任意パス参照・トラバーサル防止）。"""
+    safe_export = Path(str(export_id or "")).name
+    if not safe_export or safe_export != export_id:
+        raise ValueError("invalid export_id")
+    manifest_path = _exports_dir(project_id) / safe_export / "manifest.json"
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"エクスポート履歴が見つかりません: {export_id}")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    safe_name = Path(str(filename or "")).name
+    known = {str(crop.get("filename")) for crop in manifest.get("crops") or []}
+    if not safe_name or safe_name != filename or safe_name not in known:
+        raise FileNotFoundError(f"マニフェストに存在しない画像です: {filename}")
+    source = Path(str(manifest.get("output_dir") or "")) / safe_name
+    if not source.exists() or not source.is_file():
+        raise FileNotFoundError(f"クロップ画像が見つかりません: {source}")
+    return source
+
+
+def _apply_rotation(img: Image.Image, rotation: int) -> Image.Image:
+    """時計回りの回転を適用（0/90/180/270）。EXIFはStep4クロップ生成時に反映済みのため再解釈しない。"""
+    if rotation == 90:
+        return img.transpose(Image.ROTATE_270)  # PILは反時計回りなので270=時計回り90°
+    if rotation == 180:
+        return img.transpose(Image.ROTATE_180)
+    if rotation == 270:
+        return img.transpose(Image.ROTATE_90)
+    return img
+
+
+def load_export_crop_image(project_id: str, export_id: str, filename: str, rotation: int = 0) -> Image.Image:
+    """プレビュー・サムネイル用にクロップを読み込み、指定回転を適用して返す（元ファイルは変更しない）。"""
+    if int(rotation) not in _VALID_ROTATIONS:
+        raise ValueError("rotation must be one of 0/90/180/270")
+    source = resolve_export_crop_path(project_id, export_id, filename)
+    with Image.open(source) as img:
+        return _apply_rotation(img.convert("RGB"), int(rotation))
+
+
+def load_editing_state(project_id: str) -> dict[str, Any]:
+    """Step5の途中保存状態（プロジェクト単位）。無ければ空dict。"""
+    path = _evaluation_dir(project_id) / "editing_state.json"
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_editing_state(project_id: str, state: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(state, dict):
+        raise ValueError("state must be an object")
+    text = json.dumps(state, ensure_ascii=False, indent=2)
+    if len(text.encode("utf-8")) > _STATE_MAX_BYTES:
+        raise ValueError("editing_state が大きすぎます（画像データ等は保存できません）")
+    root = _evaluation_dir(project_id)
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "editing_state.json").write_text(text, encoding="utf-8")
+    return {"saved": True}
+
+
+def create_evaluation_dataset(
+    project_id: str,
+    dataset_name: str,
+    items: list[dict[str, Any]],
+    editing_state: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """評価データセットを作成する（画像コピー＋回転焼き込み＋CSV＋metadata）。
+
+    - 未入力ラベルがある場合は作成を拒否（空文字をCSVへ出力しない）
+    - 学習用クロップ（Step4出力）は読み取りのみで変更しない
+    - 画像名は <export_id>_<元ファイル名> で衝突を防ぐ
+    """
+    dataset_id = sanitize_dataset_id(dataset_name)
+    if not items:
+        raise ValueError("評価対象画像がありません")
+
+    unlabeled = [row for row in items if not str(row.get("label") or "").strip()]
+    if unlabeled:
+        raise ValueError(f"未入力の正解ラベルが{len(unlabeled)}件あります。全件入力後に作成してください")
+
+    for row in items:
+        rotation = int(row.get("rotation") or 0)
+        if rotation not in _VALID_ROTATIONS:
+            raise ValueError("rotation must be one of 0/90/180/270")
+
+    dataset_dir = _evaluation_dir(project_id) / dataset_id
+    if dataset_dir.exists():
+        raise ValueError(f"同名の評価データセットが既に存在します: {dataset_id}")
+
+    # 先に全ソースを解決（1件でも見つからなければ作成しない）
+    resolved: list[tuple[dict[str, Any], Path]] = []
+    missing: list[str] = []
+    for row in items:
+        try:
+            source = resolve_export_crop_path(project_id, str(row.get("export_id")), str(row.get("filename")))
+            resolved.append((row, source))
+        except (FileNotFoundError, ValueError):
+            missing.append(f"{row.get('export_id')}/{row.get('filename')}")
+    if missing:
+        raise FileNotFoundError(
+            f"クロップ画像が見つからないため作成できません（{len(missing)}件）: " + ", ".join(missing[:5])
+        )
+
+    images_dir = dataset_dir / "images"
+    try:
+        images_dir.mkdir(parents=True, exist_ok=False)
+        csv_rows: list[tuple[str, str]] = []
+        image_entries: list[dict[str, Any]] = []
+        for row, source in resolved:
+            rotation = int(row.get("rotation") or 0)
+            # ラベルはcase-sensitiveのまま保持（大小文字を変更しない）
+            label = str(row.get("label"))
+            out_name = f"{row.get('export_id')}_{Path(str(row.get('filename'))).name}"
+            target = images_dir / out_name
+            if rotation == 0:
+                shutil.copyfile(source, target)  # 無回転はバイト等価コピー
+                with Image.open(target) as img:
+                    width, height = img.size
+            else:
+                with Image.open(source) as img:
+                    rotated = _apply_rotation(img.convert("RGB"), rotation)
+                    rotated.save(target, format="PNG")
+                    width, height = rotated.size
+            csv_rows.append((out_name, label))
+            image_entries.append(
+                {
+                    "filename": out_name,
+                    "label": label,
+                    "rotation": rotation,
+                    "width": width,
+                    "height": height,
+                    "series": str(row.get("series") or ""),
+                    "source_export_id": str(row.get("export_id") or ""),
+                    "source_filename": str(row.get("filename") or ""),
+                    "source_image": str(row.get("source_image") or ""),
+                    "source_bbox_id": row.get("bbox_id"),
+                }
+            )
+
+        # 既存モデル評価が読む形式: filename,label（ヘッダーは既知キーとしてスキップされる）
+        csv_path = dataset_dir / "ground_truth.csv"
+        with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["filename", "label"])
+            writer.writerows(csv_rows)
+
+        metadata = {
+            "dataset_id": dataset_id,
+            "project_id": project_id,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "source": "training_image_builder",
+            "image_count": len(csv_rows),
+            "case_sensitive": True,
+            "csv_file": "ground_truth.csv",
+            "images": image_entries,
+        }
+        (dataset_dir / "metadata.json").write_text(
+            json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        if isinstance(editing_state, dict):
+            (dataset_dir / "editing_state.json").write_text(
+                json.dumps(editing_state, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+    except Exception:
+        # 途中失敗時は不完全なデータセットを残さない
+        shutil.rmtree(dataset_dir, ignore_errors=True)
+        raise
+
+    return {
+        "dataset_id": dataset_id,
+        "dataset_dir": str(dataset_dir.resolve()),
+        "image_dir": str(images_dir.resolve()),
+        "csv_path": str(csv_path.resolve()),
+        "image_count": len(csv_rows),
+    }

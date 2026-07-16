@@ -38,6 +38,7 @@ const imageCreationItems = [
   { id: "image-builder-step2", label: "2. YOLO検出" },
   { id: "image-builder-step3", label: "3. Bounding Box選択" },
   { id: "image-builder-step4", label: "4. クロップ出力" },
+  { id: "image-builder-step5", label: "5. 評価データ作成" },
 ];
 
 export default function Sidebar({ active, onChange, onExitApp, collapsed = false, onToggleCollapse }) {

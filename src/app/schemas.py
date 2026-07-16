@@ -93,6 +93,32 @@ class AppShutdownRequest(BaseModel):
     frontend_port: Optional[int] = Field(default=None, description="フロントエンド開発サーバーのポート")
 
 
+class EvaluationStateSaveRequest(BaseModel):
+    """Step5（評価用データ作成）の途中保存状態（プロジェクト単位）。"""
+
+    project_id: Optional[str] = Field(default="default")
+    state: dict[str, Any] = Field(default_factory=dict, description="編集状態（ラベル・回転・評価対象・フィルタ等）")
+
+
+class EvaluationDatasetItem(BaseModel):
+    """評価データセットへ含める1画像（Step4出力マニフェスト由来の確定情報）。"""
+
+    export_id: str = Field(..., description="Step4出力のexport_id")
+    filename: str = Field(..., description="出力フォルダ内のファイル名")
+    label: str = Field(..., description="正解ラベル（case-sensitive）")
+    rotation: int = Field(default=0, description="評価用コピーへ焼き込む回転角（0/90/180/270）")
+    series: Optional[str] = Field(default="")
+    source_image: Optional[str] = Field(default="")
+    bbox_id: Optional[int] = Field(default=None)
+
+
+class EvaluationDatasetCreateRequest(BaseModel):
+    project_id: Optional[str] = Field(default="default")
+    dataset_name: str = Field(default="", description="データセット名（未入力は日時ベースの既定名）")
+    items: list[EvaluationDatasetItem] = Field(default_factory=list)
+    editing_state: Optional[dict[str, Any]] = Field(default=None, description="作成時点の編集状態スナップショット")
+
+
 class BuiltinYoloDownloadRequest(BaseModel):
     """Ultralytics標準モデルの明示取得リクエスト（許可リスト内の名前のみ）。"""
 

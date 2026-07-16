@@ -44,6 +44,7 @@ const viewMeta = {
   "image-builder-step2": { title: "学習画像作成", subtitle: "Step2: YOLO検出" },
   "image-builder-step3": { title: "学習画像作成", subtitle: "Step3: Bounding Box選択" },
   "image-builder-step4": { title: "学習画像作成", subtitle: "Step4: クロップ出力" },
+  "image-builder-step5": { title: "学習画像作成", subtitle: "Step5: 評価用データ作成" },
 };
 
 // 実験機能配下の view id。今後 TrOCR / PARSeq 等を追加する場合はここに足すだけで
@@ -3332,6 +3333,7 @@ export default function App() {
     "image-builder-step2": 2,
     "image-builder-step3": 3,
     "image-builder-step4": 4,
+    "image-builder-step5": 5,
   };
   const activeImageBuilderStep = imageBuilderStepMap[activeView];
 
