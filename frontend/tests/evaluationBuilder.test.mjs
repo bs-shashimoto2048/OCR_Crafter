@@ -3,8 +3,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildDirectoryItems,
   computeEvalCounts,
   cropKey,
+  directoryItemKey,
+  DIRECTORY_SOURCE_KEY,
   EVAL_SERIES_ALL,
   evaluateCreateReadiness,
   filterEvalItems,
@@ -73,4 +76,31 @@ test("evaluateCreateReadiness: 未入力・欠損・0件で作成不可", () => 
 
 test("cropKey: export_idとファイル名から一意キーを作る", () => {
   assert.equal(cropKey("export_1", "001.png"), "export_1/001.png");
+});
+
+test("directoryItemKey: 予約接頭辞でStep4キーと衝突しない", () => {
+  assert.equal(directoryItemKey("001.png"), `${DIRECTORY_SOURCE_KEY}/001.png`);
+  assert.notEqual(directoryItemKey("001.png"), cropKey("export_1", "001.png"));
+});
+
+test("buildDirectoryItems: フォルダ画像一覧を評価候補アイテムへ変換する", () => {
+  const built = buildDirectoryItems("C:\\eval\\images", ["a.png", "", "b.jpg", null]);
+  assert.equal(built.length, 2);
+  assert.deepEqual(
+    built.map((row) => row.key),
+    [`${DIRECTORY_SOURCE_KEY}/a.png`, `${DIRECTORY_SOURCE_KEY}/b.jpg`]
+  );
+  assert.equal(built[0].source, "directory");
+  assert.equal(built[0].directory, "C:\\eval\\images");
+  assert.equal(built[0].filename, "a.png");
+  assert.equal(built[0].exists, true);
+  assert.equal(built[0].series, "");
+  // Step4候補と同じフィルタ・集計ロジックがそのまま使える形であること
+  assert.equal(filterEvalItems(built, {}, { series: EVAL_SERIES_ALL }).length, 2);
+  assert.equal(computeEvalCounts(built, {}).target, 2);
+});
+
+test("buildDirectoryItems: 空・不正入力は空配列", () => {
+  assert.deepEqual(buildDirectoryItems("", null), []);
+  assert.deepEqual(buildDirectoryItems("C:\\x", undefined), []);
 });

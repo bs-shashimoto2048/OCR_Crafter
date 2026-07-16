@@ -16,6 +16,7 @@ import useLabelingShortcuts from "../components/labeling/useLabelingShortcuts";
 import { API_BASE, request } from "../lib/api";
 import { searchDictionaryCandidates } from "../lib/candidateDictionary";
 import {
+  buildDirectoryItems,
   computeEvalCounts,
   cropKey,
   EVAL_SERIES_ALL,
@@ -35,18 +36,30 @@ const LIST_ROW_HEIGHT = 56;
 // 回転連打・画像切替の連続操作でOCRリクエストが多重化しないためのデバウンス
 const OCR_DEBOUNCE_MS = 300;
 
-// 評価候補クロップの画像URL（回転はサーバー側でその場適用。rotationがURLへ入るため対象行だけ再取得される）
+// 評価候補画像のURL（回転はサーバー側でその場適用。rotationがURLへ入るため対象行だけ再取得される）
+// Step4クロップ=マニフェスト解決 / フォルダ画像=フォルダ直下のみ解決
 function cropImageUrl(projectId, item, rotation, maxSide = 0) {
-  const params = new URLSearchParams({
-    project_id: projectId || "default",
-    export_id: item.exportId,
-    filename: item.filename,
-    rotation: String(rotation || 0),
-  });
+  const params = new URLSearchParams();
+  let endpoint = "/image-builder/evaluation/crop";
+  if (item.source === "directory") {
+    endpoint = "/image-builder/evaluation/directory-image";
+    params.set("directory", item.directory || "");
+    params.set("filename", item.filename);
+  } else {
+    params.set("project_id", projectId || "default");
+    params.set("export_id", item.exportId);
+    params.set("filename", item.filename);
+  }
+  params.set("rotation", String(rotation || 0));
   if (maxSide > 0) {
     params.set("max_side", String(maxSide));
   }
-  return `${API_BASE}/image-builder/evaluation/crop?${params.toString()}`;
+  return `${API_BASE}${endpoint}?${params.toString()}`;
+}
+
+// 一覧・情報パネルで使うフルパス表示（Step4=export_id/ファイル名、フォルダ=フォルダ\ファイル名）
+function itemSourceTitle(item) {
+  return item.source === "directory" ? `${item.directory || ""}\\${item.filename}` : `${item.exportId}/${item.filename}`;
 }
 
 // 一覧の1行（memo化: 対象行のstate変更時のみ再描画し、1000件でも回転・入力・OCRが全件再描画にならない）
@@ -81,7 +94,7 @@ const EvalListRow = memo(function EvalListRow({ projectId, item, state, isCurren
         />
       )}
       <div className="min-w-0 flex-1">
-        <p className="truncate font-mono text-[10px] text-muted" title={`${item.exportId}/${item.filename}`}>
+        <p className="truncate font-mono text-[10px] text-muted" title={itemSourceTitle(item)}>
           {item.filename}
           {item.series ? <span className="ml-1">[{item.series}]</span> : null}
           {rotation ? <span className="ml-1 tabular-nums">{rotation}°</span> : null}
@@ -104,8 +117,15 @@ export default function EvaluationDatasetBuilder({
   candidateDict = null,
   onOpenEvaluation = null,
 }) {
-  const [items, setItems] = useState([]);
+  // 評価画像の取得方法: step4=Step4出力（従来動作） / directory=任意フォルダ
+  const [sourceMode, setSourceMode] = useState("step4");
+  const [step4Items, setStep4Items] = useState([]);
+  const [directoryPath, setDirectoryPath] = useState("");
+  const [directoryItems, setDirectoryItems] = useState([]);
+  const [directoryLoading, setDirectoryLoading] = useState(false);
+  const items = sourceMode === "directory" ? directoryItems : step4Items;
   // 画像単位の編集状態: {label, rotation, checked}。バックエンドの editing_state.json と同期
+  // （キーは step4=<export_id>/<filename> / directory=__dir__/<filename> で衝突しない）
   const [itemState, setItemState] = useState({});
   const [currentKey, setCurrentKey] = useState("");
   const [seriesFilter, setSeriesFilter] = useState(EVAL_SERIES_ALL);
@@ -190,11 +210,20 @@ export default function EvaluationDatasetBuilder({
     []
   );
 
+  // フォルダ直下の画像一覧を取得して評価候補アイテムへ変換（サブフォルダは対象外）
+  async function fetchDirectoryItems(path) {
+    const data = await request(`/image-builder/evaluation/directory-images?directory=${encodeURIComponent(path)}`);
+    return buildDirectoryItems(data?.directory || path, (data?.images || []).map((row) => row.filename));
+  }
+
   // 候補（Step4出力マニフェスト）と途中保存状態の読み込み。プロジェクト切替で全て入れ替える
   useEffect(() => {
     let ignore = false;
     stateLoadedRef.current = false;
-    setItems([]);
+    setSourceMode("step4");
+    setStep4Items([]);
+    setDirectoryPath("");
+    setDirectoryItems([]);
     setItemState({});
     setCurrentKey("");
     setSeriesFilter(EVAL_SERIES_ALL);
@@ -227,14 +256,33 @@ export default function EvaluationDatasetBuilder({
             });
           }
         }
-        setItems(flat);
+        setStep4Items(flat);
         const saved = stateRes?.state || {};
         setItemState(saved.items && typeof saved.items === "object" ? saved.items : {});
         setSeriesFilter(typeof saved.seriesFilter === "string" ? saved.seriesFilter : EVAL_SERIES_ALL);
         setUnlabeledOnly(Boolean(saved.unlabeledOnly));
         setDatasetName(typeof saved.datasetName === "string" ? saved.datasetName : "");
         const savedCurrent = typeof saved.currentKey === "string" ? saved.currentKey : "";
-        setCurrentKey(savedCurrent && flat.some((row) => row.key === savedCurrent) ? savedCurrent : flat[0]?.key || "");
+        // 取得方法・フォルダパスを復元（旧stateはsourceModeなし=step4で従来動作）
+        const savedMode = saved.sourceMode === "directory" ? "directory" : "step4";
+        const savedDir = typeof saved.directoryPath === "string" ? saved.directoryPath : "";
+        setSourceMode(savedMode);
+        setDirectoryPath(savedDir);
+        if (savedMode === "directory" && savedDir) {
+          try {
+            const dirItems = await fetchDirectoryItems(savedDir);
+            if (ignore) return;
+            setDirectoryItems(dirItems);
+            setCurrentKey(
+              savedCurrent && dirItems.some((row) => row.key === savedCurrent) ? savedCurrent : dirItems[0]?.key || ""
+            );
+          } catch (e) {
+            if (ignore) return;
+            setFail(`フォルダ画像の読み込みに失敗しました: ${e.message}`);
+          }
+        } else {
+          setCurrentKey(savedCurrent && flat.some((row) => row.key === savedCurrent) ? savedCurrent : flat[0]?.key || "");
+        }
         stateLoadedRef.current = true;
       } catch (e) {
         if (!ignore) {
@@ -250,6 +298,7 @@ export default function EvaluationDatasetBuilder({
     return () => {
       ignore = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   // 途中保存（editing_state.json）。連続編集をまとめるため800msデバウンス
@@ -271,7 +320,11 @@ export default function EvaluationDatasetBuilder({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, itemState, currentKey, seriesFilter, unlabeledOnly, datasetName]);
+  }, [projectId, itemState, currentKey, seriesFilter, unlabeledOnly, datasetName, sourceMode, directoryPath]);
+
+  function buildEditingState() {
+    return { items: itemState, currentKey, seriesFilter, unlabeledOnly, datasetName, sourceMode, directoryPath };
+  }
 
   function persistEditingState(overrideState = null) {
     return request("/image-builder/evaluation/state", {
@@ -279,9 +332,54 @@ export default function EvaluationDatasetBuilder({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         project_id: projectId,
-        state: overrideState || { items: itemState, currentKey, seriesFilter, unlabeledOnly, datasetName },
+        state: overrideState || buildEditingState(),
       }),
     });
+  }
+
+  // 取得方法の切替（各モードの一覧・編集状態は保持し、現在画像だけ切替先の先頭へ移す）
+  function switchSourceMode(mode) {
+    if (mode === sourceMode) return;
+    setSourceMode(mode);
+    setSeriesFilter(EVAL_SERIES_ALL);
+    setUnlabeledOnly(false);
+    const list = mode === "directory" ? directoryItems : step4Items;
+    setCurrentKey(list[0]?.key || "");
+  }
+
+  // フォルダ選択ダイアログ（既存 /dialogs/select-directory を共通利用）
+  async function browseDirectory() {
+    try {
+      const data = await request("/dialogs/select-directory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initial_dir: directoryPath || null }),
+      });
+      if (data.path) setDirectoryPath(data.path);
+    } catch (e) {
+      setFail(`フォルダ選択に失敗しました: ${e.message}`);
+    }
+  }
+
+  // 指定フォルダの画像を一覧化（[画像を読み込む]ボタン）
+  async function loadDirectoryImages() {
+    const path = directoryPath.trim();
+    if (!path) {
+      setFail("評価画像フォルダを指定してください");
+      return;
+    }
+    setDirectoryLoading(true);
+    try {
+      const dirItems = await fetchDirectoryItems(path);
+      setDirectoryItems(dirItems);
+      setCurrentKey((prev) => (dirItems.some((row) => row.key === prev) ? prev : dirItems[0]?.key || ""));
+      setOk(`フォルダから${dirItems.length}件の画像を読み込みました`);
+    } catch (e) {
+      setDirectoryItems([]);
+      setFail(`フォルダ画像の読み込みに失敗しました: ${e.message}`);
+    } finally {
+      setDirectoryLoading(false);
+    }
   }
 
   const seriesOptions = useMemo(() => {
@@ -359,7 +457,11 @@ export default function EvaluationDatasetBuilder({
       const buildForm = (fields) => {
         const form = new FormData();
         form.append("project_id", projectId);
-        form.append("export_id", currentItem.exportId);
+        if (currentItem.source === "directory") {
+          form.append("source_directory", currentItem.directory || "");
+        } else {
+          form.append("export_id", currentItem.exportId);
+        }
         form.append("filename", currentItem.filename);
         form.append("rotation", String(currentRotation));
         if (preprocessOverrides) {
@@ -580,16 +682,27 @@ export default function EvaluationDatasetBuilder({
       const payload = {
         project_id: projectId,
         dataset_name: datasetName,
-        items: targets.map((row) => ({
-          export_id: row.exportId,
-          filename: row.filename,
-          label: String((itemState[row.key] || {}).label || ""),
-          rotation: nextRotation((itemState[row.key] || {}).rotation, 0),
-          series: row.series,
-          source_image: row.sourceImage,
-          bbox_id: row.bboxId,
-        })),
-        editing_state: { items: itemState, currentKey, seriesFilter, unlabeledOnly, datasetName },
+        // step4は従来のペイロードのまま（後方互換）。directoryはsource+source_directoryで指定
+        items: targets.map((row) =>
+          row.source === "directory"
+            ? {
+                source: "directory",
+                source_directory: row.directory,
+                filename: row.filename,
+                label: String((itemState[row.key] || {}).label || ""),
+                rotation: nextRotation((itemState[row.key] || {}).rotation, 0),
+              }
+            : {
+                export_id: row.exportId,
+                filename: row.filename,
+                label: String((itemState[row.key] || {}).label || ""),
+                rotation: nextRotation((itemState[row.key] || {}).rotation, 0),
+                series: row.series,
+                source_image: row.sourceImage,
+                bbox_id: row.bboxId,
+              }
+        ),
+        editing_state: buildEditingState(),
       };
       const data = await request("/image-builder/evaluation/create", {
         method: "POST",
@@ -635,6 +748,57 @@ export default function EvaluationDatasetBuilder({
             <div>{step.label}</div>
           </button>
         ))}
+      </div>
+
+      {/* 評価画像の取得方法（Step4出力=従来動作 / 任意フォルダ=追加機能） */}
+      <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1.5 rounded-xl border border-border bg-card/45 px-3 py-2 text-xs">
+        <span className="shrink-0 font-semibold text-muted">評価画像の取得方法</span>
+        <label className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 text-text">
+          <input
+            type="radio"
+            name="eval-source-mode"
+            checked={sourceMode === "step4"}
+            onChange={() => switchSourceMode("step4")}
+          />
+          Step4で作成した画像
+        </label>
+        <label className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 text-text">
+          <input
+            type="radio"
+            name="eval-source-mode"
+            checked={sourceMode === "directory"}
+            onChange={() => switchSourceMode("directory")}
+          />
+          フォルダから読み込む
+        </label>
+        {sourceMode === "directory" ? (
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+            <label className="shrink-0 text-muted">評価画像フォルダ</label>
+            <input
+              className="app-input h-7 min-w-[200px] flex-1 py-0 font-mono text-xs"
+              value={directoryPath}
+              onChange={(e) => setDirectoryPath(e.target.value)}
+              placeholder="画像フォルダのパス"
+            />
+            <Button size="sm" variant="secondary" className="h-7" onClick={browseDirectory}>
+              参照
+            </Button>
+            <Button
+              size="sm"
+              className="h-7"
+              onClick={loadDirectoryImages}
+              disabled={directoryLoading || !directoryPath.trim()}
+            >
+              {directoryLoading ? "読み込み中..." : "画像を読み込む"}
+            </Button>
+            <span className="shrink-0 tabular-nums text-muted">
+              画像数 <span className="font-semibold text-text">{directoryItems.length}</span>
+            </span>
+            <span className="shrink-0 text-[10px] text-muted" title="サブフォルダは対象外です">
+              対応形式: PNG / JPG / JPEG / BMP / TIFF / WEBP（サブフォルダ対象外）
+            </span>
+          </div>
+        ) : null}
       </div>
 
       <div className="flex min-h-0 flex-1 gap-2">
@@ -693,7 +857,13 @@ export default function EvaluationDatasetBuilder({
           <div ref={scrollRef} className="dark-scroll min-h-0 flex-1 overflow-y-auto">
             {visibleItems.length === 0 ? (
               <p className="p-3 text-center text-xs text-muted">
-                {loading ? "読み込み中..." : items.length === 0 ? "評価候補がありません（Step4でクロップ出力してください）" : "フィルタ一致なし"}
+                {loading || directoryLoading
+                  ? "読み込み中..."
+                  : items.length === 0
+                    ? sourceMode === "directory"
+                      ? "フォルダを指定して「画像を読み込む」を押してください"
+                      : "評価候補がありません（Step4でクロップ出力してください）"
+                    : "フィルタ一致なし"}
               </p>
             ) : (
               <div style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative" }}>
@@ -938,15 +1108,26 @@ export default function EvaluationDatasetBuilder({
             <>
               <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
                 <span className="text-muted">ファイル名</span>
-                <span className="min-w-0 truncate font-mono text-text" title={`${currentItem.exportId}/${currentItem.filename}`}>
+                <span className="min-w-0 truncate font-mono text-text" title={itemSourceTitle(currentItem)}>
                   {currentItem.filename}
                 </span>
-                <span className="text-muted">Series</span>
-                <span className="text-text">{currentItem.series || "-"}</span>
-                <span className="text-muted">元画像</span>
-                <span className="min-w-0 truncate text-text" title={currentItem.sourceImage}>
-                  {currentItem.sourceImage || "-"}
-                </span>
+                {currentItem.source === "directory" ? (
+                  <>
+                    <span className="text-muted">フォルダ</span>
+                    <span className="min-w-0 truncate font-mono text-text" title={currentItem.directory}>
+                      {currentItem.directory || "-"}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-muted">Series</span>
+                    <span className="text-text">{currentItem.series || "-"}</span>
+                    <span className="text-muted">元画像</span>
+                    <span className="min-w-0 truncate text-text" title={currentItem.sourceImage}>
+                      {currentItem.sourceImage || "-"}
+                    </span>
+                  </>
+                )}
                 <span className="text-muted">回転</span>
                 <span className="tabular-nums text-text">{currentRotation}°</span>
               </div>

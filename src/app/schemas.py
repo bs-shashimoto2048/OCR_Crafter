@@ -101,15 +101,18 @@ class EvaluationStateSaveRequest(BaseModel):
 
 
 class EvaluationDatasetItem(BaseModel):
-    """評価データセットへ含める1画像（Step4出力マニフェスト由来の確定情報）。"""
+    """評価データセットへ含める1画像（Step4出力マニフェスト由来 または 指定フォルダの画像）。"""
 
-    export_id: str = Field(..., description="Step4出力のexport_id")
-    filename: str = Field(..., description="出力フォルダ内のファイル名")
+    export_id: str = Field(default="", description="Step4出力のexport_id（source=step4のとき必須）")
+    filename: str = Field(..., description="出力フォルダ/指定フォルダ内のファイル名")
     label: str = Field(..., description="正解ラベル（case-sensitive）")
     rotation: int = Field(default=0, description="評価用コピーへ焼き込む回転角（0/90/180/270）")
     series: Optional[str] = Field(default="")
     source_image: Optional[str] = Field(default="")
     bbox_id: Optional[int] = Field(default=None)
+    # 未指定=step4（従来動作）。directory時は source_directory を指定する
+    source: Optional[str] = Field(default="step4", description="画像の取得元（step4 / directory）")
+    source_directory: Optional[str] = Field(default="", description="source=directoryのときの画像フォルダパス")
 
 
 class EvaluationDatasetRenameRequest(BaseModel):

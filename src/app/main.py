@@ -113,8 +113,10 @@ from .services.evaluation_dataset import (
     check_training_overlap,
     create_evaluation_dataset,
     delete_evaluation_dataset,
+    list_directory_images,
     list_evaluation_datasets,
     list_export_candidates,
+    load_directory_image,
     load_editing_state,
     load_export_crop_image,
     rename_evaluation_dataset,
@@ -1272,6 +1274,7 @@ async def api_ocr_preview_file(
     file: Optional[UploadFile] = File(default=None),
     project_id: str = Form("default"),
     export_id: str = Form(""),
+    source_directory: str = Form(""),
     filename: str = Form(""),
     rotation: int = Form(0),
     overrides_json: str = Form(""),
@@ -1283,8 +1286,9 @@ async def api_ocr_preview_file(
 ) -> dict[str, Any]:
     """登録前・評価用画像のOCR前処理＋推論プレビュー（/preprocess/preview のファイル入力版）。
 
-    入力は「アップロード画像」または「サーバー管理下の評価候補（export_id+filename+rotation）」のみ。
-    任意のサーバーパスは受け付けない（評価候補はマニフェスト記載ファイルのみ解決）。
+    入力は「アップロード画像」「サーバー管理下の評価候補（export_id+filename+rotation）」
+    「指定フォルダの画像（source_directory+filename+rotation。Step5のフォルダ取得モード）」のいずれか。
+    評価候補はマニフェスト記載ファイルのみ解決、フォルダ画像はフォルダ直下のみ解決（トラバーサル拒否）。
     前処理・推論・小文字制御・Confidence正規化は既存サービスを共通利用する。
     """
     resolved = _resolve_project_id(project_id)
@@ -1312,8 +1316,12 @@ async def api_ocr_preview_file(
             # Step5評価候補: 現在のユーザー回転を適用した状態でOCRへ入力する（回転前の画像を渡さない）
             img = load_export_crop_image(resolved, export_id, filename, rotation=int(rotation))
             stem = f"eval_{export_id}_{Path(filename).stem}_r{int(rotation)}"
+        elif str(source_directory or "").strip() and str(filename or "").strip():
+            # Step5フォルダ取得モード: EXIF反映＋ユーザー回転適用後の画像をOCRへ入力する
+            img = load_directory_image(source_directory, filename, rotation=int(rotation))
+            stem = f"evaldir_{Path(filename).stem}_r{int(rotation)}"
         else:
-            raise ValueError("file または export_id+filename のいずれかを指定してください")
+            raise ValueError("file / export_id+filename / source_directory+filename のいずれかを指定してください")
 
         preview = preview_preprocess_image(img, project_id=resolved, overrides=overrides, preview_stem=stem)
         return _attach_preview_prediction(
@@ -2624,6 +2632,38 @@ def image_builder_evaluation_crop(
     resolved = _resolve_project_id(project_id)
     try:
         img = load_export_crop_image(resolved, export_id, filename, rotation=int(rotation))
+        if int(max_side) > 0:
+            img.thumbnail((int(max_side), int(max_side)))
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return Response(content=buf.getvalue(), media_type="image/png", headers={"Cache-Control": "no-cache"})
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.get("/image-builder/evaluation/directory-images")
+def image_builder_evaluation_directory_images(directory: str = Query(...)) -> dict[str, Any]:
+    """指定フォルダ直下の画像一覧（Step5「フォルダから読み込む」用。サブフォルダは対象外）。"""
+    try:
+        return list_directory_images(directory)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.get("/image-builder/evaluation/directory-image")
+def image_builder_evaluation_directory_image(
+    directory: str = Query(...),
+    filename: str = Query(...),
+    rotation: int = Query(0),
+    max_side: int = Query(0),
+) -> Response:
+    """フォルダ画像のプレビュー/サムネイル（EXIF反映＋回転をその場適用。元ファイルは変更しない）。"""
+    try:
+        img = load_directory_image(directory, filename, rotation=int(rotation))
         if int(max_side) > 0:
             img.thumbnail((int(max_side), int(max_side)))
         buf = io.BytesIO()

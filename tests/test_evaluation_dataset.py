@@ -338,3 +338,129 @@ def test_crop_path_traversal_rejected(temp_projects):
         eval_ds.resolve_export_crop_path("p1", result["export_id"], "../manifest.json")
     with pytest.raises((FileNotFoundError, ValueError)):
         eval_ds.resolve_export_crop_path("p1", "../" + result["export_id"], "1.png")
+
+
+# --- 評価画像の取得方法=フォルダ（directory）モード ---
+
+
+def _jpeg_bytes(width=120, height=60, orientation=None):
+    img = Image.new("RGB", (width, height), (255, 255, 255))
+    buf = io.BytesIO()
+    if orientation:
+        exif = Image.Exif()
+        exif[0x0112] = orientation
+        img.save(buf, format="JPEG", exif=exif.tobytes())
+    else:
+        img.save(buf, format="JPEG")
+    return buf.getvalue()
+
+
+def _make_source_directory(temp_projects, name="eval_src"):
+    src_dir = temp_projects["tmp"] / name
+    src_dir.mkdir()
+    (src_dir / "a.png").write_bytes(_png_bytes(120, 60))
+    (src_dir / "b.JPG").write_bytes(_jpeg_bytes(100, 50))
+    (src_dir / "note.txt").write_text("対象外", encoding="utf-8")
+    sub = src_dir / "sub"
+    sub.mkdir()
+    (sub / "c.png").write_bytes(_png_bytes())  # サブフォルダは対象外
+    return src_dir
+
+
+def test_list_directory_images_top_level_only(temp_projects):
+    """フォルダ直下の対応画像のみ一覧化（非画像・サブフォルダは対象外。拡張子は大小文字不問）。"""
+    src_dir = _make_source_directory(temp_projects)
+    listing = eval_ds.list_directory_images(str(src_dir))
+    assert listing["image_count"] == 2
+    assert [row["filename"] for row in listing["images"]] == ["a.png", "b.JPG"]
+    with pytest.raises(FileNotFoundError):
+        eval_ds.list_directory_images(str(src_dir / "not_exist"))
+    with pytest.raises(ValueError):
+        eval_ds.list_directory_images("  ")
+
+
+def test_directory_image_traversal_and_format_rejected(temp_projects):
+    """フォルダ直下以外・非画像拡張子は解決しない。"""
+    src_dir = _make_source_directory(temp_projects)
+    with pytest.raises(ValueError):
+        eval_ds.resolve_directory_image_path(str(src_dir), "../a.png")
+    with pytest.raises(ValueError):
+        eval_ds.resolve_directory_image_path(str(src_dir), "sub/c.png")
+    with pytest.raises(ValueError):
+        eval_ds.resolve_directory_image_path(str(src_dir), "note.txt")
+    with pytest.raises(FileNotFoundError):
+        eval_ds.resolve_directory_image_path(str(src_dir), "missing.png")
+
+
+def test_load_directory_image_rotation_keeps_source(temp_projects):
+    """フォルダ画像の回転読み込みは元ファイルを変更しない（90°で幅高入替）。"""
+    src_dir = _make_source_directory(temp_projects)
+    before = (src_dir / "a.png").read_bytes()
+    img = eval_ds.load_directory_image(str(src_dir), "a.png", rotation=90)
+    assert (img.width, img.height) == (60, 120)
+    assert (src_dir / "a.png").read_bytes() == before
+
+
+def test_create_dataset_from_directory(temp_projects):
+    """フォルダ画像から作成: 無回転はバイト等価コピー・回転はPNG焼き込み・名前衝突は連番。
+    metadataへ source=directory と source_directory を保存し、CSVは既存評価で読める。"""
+    src_dir = _make_source_directory(temp_projects)
+    (src_dir / "a.jpg").write_bytes(_jpeg_bytes(80, 40))  # 回転焼き込みで a.png と衝突する名前
+    items = [
+        {"source": "directory", "source_directory": str(src_dir), "filename": "a.png", "label": "AB1", "rotation": 0},
+        {"source": "directory", "source_directory": str(src_dir), "filename": "b.JPG", "label": "CD2", "rotation": 90},
+        {"source": "directory", "source_directory": str(src_dir), "filename": "a.jpg", "label": "EF3", "rotation": 90},
+    ]
+    created = eval_ds.create_evaluation_dataset("p1", "eval_dir", items)
+    assert created["image_count"] == 3
+
+    images_dir = Path(created["image_dir"])
+    # 無回転・EXIFなし: バイト等価コピー（元ファイル名のまま）
+    assert (images_dir / "a.png").read_bytes() == (src_dir / "a.png").read_bytes()
+    # 回転焼き込み: PNGへ変換し幅高入替。元ファイルは無変更
+    with Image.open(images_dir / "b.png") as img:
+        assert (img.width, img.height) == (50, 100)
+    # a.jpg の焼き込み先 a.png は既存コピーと衝突するため連番付与
+    with Image.open(images_dir / "a_2.png") as img:
+        assert (img.width, img.height) == (40, 80)
+
+    metadata = json.loads((Path(created["dataset_dir"]) / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["source"] == "directory"
+    assert metadata["source_directory"] == str(src_dir)
+    assert metadata["images"][0]["source_export_id"] == ""
+    assert metadata["images"][0]["source_filename"] == "a.png"
+    assert metadata["images"][1]["filename"] == "b.png"
+
+    gt = _read_gt_csv(created["csv_path"])
+    assert gt["a.png"] == "AB1"
+    assert gt["b.png"] == "CD2"
+    assert gt["a_2.png"] == "EF3"
+
+
+def test_create_dataset_from_directory_bakes_exif_orientation(temp_projects):
+    """EXIF Orientation付きは無回転でも向きを焼き込む（評価入力とブラウザ表示の向きを一致させる）。"""
+    src_dir = temp_projects["tmp"] / "eval_exif"
+    src_dir.mkdir()
+    (src_dir / "photo.jpg").write_bytes(_jpeg_bytes(120, 60, orientation=6))  # 6=時計回り90°必要
+    items = [
+        {"source": "directory", "source_directory": str(src_dir), "filename": "photo.jpg", "label": "GH4", "rotation": 0}
+    ]
+    created = eval_ds.create_evaluation_dataset("p1", "eval_exif", items)
+    with Image.open(Path(created["image_dir"]) / "photo.png") as img:
+        assert (img.width, img.height) == (60, 120)  # 向き反映済み
+
+
+def test_create_dataset_step4_metadata_source_and_mixed_rejected(temp_projects):
+    """step4作成はmetadata source=step4。step4とdirectoryの混在は拒否する。"""
+    result = _run_export(temp_projects)
+    created = eval_ds.create_evaluation_dataset("p1", "eval_s4", _items_from_export(result))
+    metadata = json.loads((Path(created["dataset_dir"]) / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["source"] == "step4"
+    assert "source_directory" not in metadata
+
+    src_dir = _make_source_directory(temp_projects, name="eval_mix_src")
+    mixed = _items_from_export(result) + [
+        {"source": "directory", "source_directory": str(src_dir), "filename": "a.png", "label": "X1", "rotation": 0}
+    ]
+    with pytest.raises(ValueError, match="混在"):
+        eval_ds.create_evaluation_dataset("p1", "eval_mix", mixed)

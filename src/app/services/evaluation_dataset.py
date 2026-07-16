@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 from ..paths import IMAGE_EXTENSIONS
 from ..project_paths import get_project_paths, safe_rmtree
@@ -140,6 +140,66 @@ def load_export_crop_image(project_id: str, export_id: str, filename: str, rotat
     source = resolve_export_crop_path(project_id, export_id, filename)
     with Image.open(source) as img:
         return _apply_rotation(img.convert("RGB"), int(rotation))
+
+
+def _resolve_directory(directory: str) -> Path:
+    text = str(directory or "").strip()
+    if not text:
+        raise ValueError("フォルダパスを指定してください")
+    path = Path(text)
+    if not path.exists() or not path.is_dir():
+        raise FileNotFoundError(f"フォルダが見つかりません: {text}")
+    return path
+
+
+def list_directory_images(directory: str) -> dict[str, Any]:
+    """指定フォルダ直下の画像一覧（評価画像の取得方法=directoryモード）。サブフォルダは対象外。"""
+    path = _resolve_directory(directory)
+    images = sorted(
+        entry.name for entry in path.iterdir() if entry.is_file() and entry.suffix.lower() in IMAGE_EXTENSIONS
+    )
+    return {
+        "directory": str(path.resolve()),
+        "image_count": len(images),
+        "images": [{"filename": name} for name in images],
+    }
+
+
+def resolve_directory_image_path(directory: str, filename: str) -> Path:
+    """フォルダ直下の画像だけを解決する（パス区切り・トラバーサル・非画像拡張子を拒否）。"""
+    root = _resolve_directory(directory)
+    safe_name = Path(str(filename or "")).name
+    if not safe_name or safe_name != filename:
+        raise ValueError(f"invalid filename: {filename}")
+    if Path(safe_name).suffix.lower() not in IMAGE_EXTENSIONS:
+        raise ValueError(f"未対応の画像形式です: {safe_name}")
+    source = root / safe_name
+    if not source.exists() or not source.is_file():
+        raise FileNotFoundError(f"画像が見つかりません: {source}")
+    return source
+
+
+def _exif_orientation(path: Path) -> int:
+    """EXIF Orientationタグ（無し・読めない場合は1=そのまま）。"""
+    try:
+        with Image.open(path) as img:
+            return int(img.getexif().get(0x0112, 1) or 1)
+    except Exception:  # noqa: BLE001
+        return 1
+
+
+def load_directory_image(directory: str, filename: str, rotation: int = 0) -> Image.Image:
+    """フォルダ画像をプレビュー/OCR入力用に読み込む。
+
+    任意画像はEXIF Orientation付きの可能性があるため、読込時に1回だけ反映してから
+    ユーザー回転を適用する（ブラウザ表示と向きを一致させる。元ファイルは変更しない）。
+    """
+    if int(rotation) not in _VALID_ROTATIONS:
+        raise ValueError("rotation must be one of 0/90/180/270")
+    source = resolve_directory_image_path(directory, filename)
+    with Image.open(source) as img:
+        oriented = ImageOps.exif_transpose(img)
+        return _apply_rotation(oriented.convert("RGB"), int(rotation))
 
 
 def load_editing_state(project_id: str) -> dict[str, Any]:
@@ -343,13 +403,28 @@ def create_evaluation_dataset(
 ) -> dict[str, Any]:
     """評価データセットを作成する（画像コピー＋回転焼き込み＋CSV＋metadata）。
 
+    - 入力元は Step4出力（source=step4、既定）または 任意フォルダ（source=directory）
     - 未入力ラベルがある場合は作成を拒否（空文字をCSVへ出力しない）
-    - 学習用クロップ（Step4出力）は読み取りのみで変更しない
-    - 画像名は <export_id>_<元ファイル名> で衝突を防ぐ
+    - 元画像（Step4出力・フォルダ画像）は読み取りのみで変更しない
+    - 画像名は step4=<export_id>_<元ファイル名> / directory=元ファイル名（重複時は連番付与）
     """
     dataset_id = sanitize_dataset_id(dataset_name)
     if not items:
         raise ValueError("評価対象画像がありません")
+
+    # 入力元の判定（metadataのsourceを一意にするため、step4とdirectoryの混在は不可）
+    source_modes = {str(row.get("source") or "step4") for row in items}
+    if not source_modes <= {"step4", "directory"}:
+        raise ValueError("source は step4 / directory のいずれかを指定してください")
+    if len(source_modes) > 1:
+        raise ValueError("Step4出力とフォルダ画像を同一データセットへ混在させることはできません")
+    source_mode = source_modes.pop()
+    source_directory = ""
+    if source_mode == "directory":
+        dirs = {str(row.get("source_directory") or "").strip() for row in items}
+        if len(dirs) != 1 or not next(iter(dirs)):
+            raise ValueError("source_directory を指定してください（単一フォルダのみ）")
+        source_directory = next(iter(dirs))
 
     unlabeled = [row for row in items if not str(row.get("label") or "").strip()]
     if unlabeled:
@@ -369,13 +444,19 @@ def create_evaluation_dataset(
     missing: list[str] = []
     for row in items:
         try:
-            source = resolve_export_crop_path(project_id, str(row.get("export_id")), str(row.get("filename")))
+            if source_mode == "directory":
+                source = resolve_directory_image_path(source_directory, str(row.get("filename")))
+            else:
+                source = resolve_export_crop_path(project_id, str(row.get("export_id")), str(row.get("filename")))
             resolved.append((row, source))
         except (FileNotFoundError, ValueError):
-            missing.append(f"{row.get('export_id')}/{row.get('filename')}")
+            if source_mode == "directory":
+                missing.append(str(row.get("filename")))
+            else:
+                missing.append(f"{row.get('export_id')}/{row.get('filename')}")
     if missing:
         raise FileNotFoundError(
-            f"クロップ画像が見つからないため作成できません（{len(missing)}件）: " + ", ".join(missing[:5])
+            f"評価画像が見つからないため作成できません（{len(missing)}件）: " + ", ".join(missing[:5])
         )
 
     images_dir = dataset_dir / "images"
@@ -383,19 +464,34 @@ def create_evaluation_dataset(
         images_dir.mkdir(parents=True, exist_ok=False)
         csv_rows: list[tuple[str, str]] = []
         image_entries: list[dict[str, Any]] = []
+        used_names: set[str] = set()
         for row, source in resolved:
             rotation = int(row.get("rotation") or 0)
             # ラベルはcase-sensitiveのまま保持（大小文字を変更しない）
             label = str(row.get("label"))
-            out_name = f"{row.get('export_id')}_{Path(str(row.get('filename'))).name}"
+            if source_mode == "directory":
+                # EXIF Orientation付きは向きを焼き込む（評価パイプラインはEXIFを解釈しないため、
+                # ブラウザで見た向きと評価入力の向きを一致させる）。回転・EXIFなしはバイト等価コピー
+                bake = rotation != 0 or _exif_orientation(source) != 1
+                base_name = f"{source.stem}.png" if bake else source.name
+                out_name = base_name
+                counter = 2
+                while out_name in used_names:
+                    out_name = f"{Path(base_name).stem}_{counter}{Path(base_name).suffix}"
+                    counter += 1
+            else:
+                bake = rotation != 0
+                out_name = f"{row.get('export_id')}_{Path(str(row.get('filename'))).name}"
+            used_names.add(out_name)
             target = images_dir / out_name
-            if rotation == 0:
-                shutil.copyfile(source, target)  # 無回転はバイト等価コピー
+            if not bake:
+                shutil.copyfile(source, target)
                 with Image.open(target) as img:
                     width, height = img.size
             else:
                 with Image.open(source) as img:
-                    rotated = _apply_rotation(img.convert("RGB"), rotation)
+                    oriented = ImageOps.exif_transpose(img) if source_mode == "directory" else img
+                    rotated = _apply_rotation(oriented.convert("RGB"), rotation)
                     rotated.save(target, format="PNG")
                     width, height = rotated.size
             csv_rows.append((out_name, label))
@@ -407,10 +503,10 @@ def create_evaluation_dataset(
                     "width": width,
                     "height": height,
                     "series": str(row.get("series") or ""),
-                    "source_export_id": str(row.get("export_id") or ""),
+                    "source_export_id": str(row.get("export_id") or "") if source_mode == "step4" else "",
                     "source_filename": str(row.get("filename") or ""),
-                    "source_image": str(row.get("source_image") or ""),
-                    "source_bbox_id": row.get("bbox_id"),
+                    "source_image": str(row.get("source_image") or "") if source_mode == "step4" else "",
+                    "source_bbox_id": row.get("bbox_id") if source_mode == "step4" else None,
                 }
             )
 
@@ -421,16 +517,20 @@ def create_evaluation_dataset(
             writer.writerow(["filename", "label"])
             writer.writerows(csv_rows)
 
+        # source: step4=Step4出力由来 / directory=任意フォルダ由来
+        # （旧データセットの "training_image_builder" は step4 と同義。読む側はこの値に依存しない）
         metadata = {
             "dataset_id": dataset_id,
             "project_id": project_id,
             "created_at": datetime.now().isoformat(timespec="seconds"),
-            "source": "training_image_builder",
+            "source": source_mode,
             "image_count": len(csv_rows),
             "case_sensitive": True,
             "csv_file": "ground_truth.csv",
             "images": image_entries,
         }
+        if source_mode == "directory":
+            metadata["source_directory"] = source_directory
         (dataset_dir / "metadata.json").write_text(
             json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
         )

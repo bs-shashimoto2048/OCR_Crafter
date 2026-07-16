@@ -8,6 +8,34 @@ export function cropKey(exportId, filename) {
   return `${exportId}/${filename}`;
 }
 
+// フォルダ取得モードのキー接頭辞（Step4のexport_idと衝突しない予約値）
+export const DIRECTORY_SOURCE_KEY = "__dir__";
+
+// フォルダ画像の一意キー
+export function directoryItemKey(filename) {
+  return `${DIRECTORY_SOURCE_KEY}/${filename}`;
+}
+
+// フォルダ画像一覧から評価候補アイテムを組み立てる（Step4候補と同じ形。Series・元画像情報は持たない）
+export function buildDirectoryItems(directory, filenames) {
+  const dir = String(directory || "");
+  return (Array.isArray(filenames) ? filenames : [])
+    .map((name) => String(name || ""))
+    .filter(Boolean)
+    .map((name) => ({
+      key: directoryItemKey(name),
+      source: "directory",
+      directory: dir,
+      exportId: "",
+      filename: name,
+      series: "",
+      bboxId: null,
+      exists: true,
+      sourceImage: "",
+      createdAt: "",
+    }));
+}
+
 // 回転角の加算（0/90/180/270 で循環）
 export function nextRotation(current, delta) {
   const base = Number(current) || 0;
