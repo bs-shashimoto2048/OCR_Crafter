@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Button from "../components/Button";
 import Card from "../components/Card";
 import { request } from "../lib/api";
+import { nextSelectionAfterDelete } from "../lib/bboxSelection";
 import {
   buildModelValue,
   canDetectWithModel,
@@ -327,11 +328,26 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
     return (rows || []).map((row) => ({ ...row }));
   }
 
+  // Undo/Redoのスナップショット。BBox配列に加えて選択状態（selectedUiIds/focusedBboxId）も保存し、
+  // 削除のUndoで「削除前の選択状態」まで復元できるようにする
+  function makeHistoryEntry(rows) {
+    return {
+      rows: cloneDetections(rows),
+      selectedUiIds: [...selectedUiIds],
+      focusedBboxId,
+    };
+  }
+
   function pushUndoSnapshot(sourceRows) {
-    const snapshot = cloneDetections(sourceRows);
+    const snapshot = makeHistoryEntry(sourceRows);
     // 履歴上限100件。新しい編集操作でRedo履歴は破棄する（一般的なエディタと同じ挙動）
     setBboxUndoStack((prev) => [...prev.slice(-99), snapshot]);
     setBboxRedoStack([]);
+  }
+
+  function restoreHistoryEntry(entry) {
+    setSelectedUiIds(Array.isArray(entry.selectedUiIds) ? entry.selectedUiIds : []);
+    setFocusedBboxId(entry.focusedBboxId ?? null);
   }
 
   function undoDetections() {
@@ -341,9 +357,10 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       }
       const snapshot = prevUndo[prevUndo.length - 1];
       setDetections((prevDetections) => {
-        setBboxRedoStack((prevRedo) => [...prevRedo.slice(-99), cloneDetections(prevDetections)]);
-        return cloneDetections(snapshot);
+        setBboxRedoStack((prevRedo) => [...prevRedo.slice(-99), makeHistoryEntry(prevDetections)]);
+        return cloneDetections(snapshot.rows);
       });
+      restoreHistoryEntry(snapshot);
       return prevUndo.slice(0, -1);
     });
   }
@@ -355,9 +372,10 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       }
       const snapshot = prevRedo[prevRedo.length - 1];
       setDetections((prevDetections) => {
-        setBboxUndoStack((prevUndo) => [...prevUndo.slice(-99), cloneDetections(prevDetections)]);
-        return cloneDetections(snapshot);
+        setBboxUndoStack((prevUndo) => [...prevUndo.slice(-99), makeHistoryEntry(prevDetections)]);
+        return cloneDetections(snapshot.rows);
       });
+      restoreHistoryEntry(snapshot);
       return prevRedo.slice(0, -1);
     });
   }
@@ -501,6 +519,17 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
     }
     return detections.filter((row) => (String(row.label || "").trim() || "(unlabeled)") === seriesFilter);
   }, [detections, seriesFilter]);
+
+  // Series変更時は表示中のBBoxのみへ選択・フォーカスを絞る（前Seriesの選択を持ち越さない）
+  useEffect(() => {
+    setSelectedUiIds((prev) => {
+      const next = prev.filter((id) => filteredDetections.some((row) => row.id === id));
+      return next.length === prev.length ? prev : next;
+    });
+    setFocusedBboxId((prev) => (prev != null && filteredDetections.some((row) => row.id === prev) ? prev : null));
+    // フィルタ変更時のみ実行（detections変更での実行は既存のstale選択除去effectが担当）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seriesFilter]);
   const currentImageDataUrl = detectResult?.image_data_url || resizePreview?.image_data_url || rawPreviewUrl || "";
   // Step2 で「前処理後」表示を選んだ場合は検出前処理プレビューを表示（未取得時は元画像）
   const displayImageDataUrl =
@@ -609,24 +638,10 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
     };
   }
 
-  // 削除後は次の番号のBBOX（無ければ前の番号）を選択する
-  function nextSelectionAfterDelete(rows, deletedIds) {
-    const deleted = new Set(deletedIds);
-    const remaining = rows.filter((row) => !deleted.has(row.id)).map((row) => row.id);
-    if (remaining.length === 0) {
-      return null;
-    }
-    const minDeleted = Math.min(...deletedIds);
-    const after = remaining.filter((id) => id > minDeleted).sort((a, b) => a - b);
-    if (after.length > 0) {
-      return after[0];
-    }
-    return remaining.sort((a, b) => b - a)[0];
-  }
-
   function deleteBbox(id) {
     pushUndoSnapshot(detections);
-    const nextId = nextSelectionAfterDelete(detections, [id]);
+    // 削除後の自動選択は「表示中の一覧（Seriesフィルタ適用後）」を基準にする（lib/bboxSelection.js）
+    const nextId = nextSelectionAfterDelete(filteredDetections, [id]);
     setDetections((prev) => prev.filter((row) => row.id !== id));
     if (editingBboxId === id) {
       setEditingBboxId(null);
@@ -759,7 +774,8 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
       return;
     }
     pushUndoSnapshot(detections);
-    const nextId = nextSelectionAfterDelete(detections, targets.map((row) => row.id));
+    // 削除後の自動選択は「表示中の一覧（Seriesフィルタ適用後）」を基準にする（フィルタ外を選択しない）
+    const nextId = nextSelectionAfterDelete(filteredDetections, targets.map((row) => row.id));
     setDetections((prev) => prev.filter((row) => !targetIds.has(row.id)));
     if (nextId != null) {
       setSelectedUiIds([nextId]);
@@ -2408,9 +2424,9 @@ export default function TrainingImageBuilderView({ projectId, activeStep = 1, on
                       }}
                       tabIndex={-1}
                       onClick={(e) => {
-                        // 一覧クリックで画像側も選択状態にする（Ctrl/Cmdで複数選択）
+                        // 一覧クリックも画像クリックと同じ選択ロジック（handleBoxSelect + focusBboxCard）を使用
                         handleBoxSelect(row.id, Boolean(e.ctrlKey || e.metaKey));
-                        setFocusedBboxId(row.id);
+                        focusBboxCard(row.id);
                       }}
                       className={`flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1 text-xs ${
                         focusedBboxId === row.id
