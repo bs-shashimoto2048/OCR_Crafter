@@ -7,6 +7,7 @@ import {
   formatSignedValue,
   isBaselineModel,
   latestEvalOf,
+  matchesModelSearch,
   modelBadges,
   modelEvalEntries,
   normalizeEvalEntry,
@@ -131,4 +132,19 @@ test("normalizeEvalEntry: CER関連フィールドの正規化（旧形式はnul
   assert.equal(legacy.cer, null);
   assert.equal(legacy.charAccuracy, null);
   assert.deepEqual(legacy.confusions, []);
+});
+
+test("matchesModelSearch: 管理No・モデル名・別名のいずれでも部分一致で検索できる", () => {
+  const target = { name: "tess_20260715_145027.tess.json", alias: "v3（実画像強化）", modelId: "M0004" };
+  // 管理No検索（大文字小文字無視）
+  assert.equal(matchesModelSearch("M0004", target), true);
+  assert.equal(matchesModelSearch("m0004", target), true);
+  assert.equal(matchesModelSearch("M0001", target), false);
+  // モデル名・別名検索（従来動作の維持）
+  assert.equal(matchesModelSearch("145027", target), true);
+  assert.equal(matchesModelSearch("実画像", target), true);
+  // 空検索は全件一致・管理No未付与でも落ちない
+  assert.equal(matchesModelSearch("", target), true);
+  assert.equal(matchesModelSearch("M0004", { name: "a", alias: "", modelId: "" }), false);
+  assert.equal(matchesModelSearch("", {}), true);
 });

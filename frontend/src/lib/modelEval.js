@@ -153,3 +153,11 @@ export function correctTotalLabel(entry) {
   if (!entry || entry.correct === null || entry.total === null) return "未記録";
   return `${entry.correct} / ${entry.total}`;
 }
+
+// モデル一覧検索: モデル名・別名・管理No（M0004等）のいずれかに部分一致（大文字小文字無視）。
+// 空検索は全件一致。
+export function matchesModelSearch(query, { name, alias, modelId } = {}) {
+  const search = String(query || "").trim().toLowerCase();
+  if (!search) return true;
+  return [name, alias, modelId].some((value) => String(value || "").toLowerCase().includes(search));
+}

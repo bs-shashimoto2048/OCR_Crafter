@@ -2915,6 +2915,13 @@ export default function App() {
       const text = String(value ?? "");
       return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
     };
+    // 管理No（M0001形式）: 評価ラベル→モデル名（target.model）→モデル情報のmodel_id を引く。
+    // ベース疑似モデル（eng等）は一覧に無いため未採番=空欄
+    const idByLabel = {};
+    targets.forEach((t) => {
+      idByLabel[t.label] = modelInfos?.[t.model]?.model_id || "";
+    });
+    const modelIdOf = (label) => idByLabel[label] || "";
     // 明細: 1行=画像×モデル（編集距離・置換/脱落/挿入件数・学習前比の改善/悪化を含む）
     const comparison = ocrEvalResult.comparison || null;
     const lines = [
@@ -2924,6 +2931,7 @@ export default function App() {
         "prediction",
         "match",
         "model",
+        "model_id",
         "edit_distance",
         "sub_count",
         "del_count",
@@ -2949,6 +2957,7 @@ export default function App() {
             r.prediction ?? "",
             r.match ? "1" : "0",
             r.model_label,
+            modelIdOf(r.model_label),
             r.edit_distance ?? "",
             r.sub_count ?? "",
             r.del_count ?? "",
@@ -2965,6 +2974,7 @@ export default function App() {
     lines.push(
       [
         "model",
+        "model_id",
         "total",
         "correct",
         "accuracy_percent",
@@ -2981,6 +2991,7 @@ export default function App() {
       lines.push(
         [
           t.label,
+          modelIdOf(t.label),
           t.total,
           t.correct,
           t.accuracy_percent,
@@ -2996,10 +3007,10 @@ export default function App() {
     });
     // 混同集計（モデル別TOP10: 置換/脱落/挿入）
     lines.push("");
-    lines.push(["model", "kind", "from", "to", "count"].map(escape).join(","));
+    lines.push(["model", "model_id", "kind", "from", "to", "count"].map(escape).join(","));
     targets.forEach((t) => {
       (t.confusions || []).forEach((c) => {
-        lines.push([t.label, c.kind, c.from, c.to, c.count].map(escape).join(","));
+        lines.push([t.label, modelIdOf(t.label), c.kind, c.from, c.to, c.count].map(escape).join(","));
       });
     });
 

@@ -8,9 +8,12 @@ import shutil
 
 import torch
 
+from threading import Lock
+
 from ..config import get_settings
 from ..db import fetch_training_job
 from ..project_paths import ensure_project_directories
+from .. import project_paths as project_paths_module
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +120,57 @@ def _ocr_ratio_from_meta(meta: dict) -> dict[str, float]:
         "val": _safe_float(meta.get("val_ratio", 0.0)),
         "test": _safe_float(meta.get("test_ratio", 0.0)),
     }
+
+
+# 管理No（モデルID）: OCR Crafter全体で一意・作成順採番・削除しても番号を再利用しない。
+# data/model_ids.json へ {"counter": n, "models": {"<project_id>/<モデル名>": "M0001"}} で永続化する
+# （登録簿からは削除しないため、モデル削除後も同番号が別モデルへ振られることはない）
+_MODEL_ID_LOCK = Lock()
+
+
+def _model_id_file() -> Path:
+    # PROJECTS_DIR（テストでは一時領域へ差し替えられる）の親=dataディレクトリへ保存する
+    return Path(project_paths_module.PROJECTS_DIR).parent / "model_ids.json"
+
+
+def _load_model_id_registry() -> dict:
+    try:
+        data = json.loads(_model_id_file().read_text(encoding="utf-8"))
+        if isinstance(data, dict) and isinstance(data.get("models"), dict):
+            return {"counter": int(data.get("counter") or 0), "models": dict(data["models"])}
+    except (OSError, ValueError):
+        pass
+    return {"counter": 0, "models": {}}
+
+
+def assign_model_ids(project_id: str, items: list[dict]) -> None:
+    """モデル一覧へ管理No（`model_id`: M0001形式）を付与する。
+
+    - 既登録モデルは登録済みの番号を返す（番号は不変）
+    - 未登録モデルは**作成日時順（無ければ更新日時）**で一括採番
+      （既存モデルの初回移行も同じ経路で作成順に振られる）
+    - 採番はプロセス内Lock＋ファイル永続化。保存失敗時も表示は継続する
+    """
+    pid = str(project_id or "default")
+    with _MODEL_ID_LOCK:
+        registry = _load_model_id_registry()
+        models = registry["models"]
+        missing = [item for item in items if f"{pid}/{item.get('name')}" not in models]
+        missing.sort(key=lambda item: (str(item.get("created_at") or item.get("modified_at") or ""), str(item.get("name"))))
+        changed = False
+        for item in missing:
+            registry["counter"] = int(registry["counter"]) + 1
+            models[f"{pid}/{item.get('name')}"] = f"M{registry['counter']:04d}"
+            changed = True
+        if changed:
+            try:
+                path = _model_id_file()
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps(registry, ensure_ascii=False, indent=2), encoding="utf-8")
+            except OSError:
+                logger.warning("model id registry save failed: %s", _model_id_file())
+        for item in items:
+            item["model_id"] = models.get(f"{pid}/{item.get('name')}", "")
 
 
 def _file_size_mb(path_text: str) -> Optional[float]:
@@ -358,6 +412,7 @@ def list_model_infos(project_id: Optional[str] = None) -> list[dict]:
                     "model_dir": "",
                 }
             )
+    assign_model_ids(paths.project_id, items)
     return items
 
 

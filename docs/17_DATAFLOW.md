@@ -76,6 +76,9 @@ flowchart LR
     end
     DB[("outputs/app.db<br/>training_jobs (SQLite)")]
     LS[("ブラウザ localStorage<br/>前処理パラメータ・辞書・UI設定")]
+    MID[("data/model_ids.json<br/>モデル管理No登録簿（全プロジェクト共通）")]
 ```
+
+- `data/model_ids.json`: モデル管理No（M0001形式）の登録簿。`{"counter": 通算採番数, "models": {"<project_id>/<モデル名>": "M0001"}}`。`/models/info` の一覧取得時に未登録モデルを**作成日時順**で一括採番して追記する（既存モデルの初回移行も同じ経路）。**モデルを削除してもエントリは残し、番号を再利用しない**（OCR Crafter全体で一意）。ファイルが無い・壊れている場合は counter=0 から再構築される
 
 - どの矢印がどのAPIかは `docs/06_API_REFERENCE.md`、ファイル形式は `docs/07_DATABASE.md` を参照。

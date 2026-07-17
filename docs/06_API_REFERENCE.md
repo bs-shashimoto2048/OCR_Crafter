@@ -87,7 +87,7 @@
 | Method / Path | リクエスト | レスポンス主要キー | 概要 |
 |---|---|---|---|
 | GET `/models` | Query: `project_id?` | `items` | 保存済みモデル一覧 |
-| GET `/models/info` | Query: `project_id?` | `items` | モデル詳細情報一覧（`model_size_mb`=モデル実体サイズMB。tesseract=traineddata・分類=.ptファイル。実体なし/PaddleOCRはnull=UIでは未記録表示） |
+| GET `/models/info` | Query: `project_id?` | `items` | モデル詳細情報一覧（`model_size_mb`=モデル実体サイズMB。tesseract=traineddata・分類=.ptファイル。実体なし/PaddleOCRはnull=UIでは未記録表示。`model_id`=管理No「M0001」形式：作成日時順に自動採番・OCR Crafter全体で一意・削除後も再利用しない。`data/model_ids.json` へ永続化し未登録モデルは一覧取得時に一括採番） |
 | GET `/models/latest` | Query: `model_type?`, `training_family`, `engine?` | `model` | 最新モデル名 |
 | GET `/model-types` | Query: `project_id?` | `items` | モデル種別一覧 |
 | DELETE `/models/{model_name}` | Query: `project_id?` | `deleted` | モデル削除（models配下限定の安全検証あり） |

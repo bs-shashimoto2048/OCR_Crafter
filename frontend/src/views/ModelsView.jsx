@@ -9,6 +9,7 @@ import {
   correctTotalLabel,
   formatSignedValue,
   latestEvalOf,
+  matchesModelSearch,
   modelBadges,
   modelEvalEntries,
   whitelistLabelOf,
@@ -257,6 +258,25 @@ export default function ModelsView({
     return aliases[name] || name;
   }
 
+  // 管理No（M0001形式・作成順・OCR Crafter内で一意）。旧レスポンス等で未付与なら空
+  function modelIdOf(name) {
+    return infoOf(name).model_id || "";
+  }
+
+  // 管理No表示チップ（ホバーで「M0004 → ファイル名」のツールチップ）
+  function ModelIdChip({ name, className = "" }) {
+    const id = modelIdOf(name);
+    if (!id) return null;
+    return (
+      <span
+        className={`mr-1 inline-block shrink-0 rounded bg-accent/15 px-1 font-mono text-[10px] font-semibold text-accent ${className}`}
+        title={`${id} → ${name}`}
+      >
+        {id}
+      </span>
+    );
+  }
+
   function statusOf(name) {
     if (name && name === inferenceInUseModel) return "使用中";
     if (latestNames.has(name)) return "最新";
@@ -268,9 +288,9 @@ export default function ModelsView({
   const badgeMap = useMemo(() => modelBadges(evalHistory, models), [evalHistory, models]);
 
   const filteredModels = useMemo(() => {
-    const search = filterSearch.trim().toLowerCase();
     return models.filter((name) => {
-      if (search && !name.toLowerCase().includes(search) && !String(aliases[name] || "").toLowerCase().includes(search)) {
+      // モデル名・別名に加えて管理No（M0004等）でも検索可能
+      if (!matchesModelSearch(filterSearch, { name, alias: aliases[name], modelId: modelIdOf(name) })) {
         return false;
       }
       if (filterEngine !== "all" && engineLabelOf(engineName(name), trainingFamily(name)) !== filterEngine) {
@@ -474,6 +494,7 @@ export default function ModelsView({
         <div className="dark-scroll min-h-0 flex-[0_1_auto] space-y-2 overflow-y-auto pr-0.5 [overscroll-behavior:contain]">
           <div>
             <p className="truncate text-sm font-semibold text-text" title={name}>
+              <ModelIdChip name={name} />
               {displayName(name)}
             </p>
             {aliases[name] ? (
@@ -489,6 +510,7 @@ export default function ModelsView({
 
           <div className="space-y-1 rounded-lg border border-border bg-card/45 px-2.5 py-2">
             <p className="text-[11px] font-semibold text-text">モデル情報</p>
+            <DetailRow label="管理No" value={modelIdOf(name) || "-"} />
             <DetailRow label="Engine" value={engineLabelOf(engineName(name), trainingFamily(name))} />
             <DetailRow label="方式" value={familyLabelOf(trainingFamily(name))} />
             <DetailRow label="ベースモデル" value={info.base_lang || "-"} />
@@ -715,6 +737,9 @@ export default function ModelsView({
       const label = displayName(name);
       return label.length > 14 ? `${label.slice(0, 13)}…` : label;
     };
+    // 比較画面は管理No主体・ファイル名はツールチップ/カード下部の補助表示（未付与時は従来の短縮名）
+    const compareLabel = (name) => modelIdOf(name) || shortName(name);
+    const compareTitle = (name) => (modelIdOf(name) ? `${modelIdOf(name)} → ${name}` : name);
     const bestCell = "bg-emerald-500/15 font-semibold text-emerald-300";
     return (
       <div className="dark-scroll min-h-0 flex-1 space-y-2 overflow-y-auto pr-0.5 [overscroll-behavior:contain]">
@@ -722,7 +747,10 @@ export default function ModelsView({
         {recommended ? (
           <div className="rounded-lg border border-amber-400/50 bg-amber-400/10 px-2.5 py-2">
             <p className="text-[11px] font-semibold text-amber-200">
-              🏆 推奨モデル: <span title={recommended.model}>{displayName(recommended.model)}</span>
+              🏆 推奨モデル: <span title={compareTitle(recommended.model)}>{compareLabel(recommended.model)}</span>
+            </p>
+            <p className="truncate text-[10px] text-amber-100/80" title={recommended.model}>
+              {displayName(recommended.model)}
             </p>
             <p className="mt-0.5 text-[10px] text-amber-100/90">
               {recommended.wins}勝{recommended.reasons.length > 0 ? ` / ${recommended.reasons.join("・")}` : ""}
@@ -739,8 +767,8 @@ export default function ModelsView({
               <tr>
                 <th className="px-1.5 py-1 font-medium">指標</th>
                 {comparison.columns.map((col) => (
-                  <th key={col.model} className="px-1.5 py-1 font-medium" title={col.model}>
-                    {shortName(col.model)}
+                  <th key={col.model} className="px-1.5 py-1 font-medium" title={compareTitle(col.model)}>
+                    {compareLabel(col.model)}
                   </th>
                 ))}
               </tr>
@@ -826,7 +854,7 @@ export default function ModelsView({
                   <td className="whitespace-nowrap px-1.5 py-1 text-muted">{row.metric.label}</td>
                   <td className="whitespace-nowrap px-1.5 py-1 text-text">
                     {row.winner ? (
-                      <span title={row.winner}>🟢 {shortName(row.winner)}</span>
+                      <span title={compareTitle(row.winner)}>🟢 {compareLabel(row.winner)}</span>
                     ) : (
                       <span className="text-muted">—</span>
                     )}
@@ -837,7 +865,7 @@ export default function ModelsView({
                 <td className="whitespace-nowrap px-1.5 py-1 font-semibold text-text">勝利数</td>
                 <td className="px-1.5 py-1 text-text">
                   {comparison.columns
-                    .map((col) => `${shortName(col.model)} ${winLoss.wins[col.model] || 0}勝`)
+                    .map((col) => `${compareLabel(col.model)} ${winLoss.wins[col.model] || 0}勝`)
                     .join(" / ")}
                 </td>
               </tr>
@@ -851,9 +879,15 @@ export default function ModelsView({
           const entries = evalEntriesOf(evalHistory, name);
           return (
             <div key={name} className="rounded-lg border border-border bg-card/45 px-2.5 py-2">
-              <p className="truncate text-xs font-semibold text-text" title={name}>
-                {displayName(name)} <ModelBadgeChips names={badgeMap[name]} />
+              <p className="truncate text-xs font-semibold text-text" title={compareTitle(name)}>
+                {modelIdOf(name) ? <ModelIdChip name={name} /> : displayName(name)} <ModelBadgeChips names={badgeMap[name]} />
               </p>
+              {/* ファイル名はカード下部（補助表示） */}
+              {modelIdOf(name) ? (
+                <p className="truncate text-[10px] text-muted" title={name}>
+                  {displayName(name)}
+                </p>
+              ) : null}
               <div className="mt-1 space-y-0.5">
                 <DetailRow label="Engine" value={engineLabelOf(engineName(name), trainingFamily(name))} />
                 <DetailRow label="Iteration" value={iterationText(name)} />
@@ -893,7 +927,7 @@ export default function ModelsView({
           <input
             value={filterSearch}
             onChange={(e) => setFilterSearch(e.target.value)}
-            placeholder="検索（モデル名 / 表示名）"
+            placeholder="検索（管理No / モデル名 / 表示名）"
             className="app-input h-7 w-48 text-xs"
           />
           <select value={filterEngine} onChange={(e) => setFilterEngine(e.target.value)} className="app-select h-7 w-32 text-xs">
@@ -974,6 +1008,7 @@ export default function ModelsView({
                     </td>
                     <td className="px-2 py-2">
                       <p className="min-w-0 truncate text-text" title={name}>
+                        <ModelIdChip name={name} />
                         {displayName(name)} <ModelBadgeChips names={badgeMap[name]} />
                       </p>
                       {aliases[name] ? (
