@@ -6,6 +6,7 @@ import sys
 import signal
 import subprocess
 import time
+import hashlib
 import io
 import json
 import base64
@@ -96,6 +97,11 @@ from .services.ocr_pipeline import (
     save_ocr_prediction_log,
 )
 from .services.manual_mask import extract_black_region, load_manual_masks, save_manual_masks_for_image
+from .services.ocr_preview_cache import (
+    get_cached_preview_result,
+    make_preview_cache_key,
+    set_cached_preview_result,
+)
 from .services.preprocess import (
     apply_eval_preprocess,
     build_preprocess_config,
@@ -1274,6 +1280,208 @@ def preprocess_preview_post(req: PreprocessPreviewRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
+def _parse_preview_json_object(text: str, name: str) -> Optional[dict[str, Any]]:
+    """preview-file系のJSON Formパラメータ（object想定）を検証付きでparseする。空=None。"""
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"invalid {name}: {e}") from e
+    if not isinstance(parsed, dict):
+        raise ValueError(f"{name} must be an object")
+    return parsed
+
+
+def _load_preview_source_image(
+    resolved: str,
+    upload_bytes: Optional[bytes],
+    upload_name: str,
+    export_id: str,
+    source_directory: str,
+    filename: str,
+    rotation: int,
+) -> tuple[Image.Image, str]:
+    """preview-file系の入力画像解決（アップロード / Step4評価候補 / フォルダ画像）。
+
+    評価候補はマニフェスト記載ファイルのみ・フォルダ画像はフォルダ直下のみ解決（トラバーサル拒否）。
+    回転（フォルダ画像はEXIF反映も）はここで適用済みの画像を返す。
+    """
+    if upload_bytes is not None:
+        try:
+            with Image.open(io.BytesIO(upload_bytes)) as opened:
+                img = opened.convert("RGB")
+        except Exception as e:  # noqa: BLE001
+            raise ValueError("unsupported or unreadable image format") from e
+        return img, f"upload_{Path(str(upload_name or 'image')).stem}"
+    if str(export_id or "").strip() and str(filename or "").strip():
+        # Step5評価候補: 現在のユーザー回転を適用した状態でOCRへ入力する（回転前の画像を渡さない）
+        img = load_export_crop_image(resolved, export_id, filename, rotation=int(rotation))
+        return img, f"eval_{export_id}_{Path(filename).stem}_r{int(rotation)}"
+    if str(source_directory or "").strip() and str(filename or "").strip():
+        # Step5フォルダ取得モード: EXIF反映＋ユーザー回転適用後の画像をOCRへ入力する
+        img = load_directory_image(source_directory, filename, rotation=int(rotation))
+        return img, f"evaldir_{Path(filename).stem}_r{int(rotation)}"
+    raise ValueError("file / export_id+filename / source_directory+filename のいずれかを指定してください")
+
+
+def _predict_preview_slot(
+    project_id: str,
+    slot: dict[str, Any],
+    image_type: str,
+    processed_path: Path,
+    processed_sha: str,
+) -> dict[str, Any]:
+    """1スロット分のOCR推論（結果キャッシュ付き）。
+
+    - 結果にはbase64画像を含めない（prediction/confidence/engine/model_name/errorのみ）
+    - キャッシュキーは処理済み画像sha256+推論設定。処理済み画像は元画像・回転・
+      Step5専用前処理・共通前処理をすべて反映するため、いずれの変更でも別キーになる
+    - エラー結果はキャッシュしない（設定・環境修正後の再実行で即反映させる）
+    """
+    engine = str(slot.get("engine") or "custom")
+    model = str(slot.get("model") or "latest")
+    langs_text = str(slot.get("easyocr_langs") or "en")
+    include_lowercase = slot.get("include_lowercase") is not False
+    psm_val = int(slot.get("psm") or 0)
+    whitelist = str(slot.get("whitelist") or "")
+    slot_no = slot.get("slot")
+
+    selected_model_type = slot.get("model_type") or None
+    if engine.strip().lower() == "custom" and not selected_model_type:
+        settings = get_settings()
+        mapping = settings.get("training", {}).get("image_type_to_model", {"single": "square", "wide": "wide"})
+        selected_model_type = mapping.get(image_type) or settings.get("training", {}).get("default_model_type")
+
+    cache_key = make_preview_cache_key(
+        processed_sha,
+        engine=engine,
+        model=model,
+        model_type=str(selected_model_type or ""),
+        easyocr_langs=langs_text,
+        include_lowercase=include_lowercase,
+        psm=psm_val,
+        whitelist=whitelist,
+    )
+    cached = get_cached_preview_result(cache_key)
+    if cached is not None:
+        return {**cached, "slot": slot_no, "cached": True}
+
+    try:
+        langs = [x.strip() for x in langs_text.split(",") if x.strip()]
+        prediction = predict_from_image(
+            str(processed_path),
+            model_type=selected_model_type,
+            model=model,
+            project_id=project_id,
+            engine=engine,
+            easyocr_languages=langs,
+            apply_preprocess=False,
+            include_lowercase=include_lowercase,
+            tesseract_psm=(psm_val or None),
+            whitelist=(whitelist or None),
+        )
+        result = {
+            "engine": prediction.get("engine", engine),
+            "model_name": prediction.get("model_name", ""),
+            "prediction": prediction.get("prediction", ""),
+            "confidence": prediction.get("confidence"),
+            "error": None,
+        }
+        set_cached_preview_result(cache_key, result)
+    except Exception as e:  # noqa: BLE001
+        result = {"engine": engine, "model_name": "", "prediction": "", "confidence": None, "error": str(e)}
+    return {**result, "slot": slot_no, "cached": False}
+
+
+def run_preview_ocr_batch(
+    img: Image.Image,
+    project_id: str,
+    overrides: Optional[dict[str, Any]],
+    slots: list[dict[str, Any]],
+    preview_stem: str = "adhoc",
+) -> dict[str, Any]:
+    """前処理1回＋複数OCRスロットの逐次実行（Step5バッチ用コア）。
+
+    - 画像デコード・回転・Step5専用前処理は呼び出し側で適用済み。共通OCR前処理・
+      中間/最終画像のbase64生成はここで**1回だけ**行い、全スロットで共有する
+    - スロットは**スロット番号順に逐次実行**（同時実行数=1。CPUエンジン同士の競合を避け、
+      学習ジョブ・YOLO検出など他処理のCPUを奪いすぎない）
+    - slots=[] はプレビュー（中間・最終画像）のみ生成しOCR推論を実行しない
+    """
+    if not isinstance(slots, list) or len(slots) > 3:
+        raise ValueError("slots は最大3件の配列で指定してください")
+    preview = preview_preprocess_image(img, project_id=project_id, overrides=overrides, preview_stem=preview_stem)
+    results: list[dict[str, Any]] = []
+    if slots:
+        paths = ensure_project_directories(project_id)
+        processed_path = paths.root / str(preview.get("processed_preview") or "")
+        processed_sha = hashlib.sha256(processed_path.read_bytes()).hexdigest()
+        image_type = str(preview.get("type", "single"))
+        for slot in slots:
+            if not isinstance(slot, dict):
+                raise ValueError("slots の各要素はobjectで指定してください")
+            results.append(_predict_preview_slot(project_id, slot, image_type, processed_path, processed_sha))
+    return {
+        "project_id": preview.get("project_id"),
+        "type": preview.get("type"),
+        "ratio": preview.get("ratio"),
+        "original_size": preview.get("original_size"),
+        "pipeline": preview.get("pipeline"),
+        "interim_data_url": preview.get("interim_data_url"),
+        "processed_data_url": preview.get("processed_data_url"),
+        "results": results,
+    }
+
+
+@app.post("/api/ocr/preview-file/batch")
+async def api_ocr_preview_file_batch(
+    file: Optional[UploadFile] = File(default=None),
+    project_id: str = Form("default"),
+    export_id: str = Form(""),
+    source_directory: str = Form(""),
+    filename: str = Form(""),
+    rotation: int = Form(0),
+    overrides_json: str = Form(""),
+    eval_preprocess_json: str = Form(""),
+    slots_json: str = Form("[]"),
+) -> dict[str, Any]:
+    """Step5用: 前処理1回＋複数OCR設定（最大3スロット）を1リクエストで処理する。
+
+    - `slots_json=[]` は中間・最終画像プレビューのみ更新（OCR推論なし）
+    - 中間・最終画像のdata URLはレスポンス直下に1回だけ含め、各スロット結果には含めない
+    - 同一の処理済み画像×同一設定の結果はプロセス内LRUキャッシュを再利用（エラーは対象外）
+    - 既存 `POST /api/ocr/preview-file` は後方互換のため維持
+    """
+    resolved = _resolve_project_id(project_id)
+    try:
+        overrides = _parse_preview_json_object(overrides_json, "overrides_json")
+        slots_raw = json.loads(str(slots_json or "[]"))
+        if not isinstance(slots_raw, list):
+            raise ValueError("slots_json must be an array")
+        upload_bytes = await file.read() if file is not None else None
+        img, stem = _load_preview_source_image(
+            resolved,
+            upload_bytes,
+            str(file.filename or "image") if file is not None else "",
+            export_id,
+            source_directory,
+            filename,
+            int(rotation),
+        )
+        parsed_eval = _parse_preview_json_object(eval_preprocess_json, "eval_preprocess_json")
+        if parsed_eval is not None:
+            img = apply_eval_preprocess(img, parsed_eval)
+        return run_preview_ocr_batch(img, resolved, overrides, slots_raw, preview_stem=stem)
+    except (TypeError, json.JSONDecodeError) as e:
+        raise HTTPException(status_code=400, detail=f"invalid slots_json: {e}") from e
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
 @app.post("/api/ocr/preview-file")
 async def api_ocr_preview_file(
     file: Optional[UploadFile] = File(default=None),
@@ -1301,47 +1509,23 @@ async def api_ocr_preview_file(
     """
     resolved = _resolve_project_id(project_id)
     try:
-        overrides: Optional[dict[str, Any]] = None
-        overrides_text = str(overrides_json or "").strip()
-        if overrides_text:
-            try:
-                parsed_overrides = json.loads(overrides_text)
-            except (TypeError, ValueError) as e:
-                raise ValueError(f"invalid overrides_json: {e}") from e
-            if not isinstance(parsed_overrides, dict):
-                raise ValueError("overrides_json must be an object")
-            overrides = parsed_overrides
-
-        if file is not None:
-            content = await file.read()
-            try:
-                with Image.open(io.BytesIO(content)) as opened:
-                    img = opened.convert("RGB")
-            except Exception as e:  # noqa: BLE001
-                raise ValueError("unsupported or unreadable image format") from e
-            stem = f"upload_{Path(str(file.filename or 'image')).stem}"
-        elif str(export_id or "").strip() and str(filename or "").strip():
-            # Step5評価候補: 現在のユーザー回転を適用した状態でOCRへ入力する（回転前の画像を渡さない）
-            img = load_export_crop_image(resolved, export_id, filename, rotation=int(rotation))
-            stem = f"eval_{export_id}_{Path(filename).stem}_r{int(rotation)}"
-        elif str(source_directory or "").strip() and str(filename or "").strip():
-            # Step5フォルダ取得モード: EXIF反映＋ユーザー回転適用後の画像をOCRへ入力する
-            img = load_directory_image(source_directory, filename, rotation=int(rotation))
-            stem = f"evaldir_{Path(filename).stem}_r{int(rotation)}"
-        else:
-            raise ValueError("file / export_id+filename / source_directory+filename のいずれかを指定してください")
+        overrides = _parse_preview_json_object(overrides_json, "overrides_json")
+        upload_bytes = await file.read() if file is not None else None
+        img, stem = _load_preview_source_image(
+            resolved,
+            upload_bytes,
+            str(file.filename or "image") if file is not None else "",
+            export_id,
+            source_directory,
+            filename,
+            int(rotation),
+        )
 
         # Step5専用OCR前処理（グレースケール/二値化）。回転適用後・共通前処理パイプラインの前に適用する。
         # OCR候補生成用の推論入力にのみ作用し、評価用コピー・データセット画像へは一切反映されない。
         # 未指定=従来動作
-        eval_text = str(eval_preprocess_json or "").strip()
-        if eval_text:
-            try:
-                parsed_eval = json.loads(eval_text)
-            except (TypeError, ValueError) as e:
-                raise ValueError(f"invalid eval_preprocess_json: {e}") from e
-            if not isinstance(parsed_eval, dict):
-                raise ValueError("eval_preprocess_json must be an object")
+        parsed_eval = _parse_preview_json_object(eval_preprocess_json, "eval_preprocess_json")
+        if parsed_eval is not None:
             img = apply_eval_preprocess(img, parsed_eval)
 
         preview = preview_preprocess_image(img, project_id=resolved, overrides=overrides, preview_stem=stem)

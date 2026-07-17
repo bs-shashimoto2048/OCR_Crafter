@@ -137,7 +137,32 @@ export function writeEvalOcrSlots(projectId, slots) {
     const raw = localStorage.getItem(EVAL_OCR_SLOTS_STORAGE_KEY);
     const map = raw ? JSON.parse(raw) : {};
     map[projectId] = {
+      ...(map[projectId] && typeof map[projectId] === "object" ? map[projectId] : {}),
       slots: Array.from({ length: EVAL_OCR_SLOT_COUNT }, (_, i) => normalizeEvalOcrSlot(slots?.[i])),
+    };
+    localStorage.setItem(EVAL_OCR_SLOTS_STORAGE_KEY, JSON.stringify(map));
+  } catch {
+    // localStorage が使えない環境では保存なしで動作継続
+  }
+}
+
+// 「画像・設定変更後にOCRを自動実行」設定（既定OFF。同じ保存キーのautoRunフィールドへ保存）
+export function readEvalOcrAutoRun(projectId) {
+  try {
+    const map = JSON.parse(localStorage.getItem(EVAL_OCR_SLOTS_STORAGE_KEY) || "{}");
+    return map?.[projectId]?.autoRun === true;
+  } catch {
+    return false;
+  }
+}
+
+export function writeEvalOcrAutoRun(projectId, value) {
+  try {
+    const raw = localStorage.getItem(EVAL_OCR_SLOTS_STORAGE_KEY);
+    const map = raw ? JSON.parse(raw) : {};
+    map[projectId] = {
+      ...(map[projectId] && typeof map[projectId] === "object" ? map[projectId] : {}),
+      autoRun: value === true,
     };
     localStorage.setItem(EVAL_OCR_SLOTS_STORAGE_KEY, JSON.stringify(map));
   } catch {
