@@ -97,6 +97,7 @@ from .services.ocr_pipeline import (
 )
 from .services.manual_mask import extract_black_region, load_manual_masks, save_manual_masks_for_image
 from .services.preprocess import (
+    apply_eval_preprocess,
     build_preprocess_config,
     preview_preprocess,
     preview_preprocess_image,
@@ -785,6 +786,8 @@ def _attach_preview_prediction(
     model_type: Optional[str] = None,
     easyocr_langs: str = "en",
     include_lowercase: bool = True,
+    tesseract_psm: Optional[int] = None,
+    whitelist: Optional[str] = None,
 ) -> dict[str, Any]:
     image_type = str(preview.get("type", "single"))
     selected_model_type = model_type
@@ -809,6 +812,8 @@ def _attach_preview_prediction(
             easyocr_languages=langs,
             apply_preprocess=False,
             include_lowercase=bool(include_lowercase),
+            tesseract_psm=tesseract_psm,
+            whitelist=whitelist,
         )
         preview["prediction"] = prediction.get("prediction", "")
         preview["confidence"] = prediction.get("confidence")
@@ -1278,11 +1283,14 @@ async def api_ocr_preview_file(
     filename: str = Form(""),
     rotation: int = Form(0),
     overrides_json: str = Form(""),
+    eval_preprocess_json: str = Form(""),
     engine: str = Form("custom"),
     model: str = Form("latest"),
     model_type: str = Form(""),
     easyocr_langs: str = Form("en"),
     include_lowercase: bool = Form(True),
+    psm: int = Form(0),
+    whitelist: str = Form(""),
 ) -> dict[str, Any]:
     """登録前・評価用画像のOCR前処理＋推論プレビュー（/preprocess/preview のファイル入力版）。
 
@@ -1323,6 +1331,19 @@ async def api_ocr_preview_file(
         else:
             raise ValueError("file / export_id+filename / source_directory+filename のいずれかを指定してください")
 
+        # Step5専用OCR前処理（グレースケール/二値化）。回転適用後・共通前処理パイプラインの前に適用する。
+        # OCR候補生成用の推論入力にのみ作用し、評価用コピー・データセット画像へは一切反映されない。
+        # 未指定=従来動作
+        eval_text = str(eval_preprocess_json or "").strip()
+        if eval_text:
+            try:
+                parsed_eval = json.loads(eval_text)
+            except (TypeError, ValueError) as e:
+                raise ValueError(f"invalid eval_preprocess_json: {e}") from e
+            if not isinstance(parsed_eval, dict):
+                raise ValueError("eval_preprocess_json must be an object")
+            img = apply_eval_preprocess(img, parsed_eval)
+
         preview = preview_preprocess_image(img, project_id=resolved, overrides=overrides, preview_stem=stem)
         return _attach_preview_prediction(
             preview,
@@ -1332,6 +1353,8 @@ async def api_ocr_preview_file(
             model_type=(model_type or None),
             easyocr_langs=easyocr_langs,
             include_lowercase=bool(include_lowercase),
+            tesseract_psm=(int(psm) if int(psm or 0) > 0 else None),
+            whitelist=(whitelist or None),
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e

@@ -21,9 +21,10 @@ export function lowercaseLabelOf(fields) {
   return fields?.include_lowercase !== false ? "小文字: ON" : "小文字: OFF";
 }
 
-// 推論設定の同一判定シグネチャ。Engine＋Model＋Language＋小文字設定が完全一致するスロットは
-// 重複扱いとして推論をスキップする（既存ラベル編集と同一仕様）
+// 推論設定の同一判定シグネチャ。Engine＋Model＋Language＋小文字設定＋PSM＋whitelist が
+// 完全一致するスロットは重複扱いとして推論をスキップする。
+// psm/whitelist 未指定（既存ラベル編集の呼び出し）は空扱いで従来の判定結果と変わらない
 export function predictSignature(fields) {
   const f = fields || {};
-  return `${f.engine}|${f.model}|${f.easyocr_langs}|lc:${f.include_lowercase !== false ? "1" : "0"}`;
+  return `${f.engine}|${f.model}|${f.easyocr_langs}|lc:${f.include_lowercase !== false ? "1" : "0"}|psm:${f.psm || ""}|wl:${f.whitelist || ""}`;
 }

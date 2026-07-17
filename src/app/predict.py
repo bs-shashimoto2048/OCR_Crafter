@@ -317,11 +317,16 @@ def _predict_with_easyocr(
     image_shape: Optional[list[int]] = None,
     apply_preprocess: bool = True,
     include_lowercase: bool = True,
+    allowlist_override: Optional[str] = None,
 ) -> dict[str, Any]:
     shape = _normalize_ocr_shape(image_shape or [3, 48, 320])
     langs = _normalize_ocr_languages(languages)
     reader, use_gpu = _get_easyocr_reader(langs)
     case_control, allowlist = _resolve_latin_case_control(langs, include_lowercase)
+    # スロット別whitelist指定（Step5）。EasyOCRはreadtextのallowlistとして適用する。
+    # 未指定=小文字制御由来のallowlist（従来動作）
+    if allowlist_override is not None and str(allowlist_override).strip():
+        allowlist = str(allowlist_override).strip()
     # 小文字ON時は検証でも大小文字を保持する（従来はvalidationで常に大文字化していた）
     if case_control and include_lowercase:
         validation_charset = build_latin_allowlist(include_lowercase=True, base_allowlist=charset)
@@ -862,6 +867,8 @@ def _predict_with_tesseract(
     project_id: Optional[str] = None,
     model: str = "latest",
     apply_preprocess: bool = True,
+    psm: Optional[int] = None,
+    whitelist: Optional[str] = None,
 ) -> dict[str, Any]:
     tesseract_cmd = ensure_tesseract_inference_tool()
     normalized_model = (model or "latest").strip()
@@ -886,6 +893,12 @@ def _predict_with_tesseract(
         if not tessdata_dir or not lang:
             raise FileNotFoundError("Tesseractモデルのメタ情報が不完全です（tessdata_dir/lang）。")
 
+    # スロット別whitelist指定（Step5）。未指定=モデル既定charset（従来動作）。検証もwhitelistへ追従する
+    if whitelist is not None and str(whitelist).strip():
+        charset = str(whitelist).strip()
+    # スロット別PSM指定（Step5）。未指定=7（単一行・従来動作）
+    effective_psm = int(psm) if psm else 7
+
     tmp_path: Optional[Path] = None
     try:
         if apply_preprocess:
@@ -908,7 +921,7 @@ def _predict_with_tesseract(
             input_path = str(tmp_path)
 
         predicted, confidence = recognize_line(
-            tesseract_cmd, input_path, tessdata_dir, lang, charset, psm=7
+            tesseract_cmd, input_path, tessdata_dir, lang, charset, psm=effective_psm
         )
     finally:
         if tmp_path is not None:
@@ -954,6 +967,8 @@ def predict_from_image(
     apply_preprocess: bool = True,
     preprocess_overrides: Optional[dict[str, Any]] = None,
     include_lowercase: bool = True,
+    tesseract_psm: Optional[int] = None,
+    whitelist: Optional[str] = None,
 ) -> dict[str, Any]:
     engine_name = (engine or "custom").strip().lower()
     preprocess_meta: dict[str, Any] = {"applied": False, "image_type": "", "pipeline": []}
@@ -977,6 +992,7 @@ def predict_from_image(
             languages=easyocr_languages,
             apply_preprocess=(apply_preprocess and not preprocess_overrides),
             include_lowercase=include_lowercase,
+            allowlist_override=whitelist,
         )
         result["preprocess_applied"] = preprocess_meta["applied"]
         result["preprocess_image_type"] = preprocess_meta["image_type"]
@@ -1001,6 +1017,8 @@ def predict_from_image(
             project_id=project_id,
             model=model,
             apply_preprocess=(apply_preprocess and not preprocess_overrides),
+            psm=tesseract_psm,
+            whitelist=whitelist,
         )
         result["preprocess_applied"] = preprocess_meta["applied"]
         result["preprocess_image_type"] = preprocess_meta["image_type"]

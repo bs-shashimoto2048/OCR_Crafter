@@ -941,6 +941,47 @@ def run_preprocess(
     }
 
 
+def parse_eval_preprocess(settings: Any) -> dict[str, Any]:
+    """Step5専用OCR前処理設定を検証・正規化する（未指定キーは既定値で補完）。"""
+    src = settings if isinstance(settings, dict) else {}
+    method = str(src.get("binarize_method") or "otsu").strip().lower()
+    if method not in {"otsu", "fixed"}:
+        raise ValueError("binarize_method must be one of: otsu, fixed")
+    try:
+        threshold = int(src.get("threshold", 127))
+    except (TypeError, ValueError) as e:
+        raise ValueError("threshold must be an integer (0-255)") from e
+    if not 0 <= threshold <= 255:
+        raise ValueError("threshold must be in 0-255")
+    return {
+        "grayscale": bool(src.get("grayscale")),
+        "binarize": bool(src.get("binarize")),
+        "binarize_method": method,
+        "threshold": threshold,
+    }
+
+
+def apply_eval_preprocess(img: Image.Image, settings: Any) -> Image.Image:
+    """Step5（評価用データ作成）専用のOCR前処理アダプター。
+
+    OCR候補生成用の推論入力にだけ適用する（評価用コピー・データセット画像・元画像へは
+    適用しない。呼び出し元は /api/ocr/preview-file のみで、データセット作成処理とは無関係）。
+    アルゴリズムは既存共通実装（_op_grayscale / _op_threshold）を再利用し、Step5用に複製しない。
+    処理順: ユーザー回転適用後の評価画像 → グレースケール/二値化 → 既存のOCR前処理パイプライン。
+    両設定OFF時は入力をそのまま返す（従来動作）。
+    """
+    cfg = parse_eval_preprocess(settings)
+    if not cfg["grayscale"] and not cfg["binarize"]:
+        return img
+    if cfg["binarize"]:
+        # 二値化は内部にグレースケール変換を含む（UIの「グレースケールON」とは独立の扱い）
+        mode = "otsu" if cfg["binarize_method"] == "otsu" else "binary"
+        out = _op_threshold(img, "", {"threshold": {"type": mode, "value": cfg["threshold"]}})
+    else:
+        out = _op_grayscale(img, "", {})
+    return Image.fromarray(out, mode="L").convert("RGB")
+
+
 def preview_preprocess_image(
     img: Image.Image,
     project_id: Optional[str] = None,

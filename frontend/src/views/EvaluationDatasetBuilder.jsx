@@ -25,11 +25,19 @@ import {
   nextRotation,
 } from "../lib/evaluationBuilder";
 import {
-  DEFAULT_EVAL_OCR_SETTINGS,
-  evalOcrRequestFields,
-  readEvalOcrSettings,
-  writeEvalOcrSettings,
+  evalOcrSlotRequestFields,
+  migrateEvalOcrSlots,
+  normalizeEvalOcrSlot,
+  readEvalOcrSlots,
+  writeEvalOcrSlots,
 } from "../lib/evalOcrSettings";
+import {
+  DEFAULT_EVAL_PREPROCESS,
+  EVAL_BINARIZE_METHODS,
+  evalPreprocessRequestJson,
+  readEvalPreprocess,
+  writeEvalPreprocess,
+} from "../lib/evalPreprocess";
 import {
   EVAL_ALIGN_STORAGE_KEY,
   readLabelTextAlign,
@@ -37,7 +45,7 @@ import {
 } from "../lib/labelAlign";
 import { decideNextImageIndex } from "../lib/labelNavigation";
 import { lowercaseToggleApplicable } from "../lib/lowercase";
-import { engineLabelOf, lowercaseLabelOf } from "../lib/ocrCandidates";
+import { engineLabelOf, lowercaseLabelOf, predictSignature } from "../lib/ocrCandidates";
 
 const LIST_ROW_HEIGHT = 56;
 // 回転連打・画像切替の連続操作でOCRリクエストが多重化しないためのデバウンス
@@ -170,31 +178,66 @@ export default function EvaluationDatasetBuilder({
   const [previewSrc, setPreviewSrc] = useState("");
   const [interimSrc, setInterimSrc] = useState("");
   const [previewMeta, setPreviewMeta] = useState(null);
-  const [ocrCandidate, setOcrCandidate] = useState(null);
-  const [ocrMeta, setOcrMeta] = useState(null);
+  // スロット別のOCR結果: [{slotIndex, fields, prediction, confidence, engine, modelName, error, skipped}]
+  const [slotResults, setSlotResults] = useState([]);
   const [ocrLoading, setOcrLoading] = useState(false);
-  const [ocrError, setOcrError] = useState("");
   const [ocrReloadTick, setOcrReloadTick] = useState(0);
   const [rerunFeedback, setRerunFeedback] = useState(null);
   const rerunRequestedRef = useRef(false);
   const rerunFeedbackTimerRef = useRef(null);
+  // 回転ボタンの押下フィードバック（90/180。300msで消灯）
+  const [rotateFlash, setRotateFlash] = useState(null);
+  const rotateFlashTimerRef = useRef(null);
 
-  // Step5専用OCR設定（ラベル編集の推論設定とは独立。localStorageへプロジェクト別保存）
-  const [ocrSettings, setOcrSettings] = useState({ ...DEFAULT_EVAL_OCR_SETTINGS });
+  // Step5専用OCR設定（最大3モデル。ラベル編集の推論設定とは独立し localStorage 別キーへ保存。
+  // 旧単一設定キー ocr_eval_preview_settings_by_project_v1 は読み込み時にモデル1へ自動移行）
+  const [ocrSlots, setOcrSlots] = useState(() => migrateEvalOcrSlots(null, null));
+  // Step5専用OCR前処理（グレースケール・二値化。OCR候補生成用の推論入力にのみ適用し、
+  // 評価用画像・作成データセット・学習画像へは反映しない）
+  const [evalPreprocess, setEvalPreprocess] = useState({ ...DEFAULT_EVAL_PREPROCESS });
   useEffect(() => {
-    setOcrSettings(readEvalOcrSettings(projectId));
+    setOcrSlots(readEvalOcrSlots(projectId));
+    setEvalPreprocess(readEvalPreprocess(projectId));
   }, [projectId]);
-  // stateは入力途中の値をそのまま保持（空欄が即"en"へ戻ると編集できないため）。
-  // 正規化は保存時（writeEvalOcrSettings）とリクエスト生成時（evalOcrRequestFields）に行う
-  function updateOcrSettings(patch) {
-    setOcrSettings((prev) => {
-      const next = { ...prev, ...patch };
-      writeEvalOcrSettings(projectId, next);
+  // stateは入力途中の値をそのまま保持（空欄が即既定値へ戻ると編集できないため）。
+  // 正規化は保存時とリクエスト生成時に行う
+  function updateOcrSlot(index, patch) {
+    setOcrSlots((prev) => {
+      const next = prev.map((slot, i) => (i === index ? { ...slot, ...patch } : slot));
+      writeEvalOcrSlots(projectId, next);
       return next;
     });
   }
-  const predictFields = useMemo(() => evalOcrRequestFields(ocrSettings), [ocrSettings]);
-  const predictParamsKey = JSON.stringify(predictFields);
+  function updateEvalPreprocess(patch) {
+    setEvalPreprocess((prev) => {
+      const next = { ...prev, ...patch };
+      writeEvalPreprocess(projectId, next);
+      return next;
+    });
+  }
+  // 実行計画: スロット番号順を維持し、有効スロットの実効設定（エンジン非対応項目は既定値へ正規化）で
+  // 重複判定する。重複スロットは推論せずスキップ表示のみ
+  const slotPlans = useMemo(() => {
+    const seen = new Set();
+    return ocrSlots.map((slot, index) => {
+      const normalized = normalizeEvalOcrSlot(slot);
+      if (!normalized.enabled) {
+        return { index, enabled: false };
+      }
+      const fields = evalOcrSlotRequestFields(normalized);
+      const signature = predictSignature(fields);
+      const duplicate = seen.has(signature);
+      seen.add(signature);
+      return { index, enabled: true, duplicate, fields };
+    });
+  }, [ocrSlots]);
+  const enabledPlans = useMemo(() => slotPlans.filter((plan) => plan.enabled), [slotPlans]);
+  const evalPreprocessJson = useMemo(() => evalPreprocessRequestJson(evalPreprocess), [evalPreprocess]);
+  // 設定（スロット・前処理）変更で候補を無効化→デバウンス後に自動再実行させるための依存キー
+  const predictParamsKey = JSON.stringify([
+    slotPlans.map((plan) => (plan.enabled ? plan.fields : null)),
+    evalPreprocessJson,
+  ]);
 
   function setOk(text) {
     setMessage(text);
@@ -226,6 +269,9 @@ export default function EvaluationDatasetBuilder({
     () => () => {
       if (rerunFeedbackTimerRef.current) {
         clearTimeout(rerunFeedbackTimerRef.current);
+      }
+      if (rotateFlashTimerRef.current) {
+        clearTimeout(rotateFlashTimerRef.current);
       }
     },
     []
@@ -462,16 +508,12 @@ export default function EvaluationDatasetBuilder({
       setPreviewSrc("");
       setInterimSrc("");
       setPreviewMeta(null);
-      setOcrCandidate(null);
-      setOcrMeta(null);
-      setOcrError("");
+      setSlotResults([]);
       setOcrLoading(false);
       return undefined;
     }
     let cancelled = false;
-    const requestKey = `${currentItem.key}|r${currentRotation}`;
     setOcrLoading(true);
-    setOcrError("");
 
     const timer = setTimeout(async () => {
       const buildForm = (fields) => {
@@ -487,6 +529,10 @@ export default function EvaluationDatasetBuilder({
         if (preprocessOverrides) {
           form.append("overrides_json", JSON.stringify(preprocessOverrides));
         }
+        // Step5専用OCR前処理（グレースケール・二値化）。空文字=未指定（従来動作）
+        if (evalPreprocessJson) {
+          form.append("eval_preprocess_json", evalPreprocessJson);
+        }
         form.append("engine", String(fields?.engine || "custom"));
         form.append("model", String(fields?.model || "latest"));
         if (fields?.model_type) {
@@ -494,6 +540,12 @@ export default function EvaluationDatasetBuilder({
         }
         form.append("easyocr_langs", String(fields?.easyocr_langs || "en"));
         form.append("include_lowercase", String(fields?.include_lowercase !== false));
+        if (fields?.psm) {
+          form.append("psm", String(fields.psm));
+        }
+        if (fields?.whitelist) {
+          form.append("whitelist", String(fields.whitelist));
+        }
         return form;
       };
       const callPreview = async (fields) => {
@@ -504,71 +556,87 @@ export default function EvaluationDatasetBuilder({
         return res.json();
       };
 
-      try {
-        // Step5専用OCR設定でOCR候補を取得（ラベル編集の推論設定・比較スロットは使わない）
-        const data = await callPreview(predictFields);
-        if (cancelled) return;
+      // 有効な最大3スロットを実行（スロット番号順を維持・重複はスキップ・1件失敗しても他は表示）
+      if (enabledPlans.length === 0) {
+        if (!cancelled) {
+          setPreviewSrc("");
+          setInterimSrc("");
+          setPreviewMeta(null);
+          setSlotResults([]);
+          setOcrLoading(false);
+          finishRerunFeedback(false);
+        }
+        return;
+      }
+      const results = await Promise.all(
+        enabledPlans.map(async (plan) => {
+          if (plan.duplicate) {
+            return { slotIndex: plan.index, fields: plan.fields, skipped: true };
+          }
+          try {
+            const data = await callPreview(plan.fields);
+            const prediction = String(data?.prediction || "").trim();
+            return {
+              slotIndex: plan.index,
+              fields: plan.fields,
+              prediction,
+              confidence: typeof data?.confidence === "number" ? data.confidence : null,
+              engine: data?.predict_engine || plan.fields.engine,
+              modelName: data?.predict_model_name || "",
+              error: !prediction && data?.predict_error ? String(data.predict_error) : "",
+              response: data,
+            };
+          } catch (err) {
+            return { slotIndex: plan.index, fields: plan.fields, error: String(err?.message || err) };
+          }
+        })
+      );
+      // 古いレスポンスを新しい設定・回転へ反映しない（設定・回転・画像が変わるとcancelledになる）
+      if (cancelled) return;
+      // 中間・最終画像は最初に応答を得たスロットから採用（前処理は全スロット共通のため同一）
+      const withResponse = results.find((row) => row.response);
+      if (withResponse) {
+        const data = withResponse.response;
         setPreviewSrc(data?.processed_data_url || "");
         setInterimSrc(data?.interim_data_url || "");
         setPreviewMeta({ type: data?.type || "", ratio: data?.ratio });
-        const prediction = String(data?.prediction || "").trim();
-        setOcrCandidate(
-          prediction
-            ? {
-                text: prediction,
-                confidence: typeof data?.confidence === "number" ? data.confidence : null,
-                engine: data?.predict_engine || "",
-              }
-            : null
-        );
-        setOcrMeta({
-          engine: data?.predict_engine || predictFields?.engine || "",
-          modelName: data?.predict_model_name || "",
-        });
-        const rerunFailed = !prediction && Boolean(data?.predict_error);
-        if (rerunFailed) {
-          setOcrError(String(data.predict_error));
-        }
-        finishRerunFeedback(!rerunFailed);
-      } catch (err) {
-        if (cancelled) return;
+      } else {
         setPreviewSrc("");
         setInterimSrc("");
         setPreviewMeta(null);
-        setOcrCandidate(null);
-        setOcrMeta({ engine: predictFields?.engine || "", modelName: "" });
-        setOcrError(String(err?.message || err || "不明なエラー"));
-        finishRerunFeedback(false);
-      } finally {
-        if (!cancelled) {
-          setOcrLoading(false);
-        }
       }
+      setSlotResults(results.map(({ response, ...row }) => row));
+      finishRerunFeedback(results.some((row) => row.prediction));
+      setOcrLoading(false);
     }, OCR_DEBOUNCE_MS);
 
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-    // requestKey は currentItem.key + rotation の合成（依存はその構成要素で表現）
+    // 実行条件は currentItem.key + rotation + スロット/前処理設定（predictParamsKey）で表現
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentItem?.key, currentItem?.exists, currentRotation, projectId, predictParamsKey, ocrReloadTick]);
 
-  // 辞書からの近似候補（既存ラベル編集と同じ純ロジック・同じ辞書設定を使用）
+  // 辞書からの近似候補（既存ラベル編集と同じ純ロジック・同じ辞書設定を使用。
+  // 最大3スロットのOCR結果すべてを入力とし、同一候補は既存ロジック内で最高類似度へ統合される）
   const dictionaryCandidates = useMemo(() => {
     const entries = candidateDict?.entries || [];
     if (entries.length === 0) {
       return null;
     }
     const sources = [];
-    if (ocrCandidate?.text) {
-      sources.push({ text: ocrCandidate.text, source: engineLabelOf(ocrMeta?.engine) });
+    for (const plan of enabledPlans) {
+      const row = slotResults.find((r) => r.slotIndex === plan.index);
+      if (row?.prediction) {
+        sources.push({ text: row.prediction, source: engineLabelOf(row.engine || plan.fields.engine) });
+      }
     }
     return searchDictionaryCandidates(sources, entries, {
       maxCandidates: candidateDict?.max_candidates ?? 3,
       minSimilarity: (candidateDict?.min_similarity ?? 60) / 100,
     });
-  }, [candidateDict, ocrCandidate, ocrMeta]);
+  }, [candidateDict, slotResults, enabledPlans]);
 
   function patchItemState(key, patch) {
     setItemState((prev) => ({ ...prev, [key]: { ...(prev[key] || {}), ...patch } }));
@@ -586,14 +654,32 @@ export default function EvaluationDatasetBuilder({
     }
   }
 
-  // Esc: OCR候補を採用
+  // Esc: 最上位の有効OCR候補を採用（スロット番号順で最初に成功した候補。Confidence順ではない）
   function adoptTopCandidate() {
-    adoptText(ocrCandidate?.text || "");
+    for (const plan of enabledPlans) {
+      const row = slotResults.find((r) => r.slotIndex === plan.index);
+      if (row?.prediction) {
+        adoptText(row.prediction);
+        return;
+      }
+    }
   }
 
   function rotateCurrent(delta) {
     if (!currentItem || currentItem.exists === false) return;
     patchItemState(currentItem.key, { rotation: nextRotation(currentState.rotation, delta) });
+  }
+
+  // OCR候補ヘッダーの回転ボタン: 回転適用（プレビュー・OCRは自動更新）＋300msの押下発光。
+  // 連打時はデバウンス＋cancelledガードで最後の回転状態だけがOCRへ反映される。ラベル入力値は保持
+  function rotateWithFeedback(delta) {
+    if (!currentItem || currentItem.exists === false) return;
+    rotateCurrent(delta);
+    setRotateFlash(delta);
+    if (rotateFlashTimerRef.current) {
+      clearTimeout(rotateFlashTimerRef.current);
+    }
+    rotateFlashTimerRef.current = setTimeout(() => setRotateFlash(null), 300);
   }
 
   // 保存: editing_state を即時flushする（失敗時はfalseを返し、保存して次へは移動しない）
@@ -704,19 +790,24 @@ export default function EvaluationDatasetBuilder({
     }
   }
 
-  const rawModelName = String(ocrMeta?.modelName || "");
-  const isLatestModel = String(predictFields?.model || "") === "latest";
-  const modelDisplay =
-    String(ocrMeta?.engine || "").toLowerCase() === "easyocr"
-      ? "--"
-      : isLatestModel
-        ? "最新モデル"
-        : rawModelName || String(predictFields?.model || "--");
-  // 小文字トグルはEasyOCR/PaddleOCR×ラテン言語のときのみ有効（既存共通判定）
-  const lowercaseApplicable = lowercaseToggleApplicable(
-    ocrSettings.engine,
-    ocrSettings.engine === "easyocr" || ocrSettings.engine === "paddleocr" ? ocrSettings.easyocrLangs : "en"
-  );
+  // 候補行のモデル表示（EasyOCR=言語 / それ以外=応答のモデル名 or 設定値）
+  function slotModelLabel(fields, responseModelName) {
+    if (String(fields?.engine || "") === "easyocr") {
+      return String(fields?.easyocr_langs || "en");
+    }
+    if (responseModelName) {
+      return responseModelName;
+    }
+    return String(fields?.model || "") === "latest" ? "最新モデル" : String(fields?.model || "--");
+  }
+
+  // 候補行の付加情報（EasyOCR/PaddleOCR=小文字ON/OFF、Tesseract=PSM）
+  function slotInfoLabel(fields) {
+    if (String(fields?.engine || "") === "tesseract") {
+      return `PSM ${fields?.psm || 7}`;
+    }
+    return lowercaseLabelOf(fields);
+  }
 
   return (
     // xl以上はビューポート内固定（App fitViewport連携・ページスクロールなし。内部スクロールは左一覧とOCR候補のみ）。
@@ -942,19 +1033,19 @@ export default function EvaluationDatasetBuilder({
             >
               <StageImage
                 title="元画像"
-                description="評価用画像（ユーザー回転適用後）。OCR前処理はこの画像を入力とします"
+                description="回転後の評価画像（Step5専用OCR前処理は反映しません。保存されるのはこの画像です）"
                 src={currentItem && currentItem.exists !== false ? cropImageUrl(projectId, currentItem, currentRotation) : ""}
                 zoomPercent={zoomPercent}
               />
               <StageImage
                 title="中間画像"
-                description="主要な前処理を適用した途中確認画像（前処理設定により最終画像と同一になる場合があります）"
+                description="Step5専用OCR前処理（グレースケール・二値化）を含む途中確認画像"
                 src={interimSrc}
                 zoomPercent={zoomPercent}
               />
               <StageImage
                 title="最終画像"
-                description="OCR推論へ入力される最終処理画像"
+                description="OCR推論へ実際に渡される最終処理画像"
                 src={previewSrc}
                 zoomPercent={zoomPercent}
                 imgRef={finalImageRef}
@@ -964,18 +1055,41 @@ export default function EvaluationDatasetBuilder({
 
           {/* OCR候補（Step5専用OCR設定で取得。スクロールするのは左一覧とこの領域のみ） */}
           <div className="dark-scroll min-h-[150px] shrink grow basis-[40%] overflow-y-auto rounded-xl border border-border bg-card/60 p-2 backdrop-blur-md [scrollbar-gutter:stable]">
+            {/* 見出し行: 回転→OCR候補更新→採用 を1つの視線範囲で完結させる（回転ボタンはここへ集約） */}
             <div className="mb-1 flex h-7 shrink-0 items-center justify-between gap-2">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">
-                OCR候補
-                <span className="ml-2 font-normal normal-case tracking-normal">
-                  {engineLabelOf(predictFields?.engine)}
-                  {predictFields?.engine !== "easyocr" ? ` / ${modelDisplay}` : ""}
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">OCR候補</p>
+              <div className="flex items-center gap-1.5">
+                <span className="hidden text-[10px] text-muted xl:inline">
+                  差分は<span className="text-amber-300">黄色</span> / Escで最上位の有効候補を採用
                 </span>
-              </p>
-              <div className="flex items-center gap-2">
-                <span className="hidden text-[10px] text-muted lg:inline">
-                  差分は<span className="text-amber-300">黄色</span> / Escで候補を採用
-                </span>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className={`h-7 px-2 text-[11px] transition-shadow duration-200 ${
+                    rotateFlash === 90
+                      ? "!border-accent/70 !text-blue-200 shadow-[0_0_0_1px_rgba(96,165,250,0.55),0_0_10px_rgba(96,165,250,0.45)]"
+                      : ""
+                  }`}
+                  onClick={() => rotateWithFeedback(90)}
+                  disabled={!currentItem || currentItem.exists === false}
+                  title="時計回りに90°回転（評価用コピーへのみ反映。回転後にOCR候補を自動再取得）"
+                >
+                  ↻ 90°
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className={`h-7 px-2 text-[11px] transition-shadow duration-200 ${
+                    rotateFlash === 180
+                      ? "!border-violet-400/70 !text-violet-200 shadow-[0_0_0_1px_rgba(167,139,250,0.55),0_0_10px_rgba(167,139,250,0.45)]"
+                      : ""
+                  }`}
+                  onClick={() => rotateWithFeedback(180)}
+                  disabled={!currentItem || currentItem.exists === false}
+                  title="180°回転（評価用コピーへのみ反映。回転後にOCR候補を自動再取得）"
+                >
+                  ↺ 180°
+                </Button>
                 <OcrRerunButton
                   loading={ocrLoading}
                   feedback={rerunFeedback}
@@ -987,31 +1101,58 @@ export default function EvaluationDatasetBuilder({
                 />
               </div>
             </div>
-            {/* 行の出現・消失で高さが揺れないよう最小高さを確保 */}
+            {/* 行の出現・消失で高さが揺れないよう最小高さを確保。表示はスロット番号順（Confidence順へ並べ替えない） */}
             <div className="min-h-[44px] space-y-1.5">
-              {ocrCandidate?.text ? (
-                <CandidateRow
-                  index={1}
-                  engine={ocrMeta?.engine}
-                  modelName={rawModelName || (modelDisplay !== "--" ? modelDisplay : "")}
-                  prediction={ocrCandidate.text}
-                  confidence={ocrCandidate.confidence}
-                  current={currentLabel}
-                  onAdopt={adoptText}
-                  dimmed={ocrLoading}
-                  lowercaseLabel={lowercaseLabelOf(predictFields)}
-                />
-              ) : ocrLoading ? (
-                <CandidateMessageRow index={1} header={engineLabelOf(predictFields?.engine)} message="OCR実行中..." />
-              ) : ocrError ? (
-                <CandidateMessageRow
-                  index={1}
-                  header={engineLabelOf(ocrMeta?.engine)}
-                  message={`OCR候補取得失敗: ${ocrError}（評価データOCR設定を確認してください）`}
-                  tone="danger"
-                />
+              {enabledPlans.length === 0 ? (
+                <CandidateMessageRow message="有効なOCRモデルがありません（評価データOCR設定で有効化してください）" tone="empty" />
               ) : (
-                <CandidateMessageRow index={1} header={engineLabelOf(ocrMeta?.engine)} message="OCR候補なし" />
+                enabledPlans.map((plan, order) => {
+                  const rowIndex = order + 1;
+                  const row = slotResults.find((r) => r.slotIndex === plan.index);
+                  const header = `${engineLabelOf(plan.fields.engine)} / ${slotModelLabel(plan.fields, row?.modelName)}`;
+                  if (plan.duplicate || row?.skipped) {
+                    return (
+                      <CandidateMessageRow
+                        key={plan.index}
+                        index={rowIndex}
+                        header={header}
+                        message="他のOCR設定と同一のためスキップしました"
+                        tone="amber"
+                      />
+                    );
+                  }
+                  if (row?.prediction) {
+                    return (
+                      <CandidateRow
+                        key={plan.index}
+                        index={rowIndex}
+                        engine={row.engine}
+                        modelName={slotModelLabel(plan.fields, row.modelName)}
+                        prediction={row.prediction}
+                        confidence={row.confidence}
+                        current={currentLabel}
+                        onAdopt={adoptText}
+                        dimmed={ocrLoading}
+                        lowercaseLabel={slotInfoLabel(plan.fields)}
+                      />
+                    );
+                  }
+                  if (ocrLoading) {
+                    return <CandidateMessageRow key={plan.index} index={rowIndex} header={header} message="OCR実行中..." />;
+                  }
+                  if (row?.error) {
+                    return (
+                      <CandidateMessageRow
+                        key={plan.index}
+                        index={rowIndex}
+                        header={header}
+                        message={`OCR候補取得失敗: ${row.error}`}
+                        tone="danger"
+                      />
+                    );
+                  }
+                  return <CandidateMessageRow key={plan.index} index={rowIndex} header={header} message="OCR候補なし" />;
+                })
               )}
             </div>
 
@@ -1093,15 +1234,7 @@ export default function EvaluationDatasetBuilder({
                 <span className="text-muted">回転</span>
                 <span className="tabular-nums text-text">{currentRotation}°</span>
               </div>
-              {/* 回転は評価用コピーへのみ反映（Step4の学習画像は変更しない）。回転後にOCR候補は自動再取得 */}
-              <div className="flex gap-2">
-                <Button size="sm" variant="secondary" className="flex-1" onClick={() => rotateCurrent(90)} disabled={currentItem.exists === false}>
-                  ↻ 90°
-                </Button>
-                <Button size="sm" variant="secondary" className="flex-1" onClick={() => rotateCurrent(180)} disabled={currentItem.exists === false}>
-                  ↺ 180°
-                </Button>
-              </div>
+              {/* 回転ボタンはOCR候補見出しへ移動（ここは現在角度の表示のみ。角度は上の情報グリッドに表示） */}
               <label className="inline-flex items-center gap-2 text-xs text-text">
                 <input
                   type="checkbox"
@@ -1118,88 +1251,201 @@ export default function EvaluationDatasetBuilder({
             <p className="text-muted">{loading ? "評価候補を読み込み中..." : "一覧から画像を選択してください"}</p>
           )}
 
-          {/* Step5専用OCR設定（ラベル編集の推論設定とは独立。保存先: ocr_eval_preview_settings_by_project_v1） */}
+          {/* Step5専用OCR前処理（保存先: ocr_eval_preprocess_settings_by_project_v1。
+              OCR候補生成用の推論入力にのみ適用し、評価用画像・作成データには一切反映しない） */}
           <div className="space-y-1.5 border-t border-border/60 pt-2">
-            <p className="text-[11px] font-semibold text-muted">評価データOCR設定</p>
-            <div className="flex flex-col gap-1">
-              {[
-                { id: "paddleocr", label: "PaddleOCR" },
-                { id: "tesseract", label: "Tesseract" },
-                { id: "easyocr", label: "EasyOCR" },
-              ].map((row) => (
-                <label key={row.id} className="inline-flex h-5 cursor-pointer items-center gap-1.5 text-text">
-                  <input
-                    type="radio"
-                    name="eval-ocr-engine"
-                    checked={ocrSettings.engine === row.id}
-                    onChange={() => updateOcrSettings({ engine: row.id })}
-                  />
-                  {row.label}
-                </label>
-              ))}
-            </div>
-            {ocrSettings.engine === "paddleocr" ? (
-              <div>
-                <label className="app-label">Model</label>
-                <select
-                  className="app-select h-7 py-0 text-xs"
-                  value={ocrSettings.paddleModel}
-                  onChange={(e) => updateOcrSettings({ paddleModel: e.target.value })}
-                >
-                  <option value="latest">latest（最新）</option>
-                  {paddleModels
-                    .filter((name) => name !== "latest")
-                    .map((name) => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                </select>
-              </div>
-            ) : null}
-            {ocrSettings.engine === "tesseract" ? (
-              <div>
-                <label className="app-label">Model</label>
-                <select
-                  className="app-select h-7 py-0 text-xs"
-                  value={ocrSettings.tesseractModel}
-                  onChange={(e) => updateOcrSettings({ tesseractModel: e.target.value })}
-                >
-                  <option value="latest">latest（最新）</option>
-                  {tesseractModels
-                    .filter((name) => name !== "latest")
-                    .map((name) => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                </select>
-              </div>
-            ) : null}
-            {ocrSettings.engine === "easyocr" || ocrSettings.engine === "paddleocr" ? (
-              <div>
-                <label className="app-label">Language（カンマ区切り）</label>
-                <input
-                  className="app-input h-7 py-0 font-mono text-xs"
-                  value={ocrSettings.easyocrLangs}
-                  onChange={(e) => updateOcrSettings({ easyocrLangs: e.target.value })}
-                  placeholder="en"
-                />
-              </div>
-            ) : null}
-            <label
-              className={`inline-flex h-5 items-center gap-1.5 ${lowercaseApplicable ? "cursor-pointer text-text" : "text-muted"}`}
-              title={lowercaseApplicable ? undefined : "EasyOCR / PaddleOCR のラテン言語設定でのみ有効です"}
-            >
+            <p className="text-[11px] font-semibold text-muted">評価データOCR前処理</p>
+            <p className="text-[10px] leading-4 text-muted">
+              OCR候補の生成時だけ適用します。
+              <br />
+              評価用画像・作成データには反映しません。
+            </p>
+            <label className="inline-flex h-5 cursor-pointer items-center gap-1.5 text-text">
               <input
                 type="checkbox"
-                disabled={!lowercaseApplicable}
-                checked={ocrSettings.includeLowercase !== false}
-                onChange={(e) => updateOcrSettings({ includeLowercase: e.target.checked })}
+                checked={evalPreprocess.grayscale === true}
+                onChange={(e) => updateEvalPreprocess({ grayscale: e.target.checked })}
               />
-              小文字を出力に含める
+              グレースケール
             </label>
-            <p className="text-[10px] text-muted">前処理: プロジェクトのOCR前処理設定を適用</p>
+            <label className="inline-flex h-5 cursor-pointer items-center gap-1.5 text-text">
+              <input
+                type="checkbox"
+                checked={evalPreprocess.binarize === true}
+                onChange={(e) => updateEvalPreprocess({ binarize: e.target.checked })}
+              />
+              二値化
+            </label>
+            {evalPreprocess.binarize ? (
+              <div className="space-y-1.5 pl-5">
+                <div>
+                  <label className="app-label">方式</label>
+                  <select
+                    className="app-select h-7 py-0 text-xs"
+                    value={evalPreprocess.binarizeMethod}
+                    onChange={(e) => updateEvalPreprocess({ binarizeMethod: e.target.value })}
+                  >
+                    {EVAL_BINARIZE_METHODS.map((row) => (
+                      <option key={row.id} value={row.id}>
+                        {row.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="app-label">しきい値（固定しきい値のみ）</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={255}
+                    step={1}
+                    className="app-input h-7 py-0 text-xs"
+                    value={evalPreprocess.threshold}
+                    disabled={evalPreprocess.binarizeMethod !== "fixed"}
+                    onChange={(e) => updateEvalPreprocess({ threshold: Number(e.target.value) })}
+                  />
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          {/* Step5専用OCR設定（最大3モデル。保存先: ocr_eval_preview_slots_by_project_v1。
+              ラベル編集の推論設定とは独立） */}
+          <div className="space-y-1.5 border-t border-border/60 pt-2">
+            <p className="text-[11px] font-semibold text-muted">評価データOCR設定</p>
+            {ocrSlots.map((slot, index) => {
+              const engine = slot.engine || "paddleocr";
+              const slotLowercaseApplicable = lowercaseToggleApplicable(
+                engine,
+                engine === "easyocr" || engine === "paddleocr" ? slot.easyocrLangs : "en"
+              );
+              return (
+                <div
+                  key={index}
+                  className={`space-y-1 rounded-lg border p-1.5 ${
+                    slot.enabled ? "border-border/80 bg-card/40" : "border-border/40 opacity-75"
+                  }`}
+                >
+                  <label className="flex h-5 cursor-pointer items-center gap-1.5 text-[11px] font-semibold text-text">
+                    <input
+                      type="checkbox"
+                      checked={slot.enabled === true}
+                      onChange={(e) => updateOcrSlot(index, { enabled: e.target.checked })}
+                    />
+                    モデル{index + 1}
+                    {!slot.enabled ? <span className="ml-auto text-[10px] font-normal text-muted">無効</span> : null}
+                  </label>
+                  {slot.enabled ? (
+                    <>
+                      <div>
+                        <label className="app-label">Engine</label>
+                        <select
+                          className="app-select h-7 py-0 text-xs"
+                          value={engine}
+                          onChange={(e) => updateOcrSlot(index, { engine: e.target.value })}
+                        >
+                          <option value="paddleocr">PaddleOCR</option>
+                          <option value="tesseract">Tesseract</option>
+                          <option value="easyocr">EasyOCR</option>
+                        </select>
+                      </div>
+                      {engine === "paddleocr" ? (
+                        <div>
+                          <label className="app-label">Model</label>
+                          <select
+                            className="app-select h-7 py-0 text-xs"
+                            value={slot.paddleModel}
+                            onChange={(e) => updateOcrSlot(index, { paddleModel: e.target.value })}
+                          >
+                            <option value="latest">latest（最新）</option>
+                            {paddleModels
+                              .filter((name) => name !== "latest")
+                              .map((name) => (
+                                <option key={name} value={name}>
+                                  {name}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+                      ) : null}
+                      {engine === "tesseract" ? (
+                        <>
+                          <div>
+                            <label className="app-label">Model</label>
+                            <select
+                              className="app-select h-7 py-0 text-xs"
+                              value={slot.tesseractModel}
+                              onChange={(e) => updateOcrSlot(index, { tesseractModel: e.target.value })}
+                            >
+                              <option value="latest">latest（最新）</option>
+                              {tesseractModels
+                                .filter((name) => name !== "latest")
+                                .map((name) => (
+                                  <option key={name} value={name}>
+                                    {name}
+                                  </option>
+                                ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="app-label">PSM（既定7=単一行）</label>
+                            <input
+                              type="number"
+                              min={1}
+                              max={13}
+                              step={1}
+                              className="app-input h-7 py-0 text-xs"
+                              value={slot.psm}
+                              onChange={(e) => updateOcrSlot(index, { psm: Number(e.target.value) })}
+                            />
+                          </div>
+                        </>
+                      ) : null}
+                      {engine === "easyocr" || engine === "paddleocr" ? (
+                        <div>
+                          <label className="app-label">Language（カンマ区切り）</label>
+                          <input
+                            className="app-input h-7 py-0 font-mono text-xs"
+                            value={slot.easyocrLangs}
+                            onChange={(e) => updateOcrSlot(index, { easyocrLangs: e.target.value })}
+                            placeholder="en"
+                          />
+                        </div>
+                      ) : null}
+                      {engine === "tesseract" || engine === "easyocr" ? (
+                        <div>
+                          <label className="app-label">whitelist（空=既定）</label>
+                          <input
+                            className="app-input h-7 py-0 font-mono text-xs"
+                            value={slot.whitelist}
+                            onChange={(e) => updateOcrSlot(index, { whitelist: e.target.value })}
+                            placeholder={engine === "tesseract" ? "モデル既定のcharset" : "制限なし（小文字設定に従う）"}
+                            title="推論時の探索文字を制限します（Tesseract=whitelist / EasyOCR=allowlist）"
+                          />
+                        </div>
+                      ) : null}
+                      {engine === "easyocr" || engine === "paddleocr" ? (
+                        <label
+                          className={`inline-flex h-5 items-center gap-1.5 ${
+                            slotLowercaseApplicable ? "cursor-pointer text-text" : "text-muted"
+                          }`}
+                          title={slotLowercaseApplicable ? undefined : "ラテン言語設定でのみ有効です"}
+                        >
+                          <input
+                            type="checkbox"
+                            disabled={!slotLowercaseApplicable}
+                            checked={slot.includeLowercase !== false}
+                            onChange={(e) => updateOcrSlot(index, { includeLowercase: e.target.checked })}
+                          />
+                          小文字を出力に含める
+                        </label>
+                      ) : null}
+                    </>
+                  ) : null}
+                </div>
+              );
+            })}
+            <p className="text-[10px] text-muted">前処理: プロジェクト共通のOCR前処理設定＋上の評価データOCR前処理を適用</p>
           </div>
           </div>
 

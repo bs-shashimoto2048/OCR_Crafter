@@ -101,7 +101,9 @@ localStorage（`try/catch` で不可環境でも動作継続）:
 | `ocr_include_lowercase_by_project_v1` | 小文字出力設定 | プロジェクト別 |
 | `ocr_candidate_dict_by_project_v1` | OCR候補辞書 | プロジェクト別 |
 | `ocr_label_text_align_by_project_v1` | ラベル編集の「現在のラベル」文字位置（left/center/right、既定center） | プロジェクト別 |
-| `ocr_eval_preview_settings_by_project_v1` | Step5（評価用データ作成）専用のOCR設定（`{engine, paddleModel, tesseractModel, easyocrLangs, includeLowercase}`。ラベル編集の推論設定とは独立） | プロジェクト別 |
+| `ocr_eval_preview_settings_by_project_v1` | Step5専用OCR設定の旧単一モデル形式（読み込み時に `ocr_eval_preview_slots_by_project_v1` のモデル1へ自動移行。旧キー自体は変更しない） | プロジェクト別 |
+| `ocr_eval_preview_slots_by_project_v1` | Step5（評価用データ作成）専用のOCR設定・最大3モデル（`{slots: [{enabled, engine, paddleModel, tesseractModel, easyocrLangs, includeLowercase, psm, whitelist}]}`。初期=モデル1のみ有効。ラベル編集の推論設定とは独立） | プロジェクト別 |
+| `ocr_eval_preprocess_settings_by_project_v1` | Step5専用OCR前処理（`{grayscale, binarize, binarizeMethod: otsu/fixed, threshold}`。OCR候補生成時のみ適用・評価用画像/作成データには反映しない。プロジェクト共通OCR前処理・YOLO検出前処理とは独立） | プロジェクト別 |
 | `ocr_detection_preprocess_by_project_v1` | YOLO検出用前処理 | プロジェクト別 |
 | `ocr_sidebar_collapsed_v1` | サイドバー折り畳み | 全体共通 |
 | `ocr_image_builder_last_state_v1` | 学習画像作成の最終状態（`modelSource`=選択モデルの取得元 project/common/builtin を追加。旧データは一覧ロード後に自動補完） | 全体共通 |
