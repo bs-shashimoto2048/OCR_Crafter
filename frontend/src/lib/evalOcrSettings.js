@@ -146,13 +146,14 @@ export function writeEvalOcrSlots(projectId, slots) {
   }
 }
 
-// 「画像・設定変更後にOCRを自動実行」設定（既定OFF。同じ保存キーのautoRunフィールドへ保存）
+// 「画像切替・回転後にOCRを自動実行」設定（既定ON。同じ保存キーのautoRunフィールドへ保存）。
+// 未保存=ON / 明示的にfalse保存済み=OFF（旧バージョンでOFFを選んだ利用者の設定を尊重する）
 export function readEvalOcrAutoRun(projectId) {
   try {
     const map = JSON.parse(localStorage.getItem(EVAL_OCR_SLOTS_STORAGE_KEY) || "{}");
-    return map?.[projectId]?.autoRun === true;
+    return map?.[projectId]?.autoRun !== false;
   } catch {
-    return false;
+    return true;
   }
 }
 

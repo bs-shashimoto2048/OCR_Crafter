@@ -6,12 +6,14 @@ import sys
 import signal
 import subprocess
 import time
+import asyncio
 import hashlib
 import io
 import json
 import base64
 import shutil
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -1333,6 +1335,19 @@ def _predict_preview_slot(
     processed_path: Path,
     processed_sha: str,
 ) -> dict[str, Any]:
+    started = time.perf_counter()
+    result = _predict_preview_slot_inner(project_id, slot, image_type, processed_path, processed_sha)
+    result["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 1)
+    return result
+
+
+def _predict_preview_slot_inner(
+    project_id: str,
+    slot: dict[str, Any],
+    image_type: str,
+    processed_path: Path,
+    processed_sha: str,
+) -> dict[str, Any]:
     """1スロット分のOCR推論（結果キャッシュ付き）。
 
     - 結果にはbase64画像を含めない（prediction/confidence/engine/model_name/errorのみ）
@@ -1395,43 +1410,65 @@ def _predict_preview_slot(
     return {**result, "slot": slot_no, "cached": False}
 
 
+# Step5バッチOCRのスロット並列度。実測でPaddleOCR/Tesseract/EasyOCR(CPU)の3同時実行は
+# CPU競合で各エンジンが遅くなるため2に制限（スロット順にsubmit=先頭2件が先行し、
+# 空いたワーカーで3件目を実行）。既存ラベル編集は3並行HTTPリクエスト（スレッドプール）で
+# 実質無制限並列だが、Step5は他操作（プレビュー等）のCPUも考慮して2とする
+_PREVIEW_OCR_MAX_WORKERS = 2
+
+
 def run_preview_ocr_batch(
     img: Image.Image,
     project_id: str,
     overrides: Optional[dict[str, Any]],
     slots: list[dict[str, Any]],
     preview_stem: str = "adhoc",
+    include_images: bool = True,
 ) -> dict[str, Any]:
-    """前処理1回＋複数OCRスロットの逐次実行（Step5バッチ用コア）。
+    """前処理1回＋複数OCRスロットの並列実行（Step5バッチ用コア）。
 
     - 画像デコード・回転・Step5専用前処理は呼び出し側で適用済み。共通OCR前処理・
       中間/最終画像のbase64生成はここで**1回だけ**行い、全スロットで共有する
-    - スロットは**スロット番号順に逐次実行**（同時実行数=1。CPUエンジン同士の競合を避け、
-      学習ジョブ・YOLO検出など他処理のCPUを奪いすぎない）
+    - スロットは**同時実行数2**のスレッドプールでスロット番号順にsubmitし並列実行
+      （3モデル合計時間の単純合算を避ける。推論は既存predict_from_imageを共通利用し、
+      エンジンごとに独立ライブラリのため並列安全。結果の並びはスロット順を維持）
     - slots=[] はプレビュー（中間・最終画像）のみ生成しOCR推論を実行しない
+    - include_images=False は画像data URLを空で返す（先読み等、結果だけ必要な場合の転送削減）
+    - `timings` に前処理・スロット実行の実測時間(ms)を含める（性能調査用）
     """
     if not isinstance(slots, list) or len(slots) > 3:
         raise ValueError("slots は最大3件の配列で指定してください")
+    t0 = time.perf_counter()
     preview = preview_preprocess_image(img, project_id=project_id, overrides=overrides, preview_stem=preview_stem)
+    preprocess_ms = round((time.perf_counter() - t0) * 1000, 1)
     results: list[dict[str, Any]] = []
+    slots_wall_ms = 0.0
     if slots:
+        for slot in slots:
+            if not isinstance(slot, dict):
+                raise ValueError("slots の各要素はobjectで指定してください")
         paths = ensure_project_directories(project_id)
         processed_path = paths.root / str(preview.get("processed_preview") or "")
         processed_sha = hashlib.sha256(processed_path.read_bytes()).hexdigest()
         image_type = str(preview.get("type", "single"))
-        for slot in slots:
-            if not isinstance(slot, dict):
-                raise ValueError("slots の各要素はobjectで指定してください")
-            results.append(_predict_preview_slot(project_id, slot, image_type, processed_path, processed_sha))
+        t1 = time.perf_counter()
+        with ThreadPoolExecutor(max_workers=min(_PREVIEW_OCR_MAX_WORKERS, len(slots))) as pool:
+            futures = [
+                pool.submit(_predict_preview_slot, project_id, slot, image_type, processed_path, processed_sha)
+                for slot in slots
+            ]
+            results = [future.result() for future in futures]
+        slots_wall_ms = round((time.perf_counter() - t1) * 1000, 1)
     return {
         "project_id": preview.get("project_id"),
         "type": preview.get("type"),
         "ratio": preview.get("ratio"),
         "original_size": preview.get("original_size"),
         "pipeline": preview.get("pipeline"),
-        "interim_data_url": preview.get("interim_data_url"),
-        "processed_data_url": preview.get("processed_data_url"),
+        "interim_data_url": str(preview.get("interim_data_url") or "") if include_images else "",
+        "processed_data_url": str(preview.get("processed_data_url") or "") if include_images else "",
         "results": results,
+        "timings": {"preprocess_ms": preprocess_ms, "slots_wall_ms": slots_wall_ms},
     }
 
 
@@ -1446,12 +1483,17 @@ async def api_ocr_preview_file_batch(
     overrides_json: str = Form(""),
     eval_preprocess_json: str = Form(""),
     slots_json: str = Form("[]"),
+    include_images: bool = Form(True),
 ) -> dict[str, Any]:
     """Step5用: 前処理1回＋複数OCR設定（最大3スロット）を1リクエストで処理する。
 
     - `slots_json=[]` は中間・最終画像プレビューのみ更新（OCR推論なし）
+    - スロットは同時実行数2で並列実行（結果の並びはスロット順を維持）
     - 中間・最終画像のdata URLはレスポンス直下に1回だけ含め、各スロット結果には含めない
+      （`include_images=false` で画像を省略可能=先読み用の転送削減）
     - 同一の処理済み画像×同一設定の結果はプロセス内LRUキャッシュを再利用（エラーは対象外）
+    - ブロッキング処理はワーカースレッドへ逃がし、イベントループ（他のプレビュー・一覧等の
+      リクエスト）を塞がない（既存ラベル編集のsync defエンドポイントと同等の並行性）
     - 既存 `POST /api/ocr/preview-file` は後方互換のため維持
     """
     resolved = _resolve_project_id(project_id)
@@ -1461,19 +1503,25 @@ async def api_ocr_preview_file_batch(
         if not isinstance(slots_raw, list):
             raise ValueError("slots_json must be an array")
         upload_bytes = await file.read() if file is not None else None
-        img, stem = _load_preview_source_image(
-            resolved,
-            upload_bytes,
-            str(file.filename or "image") if file is not None else "",
-            export_id,
-            source_directory,
-            filename,
-            int(rotation),
-        )
-        parsed_eval = _parse_preview_json_object(eval_preprocess_json, "eval_preprocess_json")
-        if parsed_eval is not None:
-            img = apply_eval_preprocess(img, parsed_eval)
-        return run_preview_ocr_batch(img, resolved, overrides, slots_raw, preview_stem=stem)
+
+        def _run() -> dict[str, Any]:
+            img, stem = _load_preview_source_image(
+                resolved,
+                upload_bytes,
+                str(file.filename or "image") if file is not None else "",
+                export_id,
+                source_directory,
+                filename,
+                int(rotation),
+            )
+            parsed_eval = _parse_preview_json_object(eval_preprocess_json, "eval_preprocess_json")
+            if parsed_eval is not None:
+                img = apply_eval_preprocess(img, parsed_eval)
+            return run_preview_ocr_batch(
+                img, resolved, overrides, slots_raw, preview_stem=stem, include_images=bool(include_images)
+            )
+
+        return await asyncio.to_thread(_run)
     except (TypeError, json.JSONDecodeError) as e:
         raise HTTPException(status_code=400, detail=f"invalid slots_json: {e}") from e
     except FileNotFoundError as e:

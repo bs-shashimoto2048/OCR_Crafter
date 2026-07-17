@@ -24,7 +24,7 @@ import {
   filterEvalItems,
   nextRotation,
 } from "../lib/evaluationBuilder";
-import { buildOcrRunKey, createLruCache } from "../lib/evalOcrRun";
+import { buildOcrRunKey, createLruCache, shouldAutoRunOcr } from "../lib/evalOcrRun";
 import {
   evalOcrSlotRequestFields,
   migrateEvalOcrSlots,
@@ -204,8 +204,8 @@ export default function EvaluationDatasetBuilder({
   // Step5専用OCR設定（最大3モデル。ラベル編集の推論設定とは独立し localStorage 別キーへ保存。
   // 旧単一設定キー ocr_eval_preview_settings_by_project_v1 は読み込み時にモデル1へ自動移行）
   const [ocrSlots, setOcrSlots] = useState(() => migrateEvalOcrSlots(null, null));
-  // 「画像・設定変更後にOCRを自動実行」（既定OFF。ONでも連続操作終了後に1回だけ実行）
-  const [ocrAutoRun, setOcrAutoRun] = useState(false);
+  // 「画像切替・回転後にOCRを自動実行」（既定ON・保存済みfalseは尊重。連続操作終了後に1回だけ実行）
+  const [ocrAutoRun, setOcrAutoRun] = useState(true);
   // Step5専用OCR前処理（グレースケール・二値化。OCR候補生成用の推論入力にのみ適用し、
   // 評価用画像・作成データセット・学習画像へは反映しない）
   const [evalPreprocess, setEvalPreprocess] = useState({ ...DEFAULT_EVAL_PREPROCESS });
@@ -494,10 +494,9 @@ export default function EvaluationDatasetBuilder({
   const currentRotation = nextRotation(currentState.rotation, 0);
   const currentLabel = String(currentState.label || "");
 
-  // OCR実行条件キー: 画像・回転・Step5専用前処理・有効スロット設定のいずれかが変わると別キーになり、
-  // 表示中の候補はキャッシュミス=「要再実行」表示となる（変更のたびの自動実行はしない）
+  // OCR実行条件キー: 画像・回転・Step5専用前処理・有効スロット設定のいずれかが変わると別キーになる
   const runKey = currentItem ? buildOcrRunKey(currentItem.key, currentRotation, evalPreprocessJson, slotFieldsKey) : "";
-  // 表示するOCR結果: 実行条件キーに一致するキャッシュ結果（無ければ要再実行）
+  // 表示するOCR結果: 実行条件キーに一致するキャッシュ結果（同一条件はAPIを呼ばず即時表示）
   const displayedResults = useMemo(() => {
     if (!runKey) {
       return null;
@@ -510,6 +509,15 @@ export default function EvaluationDatasetBuilder({
     // resultsVersion はキャッシュ更新の通知用
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runKey, resultsVersion, transientResults]);
+  // 自動OCRが発火予定か（キャッシュヒット時は発火しない）。プレビュー二重取得の回避と
+  // 「認識中...」表示の判定に使う
+  const willAutoRun = shouldAutoRunOcr({
+    autoRun: ocrAutoRun,
+    hasItem: Boolean(currentItem),
+    itemExists: currentItem?.exists,
+    enabledCount: enabledPlans.length,
+    hasCachedResult: Boolean(displayedResults),
+  });
 
   // 前後移動・保存して次への対象一覧（評価対象チェック済みのみ。フィルタ適用後の表示順）
   const navVisibleKeys = useMemo(
@@ -549,16 +557,16 @@ export default function EvaluationDatasetBuilder({
   // OCR候補の取得（/api/ocr/preview-file。回転後の評価画像を入力とし、回転・画像切替はデバウンス）。
   // 古いレスポンスは requestKey ガードで破棄する（画像A実行中に画像Bへ移動してもAの結果を表示しない）
   // バッチAPI用フォーム（plans=[] でプレビューのみ=OCR推論なし）
-  function buildBatchForm(plans) {
+  function buildBatchFormFor(item, rotation, plans, includeImages = true) {
     const form = new FormData();
     form.append("project_id", projectId);
-    if (currentItem.source === "directory") {
-      form.append("source_directory", currentItem.directory || "");
+    if (item.source === "directory") {
+      form.append("source_directory", item.directory || "");
     } else {
-      form.append("export_id", currentItem.exportId);
+      form.append("export_id", item.exportId);
     }
-    form.append("filename", currentItem.filename);
-    form.append("rotation", String(currentRotation));
+    form.append("filename", item.filename);
+    form.append("rotation", String(rotation));
     if (preprocessOverrides) {
       form.append("overrides_json", JSON.stringify(preprocessOverrides));
     }
@@ -570,13 +578,16 @@ export default function EvaluationDatasetBuilder({
       "slots_json",
       JSON.stringify(plans.filter((plan) => !plan.duplicate).map((plan) => ({ slot: plan.index + 1, ...plan.fields })))
     );
+    if (!includeImages) {
+      form.append("include_images", "false");
+    }
     return form;
   }
 
   async function fetchBatch(plans, signal) {
     const res = await fetch(`${API_BASE}/api/ocr/preview-file/batch`, {
       method: "POST",
-      body: buildBatchForm(plans),
+      body: buildBatchFormFor(currentItem, currentRotation, plans),
       signal,
     });
     if (!res.ok) {
@@ -585,19 +596,54 @@ export default function EvaluationDatasetBuilder({
     return res.json();
   }
 
-  function applyPreviewImages(data) {
+  // バッチ応答をスロット順の表示行へ変換（重複はスキップ行・行単位エラー保持）
+  function mapBatchResults(plans, data) {
+    const rows = Array.isArray(data?.results) ? data.results : [];
+    return plans.map((plan) => {
+      if (plan.duplicate) {
+        return { slotIndex: plan.index, fields: plan.fields, skipped: true };
+      }
+      const row = rows.find((r) => Number(r?.slot) === plan.index + 1) || {};
+      const prediction = String(row.prediction || "").trim();
+      return {
+        slotIndex: plan.index,
+        fields: plan.fields,
+        prediction,
+        confidence: typeof row.confidence === "number" ? row.confidence : null,
+        engine: row.engine || plan.fields.engine,
+        modelName: row.model_name || "",
+        error: row.error ? String(row.error) : "",
+      };
+    });
+  }
+
+  // 中間・最終画像の反映済みキー（画像key+回転+Step5前処理）。OCRバッチが画像も返すため、
+  // 自動OCR後にプレビューだけ再取得する無駄なリクエストを防ぐ
+  const lastPreviewKeyRef = useRef("");
+  const previewKey = currentItem ? JSON.stringify([currentItem.key, currentRotation, evalPreprocessJson]) : "";
+
+  function applyPreviewImages(data, appliedKey) {
     setPreviewSrc(data?.processed_data_url || "");
     setInterimSrc(data?.interim_data_url || "");
     setPreviewMeta({ type: data?.type || "", ratio: data?.ratio });
+    lastPreviewKeyRef.current = appliedKey || "";
   }
 
   // プレビュー更新（前処理のみ・OCR推論なし）。画像切替では元画像・ラベル・回転を即時表示し、
-  // 中間・最終画像はここで非同期更新する。連続操作はデバウンスし、旧リクエストはAbortControllerで中止
+  // 中間・最終画像はここで非同期更新する。連続操作はデバウンスし、旧リクエストはAbortControllerで中止。
+  // 自動OCRが発火予定の場合はOCRバッチ応答が画像も運ぶためここでは取得しない（重複リクエスト回避）
   useEffect(() => {
     if (!currentItem || currentItem.exists === false || !projectId) {
       setPreviewSrc("");
       setInterimSrc("");
       setPreviewMeta(null);
+      lastPreviewKeyRef.current = "";
+      return undefined;
+    }
+    if (lastPreviewKeyRef.current === previewKey) {
+      return undefined; // 反映済み（OCRバッチ応答から適用済みの場合を含む）
+    }
+    if (willAutoRun) {
       return undefined;
     }
     const controller = new AbortController();
@@ -607,7 +653,7 @@ export default function EvaluationDatasetBuilder({
       try {
         const data = await fetchBatch([], controller.signal);
         if (controller.signal.aborted) return;
-        applyPreviewImages(data);
+        applyPreviewImages(data, previewKey);
       } catch {
         if (!controller.signal.aborted) {
           setPreviewSrc("");
@@ -621,7 +667,7 @@ export default function EvaluationDatasetBuilder({
       clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentItem?.key, currentItem?.exists, currentRotation, projectId, evalPreprocessJson]);
+  }, [previewKey, currentItem?.exists, projectId, willAutoRun]);
 
   // OCR再実行（手動または自動ON時）。有効な最大3スロットをバッチAPIへ1リクエストで送り、
   // サーバー側で「前処理1回＋スロット順に逐次推論（同時実行数1）」する。結果はrunKey単位でキャッシュ
@@ -634,33 +680,20 @@ export default function EvaluationDatasetBuilder({
     ocrAbortRef.current?.abort();
     const controller = new AbortController();
     ocrAbortRef.current = controller;
+    const previewKeyAtStart = previewKey;
     setOcrLoading(true);
     try {
       const data = await fetchBatch(plansAtStart, controller.signal);
       if (controller.signal.aborted) return;
       // 中間・最終画像はレスポンス直下に1回だけ含まれる（スロット結果へは含めない）
-      applyPreviewImages(data);
-      const rows = Array.isArray(data?.results) ? data.results : [];
-      const results = plansAtStart.map((plan) => {
-        if (plan.duplicate) {
-          return { slotIndex: plan.index, fields: plan.fields, skipped: true };
-        }
-        const row = rows.find((r) => Number(r?.slot) === plan.index + 1) || {};
-        const prediction = String(row.prediction || "").trim();
-        return {
-          slotIndex: plan.index,
-          fields: plan.fields,
-          prediction,
-          confidence: typeof row.confidence === "number" ? row.confidence : null,
-          engine: row.engine || plan.fields.engine,
-          modelName: row.model_name || "",
-          error: row.error ? String(row.error) : "",
-        };
-      });
+      applyPreviewImages(data, previewKeyAtStart);
+      const results = mapBatchResults(plansAtStart, data);
       if (results.every((row) => !row.error)) {
         resultsCacheRef.current.set(keyAtStart, results);
         setResultsVersion((v) => v + 1);
         setTransientResults(null);
+        // 性能に余裕があれば次の1画像だけ先読み（キャッシュ作成のみ・UIは変えない）
+        prefetchNextOcr(plansAtStart);
       } else {
         // エラーを含む結果はLRUへ入れず一時表示のみ（同一条件でもOCR再実行で再試行できる）
         setTransientResults({ key: keyAtStart, results });
@@ -686,6 +719,60 @@ export default function EvaluationDatasetBuilder({
   const runOcrRef = useRef(runOcr);
   runOcrRef.current = runOcr;
 
+  // 先読み: 現在画像のOCR完了後、表示一覧の次の1画像だけアイドル時にOCR結果キャッシュを作る。
+  // 条件: 自動OCR有効・次画像あり・同一条件が未キャッシュ。UI状態は変更しない（キャッシュのみ）。
+  // 画像data URLは不要のため include_images=false で転送を削減する
+  const prefetchAbortRef = useRef(null);
+  function prefetchNextOcr(plans) {
+    if (!ocrAutoRun || plans.length === 0) {
+      return;
+    }
+    const index = navVisibleKeys.indexOf(currentKey);
+    const nextKey = index >= 0 ? navVisibleKeys[index + 1] : undefined;
+    if (!nextKey) {
+      return;
+    }
+    const nextItem = items.find((row) => row.key === nextKey);
+    if (!nextItem || nextItem.exists === false) {
+      return;
+    }
+    const nextRot = nextRotation((itemState[nextKey] || {}).rotation, 0);
+    const nextRunKey = buildOcrRunKey(nextKey, nextRot, evalPreprocessJson, slotFieldsKey);
+    if (resultsCacheRef.current.has(nextRunKey)) {
+      return;
+    }
+    prefetchAbortRef.current?.abort();
+    const controller = new AbortController();
+    prefetchAbortRef.current = controller;
+    // 現在画像の操作を優先するため少し遅らせる（その間に操作が続けば中止される）
+    setTimeout(async () => {
+      if (controller.signal.aborted) {
+        return;
+      }
+      try {
+        const res = await fetch(`${API_BASE}/api/ocr/preview-file/batch`, {
+          method: "POST",
+          body: buildBatchFormFor(nextItem, nextRot, plans, false),
+          signal: controller.signal,
+        });
+        if (!res.ok || controller.signal.aborted) {
+          return;
+        }
+        const data = await res.json();
+        if (controller.signal.aborted) {
+          return;
+        }
+        const results = mapBatchResults(plans, data);
+        if (results.every((row) => !row.error)) {
+          resultsCacheRef.current.set(nextRunKey, results);
+          setResultsVersion((v) => v + 1);
+        }
+      } catch {
+        // 先読みの失敗は無視（通常の自動OCRで改めて実行される）
+      }
+    }, 400);
+  }
+
   // 画像・回転・設定の変更時: 実行中のOCRリクエストを中止（古い結果の反映防止・不要な通信の中断）
   useEffect(() => {
     if (ocrAbortRef.current) {
@@ -700,20 +787,16 @@ export default function EvaluationDatasetBuilder({
     () => () => {
       ocrAbortRef.current?.abort();
       previewAbortRef.current?.abort();
+      prefetchAbortRef.current?.abort();
     },
     []
   );
 
-  // 自動実行（既定OFF）: 画像・回転・前処理・設定の連続操作終了後に1回だけ実行。
-  // 同一条件の結果がキャッシュ済みなら実行しない
+  // 自動実行（既定ON）: 画像選択・前へ/次へ・保存して次へ・90°/180°回転・前処理/OCR設定変更の
+  // 連続操作終了後（300msデバウンス）に1回だけ実行。同一条件の結果がキャッシュ済みなら
+  // APIを呼ばず即時表示（shouldAutoRunOcrがfalseになる）。古いタイマーはcleanupで破棄
   useEffect(() => {
-    if (!ocrAutoRun || !runKey || enabledPlans.length === 0) {
-      return undefined;
-    }
-    if (!currentItem || currentItem.exists === false) {
-      return undefined;
-    }
-    if (resultsCacheRef.current.has(runKey)) {
+    if (!willAutoRun) {
       return undefined;
     }
     const timer = setTimeout(() => {
@@ -721,7 +804,7 @@ export default function EvaluationDatasetBuilder({
     }, OCR_DEBOUNCE_MS);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ocrAutoRun, runKey, resultsVersion]);
+  }, [willAutoRun, runKey, resultsVersion]);
 
   // 辞書からの近似候補（既存ラベル編集と同じ純ロジック・同じ辞書設定を使用。
   // 最大3スロットのOCR結果すべてを入力とし、同一候補は既存ロジック内で最高類似度へ統合される）
@@ -1213,17 +1296,18 @@ export default function EvaluationDatasetBuilder({
             <div className="min-h-[44px] space-y-1.5">
               {enabledPlans.length === 0 ? (
                 <CandidateMessageRow message="有効なOCRモデルがありません（評価データOCR設定で有効化してください）" tone="empty" />
-              ) : ocrLoading ? (
+              ) : ocrLoading || willAutoRun ? (
+                // 自動OCRの待機・実行中（画像・ラベル入力は通常どおり操作できる）
                 enabledPlans.map((plan, order) => (
                   <CandidateMessageRow
                     key={plan.index}
                     index={order + 1}
                     header={`${engineLabelOf(plan.fields.engine)} / ${slotModelLabel(plan.fields, "")}`}
-                    message="OCR実行中..."
+                    message="認識中..."
                   />
                 ))
               ) : !displayedResults ? (
-                // 画像・回転・前処理・OCR設定の変更後は自動実行せず「要再実行」状態にする（既定）
+                // 自動実行OFF時: 変更後は「要再実行」状態（[OCR再実行]押下で取得）
                 <CandidateMessageRow
                   message="設定または画像が変更されました。OCR候補を更新してください（[OCR再実行]を押す）。"
                   tone="amber"
@@ -1433,8 +1517,8 @@ export default function EvaluationDatasetBuilder({
               ラベル編集の推論設定とは独立） */}
           <div className="space-y-1.5 border-t border-border/60 pt-2">
             <p className="text-[11px] font-semibold text-muted">評価データOCR設定</p>
-            {/* 既定OFF: 画像・回転・前処理・設定の変更では候補を「要再実行」にするだけでOCRは実行しない。
-                ONでも連続操作終了後（300msデバウンス）に1回だけ実行する */}
+            {/* 既定ON（旧バージョンでOFF保存済みの場合は尊重）。連続操作終了後（300msデバウンス）に
+                1回だけ実行し、同一条件のキャッシュがあればAPIを呼ばず即時表示する */}
             <label className="inline-flex min-h-5 cursor-pointer items-start gap-1.5 text-[11px] text-text">
               <input
                 type="checkbox"
@@ -1442,7 +1526,7 @@ export default function EvaluationDatasetBuilder({
                 checked={ocrAutoRun === true}
                 onChange={(e) => updateOcrAutoRun(e.target.checked)}
               />
-              画像・設定変更後にOCRを自動実行（既定OFF）
+              画像切替・回転後にOCRを自動実行
             </label>
             {ocrSlots.map((slot, index) => {
               const engine = slot.engine || "paddleocr";

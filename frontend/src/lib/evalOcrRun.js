@@ -7,6 +7,18 @@ export function buildOcrRunKey(itemKey, rotation, evalPreprocessJson, slotFields
   return JSON.stringify([String(itemKey || ""), Number(rotation) || 0, String(evalPreprocessJson || ""), String(slotFieldsKey || "")]);
 }
 
+// 自動OCRを発火してよいか（キャッシュヒット時はAPIを呼ばない）。
+// 発火条件: 自動実行ON・対象画像あり（欠損でない）・有効スロットあり・同一条件の結果未取得
+export function shouldAutoRunOcr({ autoRun, hasItem, itemExists, enabledCount, hasCachedResult }) {
+  return (
+    autoRun === true &&
+    hasItem === true &&
+    itemExists !== false &&
+    Number(enabledCount) > 0 &&
+    hasCachedResult !== true
+  );
+}
+
 // サイズ制限付きLRUマップ（Mapの挿入順を利用。上限超過で最古を破棄）
 export function createLruCache(limit = 30) {
   const map = new Map();

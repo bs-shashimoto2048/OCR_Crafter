@@ -44,20 +44,31 @@ def _slots(n=3):
 
 @pytest.fixture
 def counters(monkeypatch, temp_projects):
-    """前処理・推論の呼び出し回数を数える（前処理は実物をラップ・推論はスタブ）。"""
+    """前処理・推論の呼び出し回数を数える（前処理は実物をラップ・推論はスタブ）。
+
+    スロットは並列実行されるため、カウントはスレッド安全な list.append で行う。
+    """
 
     class _Counters:
-        preprocess = 0
-        predict = 0
+        preprocess_calls: list[str] = []
+        predict_calls: list[str] = []
+
+        @property
+        def preprocess(self):
+            return len(_Counters.preprocess_calls)
+
+        @property
+        def predict(self):
+            return len(_Counters.predict_calls)
 
     real_preview = main_mod.preview_preprocess_image
 
     def counting_preview(img, project_id=None, overrides=None, preview_stem="adhoc"):
-        _Counters.preprocess += 1
+        _Counters.preprocess_calls.append(preview_stem)
         return real_preview(img, project_id=project_id, overrides=overrides, preview_stem=preview_stem)
 
     def fake_predict(image_path, **kwargs):
-        _Counters.predict += 1
+        _Counters.predict_calls.append(str(kwargs.get("engine")))
         return {
             "engine": kwargs.get("engine"),
             "model_name": "stub-model",
@@ -67,7 +78,7 @@ def counters(monkeypatch, temp_projects):
 
     monkeypatch.setattr(main_mod, "preview_preprocess_image", counting_preview)
     monkeypatch.setattr(main_mod, "predict_from_image", fake_predict)
-    return _Counters
+    return _Counters()
 
 
 def test_batch_preprocess_once_for_three_slots(counters):
@@ -80,7 +91,7 @@ def test_batch_preprocess_once_for_three_slots(counters):
     assert result["interim_data_url"].startswith("data:image/")
     assert result["processed_data_url"].startswith("data:image/")
     for row in result["results"]:
-        assert set(row.keys()) == {"engine", "model_name", "prediction", "confidence", "error", "slot", "cached"}
+        assert set(row.keys()) == {"engine", "model_name", "prediction", "confidence", "error", "slot", "cached", "elapsed_ms"}
 
 
 def test_batch_preview_only_runs_no_predict(counters):
@@ -144,3 +155,38 @@ def test_batch_validates_slots(counters):
         main_mod.run_preview_ocr_batch(_img(), "p1", None, _slots(3) + [{"slot": 4, "engine": "easyocr"}])
     with pytest.raises(ValueError):
         main_mod.run_preview_ocr_batch(_img(), "p1", None, ["not-a-dict"])
+
+
+def test_batch_include_images_false_omits_data_urls(counters):
+    """include_images=False は画像data URLを空にして返す（先読み用の転送削減）。"""
+    result = main_mod.run_preview_ocr_batch(_img(), "p1", None, _slots(1), include_images=False)
+    assert result["interim_data_url"] == ""
+    assert result["processed_data_url"] == ""
+    assert result["results"][0]["prediction"] == "AB1"
+
+
+def test_batch_slots_run_in_parallel(monkeypatch, temp_projects):
+    """3スロットが完全逐次にならない（同時実行数2の並列実行。開始/終了時刻の重なりで検証）。"""
+    import threading
+    import time as time_mod
+
+    events = []
+    lock = threading.Lock()
+
+    def slow_predict(image_path, **kwargs):
+        with lock:
+            events.append(("start", time_mod.perf_counter()))
+        time_mod.sleep(0.2)
+        with lock:
+            events.append(("end", time_mod.perf_counter()))
+        return {"engine": kwargs.get("engine"), "model_name": "m", "prediction": "X", "confidence": 0.5}
+
+    monkeypatch.setattr(main_mod, "predict_from_image", slow_predict)
+    result = main_mod.run_preview_ocr_batch(_img(), "p1", None, _slots(3))
+    # 完全逐次なら0.2×3=600ms以上。並列度2なら約400ms
+    assert result["timings"]["slots_wall_ms"] < 550
+    starts = sorted(t for kind, t in events if kind == "start")
+    ends = sorted(t for kind, t in events if kind == "end")
+    assert len(starts) == 3
+    assert starts[1] < ends[0]  # 2件目は1件目の終了前に開始（重なって実行）
+    assert starts[2] >= ends[0] - 0.05  # 3件目は最初の完了後に開始（同時実行は最大2）
