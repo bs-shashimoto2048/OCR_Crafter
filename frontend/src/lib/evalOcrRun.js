@@ -19,6 +19,20 @@ export function shouldAutoRunOcr({ autoRun, hasItem, itemExists, enabledCount, h
   );
 }
 
+// 先読みを実行してよいか（対象は常に次の1画像だけ）。
+// 条件: 自動実行ON・利用者がまだ同じ画像に留まっている・現在画像のOCRが実行中でない・
+// 次画像が存在する・次画像が未キャッシュ。1つでも欠ければ破棄（先読みの連鎖・連打中の先読み・
+// 現在画像OCRとの同時実行・複数件の積み上げを禁止する）
+export function shouldPrefetchNext({ autoRun, stillOnSameImage, ocrRunning, hasNextItem, nextCached }) {
+  return (
+    autoRun === true &&
+    stillOnSameImage === true &&
+    ocrRunning !== true &&
+    hasNextItem === true &&
+    nextCached !== true
+  );
+}
+
 // サイズ制限付きLRUマップ（Mapの挿入順を利用。上限超過で最古を破棄）
 export function createLruCache(limit = 30) {
   const map = new Map();

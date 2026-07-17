@@ -13,12 +13,13 @@ import json
 import base64
 import shutil
 import zipfile
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
+from threading import Lock
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, Response, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from PIL import Image
@@ -1328,32 +1329,11 @@ def _load_preview_source_image(
     raise ValueError("file / export_id+filename / source_directory+filename のいずれかを指定してください")
 
 
-def _predict_preview_slot(
-    project_id: str,
-    slot: dict[str, Any],
-    image_type: str,
-    processed_path: Path,
-    processed_sha: str,
-) -> dict[str, Any]:
-    started = time.perf_counter()
-    result = _predict_preview_slot_inner(project_id, slot, image_type, processed_path, processed_sha)
-    result["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 1)
-    return result
+def _prepare_preview_slot(slot: dict[str, Any], image_type: str, processed_sha: str) -> dict[str, Any]:
+    """スロット設定の正規化とキャッシュキー計算（推論は実行しない）。
 
-
-def _predict_preview_slot_inner(
-    project_id: str,
-    slot: dict[str, Any],
-    image_type: str,
-    processed_path: Path,
-    processed_sha: str,
-) -> dict[str, Any]:
-    """1スロット分のOCR推論（結果キャッシュ付き）。
-
-    - 結果にはbase64画像を含めない（prediction/confidence/engine/model_name/errorのみ）
-    - キャッシュキーは処理済み画像sha256+推論設定。処理済み画像は元画像・回転・
-      Step5専用前処理・共通前処理をすべて反映するため、いずれの変更でも別キーになる
-    - エラー結果はキャッシュしない（設定・環境修正後の再実行で即反映させる）
+    キャッシュキーは処理済み画像sha256+推論設定。処理済み画像は元画像・回転・
+    Step5専用前処理・共通前処理をすべて反映するため、いずれの変更でも別キーになる。
     """
     engine = str(slot.get("engine") or "custom")
     model = str(slot.get("model") or "latest")
@@ -1361,7 +1341,6 @@ def _predict_preview_slot_inner(
     include_lowercase = slot.get("include_lowercase") is not False
     psm_val = int(slot.get("psm") or 0)
     whitelist = str(slot.get("whitelist") or "")
-    slot_no = slot.get("slot")
 
     selected_model_type = slot.get("model_type") or None
     if engine.strip().lower() == "custom" and not selected_model_type:
@@ -1379,42 +1358,80 @@ def _predict_preview_slot_inner(
         psm=psm_val,
         whitelist=whitelist,
     )
-    cached = get_cached_preview_result(cache_key)
-    if cached is not None:
-        return {**cached, "slot": slot_no, "cached": True}
+    return {
+        "slot_no": slot.get("slot"),
+        "engine": engine,
+        "model": model,
+        "model_type": selected_model_type,
+        "langs_text": langs_text,
+        "include_lowercase": include_lowercase,
+        "psm": psm_val,
+        "whitelist": whitelist,
+        "cache_key": cache_key,
+    }
 
+
+def _execute_preview_slot(project_id: str, prepared: dict[str, Any], processed_path: Path) -> dict[str, Any]:
+    """1スロットの推論実行（共有Executorのワーカー上で動く）。
+
+    - 結果にはbase64画像を含めない（prediction/confidence/engine/model_name/errorのみ）
+    - 成功時のみLRUへ保存（エラーは設定・環境修正後の再実行で即反映させるためキャッシュしない）
+    """
+    started = time.perf_counter()
     try:
-        langs = [x.strip() for x in langs_text.split(",") if x.strip()]
+        langs = [x.strip() for x in prepared["langs_text"].split(",") if x.strip()]
         prediction = predict_from_image(
             str(processed_path),
-            model_type=selected_model_type,
-            model=model,
+            model_type=prepared["model_type"],
+            model=prepared["model"],
             project_id=project_id,
-            engine=engine,
+            engine=prepared["engine"],
             easyocr_languages=langs,
             apply_preprocess=False,
-            include_lowercase=include_lowercase,
-            tesseract_psm=(psm_val or None),
-            whitelist=(whitelist or None),
+            include_lowercase=prepared["include_lowercase"],
+            tesseract_psm=(prepared["psm"] or None),
+            whitelist=(prepared["whitelist"] or None),
         )
         result = {
-            "engine": prediction.get("engine", engine),
+            "engine": prediction.get("engine", prepared["engine"]),
             "model_name": prediction.get("model_name", ""),
             "prediction": prediction.get("prediction", ""),
             "confidence": prediction.get("confidence"),
             "error": None,
         }
-        set_cached_preview_result(cache_key, result)
+        result["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 1)
+        set_cached_preview_result(prepared["cache_key"], result)
     except Exception as e:  # noqa: BLE001
-        result = {"engine": engine, "model_name": "", "prediction": "", "confidence": None, "error": str(e)}
-    return {**result, "slot": slot_no, "cached": False}
+        result = {
+            "engine": prepared["engine"],
+            "model_name": "",
+            "prediction": "",
+            "confidence": None,
+            "error": str(e),
+            "elapsed_ms": round((time.perf_counter() - started) * 1000, 1),
+        }
+    return result
 
 
-# Step5バッチOCRのスロット並列度。実測でPaddleOCR/Tesseract/EasyOCR(CPU)の3同時実行は
-# CPU競合で各エンジンが遅くなるため2に制限（スロット順にsubmit=先頭2件が先行し、
-# 空いたワーカーで3件目を実行）。既存ラベル編集は3並行HTTPリクエスト（スレッドプール）で
-# 実質無制限並列だが、Step5は他操作（プレビュー等）のCPUも考慮して2とする
-_PREVIEW_OCR_MAX_WORKERS = 2
+def _slot_row(prepared: dict[str, Any], result: dict[str, Any], cached: bool) -> dict[str, Any]:
+    return {**result, "slot": prepared["slot_no"], "cached": cached}
+
+
+# Step5 OCR専用の共有Executor（プロセスで1つ）。リクエストごとにPoolを作らず、
+# **全リクエスト横断で同時推論数を2に制限**する。Abort済みリクエストの残骸・先読みが
+# 積み重なっても同時推論は2件のままで、CPU飽和による周期的な遅延を防ぐ
+# （実測: 旧実装はリクエスト毎に独立Pool生成のため6同時要求で全件20秒超に劣化）。
+# 待機はExecutorの内部キューで直列化され、in-flight共有と先読み抑制で滞留は最大数件に収まる
+_STEP5_OCR_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="step5-ocr")
+# 同一条件（処理済み画像sha256+推論設定）のin-flight共有。先読みと現在画像OCRが
+# 同じ条件を要求した場合に推論を1回へ統合する。エントリは所有者が完了時に必ず削除する
+_OCR_INFLIGHT: dict[str, Future] = {}
+_OCR_INFLIGHT_LOCK = Lock()
+
+
+def _has_ocr_inflight() -> bool:
+    with _OCR_INFLIGHT_LOCK:
+        return bool(_OCR_INFLIGHT)
 
 
 def run_preview_ocr_batch(
@@ -1424,40 +1441,92 @@ def run_preview_ocr_batch(
     slots: list[dict[str, Any]],
     preview_stem: str = "adhoc",
     include_images: bool = True,
+    prefetch: bool = False,
+    should_abort: Optional[Any] = None,
 ) -> dict[str, Any]:
-    """前処理1回＋複数OCRスロットの並列実行（Step5バッチ用コア）。
+    """前処理1回＋複数OCRスロットの実行（Step5バッチ用コア）。
 
     - 画像デコード・回転・Step5専用前処理は呼び出し側で適用済み。共通OCR前処理・
       中間/最終画像のbase64生成はここで**1回だけ**行い、全スロットで共有する
-    - スロットは**同時実行数2**のスレッドプールでスロット番号順にsubmitし並列実行
-      （3モデル合計時間の単純合算を避ける。推論は既存predict_from_imageを共通利用し、
-      エンジンごとに独立ライブラリのため並列安全。結果の並びはスロット順を維持）
+    - 推論は**プロセス共有のExecutor（同時実行数2）**へスロット番号順にsubmit。
+      リクエスト横断で同時推論数が2に制限され、連続操作でも滞留がCPU飽和を起こさない。
+      結果の並びはスロット順を維持
+    - **in-flight共有**: 同一キャッシュキーの推論が実行中なら新規に開始せず同じFutureを待つ
+      （先読みと現在画像OCRの二重実行を1回に統合）。エントリは所有者が完了時に必ず削除
+    - `prefetch=True` は「実行中/待機中のOCRが無いときだけ」実行し、混雑時はスロットを
+      実行せず `skipped_busy=True` で返す（現在画像の処理を先読みより優先する）
+    - `should_abort`（呼び出し元でクライアント切断等を判定）がTrueを返したら、
+      未開始スロットは実行せず、キュー内のFutureはキャンセルする
     - slots=[] はプレビュー（中間・最終画像）のみ生成しOCR推論を実行しない
-    - include_images=False は画像data URLを空で返す（先読み等、結果だけ必要な場合の転送削減）
-    - `timings` に前処理・スロット実行の実測時間(ms)を含める（性能調査用）
+    - include_images=False は画像data URLを空で返す（先読み用の転送削減）
     """
     if not isinstance(slots, list) or len(slots) > 3:
         raise ValueError("slots は最大3件の配列で指定してください")
+    for slot in slots:
+        if not isinstance(slot, dict):
+            raise ValueError("slots の各要素はobjectで指定してください")
     t0 = time.perf_counter()
     preview = preview_preprocess_image(img, project_id=project_id, overrides=overrides, preview_stem=preview_stem)
     preprocess_ms = round((time.perf_counter() - t0) * 1000, 1)
-    results: list[dict[str, Any]] = []
+
+    skipped_busy = False
+    results: list[Optional[dict[str, Any]]] = []
     slots_wall_ms = 0.0
-    if slots:
-        for slot in slots:
-            if not isinstance(slot, dict):
-                raise ValueError("slots の各要素はobjectで指定してください")
+    if slots and prefetch and _has_ocr_inflight():
+        # 先読みはアイドル時だけ（実行中/待機中のOCRがあれば破棄=現在画像を優先）
+        skipped_busy = True
+    elif slots:
         paths = ensure_project_directories(project_id)
         processed_path = paths.root / str(preview.get("processed_preview") or "")
         processed_sha = hashlib.sha256(processed_path.read_bytes()).hexdigest()
         image_type = str(preview.get("type", "single"))
         t1 = time.perf_counter()
-        with ThreadPoolExecutor(max_workers=min(_PREVIEW_OCR_MAX_WORKERS, len(slots))) as pool:
-            futures = [
-                pool.submit(_predict_preview_slot, project_id, slot, image_type, processed_path, processed_sha)
-                for slot in slots
-            ]
-            results = [future.result() for future in futures]
+        results = [None] * len(slots)
+        pending: list[tuple[int, dict[str, Any], Future, bool]] = []
+        for i, slot in enumerate(slots):
+            prepared = _prepare_preview_slot(slot, image_type, processed_sha)
+            cached = get_cached_preview_result(prepared["cache_key"])
+            if cached is not None:
+                results[i] = _slot_row(prepared, cached, cached=True)
+                continue
+            # クライアント切断済みなら未開始スロットを実行しない
+            if callable(should_abort) and should_abort():
+                results[i] = _slot_row(
+                    prepared,
+                    {"engine": prepared["engine"], "model_name": "", "prediction": "", "confidence": None,
+                     "error": "client disconnected (skipped)", "elapsed_ms": 0.0},
+                    cached=False,
+                )
+                continue
+            with _OCR_INFLIGHT_LOCK:
+                future = _OCR_INFLIGHT.get(prepared["cache_key"])
+                owner = future is None
+                if owner:
+                    future = _STEP5_OCR_EXECUTOR.submit(_execute_preview_slot, project_id, prepared, processed_path)
+                    _OCR_INFLIGHT[prepared["cache_key"]] = future
+            pending.append((i, prepared, future, owner))
+        for i, prepared, future, owner in pending:
+            # 各スロットの待機前に切断確認: 未開始（キュー内）のFutureはキャンセルして実行しない
+            if callable(should_abort) and should_abort() and owner and future.cancel():
+                with _OCR_INFLIGHT_LOCK:
+                    _OCR_INFLIGHT.pop(prepared["cache_key"], None)
+                results[i] = _slot_row(
+                    prepared,
+                    {"engine": prepared["engine"], "model_name": "", "prediction": "", "confidence": None,
+                     "error": "cancelled (client disconnected)", "elapsed_ms": 0.0},
+                    cached=False,
+                )
+                continue
+            try:
+                result = future.result()
+            except CancelledError:
+                result = {"engine": prepared["engine"], "model_name": "", "prediction": "", "confidence": None,
+                          "error": "cancelled", "elapsed_ms": 0.0}
+            finally:
+                if owner:
+                    with _OCR_INFLIGHT_LOCK:
+                        _OCR_INFLIGHT.pop(prepared["cache_key"], None)
+            results[i] = _slot_row(prepared, result, cached=False)
         slots_wall_ms = round((time.perf_counter() - t1) * 1000, 1)
     return {
         "project_id": preview.get("project_id"),
@@ -1467,13 +1536,15 @@ def run_preview_ocr_batch(
         "pipeline": preview.get("pipeline"),
         "interim_data_url": str(preview.get("interim_data_url") or "") if include_images else "",
         "processed_data_url": str(preview.get("processed_data_url") or "") if include_images else "",
-        "results": results,
+        "results": [row for row in results if row is not None],
+        "skipped_busy": skipped_busy,
         "timings": {"preprocess_ms": preprocess_ms, "slots_wall_ms": slots_wall_ms},
     }
 
 
 @app.post("/api/ocr/preview-file/batch")
 async def api_ocr_preview_file_batch(
+    request: Request,
     file: Optional[UploadFile] = File(default=None),
     project_id: str = Form("default"),
     export_id: str = Form(""),
@@ -1484,6 +1555,7 @@ async def api_ocr_preview_file_batch(
     eval_preprocess_json: str = Form(""),
     slots_json: str = Form("[]"),
     include_images: bool = Form(True),
+    prefetch: bool = Form(False),
 ) -> dict[str, Any]:
     """Step5用: 前処理1回＋複数OCR設定（最大3スロット）を1リクエストで処理する。
 
@@ -1502,7 +1574,20 @@ async def api_ocr_preview_file_batch(
         slots_raw = json.loads(str(slots_json or "[]"))
         if not isinstance(slots_raw, list):
             raise ValueError("slots_json must be an array")
+        # 画像デコード前の切断確認（Abort済みリクエストの処理を最小化）
+        if await request.is_disconnected():
+            return {"results": [], "skipped_busy": False, "disconnected": True}
         upload_bytes = await file.read() if file is not None else None
+
+        # ワーカースレッドから呼べるクライアント切断チェック（各スロット実行前に確認し、
+        # 切断済みなら未開始スロットを実行しない。実行中の推論の強制中断はしない）
+        loop = asyncio.get_running_loop()
+
+        def _client_disconnected() -> bool:
+            try:
+                return bool(asyncio.run_coroutine_threadsafe(request.is_disconnected(), loop).result(timeout=1.0))
+            except Exception:  # noqa: BLE001
+                return False
 
         def _run() -> dict[str, Any]:
             img, stem = _load_preview_source_image(
@@ -1518,7 +1603,14 @@ async def api_ocr_preview_file_batch(
             if parsed_eval is not None:
                 img = apply_eval_preprocess(img, parsed_eval)
             return run_preview_ocr_batch(
-                img, resolved, overrides, slots_raw, preview_stem=stem, include_images=bool(include_images)
+                img,
+                resolved,
+                overrides,
+                slots_raw,
+                preview_stem=stem,
+                include_images=bool(include_images),
+                prefetch=bool(prefetch),
+                should_abort=_client_disconnected,
             )
 
         return await asyncio.to_thread(_run)

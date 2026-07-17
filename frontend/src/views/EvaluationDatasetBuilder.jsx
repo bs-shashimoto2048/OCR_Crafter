@@ -24,7 +24,7 @@ import {
   filterEvalItems,
   nextRotation,
 } from "../lib/evaluationBuilder";
-import { buildOcrRunKey, createLruCache, shouldAutoRunOcr } from "../lib/evalOcrRun";
+import { buildOcrRunKey, createLruCache, shouldAutoRunOcr, shouldPrefetchNext } from "../lib/evalOcrRun";
 import {
   evalOcrSlotRequestFields,
   migrateEvalOcrSlots,
@@ -556,8 +556,13 @@ export default function EvaluationDatasetBuilder({
 
   // OCR候補の取得（/api/ocr/preview-file。回転後の評価画像を入力とし、回転・画像切替はデバウンス）。
   // 古いレスポンスは requestKey ガードで破棄する（画像A実行中に画像Bへ移動してもAの結果を表示しない）
+  // 最新のrunKey・OCR実行中フラグ（先読みタイマー発火時の判定用。stale closure回避）
+  const runKeyRef = useRef("");
+  runKeyRef.current = runKey;
+  const ocrLoadingRef = useRef(false);
+
   // バッチAPI用フォーム（plans=[] でプレビューのみ=OCR推論なし）
-  function buildBatchFormFor(item, rotation, plans, includeImages = true) {
+  function buildBatchFormFor(item, rotation, plans, includeImages = true, isPrefetch = false) {
     const form = new FormData();
     form.append("project_id", projectId);
     if (item.source === "directory") {
@@ -580,6 +585,10 @@ export default function EvaluationDatasetBuilder({
     );
     if (!includeImages) {
       form.append("include_images", "false");
+    }
+    if (isPrefetch) {
+      // サーバー側は「実行中/待機中のOCRが無いときだけ」先読みを実行し、混雑時は破棄する
+      form.append("prefetch", "true");
     }
     return form;
   }
@@ -678,10 +687,13 @@ export default function EvaluationDatasetBuilder({
     const keyAtStart = runKey;
     const plansAtStart = enabledPlans;
     ocrAbortRef.current?.abort();
+    // 現在画像のOCRを最優先: 進行中の先読みは中止する
+    prefetchAbortRef.current?.abort();
     const controller = new AbortController();
     ocrAbortRef.current = controller;
     const previewKeyAtStart = previewKey;
     setOcrLoading(true);
+    ocrLoadingRef.current = true;
     try {
       const data = await fetchBatch(plansAtStart, controller.signal);
       if (controller.signal.aborted) return;
@@ -692,8 +704,8 @@ export default function EvaluationDatasetBuilder({
         resultsCacheRef.current.set(keyAtStart, results);
         setResultsVersion((v) => v + 1);
         setTransientResults(null);
-        // 性能に余裕があれば次の1画像だけ先読み（キャッシュ作成のみ・UIは変えない）
-        prefetchNextOcr(plansAtStart);
+        // 現在画像の候補表示が完了した後、次の1画像だけ先読み（キャッシュ作成のみ・UIは変えない）
+        prefetchNextOcr(plansAtStart, keyAtStart);
       } else {
         // エラーを含む結果はLRUへ入れず一時表示のみ（同一条件でもOCR再実行で再試行できる）
         setTransientResults({ key: keyAtStart, results });
@@ -713,17 +725,21 @@ export default function EvaluationDatasetBuilder({
     } finally {
       if (ocrAbortRef.current === controller) {
         setOcrLoading(false);
+        ocrLoadingRef.current = false;
       }
     }
   }
   const runOcrRef = useRef(runOcr);
   runOcrRef.current = runOcr;
 
-  // 先読み: 現在画像のOCR完了後、表示一覧の次の1画像だけアイドル時にOCR結果キャッシュを作る。
-  // 条件: 自動OCR有効・次画像あり・同一条件が未キャッシュ。UI状態は変更しない（キャッシュのみ）。
+  // 先読み: 現在画像のOCRが完了し候補表示が済んだ後、表示一覧の**次の1画像だけ**を対象に
+  // アイドル時にOCR結果キャッシュを作る（対象は常に最大1件・連鎖しない・UI状態は変更しない）。
+  // 400ms待ってから発火時点の条件（同じ画像に留まっている・現在OCRが実行中でない・未キャッシュ）を
+  // 再判定するため、前へ/次へ連打中は発火しない。サーバー側でも prefetch=true は
+  // 「実行中/待機中のOCRが無いときだけ」実行され、混雑時は破棄される（現在画像を優先）。
   // 画像data URLは不要のため include_images=false で転送を削減する
   const prefetchAbortRef = useRef(null);
-  function prefetchNextOcr(plans) {
+  function prefetchNextOcr(plans, originRunKey) {
     if (!ocrAutoRun || plans.length === 0) {
       return;
     }
@@ -744,15 +760,27 @@ export default function EvaluationDatasetBuilder({
     prefetchAbortRef.current?.abort();
     const controller = new AbortController();
     prefetchAbortRef.current = controller;
-    // 現在画像の操作を優先するため少し遅らせる（その間に操作が続けば中止される）
+    // 利用者が同じ画像に留まっているか確認するための待機（この間に操作が続けば中止・不成立）
     setTimeout(async () => {
       if (controller.signal.aborted) {
+        return;
+      }
+      // 発火時点で条件を再判定（画像移動済み・現在OCR実行中・キャッシュ済みなら破棄）
+      if (
+        !shouldPrefetchNext({
+          autoRun: ocrAutoRun,
+          stillOnSameImage: runKeyRef.current === originRunKey,
+          ocrRunning: ocrLoadingRef.current,
+          hasNextItem: true,
+          nextCached: resultsCacheRef.current.has(nextRunKey),
+        })
+      ) {
         return;
       }
       try {
         const res = await fetch(`${API_BASE}/api/ocr/preview-file/batch`, {
           method: "POST",
-          body: buildBatchFormFor(nextItem, nextRot, plans, false),
+          body: buildBatchFormFor(nextItem, nextRot, plans, false, true),
           signal: controller.signal,
         });
         if (!res.ok || controller.signal.aborted) {
@@ -760,6 +788,10 @@ export default function EvaluationDatasetBuilder({
         }
         const data = await res.json();
         if (controller.signal.aborted) {
+          return;
+        }
+        // サーバーが混雑で先読みを破棄した場合（skipped_busy）や結果なしはキャッシュしない
+        if (data?.skipped_busy || !Array.isArray(data?.results) || data.results.length === 0) {
           return;
         }
         const results = mapBatchResults(plans, data);
@@ -779,6 +811,7 @@ export default function EvaluationDatasetBuilder({
       ocrAbortRef.current.abort();
       ocrAbortRef.current = null;
       setOcrLoading(false);
+      ocrLoadingRef.current = false;
     }
   }, [runKey]);
 
@@ -1297,13 +1330,13 @@ export default function EvaluationDatasetBuilder({
               {enabledPlans.length === 0 ? (
                 <CandidateMessageRow message="有効なOCRモデルがありません（評価データOCR設定で有効化してください）" tone="empty" />
               ) : ocrLoading || willAutoRun ? (
-                // 自動OCRの待機・実行中（画像・ラベル入力は通常どおり操作できる）
+                // 待機（デバウンス中・キュー待ち）と推論中を区別して表示（入力・移動は操作可能なまま）
                 enabledPlans.map((plan, order) => (
                   <CandidateMessageRow
                     key={plan.index}
                     index={order + 1}
                     header={`${engineLabelOf(plan.fields.engine)} / ${slotModelLabel(plan.fields, "")}`}
-                    message="認識中..."
+                    message={ocrLoading ? "OCR認識中..." : "OCR待機中..."}
                   />
                 ))
               ) : !displayedResults ? (

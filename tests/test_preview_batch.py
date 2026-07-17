@@ -8,6 +8,8 @@
 - スロット結果にbase64画像を含めない（画像はレスポンス直下に1回だけ）
 """
 
+from concurrent.futures import Future
+
 import pytest
 from PIL import Image
 
@@ -163,6 +165,104 @@ def test_batch_include_images_false_omits_data_urls(counters):
     assert result["interim_data_url"] == ""
     assert result["processed_data_url"] == ""
     assert result["results"][0]["prediction"] == "AB1"
+
+
+def test_batch_inflight_share_same_key(monkeypatch, temp_projects):
+    """同一条件の同時要求（先読み×通常）は推論を1回に統合し、完了後にin-flightが空になる。"""
+    import threading
+    import time as time_mod
+
+    calls = []
+
+    def slow_predict(image_path, **kwargs):
+        calls.append(str(kwargs.get("engine")))
+        time_mod.sleep(0.3)
+        return {"engine": kwargs.get("engine"), "model_name": "m", "prediction": "X", "confidence": 0.5}
+
+    monkeypatch.setattr(main_mod, "predict_from_image", slow_predict)
+
+    outputs = []
+
+    def run_once():
+        outputs.append(main_mod.run_preview_ocr_batch(_img(), "p1", None, _slots(1)))
+
+    t1 = threading.Thread(target=run_once)
+    t2 = threading.Thread(target=run_once)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    assert len(calls) == 1  # 同一キーの推論は1回だけ（in-flight共有）
+    for out in outputs:
+        assert out["results"][0]["prediction"] == "X"
+    assert main_mod._OCR_INFLIGHT == {}  # 完了後は必ず削除される
+
+
+def test_batch_inflight_removed_after_failure(monkeypatch, temp_projects):
+    """推論が失敗してもin-flightエントリは必ず削除される（エラーはキャッシュもされない）。"""
+
+    def failing_predict(image_path, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(main_mod, "predict_from_image", failing_predict)
+    result = main_mod.run_preview_ocr_batch(_img(), "p1", None, _slots(1))
+    assert result["results"][0]["error"] == "boom"
+    assert main_mod._OCR_INFLIGHT == {}
+
+
+def test_batch_prefetch_skipped_while_busy(monkeypatch, temp_projects):
+    """実行中/待機中のOCRがあるとき、prefetch=Trueはスロットを実行せず破棄する（現在画像優先）。"""
+    calls = []
+
+    def fake_predict(image_path, **kwargs):
+        calls.append(1)
+        return {"engine": kwargs.get("engine"), "model_name": "m", "prediction": "X", "confidence": 0.5}
+
+    monkeypatch.setattr(main_mod, "predict_from_image", fake_predict)
+    # 擬似的にin-flightエントリを作る（他リクエストの実行中を再現）
+    main_mod._OCR_INFLIGHT["dummy-key"] = Future()
+    try:
+        result = main_mod.run_preview_ocr_batch(_img(), "p1", None, _slots(3), prefetch=True)
+        assert result["skipped_busy"] is True
+        assert result["results"] == []
+        assert calls == []  # 推論は1回も実行されない
+    finally:
+        main_mod._OCR_INFLIGHT.clear()
+    # アイドル時のprefetchは通常どおり実行される
+    result2 = main_mod.run_preview_ocr_batch(_img(), "p1", None, _slots(1), prefetch=True)
+    assert result2["skipped_busy"] is False
+    assert result2["results"][0]["prediction"] == "X"
+    assert main_mod._OCR_INFLIGHT == {}
+
+
+def test_batch_disconnected_skips_unstarted_slots(monkeypatch, temp_projects):
+    """クライアント切断済み（should_abort=True）なら未開始スロットを実行しない。"""
+    calls = []
+
+    def fake_predict(image_path, **kwargs):
+        calls.append(1)
+        return {"engine": kwargs.get("engine"), "model_name": "m", "prediction": "X", "confidence": 0.5}
+
+    monkeypatch.setattr(main_mod, "predict_from_image", fake_predict)
+    result = main_mod.run_preview_ocr_batch(_img(), "p1", None, _slots(3), should_abort=lambda: True)
+    assert calls == []  # 全スロットが未開始のままスキップされる
+    assert all("disconnected" in str(row["error"]) for row in result["results"])
+    assert main_mod._OCR_INFLIGHT == {}
+
+
+def test_batch_continuous_runs_leave_no_backlog(counters):
+    """連続実行後にin-flightが残らない（キューが増え続けない）。"""
+    import numpy as np
+
+    for i in range(12):
+        # 前処理後も画像ごとに異なる内容になるよう、位置の違う黒帯を描く
+        arr = np.full((40, 120, 3), 230, dtype=np.uint8)
+        arr[:, i * 8 : i * 8 + 10] = 20
+        img = Image.fromarray(arr, mode="RGB")
+        main_mod.run_preview_ocr_batch(img, "p1", None, _slots(2))
+        assert main_mod._OCR_INFLIGHT == {}
+    assert counters.predict == 24  # 12画像×2スロット（重複なし・キャッシュ誤ヒットなし）
 
 
 def test_batch_slots_run_in_parallel(monkeypatch, temp_projects):
