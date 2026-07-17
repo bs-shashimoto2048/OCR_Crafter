@@ -184,6 +184,15 @@ class OcrEvaluateRequest(BaseModel):
         description="評価時whitelist。既定=実運用(A-Z/0-9/klt)、空文字=whitelistなし、任意文字列=カスタム",
     )
     psm: int = Field(default=7, ge=0, le=13)
+    # Step5と共通の評価前処理（services/preprocess.py の apply_eval_preprocess を共用）。
+    # 未指定=前処理なし（従来動作・後方互換）
+    eval_preprocess: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="評価前処理（{grayscale, binarize, binarize_method: otsu/fixed, threshold: 0-255}。未指定=従来動作）",
+    )
+    preprocess_source: Optional[str] = Field(
+        default="none", description="前処理設定の由来（none/step5/custom。応答へそのまま反映し履歴表示に使う）"
+    )
 
 
 class TesseractTrainStartRequest(BaseModel):

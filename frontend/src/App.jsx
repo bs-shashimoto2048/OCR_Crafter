@@ -20,6 +20,12 @@ import OcrBatchView from "./views/OcrBatchView";
 import { API_BASE, imageUrl, request } from "./lib/api";
 import { viewBoundaryKey } from "./lib/viewKey";
 import { lowercaseToggleApplicable } from "./lib/lowercase";
+import {
+  DEFAULT_EVAL_PREPROCESS,
+  evalPreprocessRequestObject,
+  evalPreprocessSummary,
+  readEvalPreprocess,
+} from "./lib/evalPreprocess";
 
 const viewMeta = {
   dashboard: { title: "ダッシュボード", subtitle: "OCR学習ワークフロー全体を管理" },
@@ -478,13 +484,28 @@ export default function App() {
   const [ocrEvalDatasets, setOcrEvalDatasets] = useState([]);
   const [ocrEvalDatasetId, setOcrEvalDatasetId] = useState("");
   const [ocrEvalOverlap, setOcrEvalOverlap] = useState(null);
+  // 評価時のOCR前処理（Step5と同じ設定定義を共用）。source: none=前処理なし / step5=Step5設定と同期 / custom=上書き
+  const [ocrEvalPreSource, setOcrEvalPreSource] = useState("none");
+  const [ocrEvalPreCustom, setOcrEvalPreCustom] = useState({ ...DEFAULT_EVAL_PREPROCESS });
 
   // プロジェクト切替時は評価データセットの選択・一覧をリセット（他プロジェクトのデータを混在させない）
   useEffect(() => {
     setOcrEvalDatasets([]);
     setOcrEvalDatasetId("");
     setOcrEvalOverlap(null);
+    setOcrEvalPreSource("none");
+    setOcrEvalPreCustom({ ...DEFAULT_EVAL_PREPROCESS });
   }, [projectId]);
+
+  // Step5同期時に参照するStep5の保存済み前処理設定（モデル評価画面表示中に読み直す）
+  const step5EvalPreprocess = useMemo(
+    () => readEvalPreprocess(projectId),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [projectId, activeView]
+  );
+  // 評価で実際に使う前処理設定（sourceに応じて解決）
+  const ocrEvalEffectivePreprocess =
+    ocrEvalPreSource === "step5" ? step5EvalPreprocess : ocrEvalPreSource === "custom" ? ocrEvalPreCustom : null;
 
   // モデル評価画面を開いたときに一覧を取得（削除・作成後の再表示にも追従）
   useEffect(() => {
@@ -2772,6 +2793,8 @@ export default function App() {
 
     setOcrEvalLoading(true);
     try {
+      // 評価前処理（Step5と共通定義）。none または全設定OFFは未指定（従来動作）
+      const evalPreObject = evalPreprocessRequestObject(ocrEvalEffectivePreprocess);
       const payload = {
         project_id: projectId,
         image_dir: ocrEvalImageDir,
@@ -2785,6 +2808,7 @@ export default function App() {
               ? ocrEvalWhitelistCustom
               : TESSERACT_WHITELIST_DEFAULT,
         psm: 7,
+        ...(evalPreObject ? { eval_preprocess: evalPreObject, preprocess_source: ocrEvalPreSource } : {}),
       };
       const data = await request("/api/ocr/evaluate", {
         method: "POST",
@@ -2817,6 +2841,11 @@ export default function App() {
             .split(/[\\/]/)
             .pop() ||
           "eval";
+        // 前処理情報はサーバーが実際に適用した値（応答のecho）を保存する（UI選択中の値ではない）
+        const appliedPre = {
+          source: String(data?.preprocess_source || "none"),
+          summary: data?.eval_preprocess ? evalPreprocessSummary(data.eval_preprocess) : "前処理なし",
+        };
         setModelEvalHistory((prev) => {
           const next = { ...prev };
           for (const target of data?.targets || []) {
@@ -2827,6 +2856,7 @@ export default function App() {
               [datasetLabel]: {
                 percent: Number(target?.accuracy_percent),
                 at: new Date().toISOString(),
+                pre: appliedPre,
               },
             };
           }
@@ -3450,6 +3480,12 @@ export default function App() {
         onRenameDataset={renameOcrEvalDataset}
         overlap={ocrEvalOverlap}
         evalHistory={modelEvalHistory}
+        projectId={projectId}
+        preprocessSource={ocrEvalPreSource}
+        onChangePreprocessSource={setOcrEvalPreSource}
+        preprocessCustom={ocrEvalPreCustom}
+        onChangePreprocessCustom={setOcrEvalPreCustom}
+        step5Preprocess={step5EvalPreprocess}
       />
     );
   }
@@ -3509,7 +3545,10 @@ export default function App() {
   // （ページ縦スクロールなし・内部スクロールのみ。Step3は画像領域を最大化するため）。
   // 固定px差し引き(calc)ではなく main→section→ビュー の親Flex残り高さ継承で実現する
   const fitViewport =
-    activeView === "ocr-training" || activeView === "image-builder-step3" || activeView === "image-builder-step5";
+    activeView === "ocr-training" ||
+    activeView === "image-builder-step3" ||
+    activeView === "image-builder-step5" ||
+    activeView === "ocr-eval";
 
   return (
     <div className="min-h-screen bg-transparent text-text">

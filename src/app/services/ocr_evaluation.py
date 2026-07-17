@@ -114,12 +114,26 @@ def evaluate_ocr(
     targets: list[dict[str, Any]],
     charset: Optional[str] = None,
     psm: int = 7,
+    eval_preprocess: Optional[dict[str, Any]] = None,
+    preprocess_source: str = "none",
 ) -> dict[str, Any]:
     image_root = Path(image_dir or "").expanduser()
     if not image_root.exists() or not image_root.is_dir():
         raise FileNotFoundError(f"評価用画像フォルダが見つかりません: {image_dir}")
 
     gt = _read_gt_csv(gt_csv)
+
+    # 評価前処理（Step5と共通の apply_eval_preprocess を共用。処理定義を複製しない）。
+    # 未指定または全設定OFFは従来動作（前処理なし）。
+    # 評価データセットの回転はデータセット作成時に画像ファイルへ焼き込み済み（構造A）のため、
+    # ここでは回転を適用しない（二重回転防止）
+    parsed_preprocess: Optional[dict[str, Any]] = None
+    if eval_preprocess is not None:
+        from .preprocess import parse_eval_preprocess
+
+        parsed = parse_eval_preprocess(eval_preprocess)
+        if parsed["grayscale"] or parsed["binarize"]:
+            parsed_preprocess = parsed
     # 評価時whitelist: None=既定(実運用whitelist) / 空文字=whitelistなし / 任意文字列=カスタム
     if charset is None:
         charset = TESSERACT_WHITELIST_DEFAULT
@@ -133,7 +147,8 @@ def evaluate_ocr(
         rec["correct"] = 0
         rec["mismatches"] = []
 
-    # 前処理を1回だけ行い全対象へ共通入力を与える（学習前後の比較を公平にする）
+    # 前処理を1回だけ行い全対象へ共通入力を与える（学習前後の比較を公平にする）。
+    # 処理順はStep5と共通: 元画像（回転焼き込み済み）→ 評価前処理（グレースケール/二値化）→ OCR入力整形
     from .ocr_pipeline import preprocess_ocr_image
 
     rows_out: list[dict[str, Any]] = []
@@ -143,7 +158,17 @@ def evaluate_ocr(
         if image_path is None:
             skipped_missing += 1
             continue
-        processed = preprocess_ocr_image(str(image_path), image_shape=[1, 48, 320], strong=False)
+        if parsed_preprocess is not None:
+            from PIL import Image
+
+            from .preprocess import apply_eval_preprocess
+
+            with Image.open(image_path) as opened:
+                source_image = apply_eval_preprocess(opened.convert("RGB"), parsed_preprocess)
+            processed = preprocess_ocr_image(source_image, image_shape=[1, 48, 320], strong=False)
+        else:
+            # 前処理未指定はパスをそのまま渡す（従来動作・後方互換）
+            processed = preprocess_ocr_image(str(image_path), image_shape=[1, 48, 320], strong=False)
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
         tmp_path = Path(tmp.name)
         tmp.close()
@@ -228,6 +253,9 @@ def evaluate_ocr(
         "count": len(rows_out),
         "gt_count": len(gt),
         "skipped_missing_image": skipped_missing,
+        # 実際に適用した前処理（UI選択中の値ではなくサーバー適用値。履歴・結果表示用）
+        "preprocess_source": (str(preprocess_source or "custom") if parsed_preprocess is not None else "none"),
+        "eval_preprocess": parsed_preprocess,
         "targets": targets_summary,
         "rows": rows_out,
         "comparison": comparison,

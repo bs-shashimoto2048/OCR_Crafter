@@ -133,7 +133,7 @@
 | Method / Path | リクエスト | レスポンス主要キー | 概要 |
 |---|---|---|---|
 | POST `/evaluate` | `EvaluateRequest`（`dataset` val/test, `model`, `overrides?`） | 評価結果 | 分類モデルの精度評価 |
-| POST `/api/ocr/evaluate` | `OcrEvaluateRequest`（`image_dir`, `gt_csv`, `targets[]`, `charset`, `psm`） | 評価結果 | OCRモデル評価（Tesseract。正解CSV比較） |
+| POST `/api/ocr/evaluate` | `OcrEvaluateRequest`（`image_dir`, `gt_csv`, `targets[]`, `charset`, `psm`, `eval_preprocess?`（Step5と共通の評価前処理 `{grayscale, binarize, binarize_method: otsu/fixed, threshold}`。未指定=従来動作）, `preprocess_source?`（none/step5/custom）） | 評価結果（`preprocess_source` / `eval_preprocess` に**サーバーが実際に適用した前処理**をecho。UI選択中の値ではなくこの値を履歴・結果表示に使う） | OCRモデル評価（Tesseract。正解CSV比較）。前処理は全評価画像へ同一適用され、適用順は「元画像（回転はデータセット作成時に焼き込み済み=二重回転しない）→ 評価前処理（Step5共通の `apply_eval_preprocess`）→ OCR入力整形 → 推論 → whitelist → 完全一致評価」。不正な前処理値は400 |
 | POST `/ocr/tuning/export` | `OcrTuningExportRequest`（`engine`, `image_types`, 比率） | 出力結果 | EasyOCR/PaddleOCR学習用データのエクスポート |
 
 ## ミドルウェア / 起動処理

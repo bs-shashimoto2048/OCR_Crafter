@@ -3135,6 +3135,8 @@ def api_ocr_evaluate(req: OcrEvaluateRequest) -> dict[str, Any]:
             targets=[t.model_dump() for t in req.targets],
             charset=req.charset,
             psm=req.psm,
+            eval_preprocess=req.eval_preprocess,
+            preprocess_source=str(req.preprocess_source or "none"),
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e

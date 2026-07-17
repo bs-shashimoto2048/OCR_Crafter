@@ -54,17 +54,54 @@ export function writeEvalPreprocess(projectId, settings) {
   }
 }
 
-// /api/ocr/preview-file の eval_preprocess_json へ渡す文字列。
-// 両設定OFF時は空文字（=パラメータ未指定・従来動作）を返す
-export function evalPreprocessRequestJson(settings) {
+// APIへ渡すスネークケースのオブジェクト。両設定OFF時はnull（=パラメータ未指定・従来動作）
+export function evalPreprocessRequestObject(settings) {
   const s = normalizeEvalPreprocess(settings);
   if (!s.grayscale && !s.binarize) {
-    return "";
+    return null;
   }
-  return JSON.stringify({
+  return {
     grayscale: s.grayscale,
     binarize: s.binarize,
     binarize_method: s.binarizeMethod,
     threshold: s.threshold,
+  };
+}
+
+// /api/ocr/preview-file の eval_preprocess_json へ渡す文字列。
+// 両設定OFF時は空文字（=パラメータ未指定・従来動作）を返す
+export function evalPreprocessRequestJson(settings) {
+  const obj = evalPreprocessRequestObject(settings);
+  return obj ? JSON.stringify(obj) : "";
+}
+
+// 前処理設定の1行サマリー（履歴・結果表示用）。snake_case（API応答）と
+// camelCase（UI設定）のどちらの形でも受け付ける
+export function evalPreprocessSummary(settings) {
+  const src = settings && typeof settings === "object" ? settings : {};
+  const s = normalizeEvalPreprocess({
+    grayscale: src.grayscale,
+    binarize: src.binarize,
+    binarizeMethod: src.binarizeMethod ?? src.binarize_method,
+    threshold: src.threshold,
   });
+  const parts = [];
+  if (s.grayscale) {
+    parts.push("Gray");
+  }
+  if (s.binarize) {
+    parts.push(s.binarizeMethod === "otsu" ? "Otsu" : `固定${s.threshold}`);
+  }
+  return parts.length > 0 ? parts.join("/") : "前処理なし";
+}
+
+// 前処理の由来ラベル（none/step5/custom。過去履歴に情報がない場合は未記録）
+export const EVAL_PREPROCESS_SOURCE_LABELS = {
+  none: "前処理なし",
+  step5: "Step5同期",
+  custom: "カスタム",
+};
+
+export function evalPreprocessSourceLabel(source) {
+  return EVAL_PREPROCESS_SOURCE_LABELS[String(source || "")] || "未記録";
 }
