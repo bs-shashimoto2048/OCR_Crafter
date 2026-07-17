@@ -8,6 +8,8 @@ export function flattenEvalHistory(evalHistory) {
   for (const [model, datasets] of Object.entries(evalHistory || {})) {
     for (const [dataset, entry] of Object.entries(datasets || {})) {
       const pre = entry && typeof entry.pre === "object" && entry.pre !== null ? entry.pre : null;
+      const num = (value) =>
+        value === null || value === undefined || value === "" ? null : Number.isFinite(Number(value)) ? Number(value) : null;
       rows.push({
         model,
         dataset,
@@ -15,6 +17,9 @@ export function flattenEvalHistory(evalHistory) {
         at: String(entry?.at || ""),
         preSource: pre ? String(pre.source || "") : "",
         preSummary: pre ? String(pre.summary || "") : "",
+        // CER主指標（旧形式はnull=未記録）
+        cer: num(entry?.cer),
+        charAccuracy: num(entry?.char_accuracy),
       });
     }
   }

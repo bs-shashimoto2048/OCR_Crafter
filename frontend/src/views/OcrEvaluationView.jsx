@@ -4,6 +4,7 @@ import Card from "../components/Card";
 import Button from "../components/Button";
 import { API_BASE, request } from "../lib/api";
 import { flattenEvalHistory, historyPreprocessLabel } from "../lib/evalHistory";
+import { confusionLabel } from "../lib/modelCompare";
 import {
   DEFAULT_EVAL_PREPROCESS,
   evalPreprocessRequestJson,
@@ -58,6 +59,8 @@ export default function OcrEvaluationView({
   const targets = Array.isArray(result?.targets) ? result.targets : [];
   const rows = Array.isArray(result?.rows) ? result.rows : [];
   const comparison = result?.comparison || null;
+  // 主表示対象 = 学習後モデル（学習前のみの評価では先頭ターゲット）
+  const mainTarget = targets.find((t) => !t.is_base) || targets[0] || null;
   const canRun = String(imageDir || "").trim() !== "" && String(gtCsv || "").trim() !== "" && !loading;
   const mismatchRows = rows.filter((row) => (row.results || []).some((r) => !r.match));
   const selectedDataset = datasets.find((row) => row.id === selectedDatasetId) || null;
@@ -556,6 +559,8 @@ sample_003.png,CHYBkt`}</pre>
                       <tr>
                         <th className="px-1.5 py-1 font-medium">モデル</th>
                         <th className="px-1.5 py-1 font-medium">評価データセット</th>
+                        <th className="px-1.5 py-1 font-medium">CER</th>
+                        <th className="px-1.5 py-1 font-medium">文字正解率</th>
                         <th className="px-1.5 py-1 font-medium">Accuracy</th>
                         <th className="px-1.5 py-1 font-medium">前処理</th>
                         <th className="px-1.5 py-1 font-medium">日時</th>
@@ -571,6 +576,12 @@ sample_003.png,CHYBkt`}</pre>
                             {row.dataset}
                           </td>
                           <td className="px-1.5 py-1 font-semibold text-text">
+                            {row.cer !== null ? `${(row.cer * 100).toFixed(1)}%` : "未記録"}
+                          </td>
+                          <td className="px-1.5 py-1 text-text">
+                            {row.charAccuracy !== null ? `${(row.charAccuracy * 100).toFixed(1)}%` : "未記録"}
+                          </td>
+                          <td className="px-1.5 py-1 text-text">
                             {Number.isFinite(row.percent) ? `${row.percent}%` : "-"}
                           </td>
                           <td
@@ -621,34 +632,96 @@ sample_003.png,CHYBkt`}</pre>
                 </span>
               </div>
 
-              {comparison ? (
-                <div className="grid shrink-0 grid-cols-2 gap-2 xl:grid-cols-4">
-                  <div className="rounded-lg border border-border/80 bg-card/55 px-3 py-2">
-                    <p className="text-[10px] uppercase tracking-wide text-muted/80">学習前モデル 認識率</p>
-                    <p className="mt-1 text-lg font-semibold text-text">{pct(comparison.base_accuracy)}</p>
-                    <p className="text-[10px] text-muted/70">eng.traineddata</p>
-                  </div>
-                  <div className="rounded-lg border border-success/50 bg-success/10 px-3 py-2">
-                    <p className="text-[10px] uppercase tracking-wide text-muted/80">学習後モデル 認識率</p>
-                    <p className="mt-1 text-lg font-semibold text-success">{pct(comparison.trained_accuracy)}</p>
-                    <p className="text-[10px] text-muted/70">{comparison.trained_label}</p>
-                  </div>
-                  <div className="rounded-lg border border-border/80 bg-card/55 px-3 py-2">
-                    <p className="text-[10px] uppercase tracking-wide text-muted/80">増減</p>
-                    <p className="mt-1 text-lg font-semibold text-text">{comparison.delta_percent}pt</p>
-                    <p className="text-[10px] text-muted/70">
-                      正解数 {comparison.correct_delta >= 0 ? "+" : ""}
-                      {comparison.correct_delta}
-                    </p>
-                  </div>
-                  <div className="rounded-lg border border-border/80 bg-card/55 px-3 py-2">
-                    <p className="text-[10px] uppercase tracking-wide text-muted/80">改善率</p>
-                    <p className="mt-1 text-lg font-semibold text-text">
-                      {comparison.improvement_rate === null || comparison.improvement_rate === undefined
-                        ? "-"
-                        : pct(comparison.improvement_rate)}
-                    </p>
-                    <p className="text-[10px] text-muted/70">増減 ÷ 学習前</p>
+              {/* 指標カード（CER主指標。Accuracy=完全一致率は業務指標として併記） */}
+              <div className="grid shrink-0 grid-cols-2 gap-2 xl:grid-cols-3">
+                <div className="rounded-lg border border-success/50 bg-success/10 px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-wide text-muted/80">CER（低いほど良い）</p>
+                  <p className="mt-1 text-lg font-semibold tabular-nums text-success">
+                    {mainTarget?.cer_percent !== null && mainTarget?.cer_percent !== undefined
+                      ? `${mainTarget.cer_percent}%`
+                      : "-"}
+                  </p>
+                  <p className="text-[10px] tabular-nums text-muted/70">
+                    {comparison && comparison.base_cer !== null && comparison.base_cer !== undefined
+                      ? `学習前 ${pct(comparison.base_cer)} → 学習後 ${pct(comparison.trained_cer)}`
+                      : mainTarget?.label || ""}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-border/80 bg-card/55 px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-wide text-muted/80">文字正解率（1-CER）</p>
+                  <p className="mt-1 text-lg font-semibold tabular-nums text-text">
+                    {mainTarget?.char_accuracy_percent !== null && mainTarget?.char_accuracy_percent !== undefined
+                      ? `${mainTarget.char_accuracy_percent}%`
+                      : "-"}
+                  </p>
+                  <p className="text-[10px] text-muted/70">文字単位の正解割合</p>
+                </div>
+                <div className="rounded-lg border border-border/80 bg-card/55 px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-wide text-muted/80">完全一致率（業務指標）</p>
+                  <p className="mt-1 text-lg font-semibold tabular-nums text-text">
+                    {mainTarget ? `${mainTarget.correct} / ${mainTarget.total}` : "-"}
+                    <span className="ml-2 text-sm text-muted">{mainTarget ? `${mainTarget.accuracy_percent}%` : ""}</span>
+                  </p>
+                  <p className="text-[10px] tabular-nums text-muted/70">
+                    正解 {mainTarget?.correct ?? "-"} / 誤認識 {mainTarget?.mismatch_count ?? "-"} / 総評価{" "}
+                    {mainTarget?.total ?? "-"}
+                  </p>
+                </div>
+                {comparison ? (
+                  <>
+                    <div className="rounded-lg border border-border/80 bg-card/55 px-3 py-2">
+                      <p className="text-[10px] uppercase tracking-wide text-muted/80">CER改善（学習前比）</p>
+                      <p className="mt-1 text-lg font-semibold tabular-nums text-text">
+                        {comparison.cer_delta_pt !== null && comparison.cer_delta_pt !== undefined
+                          ? `${comparison.cer_delta_pt > 0 ? "+" : ""}${comparison.cer_delta_pt}pt`
+                          : "-"}
+                      </p>
+                      <p className="text-[10px] tabular-nums text-muted/70">
+                        相対改善率{" "}
+                        {comparison.cer_relative_improvement !== null && comparison.cer_relative_improvement !== undefined
+                          ? pct(comparison.cer_relative_improvement)
+                          : "-"}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-border/80 bg-card/55 px-3 py-2">
+                      <p className="text-[10px] uppercase tracking-wide text-muted/80">改善 / 同等 / 悪化</p>
+                      <p className="mt-1 text-lg font-semibold tabular-nums">
+                        <span className="text-success">{comparison.improved}件</span>
+                        <span className="mx-1 text-sm text-muted">/ {comparison.unchanged}件 /</span>
+                        <span className="text-danger">{comparison.regressed}件</span>
+                      </p>
+                      <p className="text-[10px] text-muted/70">画像単位の編集距離を学習前と比較</p>
+                    </div>
+                    <div className="rounded-lg border border-border/80 bg-card/55 px-3 py-2">
+                      <p className="text-[10px] uppercase tracking-wide text-muted/80">完全一致の増減</p>
+                      <p className="mt-1 text-lg font-semibold tabular-nums">
+                        <span className="text-success">+{comparison.perfect_fixed}件</span>
+                        <span className="mx-1 text-sm text-muted">/</span>
+                        <span className="text-danger">-{comparison.perfect_regressed}件</span>
+                      </p>
+                      <p className="text-[10px] text-muted/70">完全一致へ改善 / 完全一致から悪化</p>
+                    </div>
+                  </>
+                ) : null}
+              </div>
+
+              {/* 混同ランキング（Levenshteinアラインメント由来の置換/脱落/挿入 TOP10） */}
+              {mainTarget && (mainTarget.confusions || []).length > 0 ? (
+                <div className="shrink-0 rounded-lg border border-border/80 bg-card/45 px-3 py-2">
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted">
+                    混同ランキング（{mainTarget.label}・TOP10）
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(mainTarget.confusions || []).map((c) => (
+                      <span
+                        key={`${c.kind}-${c.from}-${c.to}`}
+                        className="inline-flex h-6 items-center gap-1 rounded-md border border-border/70 bg-card/60 px-2 text-[11px] tabular-nums text-text"
+                        title={c.kind === "sub" ? "置換" : c.kind === "del" ? "脱落" : "挿入"}
+                      >
+                        <span className="font-mono">{confusionLabel(c)}</span>
+                        <span className="text-muted">{c.count}件</span>
+                      </span>
+                    ))}
                   </div>
                 </div>
               ) : null}
@@ -657,15 +730,25 @@ sample_003.png,CHYBkt`}</pre>
                 <thead>
                   <tr className="border-b border-border text-left text-xs text-muted">
                     <th className="px-2 py-2 font-medium">モデル</th>
-                    <th className="px-2 py-2 font-medium">認識率</th>
+                    <th className="px-2 py-2 font-medium">CER</th>
+                    <th className="px-2 py-2 font-medium">文字正解率</th>
+                    <th className="px-2 py-2 font-medium">完全一致率</th>
                     <th className="px-2 py-2 font-medium">正解 / 総数</th>
                     <th className="px-2 py-2 font-medium">誤認識</th>
                   </tr>
                 </thead>
                 <tbody>
                   {targets.map((t) => (
-                    <tr key={t.label} className="border-b border-border/70">
+                    <tr key={t.label} className="border-b border-border/70 tabular-nums">
                       <td className="px-2 py-2 text-text">{t.label}</td>
+                      <td className="px-2 py-2 font-semibold text-text">
+                        {t.cer_percent !== null && t.cer_percent !== undefined ? `${t.cer_percent}%` : "-"}
+                      </td>
+                      <td className="px-2 py-2 text-text">
+                        {t.char_accuracy_percent !== null && t.char_accuracy_percent !== undefined
+                          ? `${t.char_accuracy_percent}%`
+                          : "-"}
+                      </td>
                       <td className="px-2 py-2 text-text">{t.accuracy_percent}%</td>
                       <td className="px-2 py-2 text-muted">
                         {t.correct} / {t.total}

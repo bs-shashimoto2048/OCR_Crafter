@@ -4,7 +4,7 @@
 // 旧形式（percent/atのみ）のエントリはエラーにせず、欠損項目をnull（UIでは「未記録」）にする。
 
 export function normalizeEvalEntry(datasetLabel, entry) {
-  const num = (value) => (Number.isFinite(Number(value)) ? Number(value) : null);
+  const num = (value) => (value === null || value === undefined || value === "" ? null : Number.isFinite(Number(value)) ? Number(value) : null);
   const pre = entry && typeof entry.pre === "object" && entry.pre !== null ? entry.pre : null;
   return {
     datasetKey: String(datasetLabel || ""),
@@ -19,6 +19,17 @@ export function normalizeEvalEntry(datasetLabel, entry) {
     whitelist: entry?.whitelist ? String(entry.whitelist) : "",
     preSource: pre ? String(pre.source || "") : "",
     preSummary: pre ? String(pre.summary || "") : "",
+    // CER主指標（0〜1・低いほど良い）と関連指標（旧形式はnull=未記録）
+    cer: num(entry?.cer),
+    charAccuracy: num(entry?.char_accuracy),
+    cerDelta: num(entry?.cer_delta),
+    cerRelativeImprovement: num(entry?.cer_relative_improvement),
+    improved: num(entry?.improved),
+    unchanged: num(entry?.unchanged),
+    regressed: num(entry?.regressed),
+    perfectFixed: num(entry?.perfect_fixed),
+    perfectRegressed: num(entry?.perfect_regressed),
+    confusions: Array.isArray(entry?.confusions) ? entry.confusions : [],
   };
 }
 
@@ -46,45 +57,78 @@ export function isBaselineModel(name) {
   return BASELINE_MODEL_NAMES.has(String(name || "").toLowerCase());
 }
 
-// バッジ自動判定（手動設定なし）:
-// 🔴 baseline = 学習前ベースモデル
-// 🟢 recommended = 最新評価のAccuracyが評価済みモデル中で最高
-// 🏆 best = 全評価履歴の最高Accuracyを持つ
+// バッジ自動判定（手動設定なし・最新評価履歴から算出）:
+// 🔵 baseline = 学習前ベースモデル
+// 🏆 best_cer = 最新評価のCERが最小 / 🏆 best_char = 文字正解率が最大 / 🏆 best = Accuracy（完全一致率）が最大
+// 🟢 recommended = 総合推奨（CER最小→文字正解率→Accuracy→悪化件数の順で比較。Accuracy単独では決めない）
+// ⭐ latest_best = 最も新しい評価日時のモデル群の中でCER（無ければAccuracy）最良
 export function modelBadges(evalHistory, models) {
   const badges = {};
-  let bestLatest = null;
-  let bestEver = null;
+  const push = (model, key) => {
+    (badges[model] = badges[model] || []).push(key);
+  };
+  const evaluated = [];
   for (const model of models || []) {
     if (isBaselineModel(model)) {
-      (badges[model] = badges[model] || []).push("baseline");
+      push(model, "baseline");
       continue;
     }
-    const entries = modelEvalEntries(evalHistory, model);
-    if (entries.length === 0) {
-      continue;
-    }
-    const latest = entries[0];
-    if (!bestLatest || latest.percent > bestLatest.percent) {
-      bestLatest = { model, percent: latest.percent };
-    }
-    const top = Math.max(...entries.map((row) => row.percent));
-    if (!bestEver || top > bestEver.percent) {
-      bestEver = { model, percent: top };
+    const latest = latestEvalOf(evalHistory, model);
+    if (latest) {
+      evaluated.push({ model, latest });
     }
   }
-  if (bestLatest) {
-    (badges[bestLatest.model] = badges[bestLatest.model] || []).push("recommended");
+  if (evaluated.length === 0) {
+    return badges;
   }
-  if (bestEver) {
-    (badges[bestEver.model] = badges[bestEver.model] || []).push("best");
-  }
+  const minBy = (rows, fn) =>
+    rows.reduce((acc, row) => (fn(row) !== null && (acc === null || fn(row) < fn(acc)) ? row : acc), null);
+  const maxBy = (rows, fn) =>
+    rows.reduce((acc, row) => (fn(row) !== null && (acc === null || fn(row) > fn(acc)) ? row : acc), null);
+
+  const withCer = evaluated.filter((row) => row.latest.cer !== null);
+  const bestCer = minBy(withCer, (row) => row.latest.cer);
+  if (bestCer) push(bestCer.model, "best_cer");
+  const bestChar = maxBy(
+    evaluated.filter((row) => row.latest.charAccuracy !== null),
+    (row) => row.latest.charAccuracy
+  );
+  if (bestChar) push(bestChar.model, "best_char");
+  const bestAcc = maxBy(evaluated, (row) => (Number.isFinite(row.latest.percent) ? row.latest.percent : null));
+  if (bestAcc) push(bestAcc.model, "best");
+
+  // 総合推奨: CER→文字正解率→Accuracy→悪化件数（少ないほど良い）の優先順で比較
+  const recommended = [...evaluated].sort((a, b) => {
+    const cerA = a.latest.cer ?? Infinity;
+    const cerB = b.latest.cer ?? Infinity;
+    if (cerA !== cerB) return cerA - cerB;
+    const charA = a.latest.charAccuracy ?? -1;
+    const charB = b.latest.charAccuracy ?? -1;
+    if (charA !== charB) return charB - charA;
+    if (a.latest.percent !== b.latest.percent) return b.latest.percent - a.latest.percent;
+    return (a.latest.regressed ?? Infinity) - (b.latest.regressed ?? Infinity);
+  })[0];
+  if (recommended) push(recommended.model, "recommended");
+
+  // 最新の評価実行（最も新しい評価日時）内での最良
+  const newestAt = evaluated.reduce((acc, row) => (row.latest.at > acc ? row.latest.at : acc), "");
+  const newestRows = evaluated.filter((row) => row.latest.at === newestAt);
+  const latestBest =
+    minBy(
+      newestRows.filter((row) => row.latest.cer !== null),
+      (row) => row.latest.cer
+    ) || maxBy(newestRows, (row) => (Number.isFinite(row.latest.percent) ? row.latest.percent : null));
+  if (latestBest) push(latestBest.model, "latest_best");
   return badges;
 }
 
 export const MODEL_BADGE_LABELS = {
-  recommended: { icon: "🟢", label: "推奨", title: "最新評価で最高性能（評価履歴から自動判定）" },
-  best: { icon: "🏆", label: "Best Accuracy", title: "全評価履歴で最高Accuracy（評価履歴から自動判定）" },
-  baseline: { icon: "🔴", label: "ベースライン", title: "学習前のベースモデル" },
+  recommended: { icon: "🟢", label: "Recommended", title: "総合推奨（CER→文字正解率→完全一致率→悪化件数で自動判定）" },
+  latest_best: { icon: "⭐", label: "Latest Best", title: "最新の評価実行で最良（評価履歴から自動判定）" },
+  best_cer: { icon: "🏆", label: "Best CER", title: "最新評価でCER最小（評価履歴から自動判定）" },
+  best_char: { icon: "🏆", label: "Best Char Acc", title: "最新評価で文字正解率最大（評価履歴から自動判定）" },
+  best: { icon: "🏆", label: "Best Accuracy", title: "最新評価で完全一致率最大（評価履歴から自動判定）" },
+  baseline: { icon: "🔵", label: "Baseline", title: "学習前のベースモデル" },
 };
 
 // 評価時whitelistモードの表示ラベル（旧形式=記録なしは未記録）

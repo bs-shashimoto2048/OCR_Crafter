@@ -13,6 +13,19 @@ import {
   modelEvalEntries,
   whitelistLabelOf,
 } from "../lib/modelEval";
+import {
+  buildConfusionComparison,
+  buildModelComparison,
+  buildWinLoss,
+  confusionLabel,
+  formatMetricValue,
+  recommendModel,
+} from "../lib/modelCompare";
+
+// 0〜1の比率を%表示（null=未記録）
+function ratioPct(value, digits = 1) {
+  return Number.isFinite(value) ? `${(value * 100).toFixed(digits)}%` : "未記録";
+}
 
 function basename(path) {
   if (!path) return "";
@@ -116,18 +129,23 @@ function ModelBadgeChips({ names }) {
   );
 }
 
-// 一覧の評価セル: Accuracy・正解/総数・改善率・評価日時（一覧だけで性能比較できる情報量にする）
+// 一覧の評価セル: CER主指標＋完全一致率・正解/総数・評価日時（一覧だけで性能比較できる情報量にする）
 function ListEvalCell({ latest }) {
   if (!latest) return <span className="text-muted">--</span>;
   const ct = correctTotalLabel(latest);
   return (
     <div className="text-[11px] leading-4 tabular-nums">
       <p>
-        <span className={`font-semibold ${evalColorClass(latest.percent)}`}>{latest.percent}%</span>
+        {latest.cer !== null ? (
+          <span className="font-semibold text-text">CER {(latest.cer * 100).toFixed(1)}%</span>
+        ) : (
+          <span className={`font-semibold ${evalColorClass(latest.percent)}`}>{latest.percent}%</span>
+        )}
         {ct !== "未記録" ? <span className="ml-1 text-muted">（{ct}）</span> : null}
       </p>
       <p className="text-muted">
-        改善 {formatSignedValue(latest.improvementRate, "%")} / {latest.at ? latest.at.slice(0, 16).replace("T", " ") : "-"}
+        一致 {Number.isFinite(latest.percent) ? `${latest.percent}%` : "-"} /{" "}
+        {latest.at ? latest.at.slice(0, 16).replace("T", " ") : "-"}
       </p>
     </div>
   );
@@ -485,34 +503,84 @@ export default function ModelsView({
             <DetailRow label="Export状態" value={exportReady(name) ? "Export済" : "未Export"} />
           </div>
 
-          {/* 最新評価（Accuracyだけでなく正解/総数・誤認識・学習前との差分を表示） */}
+          {/* 最新評価（CER主指標。完全一致率=業務指標として併記。学習前との改善/悪化も表示） */}
           <div className="rounded-lg border border-border bg-card/45 px-2.5 py-2">
             <p className="mb-1 text-[11px] font-semibold text-text">最新評価</p>
             {latest ? (
               <>
                 <div className="flex items-baseline justify-between">
-                  <span className={`text-xl font-semibold tabular-nums ${evalColorClass(latest.percent)}`}>
-                    {latest.percent}%
-                  </span>
+                  {latest.cer !== null ? (
+                    <span className="text-xl font-semibold tabular-nums text-text">
+                      CER {ratioPct(latest.cer)}
+                    </span>
+                  ) : (
+                    <span className={`text-xl font-semibold tabular-nums ${evalColorClass(latest.percent)}`}>
+                      {latest.percent}%
+                    </span>
+                  )}
                   <span className="text-[10px] text-muted">{latest.at ? latest.at.slice(0, 16).replace("T", " ") : "-"}</span>
                 </div>
                 <div className="mt-1 h-1.5 w-full overflow-hidden rounded-sm bg-border/40">
                   <div
-                    className={`h-full rounded-sm ${evalBarClass(latest.percent)}`}
-                    style={{ width: `${Math.max(0, Math.min(100, latest.percent))}%` }}
+                    className={`h-full rounded-sm ${evalBarClass(latest.charAccuracy !== null ? latest.charAccuracy * 100 : latest.percent)}`}
+                    style={{
+                      width: `${Math.max(0, Math.min(100, latest.charAccuracy !== null ? latest.charAccuracy * 100 : latest.percent))}%`,
+                    }}
                   />
                 </div>
                 <div className="mt-1.5 space-y-1">
-                  <DetailRow label="正解 / 総数" value={correctTotalLabel(latest)} />
+                  <DetailRow label="文字正解率（1-CER）" value={ratioPct(latest.charAccuracy)} />
+                  <DetailRow label="完全一致率（業務指標）" value={`${correctTotalLabel(latest)}（${latest.percent}%）`} />
                   <DetailRow label="誤認識" value={latest.mismatch === null ? "未記録" : `${latest.mismatch}件`} />
-                  <DetailRow label="改善率（学習前比）" value={formatSignedValue(latest.improvementRate, "%")} />
-                  <DetailRow label="改善件数（学習前比）" value={formatSignedValue(latest.improvementCount, "件")} />
+                  <DetailRow
+                    label="CER改善（学習前比）"
+                    value={
+                      latest.cerDelta === null
+                        ? "未記録"
+                        : `${latest.cerDelta > 0 ? "+" : ""}${(latest.cerDelta * 100).toFixed(1)}pt / 相対 ${ratioPct(latest.cerRelativeImprovement)}`
+                    }
+                  />
+                  <DetailRow
+                    label="改善 / 同等 / 悪化"
+                    value={
+                      latest.improved === null
+                        ? "未記録"
+                        : `${latest.improved}件 / ${latest.unchanged ?? "-"}件 / ${latest.regressed ?? "-"}件`
+                    }
+                  />
+                  <DetailRow
+                    label="完全一致の増減"
+                    value={
+                      latest.perfectFixed === null
+                        ? "未記録"
+                        : `+${latest.perfectFixed}件 / -${latest.perfectRegressed ?? 0}件`
+                    }
+                  />
                 </div>
               </>
             ) : (
               <p className="text-[11px] text-muted">評価未実施（モデル評価画面で実行すると表示されます）</p>
             )}
           </div>
+
+          {/* 混同TOP5（最新評価のLevenshteinアラインメント由来） */}
+          {latest && (latest.confusions || []).length > 0 ? (
+            <div className="rounded-lg border border-border bg-card/45 px-2.5 py-2">
+              <p className="mb-1 text-[11px] font-semibold text-text">混同TOP5</p>
+              <div className="flex flex-wrap gap-1">
+                {(latest.confusions || []).slice(0, 5).map((c) => (
+                  <span
+                    key={`${c.kind}-${c.from}-${c.to}`}
+                    className="inline-flex h-5 items-center gap-1 rounded border border-border/70 bg-card/60 px-1.5 text-[10px] tabular-nums text-text"
+                    title={c.kind === "sub" ? "置換" : c.kind === "del" ? "脱落" : "挿入"}
+                  >
+                    <span className="font-mono">{confusionLabel(c)}</span>
+                    <span className="text-muted">{c.count}件</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           {/* 評価条件（最新評価で実際に使用した条件） */}
           {latest ? (
@@ -562,26 +630,36 @@ export default function ModelsView({
                 <thead className="sticky top-0 z-10 bg-[#333c46] text-left text-muted">
                   <tr>
                     <th className="px-1 py-1 font-medium">日時</th>
-                    <th className="px-1 py-1 font-medium">セット</th>
-                    <th className="px-1 py-1 font-medium">Acc</th>
+                    <th className="px-1 py-1 font-medium">CER</th>
+                    <th className="px-1 py-1 font-medium">文字</th>
+                    <th className="px-1 py-1 font-medium">一致</th>
                     <th className="px-1 py-1 font-medium">正解</th>
-                    <th className="px-1 py-1 font-medium">改善率</th>
+                    <th className="px-1 py-1 font-medium">改善</th>
+                    <th className="px-1 py-1 font-medium">悪化</th>
                     <th className="px-1 py-1 font-medium">前処理</th>
                   </tr>
                 </thead>
                 <tbody>
                   {historyEntries.map((row) => (
                     <tr key={`${row.datasetKey}-${row.at}`} className="border-t border-border/50">
-                      <td className="whitespace-nowrap px-1 py-1 text-muted">
+                      <td className="whitespace-nowrap px-1 py-1 text-muted" title={`${row.dataset} / ${row.at}`}>
                         {row.at ? row.at.slice(5, 16).replace("T", " ") : "-"}
                       </td>
-                      <td className="min-w-0 max-w-[6rem] truncate px-1 py-1 text-muted" title={row.dataset}>
-                        {row.dataset}
+                      <td className="whitespace-nowrap px-1 py-1 font-semibold text-text">
+                        {row.cer !== null ? ratioPct(row.cer) : "未記録"}
+                      </td>
+                      <td className="whitespace-nowrap px-1 py-1 text-text">
+                        {row.charAccuracy !== null ? ratioPct(row.charAccuracy) : "-"}
                       </td>
                       <td className={`px-1 py-1 font-semibold ${evalColorClass(row.percent)}`}>{row.percent}%</td>
                       <td className="whitespace-nowrap px-1 py-1 text-text">{correctTotalLabel(row)}</td>
-                      <td className="whitespace-nowrap px-1 py-1 text-text">{formatSignedValue(row.improvementRate, "%")}</td>
-                      <td className="min-w-0 max-w-[6rem] truncate px-1 py-1 text-muted" title={historyPreprocessLabel(row)}>
+                      <td className="whitespace-nowrap px-1 py-1 text-success">
+                        {row.improved === null ? "-" : `${row.improved}件`}
+                      </td>
+                      <td className="whitespace-nowrap px-1 py-1 text-danger">
+                        {row.regressed === null ? "-" : `${row.regressed}件`}
+                      </td>
+                      <td className="min-w-0 max-w-[5rem] truncate px-1 py-1 text-muted" title={historyPreprocessLabel(row)}>
                         {historyPreprocessLabel(row)}
                       </td>
                     </tr>
@@ -624,17 +702,157 @@ export default function ModelsView({
     );
   }
 
-  // 右ペイン: 比較（最大3件）
+  // 右ペイン: 比較（最大3件・CER中心。比較テーブル+混同比較+勝敗表+推奨モデル）
   function renderCompare() {
+    if (compareTargets.length === 0) {
+      return <p className="text-xs text-muted">一覧でモデルを選択してください。</p>;
+    }
+    const comparison = buildModelComparison(evalHistory, compareTargets);
+    const winLoss = buildWinLoss(comparison);
+    const recommended = recommendModel(comparison, winLoss);
+    const confusionRows = buildConfusionComparison(comparison, 8);
+    const shortName = (name) => {
+      const label = displayName(name);
+      return label.length > 14 ? `${label.slice(0, 13)}…` : label;
+    };
+    const bestCell = "bg-emerald-500/15 font-semibold text-emerald-300";
     return (
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-0.5">
+      <div className="dark-scroll min-h-0 flex-1 space-y-2 overflow-y-auto pr-0.5 [overscroll-behavior:contain]">
+        {/* 総合評価: 推奨モデル（Accuracy単独では決めない。勝利数→CER→文字正解率） */}
+        {recommended ? (
+          <div className="rounded-lg border border-amber-400/50 bg-amber-400/10 px-2.5 py-2">
+            <p className="text-[11px] font-semibold text-amber-200">
+              🏆 推奨モデル: <span title={recommended.model}>{displayName(recommended.model)}</span>
+            </p>
+            <p className="mt-0.5 text-[10px] text-amber-100/90">
+              {recommended.wins}勝{recommended.reasons.length > 0 ? ` / ${recommended.reasons.join("・")}` : ""}
+            </p>
+          </div>
+        ) : (
+          <p className="text-[11px] text-muted">評価済みのモデルがありません（モデル評価画面で実行してください）</p>
+        )}
+
+        {/* 比較テーブル（各行の最良値を緑ハイライト） */}
+        <div className="overflow-x-auto rounded-lg border border-border bg-card/45 px-1 py-1">
+          <table className="w-full text-[10px] tabular-nums">
+            <thead className="text-left text-muted">
+              <tr>
+                <th className="px-1.5 py-1 font-medium">指標</th>
+                {comparison.columns.map((col) => (
+                  <th key={col.model} className="px-1.5 py-1 font-medium" title={col.model}>
+                    {shortName(col.model)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {comparison.rows.map((row) => (
+                <tr key={row.metric.key} className="border-t border-border/50">
+                  <td className="whitespace-nowrap px-1.5 py-1 text-muted">{row.metric.label}</td>
+                  {row.values.map((value, index) => (
+                    <td
+                      key={comparison.columns[index].model}
+                      className={`whitespace-nowrap px-1.5 py-1 ${
+                        value !== null && value === row.best ? bestCell : "text-text"
+                      }`}
+                    >
+                      {formatMetricValue(row.metric, comparison.columns[index].latest)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+              {/* 評価条件行（比較の前提確認用） */}
+              {[
+                { label: "評価データセット", value: (col) => col.latest?.dataset || "未記録" },
+                { label: "OCR前処理", value: (col) => (col.latest ? historyPreprocessLabel(col.latest) : "未記録") },
+                { label: "Whitelist", value: (col) => whitelistLabelOf(col.latest?.whitelist) },
+                { label: "評価日時", value: (col) => (col.latest?.at ? col.latest.at.slice(5, 16).replace("T", " ") : "未記録") },
+              ].map((row) => (
+                <tr key={row.label} className="border-t border-border/50">
+                  <td className="whitespace-nowrap px-1.5 py-1 text-muted">{row.label}</td>
+                  {comparison.columns.map((col) => (
+                    <td key={col.model} className="min-w-0 max-w-[7rem] truncate px-1.5 py-1 text-muted" title={row.value(col)}>
+                      {row.value(col)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* 混同比較（モデル別件数。少ないほど良い=最小を緑） */}
+        {confusionRows.length > 0 ? (
+          <div className="overflow-x-auto rounded-lg border border-border bg-card/45 px-1 py-1">
+            <p className="px-1.5 pt-1 text-[10px] font-semibold text-muted">混同比較（件数・少ないほど良い）</p>
+            <table className="w-full text-[10px] tabular-nums">
+              <tbody>
+                {confusionRows.map((row) => {
+                  const numeric = row.counts.filter((v) => v !== null);
+                  const best = numeric.length >= 2 ? Math.min(...numeric) : null;
+                  return (
+                    <tr key={`${row.kind}-${row.from}-${row.to}`} className="border-t border-border/50">
+                      <td
+                        className="whitespace-nowrap px-1.5 py-1 font-mono text-muted"
+                        title={row.kind === "sub" ? "置換" : row.kind === "del" ? "脱落" : "挿入"}
+                      >
+                        {row.label}
+                      </td>
+                      {row.counts.map((count, index) => (
+                        <td
+                          key={comparison.columns[index].model}
+                          className={`whitespace-nowrap px-1.5 py-1 ${
+                            count !== null && best !== null && count === best ? bestCell : "text-text"
+                          }`}
+                        >
+                          {count === null ? "-" : `${count}件`}
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+
+        {/* 勝敗表（指標ごとの勝者と勝利数） */}
+        <div className="overflow-x-auto rounded-lg border border-border bg-card/45 px-1 py-1">
+          <p className="px-1.5 pt-1 text-[10px] font-semibold text-muted">勝敗表</p>
+          <table className="w-full text-[10px] tabular-nums">
+            <tbody>
+              {winLoss.rows.map((row) => (
+                <tr key={row.metric.key} className="border-t border-border/50">
+                  <td className="whitespace-nowrap px-1.5 py-1 text-muted">{row.metric.label}</td>
+                  <td className="whitespace-nowrap px-1.5 py-1 text-text">
+                    {row.winner ? (
+                      <span title={row.winner}>🟢 {shortName(row.winner)}</span>
+                    ) : (
+                      <span className="text-muted">—</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              <tr className="border-t border-border">
+                <td className="whitespace-nowrap px-1.5 py-1 font-semibold text-text">勝利数</td>
+                <td className="px-1.5 py-1 text-text">
+                  {comparison.columns
+                    .map((col) => `${shortName(col.model)} ${winLoss.wins[col.model] || 0}勝`)
+                    .join(" / ")}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        {/* モデル基本情報（従来の比較情報を維持） */}
         {compareTargets.map((name) => {
           const counts = datasetCounts(name);
           const entries = evalEntriesOf(evalHistory, name);
           return (
             <div key={name} className="rounded-lg border border-border bg-card/45 px-2.5 py-2">
               <p className="truncate text-xs font-semibold text-text" title={name}>
-                {displayName(name)}
+                {displayName(name)} <ModelBadgeChips names={badgeMap[name]} />
               </p>
               <div className="mt-1 space-y-0.5">
                 <DetailRow label="Engine" value={engineLabelOf(engineName(name), trainingFamily(name))} />
@@ -649,7 +867,6 @@ export default function ModelsView({
             </div>
           );
         })}
-        {compareTargets.length === 0 ? <p className="text-xs text-muted">一覧でモデルを選択してください。</p> : null}
       </div>
     );
   }

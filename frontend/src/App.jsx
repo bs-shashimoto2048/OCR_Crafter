@@ -2846,18 +2846,20 @@ export default function App() {
           source: String(data?.preprocess_source || "none"),
           summary: data?.eval_preprocess ? evalPreprocessSummary(data.eval_preprocess) : "前処理なし",
         };
+        // 同一評価実行のエントリは同じ評価日時を共有する（⭐Latest Bestバッジの同一実行判定に使う）
+        const evaluatedAt = new Date().toISOString();
         setModelEvalHistory((prev) => {
           const next = { ...prev };
           for (const target of data?.targets || []) {
             const key = String(target?.model || "");
             if (!key) continue;
-            // 改善率・改善件数は学習前モデルとの差分（comparisonがある評価のみ。ベース側にはnull）
+            // 改善率・改善件数・CER比較は学習前モデルとの差分（comparisonがある評価のみ。ベース側にはnull）
             const hasImprovement = !target?.is_base && data?.comparison;
             next[key] = {
               ...(next[key] || {}),
               [datasetLabel]: {
                 percent: Number(target?.accuracy_percent),
-                at: new Date().toISOString(),
+                at: evaluatedAt,
                 pre: appliedPre,
                 // モデルカルテ用の詳細（旧形式=これらのキー無しは「未記録」表示で互換）
                 correct_count: Number(target?.correct),
@@ -2870,6 +2872,18 @@ export default function App() {
                 improvement_count: hasImprovement ? Number(data.comparison.correct_delta) : null,
                 dataset: selectedDataset?.name || datasetLabel,
                 whitelist: ocrEvalWhitelistMode,
+                // CER主指標（マイクロ平均）と関連指標
+                cer: target?.cer ?? null,
+                char_accuracy: target?.char_accuracy ?? null,
+                cer_delta: hasImprovement ? (data.comparison.cer_delta ?? null) : null,
+                cer_relative_improvement: hasImprovement ? (data.comparison.cer_relative_improvement ?? null) : null,
+                improved: hasImprovement ? (data.comparison.improved ?? null) : null,
+                unchanged: hasImprovement ? (data.comparison.unchanged ?? null) : null,
+                regressed: hasImprovement ? (data.comparison.regressed ?? null) : null,
+                perfect_fixed: hasImprovement ? (data.comparison.perfect_fixed ?? null) : null,
+                perfect_regressed: hasImprovement ? (data.comparison.perfect_regressed ?? null) : null,
+                // 混同TOP5（モデルカルテ・比較用の要約のみ保持）
+                confusions: Array.isArray(target?.confusions) ? target.confusions.slice(0, 5) : [],
               },
             };
           }
@@ -2901,20 +2915,92 @@ export default function App() {
       const text = String(value ?? "");
       return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
     };
-    // 明細: 1行=画像×モデル（filename, ground_truth, prediction, match, model）
-    const lines = [["filename", "ground_truth", "prediction", "match", "model"].map(escape).join(",")];
+    // 明細: 1行=画像×モデル（編集距離・置換/脱落/挿入件数・学習前比の改善/悪化を含む）
+    const comparison = ocrEvalResult.comparison || null;
+    const lines = [
+      [
+        "filename",
+        "ground_truth",
+        "prediction",
+        "match",
+        "model",
+        "edit_distance",
+        "sub_count",
+        "del_count",
+        "ins_count",
+        "vs_base",
+      ]
+        .map(escape)
+        .join(","),
+    ];
     rows.forEach((row) => {
+      const baseRes = comparison ? (row.results || []).find((r) => r.model_label === comparison.base_label) : null;
       (row.results || []).forEach((r) => {
+        // 学習後モデル行には学習前との編集距離比較（improved/unchanged/regressed）を付ける
+        let vsBase = "";
+        if (baseRes && r.model_label !== comparison.base_label && r.edit_distance !== undefined) {
+          const diff = Number(r.edit_distance) - Number(baseRes.edit_distance);
+          vsBase = diff < 0 ? "improved" : diff > 0 ? "regressed" : "unchanged";
+        }
         lines.push(
-          [row.image, row.expected, r.prediction ?? "", r.match ? "1" : "0", r.model_label].map(escape).join(",")
+          [
+            row.image,
+            row.expected,
+            r.prediction ?? "",
+            r.match ? "1" : "0",
+            r.model_label,
+            r.edit_distance ?? "",
+            r.sub_count ?? "",
+            r.del_count ?? "",
+            r.ins_count ?? "",
+            vsBase,
+          ]
+            .map(escape)
+            .join(",")
         );
       });
     });
-    // サマリ: モデル別の集計（accuracy summary）
+    // サマリ: モデル別の集計（CER主指標＋従来のaccuracy）
     lines.push("");
-    lines.push(["model", "total", "correct", "accuracy_percent", "mismatch_count"].map(escape).join(","));
+    lines.push(
+      [
+        "model",
+        "total",
+        "correct",
+        "accuracy_percent",
+        "mismatch_count",
+        "cer_percent",
+        "char_accuracy_percent",
+        "edit_distance_total",
+        "ref_length_total",
+      ]
+        .map(escape)
+        .join(",")
+    );
     targets.forEach((t) => {
-      lines.push([t.label, t.total, t.correct, t.accuracy_percent, t.mismatch_count].map(escape).join(","));
+      lines.push(
+        [
+          t.label,
+          t.total,
+          t.correct,
+          t.accuracy_percent,
+          t.mismatch_count,
+          t.cer_percent ?? "",
+          t.char_accuracy_percent ?? "",
+          t.edit_distance_total ?? "",
+          t.ref_length_total ?? "",
+        ]
+          .map(escape)
+          .join(",")
+      );
+    });
+    // 混同集計（モデル別TOP10: 置換/脱落/挿入）
+    lines.push("");
+    lines.push(["model", "kind", "from", "to", "count"].map(escape).join(","));
+    targets.forEach((t) => {
+      (t.confusions || []).forEach((c) => {
+        lines.push([t.label, c.kind, c.from, c.to, c.count].map(escape).join(","));
+      });
     });
 
     const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });

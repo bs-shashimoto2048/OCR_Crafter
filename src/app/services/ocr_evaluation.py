@@ -7,6 +7,7 @@
 
 import csv
 import tempfile
+from collections import Counter
 from pathlib import Path
 from typing import Any, Optional
 
@@ -26,6 +27,44 @@ def _normalize_compare(text: str) -> str:
     # 大文字(A-Z)と小文字筆記体(k/l/t)の読み分けを測るため、
     # 大小変換は行わず case-sensitive の完全一致（trimのみ）で比較する
     return str(text or "").strip()
+
+
+def levenshtein_ops(expected: str, predicted: str) -> tuple[int, list[tuple[str, str, str]]]:
+    """Levenshtein編集距離とアラインメント操作を返す。
+
+    戻り値: (編集距離, 操作リスト)。操作は
+    ("sub", 正解文字, 予測文字) = 置換 / ("del", 正解文字, "") = 脱落 / ("ins", "", 予測文字) = 挿入。
+    DP+バックトレースの純Python実装（評価文字列は短いため追加依存なしで十分高速）。
+    """
+    a = str(expected or "")
+    b = str(predicted or "")
+    n, m = len(a), len(b)
+    # dp[i][j] = a[:i] と b[:j] の編集距離
+    dp = [[0] * (m + 1) for _ in range(n + 1)]
+    for i in range(n + 1):
+        dp[i][0] = i
+    for j in range(m + 1):
+        dp[0][j] = j
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            cost = 0 if a[i - 1] == b[j - 1] else 1
+            dp[i][j] = min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost)
+    ops: list[tuple[str, str, str]] = []
+    i, j = n, m
+    while i > 0 or j > 0:
+        if i > 0 and j > 0 and dp[i][j] == dp[i - 1][j - 1] + (0 if a[i - 1] == b[j - 1] else 1):
+            if a[i - 1] != b[j - 1]:
+                ops.append(("sub", a[i - 1], b[j - 1]))
+            i -= 1
+            j -= 1
+        elif i > 0 and dp[i][j] == dp[i - 1][j] + 1:
+            ops.append(("del", a[i - 1], ""))
+            i -= 1
+        else:
+            ops.append(("ins", "", b[j - 1]))
+            j -= 1
+    ops.reverse()
+    return dp[n][m], ops
 
 
 def _build_tesseract_recognizer(project_id: Optional[str], model: str, charset: str, psm: int) -> dict[str, Any]:
@@ -146,6 +185,11 @@ def evaluate_ocr(
         rec["total"] = 0
         rec["correct"] = 0
         rec["mismatches"] = []
+        # CER（マイクロ平均）用: 全画像の編集距離総和・正解文字数総和（画像ごとのCER平均は使わない）
+        rec["dist_total"] = 0
+        rec["ref_total"] = 0
+        # 混同集計（Levenshteinアラインメント由来の置換/脱落/挿入）
+        rec["confusions"] = Counter()
 
     # 前処理を1回だけ行い全対象へ共通入力を与える（学習前後の比較を公平にする）。
     # 処理順はStep5と共通: 元画像（回転焼き込み済み）→ 評価前処理（グレースケール/二値化）→ OCR入力整形
@@ -178,7 +222,14 @@ def evaluate_ocr(
             results: list[dict[str, Any]] = []
             for rec in recognizers:
                 prediction, confidence = rec["recognize"](str(tmp_path))
-                match = bool(prediction.strip()) and _normalize_compare(prediction) == expected_cmp
+                pred_cmp = _normalize_compare(prediction)
+                match = bool(prediction.strip()) and pred_cmp == expected_cmp
+                # 編集距離とアラインメント（CER・混同集計・改善/悪化判定・CSVで使用）
+                distance, ops = levenshtein_ops(expected_cmp, pred_cmp)
+                rec["dist_total"] += distance
+                rec["ref_total"] += len(expected_cmp)
+                for op in ops:
+                    rec["confusions"][op] += 1
                 rec["total"] += 1
                 if match:
                     rec["correct"] += 1
@@ -193,6 +244,10 @@ def evaluate_ocr(
                         # None=取得不能（whitelist指定時のTesseract既知挙動）。0へ偽装しない
                         "confidence": round(float(confidence), 4) if confidence is not None else None,
                         "match": bool(match),
+                        "edit_distance": int(distance),
+                        "sub_count": sum(1 for op in ops if op[0] == "sub"),
+                        "del_count": sum(1 for op in ops if op[0] == "del"),
+                        "ins_count": sum(1 for op in ops if op[0] == "ins"),
                     }
                 )
             rows_out.append({"image": name, "expected": expected, "results": results})
@@ -210,6 +265,10 @@ def evaluate_ocr(
         total = int(rec["total"])
         correct = int(rec["correct"])
         accuracy = (correct / total) if total > 0 else 0.0
+        # CER = 全画像の編集距離総和 ÷ 全画像の正解文字数総和（マイクロ平均。低いほど良い）
+        ref_total = int(rec["ref_total"])
+        dist_total = int(rec["dist_total"])
+        cer = round(dist_total / ref_total, 4) if ref_total > 0 else None
         targets_summary.append(
             {
                 "label": rec["label"],
@@ -221,6 +280,18 @@ def evaluate_ocr(
                 "accuracy": round(accuracy, 4),
                 "accuracy_percent": round(accuracy * 100.0, 2),
                 "mismatch_count": total - correct,
+                # CER主指標と補助指標（文字正解率=1-CER）
+                "cer": cer,
+                "cer_percent": round(cer * 100.0, 2) if cer is not None else None,
+                "char_accuracy": round(1.0 - cer, 4) if cer is not None else None,
+                "char_accuracy_percent": round((1.0 - cer) * 100.0, 2) if cer is not None else None,
+                "edit_distance_total": dist_total,
+                "ref_length_total": ref_total,
+                # 混同ランキング（置換/脱落/挿入のTOP10。Levenshteinアラインメント由来）
+                "confusions": [
+                    {"kind": kind, "from": src, "to": dst, "count": int(count)}
+                    for (kind, src, dst), count in rec["confusions"].most_common(10)
+                ],
                 "mismatches": rec["mismatches"],
             }
         )
@@ -231,6 +302,35 @@ def evaluate_ocr(
     if base and trained and base is not trained:
         delta = round(trained["accuracy"] - base["accuracy"], 4)
         improvement = round((delta / base["accuracy"]), 4) if base["accuracy"] > 0 else None
+        # 画像単位の編集距離を比較して 改善/同等/悪化・完全一致の増減 を集計
+        improved = unchanged = regressed = 0
+        perfect_fixed = perfect_regressed = 0
+        for row in rows_out:
+            base_res = next((r for r in row["results"] if r["model_label"] == base["label"]), None)
+            trained_res = next((r for r in row["results"] if r["model_label"] == trained["label"]), None)
+            if not base_res or not trained_res:
+                continue
+            base_dist = int(base_res.get("edit_distance") or 0)
+            trained_dist = int(trained_res.get("edit_distance") or 0)
+            if trained_dist < base_dist:
+                improved += 1
+            elif trained_dist > base_dist:
+                regressed += 1
+            else:
+                unchanged += 1
+            if not base_res["match"] and trained_res["match"]:
+                perfect_fixed += 1
+            elif base_res["match"] and not trained_res["match"]:
+                perfect_regressed += 1
+        # CER差（学習後-学習前。負=改善）と相対改善率（(学習前-学習後)/学習前）
+        cer_base = base.get("cer")
+        cer_trained = trained.get("cer")
+        cer_delta = round(cer_trained - cer_base, 4) if cer_base is not None and cer_trained is not None else None
+        cer_relative = (
+            round((cer_base - cer_trained) / cer_base, 4)
+            if cer_base is not None and cer_trained is not None and cer_base > 0
+            else None
+        )
         comparison = {
             "base_label": base["label"],
             "trained_label": trained["label"],
@@ -242,6 +342,18 @@ def evaluate_ocr(
             "delta_percent": round(delta * 100.0, 2),
             "improvement_rate": improvement,
             "correct_delta": trained["correct"] - base["correct"],
+            # CER主指標の比較
+            "base_cer": cer_base,
+            "trained_cer": cer_trained,
+            "cer_delta": cer_delta,
+            "cer_delta_pt": round(cer_delta * 100.0, 2) if cer_delta is not None else None,
+            "cer_relative_improvement": cer_relative,
+            # 画像単位の改善/同等/悪化と完全一致の増減
+            "improved": improved,
+            "unchanged": unchanged,
+            "regressed": regressed,
+            "perfect_fixed": perfect_fixed,
+            "perfect_regressed": perfect_regressed,
         }
 
     return {
