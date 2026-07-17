@@ -187,10 +187,10 @@ export default function TrainingImageBuilderView({
   activeStep = 1,
   onStepChange,
   labelingPreprocessOverrides = null,
-  labelingPredictParams = null,
-  labelingExtraPredictParams = [],
   candidateDict = null,
   onOpenEvaluation = null,
+  paddleModels = [],
+  tesseractModels = [],
 }) {
   const initialState = useMemo(() => loadImageBuilderState(), []);
   const bboxItemRefs = useRef(new Map());
@@ -1673,10 +1673,10 @@ export default function TrainingImageBuilderView({
         stepProgress={stepProgress}
         onStepChange={goStep}
         preprocessOverrides={labelingPreprocessOverrides}
-        predictParams={labelingPredictParams}
-        extraPredictParams={labelingExtraPredictParams}
         candidateDict={candidateDict}
         onOpenEvaluation={onOpenEvaluation}
+        paddleModels={paddleModels}
+        tesseractModels={tesseractModels}
       />
     );
   }

@@ -3472,12 +3472,13 @@ export default function App() {
           const nextView = `image-builder-step${step}`;
           setActiveView(nextView);
         }}
-        // Step5（評価用データ作成）のOCR候補・辞書候補用（既存ラベル編集と同じ設定を参照）
+        // Step5（評価用データ作成）用。OCR設定はStep5専用（localStorage別キー）で、
+        // ここからはモデル一覧・辞書・プロジェクト共通の前処理オーバーライドのみ渡す
         onOpenEvaluation={openEvaluationWithDataset}
         labelingPreprocessOverrides={labelingPreprocessOverrides}
-        labelingPredictParams={labelingPredictParams}
-        labelingExtraPredictParams={labelingExtraPredictParams}
         candidateDict={candidateDict}
+        paddleModels={paddleOcrModelOptions}
+        tesseractModels={tesseractModels}
       />
     );
   }
@@ -3507,7 +3508,8 @@ export default function App() {
   // OCR学習画面と学習画像作成Step3はデスクトップ(xl=1280px以上)でビューポート内へ収める
   // （ページ縦スクロールなし・内部スクロールのみ。Step3は画像領域を最大化するため）。
   // 固定px差し引き(calc)ではなく main→section→ビュー の親Flex残り高さ継承で実現する
-  const fitViewport = activeView === "ocr-training" || activeView === "image-builder-step3";
+  const fitViewport =
+    activeView === "ocr-training" || activeView === "image-builder-step3" || activeView === "image-builder-step5";
 
   return (
     <div className="min-h-screen bg-transparent text-text">

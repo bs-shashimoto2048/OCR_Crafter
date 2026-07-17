@@ -7,6 +7,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Optional
 
+import numpy as np
 import torch
 from PIL import Image, ImageEnhance, ImageFilter
 from torchvision import transforms
@@ -276,10 +277,20 @@ def _apply_latin_case_to_results(
 def _run_easyocr(
     reader: Any, input_path: str, allowlist: Optional[str] = None
 ) -> tuple[str, float, list[dict[str, Any]]]:
+    # パス文字列を渡すと easyocr 内部の cv2.imread に依存する。Windowsでは ultralytics
+    # （YOLO検出）を一度importすると cv2.imread が「グレースケール指定でも常に3次元
+    # (H,W,1) を返す」実装へグローバルに差し替えられるため、YOLO実行後の easyocr が
+    # get_image_list の `maximum_y, maximum_x = img.shape` で必ず失敗していた
+    # （ValueError: too many values to unpack (expected 2)）。
+    # cv2.imread へ依存しないよう自前でグレースケール読込し numpy 配列で渡す
+    # （easyocr の numpy 分岐は次元を正しく処理する。認識入力は従来のグレースケール
+    # 読込と同一。非ASCIIパスでも安全）。
+    with Image.open(input_path) as img:
+        image_array = np.array(img.convert("L"))
     if allowlist:
-        raw_results = reader.readtext(input_path, detail=1, paragraph=False, allowlist=allowlist)
+        raw_results = reader.readtext(image_array, detail=1, paragraph=False, allowlist=allowlist)
     else:
-        raw_results = reader.readtext(input_path, detail=1, paragraph=False)
+        raw_results = reader.readtext(image_array, detail=1, paragraph=False)
     parsed_results: list[dict[str, Any]] = []
     for row in raw_results[:20]:
         if len(row) < 3:
