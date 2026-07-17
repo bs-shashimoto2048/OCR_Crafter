@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import Button from "../components/Button";
@@ -163,6 +163,8 @@ export default function EvaluationDatasetBuilder({
   const scrollRef = useRef(null);
   const labelInputRef = useRef(null);
   const savingRef = useRef(false);
+  // 保存中のUI表示用（保存ボタンの「保存中...」表示。OCRとは独立で、保存完了後すぐ操作可能へ戻る）
+  const [saving, setSaving] = useState(false);
 
   // ラベル配置（Step5専用キーでプロジェクト単位保存。既存ラベル編集のキーとは混在させない）
   const [labelTextAlign, setLabelTextAlign] = useState("center");
@@ -840,7 +842,10 @@ export default function EvaluationDatasetBuilder({
   }, [willAutoRun, runKey, resultsVersion]);
 
   // 辞書からの近似候補（既存ラベル編集と同じ純ロジック・同じ辞書設定を使用。
-  // 最大3スロットのOCR結果すべてを入力とし、同一候補は既存ロジック内で最高類似度へ統合される）
+  // 最大3スロットのOCR結果すべてを入力とし、同一候補は既存ロジック内で最高類似度へ統合される）。
+  // useDeferredValueでOCR候補表示より低優先にし、辞書検索（最大数千件の類似度計算）が
+  // クリック・入力・候補表示のレンダリングを塞がないよう分離する
+  const deferredResults = useDeferredValue(displayedResults);
   const dictionaryCandidates = useMemo(() => {
     const entries = candidateDict?.entries || [];
     if (entries.length === 0) {
@@ -848,7 +853,7 @@ export default function EvaluationDatasetBuilder({
     }
     const sources = [];
     for (const plan of enabledPlans) {
-      const row = (displayedResults || []).find((r) => r.slotIndex === plan.index);
+      const row = (deferredResults || []).find((r) => r.slotIndex === plan.index);
       if (row?.prediction) {
         sources.push({ text: row.prediction, source: engineLabelOf(row.engine || plan.fields.engine) });
       }
@@ -857,7 +862,7 @@ export default function EvaluationDatasetBuilder({
       maxCandidates: candidateDict?.max_candidates ?? 3,
       minSimilarity: (candidateDict?.min_similarity ?? 60) / 100,
     });
-  }, [candidateDict, displayedResults, enabledPlans]);
+  }, [candidateDict, deferredResults, enabledPlans]);
 
   function patchItemState(key, patch) {
     setItemState((prev) => ({ ...prev, [key]: { ...(prev[key] || {}), ...patch } }));
@@ -911,9 +916,11 @@ export default function EvaluationDatasetBuilder({
     rotateFlashTimerRef.current = setTimeout(() => setRotateFlash(null), 300);
   }
 
-  // 保存: editing_state を即時flushする（失敗時はfalseを返し、保存して次へは移動しない）
+  // 保存: editing_state を即時flushする（失敗時はfalseを返し、保存して次へは移動しない）。
+  // 保存のPromiseチェーンにOCR・プレビュー・先読みは含めない（保存完了で即ボタン操作可能へ戻る）
   async function saveCurrentLabel() {
     if (!currentItem) return false;
+    setSaving(true);
     try {
       await persistEditingState();
       setOk(`保存しました: ${currentItem.filename}`);
@@ -921,6 +928,8 @@ export default function EvaluationDatasetBuilder({
     } catch (e) {
       setFail(`ラベル保存に失敗しました: ${e.message}`);
       return false;
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -1421,10 +1430,16 @@ export default function EvaluationDatasetBuilder({
               inputRef={labelInputRef}
             />
             <div className="flex h-9 flex-wrap items-center gap-2">
-              <Button size="sm" className="h-8 px-6" onClick={saveAndNext} title="ラベルを保存して次の画像へ (Enter)">
-                保存して次へ
+              <Button
+                size="sm"
+                className="h-8 px-6"
+                onClick={saveAndNext}
+                disabled={saving}
+                title="ラベルを保存して次の画像へ (Enter)"
+              >
+                {saving ? "保存中..." : "保存して次へ"}
               </Button>
-              <Button size="sm" variant="secondary" className="h-8" onClick={saveCurrentLabel} title="ラベルを保存 (Ctrl+S)">
+              <Button size="sm" variant="secondary" className="h-8" onClick={saveCurrentLabel} disabled={saving} title="ラベルを保存 (Ctrl+S)">
                 保存
               </Button>
               <Button size="sm" variant="secondary" className="h-8" onClick={() => moveBy(-1)} title="前の画像へ (Ctrl+←)">

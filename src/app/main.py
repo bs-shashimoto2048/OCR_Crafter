@@ -1584,8 +1584,9 @@ async def api_ocr_preview_file_batch(
         loop = asyncio.get_running_loop()
 
         def _client_disconnected() -> bool:
+            # timeoutは短く保つ（このチェック自体がスロット実行を遅らせないため）
             try:
-                return bool(asyncio.run_coroutine_threadsafe(request.is_disconnected(), loop).result(timeout=1.0))
+                return bool(asyncio.run_coroutine_threadsafe(request.is_disconnected(), loop).result(timeout=0.2))
             except Exception:  # noqa: BLE001
                 return False
 
@@ -2983,7 +2984,9 @@ def image_builder_evaluation_crop(
             img.thumbnail((int(max_side), int(max_side)))
         buf = io.BytesIO()
         img.save(buf, format="PNG")
-        return Response(content=buf.getvalue(), media_type="image/png", headers={"Cache-Control": "no-cache"})
+        # rotationがURLに含まれ回転ごとに別URLになるため短期キャッシュ可（サムネイルの
+        # 再取得がOCR・保存リクエストとブラウザ同時接続枠を奪い合うのを防ぐ）
+        return Response(content=buf.getvalue(), media_type="image/png", headers={"Cache-Control": "private, max-age=300"})
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
@@ -3015,7 +3018,9 @@ def image_builder_evaluation_directory_image(
             img.thumbnail((int(max_side), int(max_side)))
         buf = io.BytesIO()
         img.save(buf, format="PNG")
-        return Response(content=buf.getvalue(), media_type="image/png", headers={"Cache-Control": "no-cache"})
+        # rotationがURLに含まれ回転ごとに別URLになるため短期キャッシュ可（サムネイルの
+        # 再取得がOCR・保存リクエストとブラウザ同時接続枠を奪い合うのを防ぐ）
+        return Response(content=buf.getvalue(), media_type="image/png", headers={"Cache-Control": "private, max-age=300"})
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:

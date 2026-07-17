@@ -265,6 +265,35 @@ def test_batch_continuous_runs_leave_no_backlog(counters):
     assert counters.predict == 24  # 12画像×2スロット（重複なし・キャッシュ誤ヒットなし）
 
 
+def test_save_not_blocked_by_busy_ocr_executor(monkeypatch, temp_projects):
+    """OCR専用Executor（2ワーカー）が遅いOCRで埋まっていても、保存処理は即時完了する。
+
+    保存（editing_state書き込み）はOCR Executor・in-flight・Futureを一切共有しないことの回帰テスト。
+    """
+    import threading
+    import time as time_mod
+
+    from src.app.services.evaluation_dataset import load_editing_state, save_editing_state
+
+    def slow_predict(image_path, **kwargs):
+        time_mod.sleep(0.6)
+        return {"engine": kwargs.get("engine"), "model_name": "m", "prediction": "X", "confidence": 0.5}
+
+    monkeypatch.setattr(main_mod, "predict_from_image", slow_predict)
+    # 2スロット（=Executorの2ワーカーを両方占有）の遅いOCRをバックグラウンドで開始
+    worker = threading.Thread(target=lambda: main_mod.run_preview_ocr_batch(_img(), "p1", None, _slots(2)))
+    worker.start()
+    time_mod.sleep(0.15)  # スロットがExecutorへ載るのを待つ
+
+    t0 = time_mod.perf_counter()
+    save_editing_state("p1", {"items": {"a": {"label": "AB1", "rotation": 0, "checked": True}}})
+    save_ms = (time_mod.perf_counter() - t0) * 1000
+    worker.join()
+
+    assert save_ms < 200  # OCR完了（0.6秒×2件）を待たずに保存が完了する
+    assert load_editing_state("p1")["items"]["a"]["label"] == "AB1"
+
+
 def test_batch_slots_run_in_parallel(monkeypatch, temp_projects):
     """3スロットが完全逐次にならない（同時実行数2の並列実行。開始/終了時刻の重なりで検証）。"""
     import threading
