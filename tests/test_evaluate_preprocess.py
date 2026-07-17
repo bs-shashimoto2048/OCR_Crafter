@@ -102,6 +102,49 @@ def test_evaluate_with_fixed_and_otsu_binarize(eval_env):
     assert set(np.unique(arr2)) == {0, 255}
 
 
+def test_evaluate_response_contains_model_card_fields(eval_env):
+    """モデルカルテが参照する correct / total / mismatch_count / accuracy_percent が応答に含まれる
+    （既存フィールドの後方互換確認。フロントはこれを correct_count / total_count /
+    misrecognized_count として履歴へ保存する）。"""
+    result = _run(eval_env)
+    target = result["targets"][0]
+    assert target["correct"] == 1
+    assert target["total"] == 1
+    assert target["mismatch_count"] == 0
+    assert target["accuracy_percent"] == 100.0
+    assert "accuracy" in target and "is_base" in target
+
+
+def test_model_info_includes_size(tmp_path, monkeypatch, temp_projects):
+    """/models/info 相当の list_model_infos が model_size_mb を返す（traineddata実体のサイズ）。"""
+    import json as json_mod
+
+    from src.app.project_paths import get_project_paths
+    from src.app.services.model_registry import list_model_infos
+
+    models_dir = get_project_paths("p1").root / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    traineddata = tmp_path / "m.traineddata"
+    traineddata.write_bytes(b"x" * (1024 * 1024))  # 1MB
+    meta = {
+        "traineddata_path": str(traineddata),
+        "lang": "cursive",
+        "base_lang": "eng",
+        "created_at": "2026-07-17T00:00:00",
+        "counts": {"train": 10, "val": 2, "test": 1},
+    }
+    (models_dir / "m.tess.json").write_text(json_mod.dumps(meta), encoding="utf-8")
+
+    items = list_model_infos("p1")
+    row = next(item for item in items if item["name"] == "m.tess.json")
+    assert row["model_size_mb"] == 1.0
+    # traineddataが無いモデルはNone（未記録扱い）
+    (models_dir / "m2.tess.json").write_text(json_mod.dumps({**meta, "traineddata_path": ""}), encoding="utf-8")
+    items2 = list_model_infos("p1")
+    row2 = next(item for item in items2 if item["name"] == "m2.tess.json")
+    assert row2["model_size_mb"] is None
+
+
 def test_evaluate_rejects_invalid_preprocess(eval_env):
     """不正な前処理値はValueError（API側で400へ変換される）。"""
     with pytest.raises(ValueError):

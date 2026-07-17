@@ -87,7 +87,7 @@
 | Method / Path | リクエスト | レスポンス主要キー | 概要 |
 |---|---|---|---|
 | GET `/models` | Query: `project_id?` | `items` | 保存済みモデル一覧 |
-| GET `/models/info` | Query: `project_id?` | `items` | モデル詳細情報一覧 |
+| GET `/models/info` | Query: `project_id?` | `items` | モデル詳細情報一覧（`model_size_mb`=モデル実体サイズMB。tesseract=traineddata・分類=.ptファイル。実体なし/PaddleOCRはnull=UIでは未記録表示） |
 | GET `/models/latest` | Query: `model_type?`, `training_family`, `engine?` | `model` | 最新モデル名 |
 | GET `/model-types` | Query: `project_id?` | `items` | モデル種別一覧 |
 | DELETE `/models/{model_name}` | Query: `project_id?` | `deleted` | モデル削除（models配下限定の安全検証あり） |

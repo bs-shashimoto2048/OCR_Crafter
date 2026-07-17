@@ -119,6 +119,20 @@ def _ocr_ratio_from_meta(meta: dict) -> dict[str, float]:
     }
 
 
+def _file_size_mb(path_text: str) -> Optional[float]:
+    """モデル実体ファイルのサイズ(MB)。存在しない・取得不能はNone（UIでは未記録表示）。"""
+    text = str(path_text or "").strip()
+    if not text:
+        return None
+    try:
+        path = Path(text).expanduser()
+        if path.is_file():
+            return round(path.stat().st_size / (1024 * 1024), 2)
+    except OSError:
+        return None
+    return None
+
+
 def list_model_infos(project_id: Optional[str] = None) -> list[dict]:
     paths = ensure_project_directories(project_id)
     paths.models.mkdir(parents=True, exist_ok=True)
@@ -148,6 +162,8 @@ def list_model_infos(project_id: Optional[str] = None) -> list[dict]:
                     "traineddata_path": traineddata_path,
                     "lang": str(payload.get("lang") or ""),
                     "base_lang": str(payload.get("base_lang") or ""),
+                    # モデルカルテ用: 学習済みtraineddataの実体サイズ（未Export等で無い場合はNone）
+                    "model_size_mb": _file_size_mb(traineddata_path),
                     "ocr_inference_ready": bool(inference_ready),
                     "exported": bool(inference_ready),
                     "dataset_split_counts": {
@@ -320,6 +336,8 @@ def list_model_infos(project_id: Optional[str] = None) -> list[dict]:
                     "engine": "custom",
                     "created_at": str(checkpoint.get("created_at") or ""),
                     "modified_at": datetime.fromtimestamp(st.st_mtime).isoformat(),
+                    # モデルカルテ用: .ptファイルの実体サイズ
+                    "model_size_mb": round(st.st_size / (1024 * 1024), 2),
                     "dataset_split_ratio": {
                         "train": float(ratio.get("train", 0.0)) if ratio else 0.0,
                         "val": float(ratio.get("val", 0.0)) if ratio else 0.0,

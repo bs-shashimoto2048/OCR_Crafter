@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test tests/labelNavigation.test.mjs tests/candidateDictionary.test.mjs tests/confidence.test.mjs tests/trainingLog.test.mjs tests/trainingView.render.test.mjs tests/ratio.test.mjs tests/detectModel.test.mjs tests/viewKey.test.mjs tests/bboxSelection.test.mjs tests/evaluationBuilder.test.mjs tests/ocrCandidates.test.mjs tests/evalOcrSettings.test.mjs tests/evalPreprocess.test.mjs tests/evalOcrRun.test.mjs"
+    "test": "node --test tests/labelNavigation.test.mjs tests/candidateDictionary.test.mjs tests/confidence.test.mjs tests/trainingLog.test.mjs tests/trainingView.render.test.mjs tests/ratio.test.mjs tests/detectModel.test.mjs tests/viewKey.test.mjs tests/bboxSelection.test.mjs tests/evaluationBuilder.test.mjs tests/ocrCandidates.test.mjs tests/evalOcrSettings.test.mjs tests/evalPreprocess.test.mjs tests/evalOcrRun.test.mjs tests/modelEval.test.mjs"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.6",

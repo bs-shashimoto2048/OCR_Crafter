@@ -2851,12 +2851,25 @@ export default function App() {
           for (const target of data?.targets || []) {
             const key = String(target?.model || "");
             if (!key) continue;
+            // 改善率・改善件数は学習前モデルとの差分（comparisonがある評価のみ。ベース側にはnull）
+            const hasImprovement = !target?.is_base && data?.comparison;
             next[key] = {
               ...(next[key] || {}),
               [datasetLabel]: {
                 percent: Number(target?.accuracy_percent),
                 at: new Date().toISOString(),
                 pre: appliedPre,
+                // モデルカルテ用の詳細（旧形式=これらのキー無しは「未記録」表示で互換）
+                correct_count: Number(target?.correct),
+                total_count: Number(target?.total),
+                misrecognized_count: Number(target?.mismatch_count),
+                improvement_rate:
+                  hasImprovement && data.comparison.improvement_rate !== null && data.comparison.improvement_rate !== undefined
+                    ? Math.round(Number(data.comparison.improvement_rate) * 1000) / 10
+                    : null,
+                improvement_count: hasImprovement ? Number(data.comparison.correct_delta) : null,
+                dataset: selectedDataset?.name || datasetLabel,
+                whitelist: ocrEvalWhitelistMode,
               },
             };
           }

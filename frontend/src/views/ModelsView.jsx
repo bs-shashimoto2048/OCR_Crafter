@@ -3,6 +3,16 @@ import { useEffect, useMemo, useState } from "react";
 import Card from "../components/Card";
 import Button from "../components/Button";
 import { API_BASE } from "../lib/api";
+import { historyPreprocessLabel } from "../lib/evalHistory";
+import {
+  MODEL_BADGE_LABELS,
+  correctTotalLabel,
+  formatSignedValue,
+  latestEvalOf,
+  modelBadges,
+  modelEvalEntries,
+  whitelistLabelOf,
+} from "../lib/modelEval";
 
 function basename(path) {
   if (!path) return "";
@@ -76,15 +86,51 @@ function evalBarClass(percent) {
   return "bg-red-400/80";
 }
 
-// 評価履歴（{セット名: {percent}}）を表示順の配列へ
+// 評価履歴の上位3件（サマリーカード・比較用の簡易表示。詳細はモデルカルテで表示）
 function evalEntriesOf(evalHistory, name) {
-  const record = evalHistory?.[name];
-  if (!record || typeof record !== "object") return [];
-  return Object.entries(record)
-    .filter(([, v]) => Number.isFinite(Number(v?.percent)))
-    .sort((a, b) => String(b[1]?.at || "").localeCompare(String(a[1]?.at || "")))
+  return modelEvalEntries(evalHistory, name)
     .slice(0, 3)
-    .map(([label, v]) => ({ label, percent: Number(v.percent) }));
+    .map((row) => ({ label: row.dataset, percent: row.percent }));
+}
+
+// 推奨バッジ（🟢推奨 / 🏆Best Accuracy / 🔴ベースライン。評価履歴から自動判定・高さ固定）
+function ModelBadgeChips({ names }) {
+  if (!names || names.length === 0) return null;
+  return (
+    <span className="inline-flex flex-wrap gap-1 align-middle">
+      {names.map((key) => {
+        const def = MODEL_BADGE_LABELS[key];
+        if (!def) return null;
+        return (
+          <span
+            key={key}
+            title={def.title}
+            className="inline-flex h-5 items-center gap-0.5 whitespace-nowrap rounded-full border border-border/70 bg-card/60 px-1.5 text-[10px] text-text"
+          >
+            <span aria-hidden="true">{def.icon}</span>
+            {def.label}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+// 一覧の評価セル: Accuracy・正解/総数・改善率・評価日時（一覧だけで性能比較できる情報量にする）
+function ListEvalCell({ latest }) {
+  if (!latest) return <span className="text-muted">--</span>;
+  const ct = correctTotalLabel(latest);
+  return (
+    <div className="text-[11px] leading-4 tabular-nums">
+      <p>
+        <span className={`font-semibold ${evalColorClass(latest.percent)}`}>{latest.percent}%</span>
+        {ct !== "未記録" ? <span className="ml-1 text-muted">（{ct}）</span> : null}
+      </p>
+      <p className="text-muted">
+        改善 {formatSignedValue(latest.improvementRate, "%")} / {latest.at ? latest.at.slice(0, 16).replace("T", " ") : "-"}
+      </p>
+    </div>
+  );
 }
 
 function EvalBadges({ entries }) {
@@ -199,6 +245,9 @@ export default function ModelsView({
     if (exportReady(name)) return "Export済";
     return "過去モデル";
   }
+
+  // 推奨バッジ（評価履歴から自動判定）
+  const badgeMap = useMemo(() => modelBadges(evalHistory, models), [evalHistory, models]);
 
   const filteredModels = useMemo(() => {
     const search = filterSearch.trim().toLowerCase();
@@ -383,14 +432,28 @@ export default function ModelsView({
     return aug.enabled ? `ON（強度 ${Number(aug.strength || 0) || "-"}）` : "OFF";
   }
 
-  // 右ペイン: モデル詳細
+  // 学習画像数（Train+Val+Testの合計。カウント不明は"-"）
+  function trainingImageTotal(name) {
+    const counts = infoOf(name).dataset_split_counts || infoOf(name).ocr_dataset_counts || {};
+    const total = Number(counts.train || 0) + Number(counts.val || 0) + Number(counts.test || 0);
+    return total > 0 ? total : "-";
+  }
+
+  function modelSizeText(name) {
+    const size = Number(infoOf(name).model_size_mb);
+    return Number.isFinite(size) && size > 0 ? `${size} MB` : "-";
+  }
+
+  // 右ペイン: モデル詳細（モデルカルテ: モデル情報→最新評価→評価条件→評価履歴。
+  // 上部は内容高（不足時のみ内部スクロール）、評価履歴が残り高を使い内部スクロールする）
   function renderDetail(name) {
     const info = infoOf(name);
     const counts = datasetCounts(name);
-    const entries = evalEntriesOf(evalHistory, name);
+    const latest = latestEvalOf(evalHistory, name);
+    const historyEntries = modelEvalEntries(evalHistory, name);
     return (
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-0.5">
+        <div className="dark-scroll min-h-0 flex-[0_1_auto] space-y-2 overflow-y-auto pr-0.5 [overscroll-behavior:contain]">
           <div>
             <p className="truncate text-sm font-semibold text-text" title={name}>
               {displayName(name)}
@@ -400,54 +463,73 @@ export default function ModelsView({
                 {name}
               </p>
             ) : null}
-            <div className="mt-1">
+            <div className="mt-1 flex flex-wrap items-center gap-1">
               <StatusBadge status={statusOf(name)} />
+              <ModelBadgeChips names={badgeMap[name]} />
             </div>
           </div>
 
           <div className="space-y-1 rounded-lg border border-border bg-card/45 px-2.5 py-2">
+            <p className="text-[11px] font-semibold text-text">モデル情報</p>
             <DetailRow label="Engine" value={engineLabelOf(engineName(name), trainingFamily(name))} />
             <DetailRow label="方式" value={familyLabelOf(trainingFamily(name))} />
             <DetailRow label="ベースモデル" value={info.base_lang || "-"} />
             <DetailRow label="Charset" value={info.charset || "-"} />
             <DetailRow label="Iteration" value={iterationText(name)} />
+            <DetailRow label="学習画像数" value={trainingImageTotal(name)} />
             <DetailRow label="Train / Val / Test" value={`${counts.train} / ${counts.val} / ${counts.test}`} />
             <DetailRow label="Augmentation" value={augText(name)} />
+            <DetailRow label="モデルサイズ" value={modelSizeText(name)} />
             <DetailRow label="学習時間" value={info.training_duration || "-"} />
-            <DetailRow label="作成日時" value={formatDateTime(createdAt(name))} />
+            <DetailRow label="学習日時" value={formatDateTime(createdAt(name))} />
             <DetailRow label="Export状態" value={exportReady(name) ? "Export済" : "未Export"} />
           </div>
+
+          {/* 最新評価（Accuracyだけでなく正解/総数・誤認識・学習前との差分を表示） */}
+          <div className="rounded-lg border border-border bg-card/45 px-2.5 py-2">
+            <p className="mb-1 text-[11px] font-semibold text-text">最新評価</p>
+            {latest ? (
+              <>
+                <div className="flex items-baseline justify-between">
+                  <span className={`text-xl font-semibold tabular-nums ${evalColorClass(latest.percent)}`}>
+                    {latest.percent}%
+                  </span>
+                  <span className="text-[10px] text-muted">{latest.at ? latest.at.slice(0, 16).replace("T", " ") : "-"}</span>
+                </div>
+                <div className="mt-1 h-1.5 w-full overflow-hidden rounded-sm bg-border/40">
+                  <div
+                    className={`h-full rounded-sm ${evalBarClass(latest.percent)}`}
+                    style={{ width: `${Math.max(0, Math.min(100, latest.percent))}%` }}
+                  />
+                </div>
+                <div className="mt-1.5 space-y-1">
+                  <DetailRow label="正解 / 総数" value={correctTotalLabel(latest)} />
+                  <DetailRow label="誤認識" value={latest.mismatch === null ? "未記録" : `${latest.mismatch}件`} />
+                  <DetailRow label="改善率（学習前比）" value={formatSignedValue(latest.improvementRate, "%")} />
+                  <DetailRow label="改善件数（学習前比）" value={formatSignedValue(latest.improvementCount, "件")} />
+                </div>
+              </>
+            ) : (
+              <p className="text-[11px] text-muted">評価未実施（モデル評価画面で実行すると表示されます）</p>
+            )}
+          </div>
+
+          {/* 評価条件（最新評価で実際に使用した条件） */}
+          {latest ? (
+            <div className="space-y-1 rounded-lg border border-border bg-card/45 px-2.5 py-2">
+              <p className="text-[11px] font-semibold text-text">評価条件</p>
+              <DetailRow label="評価データセット" value={latest.dataset || "未記録"} />
+              <DetailRow label="画像数" value={latest.total === null ? "未記録" : latest.total} />
+              <DetailRow label="OCR前処理" value={historyPreprocessLabel(latest)} />
+              <DetailRow label="Whitelist" value={whitelistLabelOf(latest.whitelist)} />
+              <DetailRow label="評価日時" value={latest.at ? latest.at.slice(0, 16).replace("T", " ") : "未記録"} />
+            </div>
+          ) : null}
 
           <div className="space-y-1 rounded-lg border border-border bg-card/45 px-2.5 py-2">
             <DetailRow label="traineddata" value={info.traineddata_path || "-"} />
             <DetailRow label="json" value={name.endsWith(".json") ? name : info.meta_path || "-"} />
             <DetailRow label="Export先" value={info.export_dir || info.inference_dir || (exportReady(name) ? "export済" : "-")} />
-          </div>
-
-          <div className="rounded-lg border border-border bg-card/45 px-2.5 py-2">
-            <p className="mb-1 text-[11px] font-semibold text-text">評価結果</p>
-            {entries.length > 0 ? (
-              <div className="space-y-1.5">
-                {entries.map((entry) => (
-                  <div key={entry.label}>
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="truncate text-muted" title={entry.label}>
-                        {entry.label}
-                      </span>
-                      <span className={`font-semibold ${evalColorClass(entry.percent)}`}>{entry.percent}%</span>
-                    </div>
-                    <div className="mt-0.5 h-1.5 w-full overflow-hidden rounded-sm bg-border/40">
-                      <div
-                        className={`h-full rounded-sm ${evalBarClass(entry.percent)}`}
-                        style={{ width: `${Math.max(0, Math.min(100, entry.percent))}%` }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-[11px] text-muted">評価未実施（モデル評価画面で実行すると表示されます）</p>
-            )}
           </div>
 
           <div className="rounded-lg border border-border bg-card/45 px-2.5 py-2">
@@ -469,6 +551,47 @@ export default function ModelsView({
               </Button>
             </div>
           </div>
+        </div>
+
+        {/* 評価履歴: 残り高を使って内部スクロール（ヘッダーはsticky固定） */}
+        <div className="mt-2 flex min-h-[110px] flex-1 flex-col rounded-lg border border-border bg-card/45 px-2.5 py-2">
+          <p className="mb-1 shrink-0 text-[11px] font-semibold text-text">評価履歴（{historyEntries.length}件）</p>
+          {historyEntries.length > 0 ? (
+            <div className="dark-scroll min-h-0 flex-1 overflow-auto [overscroll-behavior:contain] [scrollbar-gutter:stable]">
+              <table className="w-full text-[10px] tabular-nums">
+                <thead className="sticky top-0 z-10 bg-[#333c46] text-left text-muted">
+                  <tr>
+                    <th className="px-1 py-1 font-medium">日時</th>
+                    <th className="px-1 py-1 font-medium">セット</th>
+                    <th className="px-1 py-1 font-medium">Acc</th>
+                    <th className="px-1 py-1 font-medium">正解</th>
+                    <th className="px-1 py-1 font-medium">改善率</th>
+                    <th className="px-1 py-1 font-medium">前処理</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {historyEntries.map((row) => (
+                    <tr key={`${row.datasetKey}-${row.at}`} className="border-t border-border/50">
+                      <td className="whitespace-nowrap px-1 py-1 text-muted">
+                        {row.at ? row.at.slice(5, 16).replace("T", " ") : "-"}
+                      </td>
+                      <td className="min-w-0 max-w-[6rem] truncate px-1 py-1 text-muted" title={row.dataset}>
+                        {row.dataset}
+                      </td>
+                      <td className={`px-1 py-1 font-semibold ${evalColorClass(row.percent)}`}>{row.percent}%</td>
+                      <td className="whitespace-nowrap px-1 py-1 text-text">{correctTotalLabel(row)}</td>
+                      <td className="whitespace-nowrap px-1 py-1 text-text">{formatSignedValue(row.improvementRate, "%")}</td>
+                      <td className="min-w-0 max-w-[6rem] truncate px-1 py-1 text-muted" title={historyPreprocessLabel(row)}>
+                        {historyPreprocessLabel(row)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="text-[11px] text-muted">評価未実施</p>
+          )}
         </div>
 
         <div className="mt-2 shrink-0 space-y-1.5 border-t border-border/60 pt-2">
@@ -633,8 +756,8 @@ export default function ModelsView({
                       />
                     </td>
                     <td className="px-2 py-2">
-                      <p className="truncate text-text" title={name}>
-                        {displayName(name)}
+                      <p className="min-w-0 truncate text-text" title={name}>
+                        {displayName(name)} <ModelBadgeChips names={badgeMap[name]} />
                       </p>
                       {aliases[name] ? (
                         <p className="truncate text-[10px] text-muted" title={name}>
@@ -646,7 +769,7 @@ export default function ModelsView({
                     <td className="px-2 py-2 text-muted">{familyLabelOf(trainingFamily(name))}</td>
                     <td className="whitespace-nowrap px-2 py-2 text-muted">{formatDateTime(createdAt(name))}</td>
                     <td className="px-2 py-2">
-                      <EvalBadges entries={evalEntriesOf(evalHistory, name)} />
+                      <ListEvalCell latest={latestEvalOf(evalHistory, name)} />
                     </td>
                     <td className="px-2 py-2">
                       <StatusBadge status={statusOf(name)} />
