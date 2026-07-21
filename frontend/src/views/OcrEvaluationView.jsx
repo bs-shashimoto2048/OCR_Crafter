@@ -4,7 +4,7 @@ import Card from "../components/Card";
 import Button from "../components/Button";
 import { API_BASE, request } from "../lib/api";
 import { flattenEvalHistory, historyPreprocessLabel } from "../lib/evalHistory";
-import { confusionLabel } from "../lib/modelCompare";
+import { confusionLabel, confusionTitle } from "../lib/confusionFormat";
 import {
   DEFAULT_EVAL_PREPROCESS,
   evalPreprocessRequestJson,
@@ -716,9 +716,9 @@ sample_003.png,CHYBkt`}</pre>
                       <span
                         key={`${c.kind}-${c.from}-${c.to}`}
                         className="inline-flex h-6 items-center gap-1 rounded-md border border-border/70 bg-card/60 px-2 text-[11px] tabular-nums text-text"
-                        title={c.kind === "sub" ? "置換" : c.kind === "del" ? "脱落" : "挿入"}
+                        title={confusionTitle(c)}
                       >
-                        <span className="font-mono">{confusionLabel(c)}</span>
+                        <span className="confusion-glyphs">{confusionLabel(c)}</span>
                         <span className="text-muted">{c.count}件</span>
                       </span>
                     ))}

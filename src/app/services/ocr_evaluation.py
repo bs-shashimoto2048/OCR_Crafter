@@ -6,7 +6,9 @@
 """
 
 import csv
+import logging
 import tempfile
+import unicodedata
 from collections import Counter
 from pathlib import Path
 from typing import Any, Optional
@@ -23,10 +25,21 @@ def _is_base_model(model: Any) -> bool:
     return str(model or "").strip().lower() in _BASE_MODEL_ALIASES
 
 
+logger = logging.getLogger(__name__)
+
+
 def _normalize_compare(text: str) -> str:
     # 大文字(A-Z)と小文字筆記体(k/l/t)の読み分けを測るため、
-    # 大小変換は行わず case-sensitive の完全一致（trimのみ）で比較する
-    return str(text or "").strip()
+    # 大小変換は行わず case-sensitive の完全一致（trim + Unicode NFC正規化のみ）で比較する。
+    # NFC=合成済み形への統一（例: 結合文字のé→単一のé）であり、既存のASCII charsetでは無変化。
+    # NFKCは半角/全角・記号を同一視して文字の意味を変えるため使用しない
+    # （大小文字・半角/全角・0とO・1とI・異体字・記号の種類も同一視しない）。
+    normalized = unicodedata.normalize("NFC", str(text or "")).strip()
+    if "�" in normalized:
+        # U+FFFD（Unicode置換文字）は上流のデコード時点で元の文字が失われており復元できない。
+        # 集計・表示はそのままU+FFFDとして扱い、原因調査用にログへ残す
+        logger.warning("評価文字列にU+FFFD（Unicode置換文字）が含まれています。元の文字は復元できません: %r", normalized)
+    return normalized
 
 
 def levenshtein_ops(expected: str, predicted: str) -> tuple[int, list[tuple[str, str, str]]]:

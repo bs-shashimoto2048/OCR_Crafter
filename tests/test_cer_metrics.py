@@ -141,3 +141,33 @@ def test_rows_include_edit_distance_and_backward_compat(cer_env):
     assert trained["accuracy_percent"] == round(2 / 3 * 100, 2)
     assert trained["correct"] == 2 and trained["total"] == 3 and trained["mismatch_count"] == 1
     assert cer_env["comparison"]["correct_delta"] == 1
+
+
+def test_normalize_compare_nfc_only():
+    """Unicode正規化はNFCのみ: 合成/結合の表記ゆれは同一視するが、
+    大小文字・半角/全角・0とO等は同一視しない（評価仕様）。"""
+    from src.app.services.ocr_evaluation import _normalize_compare
+
+    # NFD（e + 結合アクセント）とNFC（合成済みé）は同一視する
+    assert _normalize_compare("é") == _normalize_compare("é")
+    # 大小文字は同一視しない（case-sensitive維持）
+    assert _normalize_compare("abc") != _normalize_compare("ABC")
+    # 半角/全角は同一視しない（NFKCを使わない）
+    assert _normalize_compare("0") != _normalize_compare("０")
+    # 0とO・1とIは同一視しない
+    assert _normalize_compare("0") != _normalize_compare("O")
+    assert _normalize_compare("1") != _normalize_compare("I")
+    # ASCII charsetでは無変化（trimのみ）
+    assert _normalize_compare("  CBCOM  ") == "CBCOM"
+
+
+def test_normalize_compare_logs_replacement_char(caplog):
+    """U+FFFD（置換文字）を含む場合は復元不能である旨をログへ記録する。"""
+    import logging
+
+    from src.app.services.ocr_evaluation import _normalize_compare
+
+    with caplog.at_level(logging.WARNING, logger="src.app.services.ocr_evaluation"):
+        result = _normalize_compare("AB�C")
+    assert result == "AB�C"  # データ自体は変更しない
+    assert any("U+FFFD" in rec.message for rec in caplog.records)

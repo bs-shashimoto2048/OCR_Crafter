@@ -170,6 +170,19 @@
     overscroll-behavior: contain;
   }
 
+  /* 混同ラベル用フォント: ∅・→・␠・⇥・↵ 等の記号を表示できるフォールバックを明示する
+     （新規フォントは同梱せず、OS標準のシンボルフォントで補完。等幅を先頭に置き桁を揃える） */
+  .confusion-glyphs {
+    font-family:
+      ui-monospace,
+      "Cascadia Mono",
+      Consolas,
+      "Noto Sans JP",
+      "Segoe UI Symbol",
+      "Noto Sans Symbols 2",
+      monospace;
+  }
+
   /* 内部スクロール領域用のダークテーマスクロールバー（次回学習設定・重要イベント・詳細ログ等） */
   .dark-scroll {
     scrollbar-width: thin;

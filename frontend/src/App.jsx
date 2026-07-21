@@ -18,6 +18,7 @@ import TrainingImageBuilderView from "./views/TrainingImageBuilderView";
 import RapidOCRView from "./views/RapidOCRView";
 import OcrBatchView from "./views/OcrBatchView";
 import { API_BASE, imageUrl, request } from "./lib/api";
+import { charCodepoints } from "./lib/confusionFormat";
 import { viewBoundaryKey } from "./lib/viewKey";
 import { lowercaseToggleApplicable } from "./lib/lowercase";
 import {
@@ -3007,10 +3008,15 @@ export default function App() {
     });
     // 混同集計（モデル別TOP10: 置換/脱落/挿入）
     lines.push("");
-    lines.push(["model", "model_id", "kind", "from", "to", "count"].map(escape).join(","));
+    // from_codepoint/to_codepoint: 画面で表示できない文字（制御文字・U+FFFD等）も解析できるようU+XXXX表記を併記
+    lines.push(["model", "model_id", "kind", "from", "to", "from_codepoint", "to_codepoint", "count"].map(escape).join(","));
     targets.forEach((t) => {
       (t.confusions || []).forEach((c) => {
-        lines.push([t.label, modelIdOf(t.label), c.kind, c.from, c.to, c.count].map(escape).join(","));
+        lines.push(
+          [t.label, modelIdOf(t.label), c.kind, c.from, c.to, charCodepoints(c.from), charCodepoints(c.to), c.count]
+            .map(escape)
+            .join(",")
+        );
       });
     });
 

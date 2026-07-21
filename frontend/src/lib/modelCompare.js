@@ -33,12 +33,9 @@ export function buildCompareColorMap(models) {
   return Object.fromEntries((models || []).map((model, index) => [model, compareModelColor(index)]));
 }
 
-// 混同表示ラベル（脱落/挿入は∅で表現）
-export function confusionLabel(c) {
-  const from = String(c?.from || "") || "∅";
-  const to = String(c?.to || "") || "∅";
-  return `${from}→${to}`;
-}
+// 混同表示ラベル（実装は lib/confusionFormat.js。既存importの互換のため再exportする）
+import { confusionLabel } from "./confusionFormat.js";
+export { confusionLabel };
 
 // 指標の数値（比較・最良判定用）。未記録はnull
 export function metricValue(metric, entry) {

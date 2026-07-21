@@ -3,6 +3,8 @@
 // 表示用へ正規化し、推奨バッジを自動判定する。
 // 旧形式（percent/atのみ）のエントリはエラーにせず、欠損項目をnull（UIでは「未記録」）にする。
 
+import { normalizeConfusions } from "./confusionFormat.js";
+
 export function normalizeEvalEntry(datasetLabel, entry) {
   const num = (value) => (value === null || value === undefined || value === "" ? null : Number.isFinite(Number(value)) ? Number(value) : null);
   const pre = entry && typeof entry.pre === "object" && entry.pre !== null ? entry.pre : null;
@@ -29,7 +31,8 @@ export function normalizeEvalEntry(datasetLabel, entry) {
     regressed: num(entry?.regressed),
     perfectFixed: num(entry?.perfect_fixed),
     perfectRegressed: num(entry?.perfect_regressed),
-    confusions: Array.isArray(entry?.confusions) ? entry.confusions : [],
+    // 構造化形式（配列）を正とし、旧・文字列キー形式（{"Y→":5}等）は読み込み時に構造化へ変換
+    confusions: normalizeConfusions(entry?.confusions),
   };
 }
 

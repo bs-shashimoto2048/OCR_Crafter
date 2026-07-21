@@ -16,6 +16,25 @@ timeline
 
 ## 2026-07
 
+### 混同表示の特殊文字・Unicode安全化
+
+**概要**
+混同（置換/脱落/挿入）の表示を `lib/confusionFormat.js` へ集約した。内部データは従来どおり `{kind, from, to, count}` の構造化形式を正とし（∅や矢印などの表示記号・文字列キーを保存しない）、表示時のみ変換する: 空文字=∅ / 半角スペース=␠ / 全角スペース=□（半角と区別）/ タブ=⇥ / 改行=↵ / 復帰=CR / NULL=NUL / U+FFFD="U+FFFD" / 孤立サロゲート・その他制御文字=U+XXXX表記。ラベルは `confusionLabel`（`0 → O` 形式・スペース入り）、ツールチップは `confusionTitle`（「脱落：正解文字「Y」が認識結果から欠落」等＋特殊文字のコードポイント説明）。評価比較の正規化 `_normalize_compare` へ **Unicode NFC正規化**を追加し、U+FFFD検出時は復元不能である旨をログへ記録する。評価CSVの混同セクションへ `from_codepoint` / `to_codepoint`（U+XXXX）列を追加した。
+
+**変更理由**
+OCR結果に制御文字・不正バイト由来のU+FFFDが混じると混同ラベルが `�` になり原因を追えなかった。調査の結果、内部形式（kind/from/to構造化）は健全で、問題は「表示時の未変換」と「U+FFFDが上流デコードで発生した場合に検知できない」こと。表示層の安全化＋ログ＋CSVのコードポイント列で、画面で表示できない文字も解析可能にした。
+
+**注意事項**
+- **NFCのみ**（合成済み形への統一）。NFKCは半角/全角・記号を同一視して評価の意味を変えるため使用しない。大小文字・0とO・1とI・異体字も同一視しない（charset仕様維持。ASCII評価では実質無変化）
+- kind名はバックエンドの "sub"/"del"/"ins" を維持（"substitution" 等の別名は読み込み時に正規化）。**新規保存で文字列キー形式（`{"Y→":5}`）を使わないこと**——旧形式は `normalizeConfusions` が読み込み時に構造化へ変換する（矢印文字を含む文字列は完全には分割できないベストエフォート）
+- 混同ラベルには `.confusion-glyphs` フォント（ui-monospace→Segoe UI Symbol等のOS標準フォールバック。フォント同梱なし）を使う
+- U+FFFDは元の文字が失われているため復元しない（そのまま集計・表示し、警告ログのみ）
+
+**影響範囲**
+`lib/confusionFormat.js`（新規）、`lib/modelCompare.js`（confusionLabel再export）、`lib/modelEval.js`（normalizeConfusions）、ModelsView/OcrEvaluationView（ツールチップ・フォント）、App.jsx（CSVコードポイント列）、`ocr_evaluation.py`（NFC＋FFFDログ）、`index.css`、`frontend/tests/confusionFormat.test.mjs`（新規）、`tests/test_cer_metrics.py`
+
+---
+
 ### モデル比較のモデル識別色（固定3色）
 
 **概要**

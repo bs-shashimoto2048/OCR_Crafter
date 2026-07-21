@@ -16,6 +16,7 @@ import {
   modelEvalEntries,
   whitelistLabelOf,
 } from "../lib/modelEval";
+import { confusionTitle } from "../lib/confusionFormat";
 import {
   COMPARE_METRICS,
   buildCompareColorMap,
@@ -669,9 +670,9 @@ export default function ModelsView({
                   <span
                     key={`${c.kind}-${c.from}-${c.to}`}
                     className="inline-flex min-w-[3.5rem] flex-col items-center rounded-md border border-border/70 bg-card/60 px-2 py-1 tabular-nums"
-                    title={c.kind === "sub" ? "置換" : c.kind === "del" ? "脱落" : "挿入"}
+                    title={confusionTitle(c)}
                   >
-                    <span className="font-mono text-[14px] font-semibold text-text">{confusionLabel(c)}</span>
+                    <span className="confusion-glyphs text-[14px] font-semibold text-text">{confusionLabel(c)}</span>
                     <span className="text-[11px] text-muted">{c.count}件</span>
                   </span>
                 ))}
@@ -1111,8 +1112,8 @@ export default function ModelsView({
                 {confusionRows.map((row) => (
                   <div key={`${row.kind}-${row.from}-${row.to}`}>
                     <p
-                      className="font-mono text-[14px] font-semibold text-text"
-                      title={`${row.kind === "sub" ? "置換" : row.kind === "del" ? "脱落" : "挿入"} / 全モデル合計 ${row.total}件`}
+                      className="confusion-glyphs text-[14px] font-semibold text-text"
+                      title={`${confusionTitle(row)}\n全モデル合計 ${row.total}件`}
                     >
                       {row.label}
                     </p>
