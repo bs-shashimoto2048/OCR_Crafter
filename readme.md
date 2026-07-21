@@ -1,156 +1,86 @@
-# OCR Crafter (ローカルOCR学習環境)
+# OCR Crafter（ローカルOCR学習環境）
 
-詳細な利用手順: [docs/usage.md](/Users/hashimoto/vscode/_app/ocr_crafter/docs/usage.md)
+ローカル環境で完結する **OCRモデル開発プラットフォーム**。
+画像の取り込みからデータ作成・学習・CER評価・モデル管理/比較・推論・修正までを1つのWeb UIで行う。
 
-## 1. ディレクトリ初期化
+- バックエンド: FastAPI（`src/app/`、port 8000）
+- フロントエンド: React 18 + Vite 5 + Tailwind（`frontend/`、port 5173）
+- データはプロジェクト単位（`data/projects/<project_id>/`）で分離管理
 
-```bash
-python3 -m src.app.init_dirs
-```
+詳細な利用手順: [docs/usage.md](docs/usage.md) ／ ドキュメント一覧: [docs/](docs/)
 
-## 2. バックエンド起動（FastAPI）
+## 対応OCRエンジン
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn src.app.main:app --reload --port 8000
-```
+| エンジン | 学習 | 推論 | 備考 |
+|---|---|---|---|
+| Tesseract | ○（LSTM fine-tune） | ○ | 学習対象文字 `A-Z0-9klt`（[docs/12](docs/12_TESSERACT_CHARSET_SPEC.md)） |
+| PaddleOCR | ○（認識モデル） | ○ | `external/PaddleOCR` を使用 |
+| EasyOCR | ×（推論のみ） | ○ | |
+| custom（分類モデル） | ○（実験機能） | ○ | 文字分割ベースの分類学習 |
 
-## 3. フロントエンド起動（React + Vite）
+## 主要ワークフロー（サイドバー順）
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
+サイドバーはOCRモデル開発の作業工程順に並んでいる（上から順に進めるとモデルが完成する）。
 
-必要なら `frontend/.env` に以下を追加:
+1. **プロジェクト** — ダッシュボードでプロジェクト概要・進行状況を確認
+2. **データ作成** — 画像指定・リサイズ → YOLO検出 → Bounding Box選択 → クロップ出力
+   → 画像 → 前処理設定 → ラベル編集 → 評価データ作成
+3. **OCRモデル** — データ作成・学習 → モデル管理 → モデル評価 → 推論 → OCR修正 → バッチ推論
+4. **実験機能** — 分類学習 / 分類モデル管理 / 分類推論 / 分類評価
 
-```bash
-VITE_API_BASE=http://127.0.0.1:8000
-```
+## 主要機能
 
-## 4. 主要フロー（UI）
+- **データ作成**: YOLO検出＋BBox選択による元画像からの学習画像クロップ、前処理パイプライン（二値化・照明ムラ補正・手動マスク等）、キーボード中心のラベル編集、評価データセット作成（Step5）
+- **学習**: Tesseract LSTM fine-tune / PaddleOCR認識モデル / 分類モデル（いずれも非同期ジョブ）。実験名・親モデル・学習メモをモデルメタへ保存可能
+- **CER評価**: 主指標=CER（全画像の編集距離総和÷正解文字数総和のマイクロ平均）。文字正解率・完全一致率・改善/同等/悪化・混同TOP（置換/脱落/挿入）・CSV出力・評価履歴
+- **モデル管理**: 管理No（M0001形式・全プロジェクト横断で一意・削除後も再利用しない）、モデルカルテ（数字主体のダッシュボード）
+- **モデル比較**: 最大3モデルを固定色（ブルー/オレンジ/パープル）で比較。性能サマリー・改善悪化比較・学習条件比較・条件差分・次回学習提案・混同比較・指標別結果
+- **推論・修正**: 単一推論／バッチ推論／OCR修正（キーボード中心・修正ログからのデータセット再生成）
 
-1. プロジェクト作成/選択  
-2. 画像取り込み（取り込み時に前処理も自動実行）  
-3. ラベル編集  
-4. データセット作成  
-5. 学習開始（非同期）  
-6. 評価 / 推論
-
-## 5. エンドポイント一覧
-
-- `GET /health` : ヘルスチェック
-- `GET /api/system/check` : 実行環境チェック（GPU可否 / PaddleOCRパス / 推奨プロファイル）
-- `GET /projects` : プロジェクト一覧
-- `POST /projects` : プロジェクト作成
-- `DELETE /projects/{project_id}` : プロジェクト削除
-- `POST /dialogs/select-directory` : ローカルのフォルダ選択ダイアログを開いてパス取得
-- `POST /images/import` : 外部ディレクトリから画像取り込み（`project_id` 指定）
-- `GET /images?project_id=...` : 画像一覧取得（ラベル付き）
-- `POST /images/{image_name}/rotate?project_id=...` : 画像回転（90度単位、右回転が正）
-- `GET /images/{image_name}/processed?project_id=...` : 前処理済み画像取得
-- `POST /preprocess/run` : 前処理実行（`project_id` + ON/OFF・パラメータ上書き）
-- `GET /preprocess/preview` / `POST /preprocess/preview` : 前処理プレビュー + 推論
-- `GET /labels?project_id=...` : ラベル一覧取得
-- `PUT /labels/{image_name}?project_id=...` : ラベル更新
-- `POST /dataset/build` : `train/val/test` 分割して `data/projects/{project_id}/dataset` へ出力
-- `POST /train/start` : 非同期学習ジョブ開始（BackgroundTasks）
-- `GET /train/{job_id}` : 学習ジョブ状態取得（SQLite）
-- `POST /api/ocr/dataset/create` : OCR用 `path\ttext` データセット作成（PaddleOCR学習向け）
-- `POST /api/ocr/train/start` : PaddleOCR 学習ジョブ開始
-- `GET /api/ocr/train/status/{job_id}` : OCR学習状態取得
-- `GET /api/ocr/train/log/{job_id}` : OCR学習ログ取得
-- `POST /api/ocr/models/export-migrate` : 既存OCRモデルを推論用(inference)へ一括変換
-- `GET /api/ocr/models/official` : 選択可能な公式PaddleOCR認識モデル一覧
-- `GET /api/models/download/{model_name}?project_id=...` : モデルダウンロード（`.pt` 直取得 / `.ocr.json` は inference ZIP）
-- `GET /models?project_id=...` : 保存済みモデル一覧
-- `GET /models/latest?project_id=...&model_type=...` : 最新モデル参照（種別指定可）
-- `GET /model-types?project_id=...` : モデル種別一覧
-- `POST /predict` : 画像推論（`custom` / `easyocr` / `paddleocr`）
-- `POST /evaluate` : 精度評価（accuracy、混同行列、誤認識ログ）
-- `POST /ocr/tuning/export` : EasyOCR/PaddleOCR 学習用データをエクスポート
-- `POST /system/shutdown` : フロント/バックエンド終了
-
-## 6. 学習・推論CLI
-
-```bash
-python3 -m src.app.train --project-id default --model-type square --epochs 5 --batch-size 32
-python3 -m src.app.predict path/to/image.png --project-id default --model-type square
-python3 -m src.app.predict path/to/image.png --project-id default --engine paddleocr --easyocr-langs en
-python3 -m src.app.ocr_tuning --project-id default --engine both --image-types wide --train-ratio 0.8 --val-ratio 0.1 --test-ratio 0.1
-```
-
-## 7. 設定
-
-- `config/settings.yaml` で前処理・分割比率・学習デフォルト値を管理
-- device は `mps` 利用可能なら自動で `mps`、不可なら `cpu`
-- OCR学習は `ocr_training` を参照（`default_device`, `default_auto_batch_size`, `*_num_workers`, `default_save_epoch_step`, `default_use_amp`, `default_pin_memory`, `default_persistent_workers`）
-- PaddleOCR の場所は `PADDLEOCR_PATH`（環境変数）または `ocr_training.paddleocr_repo_dir` で指定
-- `ocr_training.presets` の `mac_safe` / `rtx_train` をUIから適用可能
-- データは `data/projects/{project_id}/` 配下でプロジェクトごとに分離管理
-
-## 8. OCRチューニング（EasyOCR / PaddleOCR）
-
-補足:
-- OCR学習完了時に、推論用 `inference` モデルを自動exportします。
-- 推論では export済みモデルのみ使用します（未exportモデルはエラー）。
-- `engine=paddleocr` で学習済みOCRモデルを指定した場合、認識モデルを直接利用します（推論時の追加公式モデル取得に依存しません）。
-- `device=auto` でもGPU検出時はGPU設定（auto batch/AMP/pin_memory/persistent_workers）を有効化します。
-- OOM検出時は batch を半減して1回だけ自動リトライします。
-- 学習ログに `metrics` 行（`batch_size`, `step_time`, `gpu_usage`, `vram_usage`）を定期出力します。
-
-1. 追加依存をインストール（任意）
-
-```bash
-source .venv/bin/activate
-pip install -r requirements-ocr-tuning.txt
-```
-
-2. 学習用データをエクスポート
-
-```bash
-python3 -m src.app.ocr_tuning \
-  --project-id default \
-  --engine both \
-  --image-types wide \
-  --train-ratio 0.8 \
-  --val-ratio 0.1 \
-  --test-ratio 0.1
-```
-
-出力先: `data/projects/<project_id>/outputs/ocr_tuning/<timestamp>/`
-
-- EasyOCR: `easyocr/train_labels.txt`, `easyocr/val_labels.txt`, `easyocr/test_labels.txt`
-- PaddleOCR: `paddleocr/rec/train.txt`, `paddleocr/rec/val.txt`, `paddleocr/rec/test.txt`, `paddleocr/rec/charset.txt`
-- 共通メタ: `meta.json`
-
-## 9. 旧データ移行（必要時）
-
-旧構造（`data/raw` など）から新構造へ移す場合:
-
-```bash
-python3 -m src.app.migrate_legacy_data --project-id default
-```
-
----
-
-## Quick Start
-
- 1. バックエンド起動（FastAPI / Windows PowerShell）
+## セットアップ・起動（Windows PowerShell）
 
 ```powershell
+# 初回のみ
+python -m venv .venv
 .\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+cd frontend; npm install; cd ..
+
+# バックエンド
 uvicorn src.app.main:app --reload --port 8000
-````
 
-2. フロントエンド起動（React + Vite / Windows PowerShell）
-
-```powershell
+# フロントエンド（別ターミナル）
 cd frontend
-npm run dev
+npm run dev    # http://localhost:5173
 ```
 
----
+必要なら `frontend/.env` に `VITE_API_BASE=http://127.0.0.1:8000` を設定。
+Tesseract学習にはUB-Mannheimビルド等の学習ツール（lstmtraining）が必要（[docs/11](docs/11_TESSERACT_CHECKLIST.md)）。
+
+## テスト・ビルド
+
+```powershell
+python -m pytest -q            # バックエンド（.venv）
+cd frontend; npm test          # フロントエンド（node:test）
+cd frontend; npm run build     # フロントのビルド（バックエンドにビルド工程なし）
+```
+
+## 設定・データ
+
+- `config/settings.yaml`: 前処理パイプライン・学習デフォルト・Tesseractパス等の全設定（[docs/08](docs/08_CONFIGURATION.md)）
+- `data/projects/<project_id>/`: 画像・ラベル・モデル・出力（gitignore対象）
+- `data/model_ids.json`: モデル管理Noの登録簿（全プロジェクト共通）
+
+## ドキュメント
+
+| ドキュメント | 内容 |
+|---|---|
+| [docs/00_PROJECT_OVERVIEW.md](docs/00_PROJECT_OVERVIEW.md) | プロジェクト概要・画面構成 |
+| [docs/04_BUILD_AND_RUN.md](docs/04_BUILD_AND_RUN.md) | ビルド・実行・テスト |
+| [docs/06_API_REFERENCE.md](docs/06_API_REFERENCE.md) | API仕様（全エンドポイント） |
+| [docs/11_TESSERACT_CHECKLIST.md](docs/11_TESSERACT_CHECKLIST.md) | Tesseract学習・推論・評価チェックリスト |
+| [docs/12_TESSERACT_CHARSET_SPEC.md](docs/12_TESSERACT_CHARSET_SPEC.md) | charset / whitelist 確定仕様 |
+| [docs/16_SCREEN_SPEC.md](docs/16_SCREEN_SPEC.md) | 画面仕様（UI） |
+| [docs/17_DATAFLOW.md](docs/17_DATAFLOW.md) | 処理・保存フロー |
+| [docs/15_CHANGELOG_AI.md](docs/15_CHANGELOG_AI.md) | 仕様変更の理由と履歴 |
+| [CLAUDE.md](CLAUDE.md) | 開発ルール（AIエージェント向け） |
