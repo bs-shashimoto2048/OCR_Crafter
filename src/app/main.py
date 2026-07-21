@@ -1943,6 +1943,15 @@ def _run_tesseract_training_job(job_id: str) -> None:
             paths = ensure_project_directories(project_id)
             log_path = paths.logs / f"train_tesseract_{job_id}.log"
 
+        # 実験情報（実験名/親モデル/学習メモ）をジョブからモデルメタへ引き継ぐ
+        extra_meta: Optional[dict[str, Any]] = None
+        try:
+            raw_meta = job.get("experiment_meta")
+            parsed = json.loads(raw_meta) if raw_meta else None
+            extra_meta = parsed if isinstance(parsed, dict) else None
+        except (TypeError, ValueError):
+            extra_meta = None
+
         result = run_tesseract_training(
             project_id=project_id,
             job_id=job_id,
@@ -1952,6 +1961,7 @@ def _run_tesseract_training_job(job_id: str) -> None:
             base_lang=base_lang,
             psm=psm,
             log_path=log_path,
+            extra_meta=extra_meta,
         )
         current = fetch_training_job(job_id) or job
         upsert_training_job(
@@ -2269,6 +2279,19 @@ def api_tesseract_train_start(req: TesseractTrainStartRequest) -> dict[str, Any]
         "model_path": None,
         "worker_pid": None,
         "log_path": str(log_path),
+        # 実験情報はジョブ経由でモデルメタ（.tess.json）へ引き継ぐ（未指定なら保存しない=従来動作）
+        "experiment_meta": (
+            json.dumps(
+                {
+                    "experiment_name": str(req.experiment_name or "").strip(),
+                    "parent_model_id": str(req.parent_model_id or "").strip(),
+                    "training_note": str(req.training_note or "").strip(),
+                },
+                ensure_ascii=False,
+            )
+            if (req.experiment_name or req.parent_model_id or req.training_note)
+            else None
+        ),
         "created_at": now,
         "updated_at": now,
     }

@@ -205,6 +205,10 @@ class TesseractTrainStartRequest(BaseModel):
     max_iterations: int = Field(default=1000, ge=1, le=100000, description="LSTM fine-tuneの最大イテレーション")
     base_lang: str = Field(default="eng", description="fine-tuneのベース言語(traineddata)")
     psm: int = Field(default=7, ge=0, le=13, description="単一行認識用のPage Segmentation Mode")
+    # 実験情報（学習条件比較用。未指定=従来動作でメタへは空値保存）
+    experiment_name: str = Field(default="", description="実験名（モデルメタへ保存し学習条件比較で表示）")
+    parent_model_id: str = Field(default="", description="親モデルの管理No（派生関係の追跡用。ベース直学習は空）")
+    training_note: str = Field(default="", description="学習メモ（変更内容などの自由記述）")
 
 
 class OcrTrainStartRequest(BaseModel):

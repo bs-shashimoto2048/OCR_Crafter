@@ -55,4 +55,28 @@ export const HELP_TEXTS = {
     title: "OCR前処理",
     body: "OCR実行前に実施した画像処理です。\n例: グレースケール化・二値化・閾値変更 など",
   },
+  parentModel: {
+    title: "親モデル",
+    body: "このモデルの学習開始時に使用した直前のモデルです。\nモデルの派生関係を追跡するために使用します。\nベースモデルから直接学習した場合は「なし」または未記録です。",
+  },
+  trainValTest: {
+    title: "Train / Val / Test",
+    body: "学習用（Train）・検証用（Validation）・テスト用（Test）へ分けた画像枚数です。\n分割が異なるモデル同士は、Iterationなど単一条件の効果を比較できません。",
+  },
+  augmentation: {
+    title: "Augmentation",
+    body: "学習画像へ回転・ぼかし・明るさ変更などを加えてデータを増やす手法です。\n過学習の抑制に有効ですが、強すぎると精度が下がる場合があります。",
+  },
+  charset: {
+    title: "Charset",
+    body: "学習対象とした文字の集合です。\nCharsetが異なるモデル同士は認識できる文字が異なるため、単純な性能比較はできません。",
+  },
+  singleConditionCompare: {
+    title: "単一条件比較",
+    body: "前モデルから1つの学習条件だけを変更した比較です。\n性能変化の原因を判断しやすい実験です。",
+  },
+  multiConditionChange: {
+    title: "複数条件変更",
+    body: "前モデルから2つ以上の学習条件が変更された比較です。\n性能が変化しても、どの条件が要因かは特定できません。",
+  },
 };

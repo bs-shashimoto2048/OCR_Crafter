@@ -112,6 +112,10 @@ def init_db() -> None:
             conn.execute("ALTER TABLE training_jobs ADD COLUMN log_path TEXT")
         if "worker_pid" not in columns:
             conn.execute("ALTER TABLE training_jobs ADD COLUMN worker_pid INTEGER")
+        if "experiment_meta" not in columns:
+            # 実験情報（experiment_name / parent_model_id / training_note）のJSON文字列。
+            # モデルメタ（.tess.json等）へ引き継ぐための一時保管（後方互換のためNULL可）
+            conn.execute("ALTER TABLE training_jobs ADD COLUMN experiment_meta TEXT")
         conn.commit()
 
 
@@ -144,8 +148,8 @@ def upsert_training_job(job: dict[str, Any]) -> None:
         conn.execute(
             """
             INSERT INTO training_jobs (
-                id, project_id, training_family, engine, model_type, epochs, batch_size, device, auto_batch_size, train_num_workers, eval_num_workers, save_epoch_step, use_amp, pin_memory, persistent_workers, resolved_device, learning_rate, training_mode, init_source_type, init_source_value, freeze_backbone_epochs, backbone_lr_scale, charset, max_text_length, dataset_dir, paddle_repo_dir, image_shape, status, message, model_path, worker_pid, log_path, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, project_id, training_family, engine, model_type, epochs, batch_size, device, auto_batch_size, train_num_workers, eval_num_workers, save_epoch_step, use_amp, pin_memory, persistent_workers, resolved_device, learning_rate, training_mode, init_source_type, init_source_value, freeze_backbone_epochs, backbone_lr_scale, charset, max_text_length, dataset_dir, paddle_repo_dir, image_shape, status, message, model_path, worker_pid, log_path, experiment_meta, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 project_id=excluded.project_id,
                 training_family=excluded.training_family,
@@ -178,6 +182,7 @@ def upsert_training_job(job: dict[str, Any]) -> None:
                 model_path=excluded.model_path,
                 worker_pid=excluded.worker_pid,
                 log_path=excluded.log_path,
+                experiment_meta=excluded.experiment_meta,
                 updated_at=excluded.updated_at
             """,
             (
@@ -213,6 +218,7 @@ def upsert_training_job(job: dict[str, Any]) -> None:
                 job.get("model_path"),
                 worker_pid,
                 job.get("log_path"),
+                job.get("experiment_meta"),
                 job["created_at"],
                 job["updated_at"],
             ),
@@ -224,7 +230,7 @@ def fetch_training_job(job_id: str) -> Optional[dict[str, Any]]:
     with get_conn() as conn:
         row = conn.execute(
             """
-            SELECT id, project_id, training_family, engine, model_type, epochs, batch_size, device, auto_batch_size, train_num_workers, eval_num_workers, save_epoch_step, use_amp, pin_memory, persistent_workers, resolved_device, learning_rate, training_mode, init_source_type, init_source_value, freeze_backbone_epochs, backbone_lr_scale, charset, max_text_length, dataset_dir, paddle_repo_dir, image_shape, status, message, model_path, worker_pid, log_path, created_at, updated_at
+            SELECT id, project_id, training_family, engine, model_type, epochs, batch_size, device, auto_batch_size, train_num_workers, eval_num_workers, save_epoch_step, use_amp, pin_memory, persistent_workers, resolved_device, learning_rate, training_mode, init_source_type, init_source_value, freeze_backbone_epochs, backbone_lr_scale, charset, max_text_length, dataset_dir, paddle_repo_dir, image_shape, status, message, model_path, worker_pid, log_path, experiment_meta, created_at, updated_at
             FROM training_jobs WHERE id = ?
             """,
             (job_id,),
@@ -266,6 +272,7 @@ def fetch_training_job(job_id: str) -> Optional[dict[str, Any]]:
         "model_path",
         "worker_pid",
         "log_path",
+        "experiment_meta",
         "created_at",
         "updated_at",
     ]

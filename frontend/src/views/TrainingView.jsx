@@ -62,6 +62,12 @@ export default function TrainingView({
   setOcrEngine,
   ocrCharset,
   setOcrCharset,
+  experimentName,
+  setExperimentName,
+  parentModelId,
+  setParentModelId,
+  trainingNote,
+  setTrainingNote,
   ocrMaxTextLength,
   setOcrMaxTextLength,
   ocrImageShape,
@@ -1011,6 +1017,45 @@ export default function TrainingView({
                           </label>
                           <input className="app-input" value={TESSERACT_CHARSET_DEFAULT} readOnly />
                           <p className="mt-1 text-xs text-muted">推論時whitelist（既定）</p>
+                        </div>
+                        {/* 実験情報（モデルメタへ保存し、モデル比較の学習条件比較で表示。未入力=未記録） */}
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="app-label">
+                              実験名
+                              <InfoHint text="この学習の目的が分かる名前です（例: Iteration 15000）。モデルメタへ保存され、モデル比較の学習条件比較で表示されます。" />
+                            </label>
+                            <input
+                              className="app-input"
+                              value={experimentName ?? ""}
+                              onChange={(e) => setExperimentName?.(e.target.value)}
+                              placeholder="例: Iteration検証"
+                            />
+                          </div>
+                          <div>
+                            <label className="app-label">
+                              親モデル（管理No）
+                              <InfoHint text="このモデルの学習開始時に参照した直前のモデルの管理Noです。派生関係の追跡用で、学習内容には影響しません（ベース直学習は空欄）。" />
+                            </label>
+                            <input
+                              className="app-input"
+                              value={parentModelId ?? ""}
+                              onChange={(e) => setParentModelId?.(e.target.value)}
+                              placeholder="例: M0003（任意）"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="app-label">
+                            学習メモ
+                            <InfoHint text="前回から変更した内容などの自由記述です。モデルメタへ保存され、学習条件比較で表示されます。" />
+                          </label>
+                          <textarea
+                            className="app-input min-h-[64px] py-1.5"
+                            value={trainingNote ?? ""}
+                            onChange={(e) => setTrainingNote?.(e.target.value)}
+                            placeholder="例: Iterationのみ変更（他条件は前回と同一）"
+                          />
                         </div>
                         <div className="rounded-lg border border-accent/30 bg-accent/10 px-3 py-2 text-xs text-blue-100">
                           公式 <span className="font-semibold">eng.traineddata</span> をベースに LSTM を fine-tune します。

@@ -232,6 +232,15 @@ def list_model_infos(project_id: Optional[str] = None) -> list[dict]:
                         "init_source_type": "tesseract_base",
                         "init_source_value": str(payload.get("base_lang") or ""),
                     },
+                    # 実験情報（学習条件比較用。旧メタは空値/None=UIで「未記録」表示）
+                    "experiment_name": str(payload.get("experiment_name") or ""),
+                    "parent_model_id": str(payload.get("parent_model_id") or ""),
+                    "training_note": str(payload.get("training_note") or ""),
+                    "training_duration_seconds": (
+                        _safe_int(payload.get("training_duration_seconds"))
+                        if payload.get("training_duration_seconds") is not None
+                        else None
+                    ),
                 }
             )
         elif path.name.endswith(".ocr.json"):

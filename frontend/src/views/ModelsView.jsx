@@ -18,6 +18,14 @@ import {
 } from "../lib/modelEval";
 import { confusionTitle } from "../lib/confusionFormat";
 import {
+  DIFF_CLASSIFICATION_LABELS,
+  TRAINING_CONDITION_ROWS,
+  buildComparabilityNotes,
+  buildConditionDiffSummaries,
+  buildNextTrainingProposals,
+  normalizeTrainingCondition,
+} from "../lib/trainingCompare";
+import {
   COMPARE_METRICS,
   buildCompareColorMap,
   buildConditionComparison,
@@ -252,6 +260,7 @@ export default function ModelsView({
   inferenceInUseEngine = "",
   onUseForInference,
   onOpenEvaluation,
+  onCreateTrainingPlan,
 }) {
   const latestAny = basename(latest.any || "");
   const latestByType = latest.byType || {};
@@ -843,6 +852,45 @@ export default function ModelsView({
     const colorMap = buildCompareColorMap(compareTargets);
     const colorOf = (name) => colorMap[name];
     const bestText = "font-semibold text-emerald-300";
+    // 学習条件比較・条件差分・次回学習提案（lib/trainingCompare.js の純ロジック）
+    const conditionOf = (name) => normalizeTrainingCondition(infoOf(name));
+    const latestOfModel = (name) => latestEvalOf(evalHistory, name);
+    const diffSummaries = buildConditionDiffSummaries({
+      targets: compareTargets,
+      labelOf: compareLabel,
+      conditionOf,
+      latestOf: latestOfModel,
+    });
+    const comparabilityNotes = buildComparabilityNotes({ targets: compareTargets, labelOf: compareLabel, conditionOf });
+    const proposals = buildNextTrainingProposals({
+      targets: compareTargets,
+      labelOf: compareLabel,
+      conditionOf,
+      latestOf: latestOfModel,
+      conditionsMatch: conditions.match,
+    });
+    // 「この条件で学習設定を作成」: 学習画面へ設定を引き継ぐ（学習は開始しない）
+    const createTrainingPlan = (proposal) => {
+      const ref = proposal.settings?.referenceModel;
+      const refCounts = ref ? conditionOf(ref)?.splitCounts : null;
+      let ratios = null;
+      if (refCounts) {
+        const total = refCounts.train + refCounts.val + refCounts.test;
+        const round1 = (v) => Math.round((v / total) * 10) / 10;
+        const candidate = { train: round1(refCounts.train), val: round1(refCounts.val), test: round1(refCounts.test) };
+        if (Math.abs(candidate.train + candidate.val + candidate.test - 1) < 1e-6) ratios = candidate;
+      }
+      onCreateTrainingPlan?.({
+        experimentName: proposal.title,
+        parentModelId: ref ? modelIdOf(ref) : "",
+        iterations: proposal.settings?.iterations || null,
+        ratios,
+        note: [
+          `比較提案「${proposal.title}」より作成（変更項目: ${proposal.changedLabel}）`,
+          ...proposal.lines.map((line) => `${line.label}: ${line.value}`),
+        ].join("\n"),
+      });
+    };
     // 主要3指標（カード表示）と改善・悪化比較（画像単位の学習前比）の行定義
     const mainMetrics = ["cer", "charAccuracy", "percent"].map((key) => COMPARE_METRICS.find((m) => m.key === key));
     const mainHelp = { cer: HELP_TEXTS.cer, charAccuracy: HELP_TEXTS.charAccuracy, percent: HELP_TEXTS.exactMatch };
@@ -898,30 +946,25 @@ export default function ModelsView({
             </div>
           ) : null}
 
-          {/* 比較結果の要約: 推奨モデル（勝利数→CER→文字正解率。Accuracy単独では決めない） */}
+          {/* 比較結果の要約: 推奨モデル（勝利数→CER→文字正解率。Accuracy単独では決めない）。
+              管理No主表示＋ファイル名補助を1行に収め、理由は最大1行のコンパクト表示 */}
           {recommended ? (
-            <div className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2.5">
-              <p className="text-[13px] text-amber-200">推奨モデル</p>
-              <p className="text-xl font-bold leading-7" style={{ color: colorOf(recommended.model) }} title={compareTitle(recommended.model)}>
-                {compareLabel(recommended.model)}
-              </p>
-              <p className="truncate text-[12px] text-amber-100/70" title={recommended.model}>
-                {displayName(recommended.model)}
-              </p>
+            <div className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2">
+              <div className="flex min-w-0 items-baseline gap-2">
+                <span className="shrink-0 text-[13px] text-amber-200">推奨モデル</span>
+                <span className="shrink-0 text-lg font-bold leading-6" style={{ color: colorOf(recommended.model) }} title={compareTitle(recommended.model)}>
+                  {compareLabel(recommended.model)}
+                </span>
+                <span className="min-w-0 truncate text-[12px] text-amber-100/70" title={recommended.model}>
+                  {displayName(recommended.model)}
+                </span>
+              </div>
               {recommended.reasons.length > 0 ? (
-                <div className="mt-1.5 flex flex-wrap gap-1" title={recommended.reasons.join("・")}>
-                  {recommended.reasons.slice(0, 4).map((reason) => (
-                    <span
-                      key={reason}
-                      className="rounded-full border border-amber-300/30 bg-amber-300/10 px-2 py-0.5 text-[12px] text-amber-100/90"
-                    >
-                      {reason}
-                    </span>
-                  ))}
-                  {recommended.reasons.length > 4 ? (
-                    <span className="px-1 py-0.5 text-[12px] text-amber-100/70">ほか{recommended.reasons.length - 4}項目で最良</span>
-                  ) : null}
-                </div>
+                <p className="mt-0.5 truncate text-[12px] text-amber-100/90" title={recommended.reasons.join("・")}>
+                  {recommended.reasons.length > 3
+                    ? `${recommended.reasons.slice(0, 3).map((r) => r.replace(/最良$/, "")).join("・")}など${recommended.reasons.length}項目で最良`
+                    : `${recommended.reasons.join("・")}`}
+                </p>
               ) : null}
             </div>
           ) : (
@@ -943,34 +986,44 @@ export default function ModelsView({
                 <p className="truncate text-[11px] text-muted" title={col.model}>
                   {displayName(col.model)}
                 </p>
-                <div className="mt-2 space-y-2.5">
+                {/* 主要3指標を横3列で表示（縦積みしない=カード高さを約1/3へ削減）。
+                    値(22px)の直下に略称ラベル＋差分（一致は正解/総数）を小さく表示 */}
+                <div className="mt-1.5 grid grid-cols-3 gap-1 border-t border-border/50 pt-1.5 text-center">
                   {mainMetrics.map((metric) => {
                     const row = comparison.rows.find((r) => r.metric.key === metric.key);
                     const value = metricValue(metric, col.latest);
                     const diff = formatBestDiff(metric, col.latest, row.best);
+                    const shortLabel = metric.key === "cer" ? "CER" : metric.key === "charAccuracy" ? "文字" : "一致";
+                    const subText =
+                      metric.key === "percent"
+                        ? col.latest?.correct !== null && col.latest?.correct !== undefined
+                          ? `${col.latest.correct} / ${col.latest.total}`
+                          : diff || ""
+                        : diff || "";
                     return (
-                      <div key={metric.key}>
-                        <p className="flex items-center text-[13px] text-muted">
-                          {metric.label}
+                      <div key={metric.key} className="min-w-0">
+                        {value === null ? (
+                          <p className="text-[14px] font-medium leading-7 text-muted">—</p>
+                        ) : (
+                          <p
+                            className={`truncate text-[22px] font-bold leading-7 tabular-nums ${
+                              diff === "最良" ? "text-emerald-300" : "text-text"
+                            }`}
+                          >
+                            {metric.key === "percent" ? `${value}%` : formatMetricValue(metric, col.latest)}
+                          </p>
+                        )}
+                        <p className="flex items-center justify-center text-[13px] text-muted">
+                          {shortLabel}
                           <InfoTooltip {...mainHelp[metric.key]} align={index === 0 ? "left" : "right"} />
                         </p>
-                        {value === null ? (
-                          <p className="text-[14px] font-medium text-muted">未記録</p>
-                        ) : (
-                          <>
-                            <p className={`text-[22px] font-bold leading-7 tabular-nums ${diff === "最良" ? "text-emerald-300" : "text-text"}`}>
-                              {formatMetricValue(metric, col.latest)}
-                            </p>
-                            {metric.key === "percent" && col.latest?.correct !== null ? (
-                              <p className="text-[12px] tabular-nums text-muted">
-                                {col.latest.correct} / {col.latest.total}
-                              </p>
-                            ) : null}
-                            <p className={`text-[13px] tabular-nums ${diff === "最良" ? "text-emerald-300" : "text-muted"}`}>
-                              {diff || ""}
-                            </p>
-                          </>
-                        )}
+                        <p
+                          className={`truncate text-[12px] tabular-nums ${
+                            value === null ? "text-muted" : diff === "最良" && metric.key !== "percent" ? "text-emerald-300" : "text-muted"
+                          }`}
+                        >
+                          {value === null ? "未記録" : subText}
+                        </p>
                       </div>
                     );
                   })}
@@ -1031,7 +1084,167 @@ export default function ModelsView({
             </div>
           </div>
 
-          {/* 評価条件（比較の前提確認。警告対象=データセット/前処理/Whitelist/画像数） */}
+          {/* ⑤ 学習条件比較（何を変えて学習したかをモデル間で比較。旧モデルの未記録項目は「未記録」表示） */}
+          <div className="rounded-lg border border-border bg-card/45 px-2.5 py-2.5">
+            <p className="mb-1.5 text-[15px] font-semibold text-text">学習条件比較</p>
+            {comparabilityNotes.length > 0 ? (
+              <div className="mb-2 rounded-lg border border-amber-400/50 bg-amber-400/10 px-2.5 py-1.5">
+                <p className="text-[12px] font-semibold text-amber-200">注意</p>
+                {comparabilityNotes.map((note) => (
+                  <p key={note} className="mt-0.5 text-[12px] leading-relaxed text-amber-100/90">
+                    {note}
+                  </p>
+                ))}
+              </div>
+            ) : null}
+            <div className="comparison-table-wrap">
+              <table className="w-full text-[13px]">
+                <thead>
+                  <tr>
+                    <th className={stickyLabel}></th>
+                    {compareTargets.map((name) => (
+                      <th
+                        key={name}
+                        className="whitespace-nowrap px-2 py-1.5 text-left text-[13px] font-semibold"
+                        style={{ color: colorOf(name) }}
+                        title={compareTitle(name)}
+                      >
+                        {compareLabel(name)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {TRAINING_CONDITION_ROWS.map((row) => (
+                    <tr key={row.key} className="border-t border-border/50">
+                      <td className={stickyLabel}>
+                        <span className="flex items-center">
+                          {row.label}
+                          {row.helpKey && HELP_TEXTS[row.helpKey] ? <InfoTooltip {...HELP_TEXTS[row.helpKey]} align="left" /> : null}
+                        </span>
+                      </td>
+                      {compareTargets.map((name) => {
+                        const text = row.value(conditionOf(name));
+                        return (
+                          <td
+                            key={name}
+                            className={`min-w-0 max-w-[12rem] truncate px-2 py-1.5 text-[13px] ${text === "未記録" ? "text-muted" : "text-text"}`}
+                            title={text}
+                          >
+                            {text}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* ⑥ 条件差分の要約（隣接ペアの変更項目・性能変化・判定。単一条件比較/複数条件変更を明示） */}
+          {diffSummaries.length > 0 ? (
+            <div className="rounded-lg border border-border bg-card/45 px-2.5 py-2.5">
+              <p className="mb-1.5 text-[15px] font-semibold text-text">条件差分の要約</p>
+              <div className="space-y-2">
+                {diffSummaries.map((summary) => (
+                  <div key={summary.pair} className="rounded-lg border border-border/70 bg-card/60 px-2.5 py-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[14px] font-semibold">
+                        <span style={{ color: colorOf(summary.from) }}>{compareLabel(summary.from)}</span>
+                        <span className="text-muted"> → </span>
+                        <span style={{ color: colorOf(summary.to) }}>{compareLabel(summary.to)}</span>
+                      </span>
+                      <span
+                        className={`flex items-center rounded-full border px-2 py-0.5 text-[11px] ${
+                          summary.classification === "single"
+                            ? "border-success/40 bg-success/10 text-success"
+                            : summary.classification === "multi"
+                              ? "border-amber-400/40 bg-amber-400/10 text-amber-200"
+                              : "border-border bg-card/60 text-muted"
+                        }`}
+                      >
+                        {DIFF_CLASSIFICATION_LABELS[summary.classification]}
+                        {summary.classification === "single" ? <InfoTooltip {...HELP_TEXTS.singleConditionCompare} /> : null}
+                        {summary.classification === "multi" ? <InfoTooltip {...HELP_TEXTS.multiConditionChange} /> : null}
+                      </span>
+                      <span className="text-[12px] text-muted">変更項目：{summary.changeCount}件</span>
+                    </div>
+                    {summary.changes.length > 0 ? (
+                      <div className="mt-1.5">
+                        <p className="text-[12px] font-semibold text-muted">変更</p>
+                        {summary.changes.map((change) => (
+                          <p key={change.key} className="text-[13px] text-text">
+                            ・{change.label}：{change.from} → {change.to}
+                          </p>
+                        ))}
+                      </div>
+                    ) : null}
+                    {summary.results.length > 0 ? (
+                      <div className="mt-1.5">
+                        <p className="text-[12px] font-semibold text-muted">結果</p>
+                        {summary.results.map((result) => (
+                          <p key={result.label} className="text-[13px] tabular-nums text-text">
+                            ・{result.label}：{result.from} → {result.to}（
+                            <span className={result.improved ? "text-success" : result.worsened ? "text-danger" : "text-muted"}>
+                              {result.delta}
+                            </span>
+                            ）
+                          </p>
+                        ))}
+                      </div>
+                    ) : null}
+                    <div className="mt-1.5">
+                      <p className="text-[12px] font-semibold text-muted">判定</p>
+                      <p className="text-[13px] leading-relaxed text-text">{summary.verdict}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {/* ⑦ 次回学習の提案（ルールベースの比較実験候補。断定しない） */}
+          {proposals.length > 0 ? (
+            <div className="rounded-lg border border-border bg-card/45 px-2.5 py-2.5">
+              <p className="mb-1 text-[15px] font-semibold text-text">次回学習の提案</p>
+              <p className="mb-2 text-[12px] leading-relaxed text-muted">
+                この提案は比較結果に基づく実験候補です。性能向上を保証するものではありません。
+              </p>
+              <div className="space-y-2">
+                {proposals.map((proposal, index) => (
+                  <div key={proposal.id} className="rounded-lg border border-border/70 bg-card/60 px-2.5 py-2">
+                    <p className="text-[14px] font-semibold text-text">
+                      候補{String.fromCharCode(65 + index)}：{proposal.title}
+                    </p>
+                    <div className="mt-1 space-y-0.5">
+                      {proposal.lines.map((line) => (
+                        <div key={line.label} className="flex items-start justify-between gap-3">
+                          <span className="shrink-0 text-[12px] text-muted">{line.label}</span>
+                          <span className="min-w-0 break-all text-right text-[13px] text-text">{line.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                    {proposal.settings && onCreateTrainingPlan ? (
+                      <div className="mt-2">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="h-7 px-2.5 text-[12px]"
+                          onClick={() => createTrainingPlan(proposal)}
+                          title="学習画面へ設定を引き継ぎます（学習はまだ開始しません）"
+                        >
+                          この条件で学習設定を作成
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {/* ⑧ 評価条件（比較の前提確認。警告対象=データセット/前処理/Whitelist/画像数） */}
           <div className="rounded-lg border border-border bg-card/45 px-2.5 py-2.5">
             <p className="mb-1.5 flex items-center gap-2 text-[15px] font-semibold text-text">
               評価条件
@@ -1084,14 +1297,17 @@ export default function ModelsView({
             </div>
           </div>
 
-          {/* 混同比較（全モデル合計の多い順。横棒で件数を可視化・0件は棒なし） */}
+          {/* ⑨ 混同比較（全モデル合計の多い順。横棒で件数を可視化・0件は棒なし。初期折りたたみ） */}
           {allConfusions.length > 0 ? (
-            <div className="rounded-lg border border-border bg-card/45 px-2.5 py-2.5">
-              <div className="mb-1.5 flex items-center justify-between">
-                <p className="flex items-center text-[15px] font-semibold text-text">
-                  混同比較{confusionExpanded ? `（全${allConfusions.length}件）` : " TOP8"}
+            <details className="rounded-lg border border-border bg-card/45 px-2.5 py-2.5">
+              <summary className="cursor-pointer select-none text-[15px] font-semibold text-text">
+                混同比較{confusionExpanded ? `（全${allConfusions.length}件）` : " TOP8"}
+              </summary>
+              <div className="mb-1.5 mt-1.5 flex items-center justify-between">
+                <span className="flex items-center text-[12px] text-muted">
+                  誤認識の組み合わせ比較
                   <InfoTooltip {...HELP_TEXTS.confusionCompare} align="left" />
-                </p>
+                </span>
                 {allConfusions.length > 8 ? (
                   <button
                     type="button"
@@ -1141,12 +1357,13 @@ export default function ModelsView({
                   </div>
                 ))}
               </div>
-            </div>
+            </details>
           ) : null}
 
-          {/* 指標別結果（同率最良は全モデルを併記。同率でも各モデルへ1勝） */}
-          <div className="rounded-lg border border-border bg-card/45 px-2.5 py-2.5">
-            <p className="mb-1 text-[15px] font-semibold text-text">指標別結果</p>
+          {/* ⑩ 指標別結果・総合勝利数（初期折りたたみ。同率最良は全モデルを併記・同率でも各モデルへ1勝） */}
+          <details className="rounded-lg border border-border bg-card/45 px-2.5 py-2.5">
+            <summary className="cursor-pointer select-none text-[15px] font-semibold text-text">指標別結果・総合勝利数</summary>
+            <p className="mb-1 mt-1.5 text-[13px] font-semibold text-muted">指標別結果</p>
             <table className="w-full text-[13px]">
               <tbody>
                 {winLoss.rows.map((row) => (
@@ -1170,11 +1387,9 @@ export default function ModelsView({
                 ))}
               </tbody>
             </table>
-          </div>
 
-          {/* 総合勝利数（推奨モデル判定と同じ勝利数。横棒で差を可視化） */}
-          <div className="rounded-lg border border-border bg-card/45 px-2.5 py-2.5">
-            <p className="mb-1.5 text-[15px] font-semibold text-text">総合勝利数</p>
+            {/* 総合勝利数（推奨モデル判定と同じ勝利数。横棒で差を可視化） */}
+            <p className="mb-1.5 mt-2 border-t border-border/50 pt-2 text-[13px] font-semibold text-muted">総合勝利数</p>
             <div className="space-y-1.5">
               {winsSorted.map((col) => {
                 const wins = winLoss.wins[col.model] || 0;
@@ -1204,9 +1419,9 @@ export default function ModelsView({
                 );
               })}
             </div>
-          </div>
+          </details>
 
-          {/* モデル詳細情報（比較時の優先度が低いため初期は折り畳み） */}
+          {/* ⑪ モデル詳細情報（比較時の優先度が低いため初期は折り畳み） */}
           <details className="rounded-lg border border-border bg-card/45 px-2.5 py-2.5">
             <summary className="cursor-pointer select-none text-[15px] font-semibold text-text">モデル詳細情報</summary>
             <div className="comparison-table-wrap mt-2">

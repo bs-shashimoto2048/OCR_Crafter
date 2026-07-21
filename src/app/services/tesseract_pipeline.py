@@ -15,6 +15,7 @@ import json
 import os
 import shutil
 import subprocess
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -369,8 +370,11 @@ def register_tesseract_model(
     counts: dict[str, int],
     job_id: str,
     max_iterations: int,
+    extra_meta: Optional[dict[str, Any]] = None,
+    training_duration_seconds: Optional[int] = None,
 ) -> Path:
     paths = ensure_project_directories(project_id)
+    extra = extra_meta if isinstance(extra_meta, dict) else {}
     meta = {
         "engine": "tesseract",
         "training_family": "tesseract",
@@ -386,6 +390,11 @@ def register_tesseract_model(
         "job_id": job_id,
         "max_iterations": int(max_iterations),
         "created_at": datetime.now().isoformat(),
+        # 実験情報（学習条件比較用）。未指定は空値で保存し、UI側で「未記録」表示（後方互換）
+        "experiment_name": str(extra.get("experiment_name") or ""),
+        "parent_model_id": str(extra.get("parent_model_id") or ""),
+        "training_note": str(extra.get("training_note") or ""),
+        "training_duration_seconds": int(training_duration_seconds) if training_duration_seconds is not None else None,
     }
     meta_path = paths.models / f"{lang}{TESSERACT_MODEL_SUFFIX}"
     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -402,7 +411,9 @@ def run_tesseract_training(
     psm: int = DEFAULT_PSM,
     log_path: Optional[Path] = None,
     config: Optional[dict[str, Any]] = None,
+    extra_meta: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
+    training_started_at = time.monotonic()
     cfg = _tess_cfg(config)
     # 学習対象文字セット。大文字/小文字を区別するため大小変換は行わない（重複除去のみ）
     normalized_charset = "".join(dict.fromkeys(str(charset or cfg.get("default_charset") or TESSERACT_TARGET_CHARSET)))
@@ -533,6 +544,8 @@ def run_tesseract_training(
         counts=counts,
         job_id=job_id,
         max_iterations=iterations,
+        extra_meta=extra_meta,
+        training_duration_seconds=int(time.monotonic() - training_started_at),
     )
     _append_log(log_path, f"Tesseract 学習が完了しました: {traineddata_out}")
     return {

@@ -207,8 +207,10 @@
     padding: clamp(8px, 0.9vw, 12px);
   }
 
-  /* 右ペインが狭い場合はカードを縦並びへ（文字を縮小して3列へ詰め込まない） */
-  @container (max-width: 379px) {
+  /* 右ペインが狭い場合はカードを縦並びへ（文字を縮小して3列へ詰め込まない）。
+     閾値689px=カード内の主要3指標（22px数値×3列＝1カード約220px）が
+     3カード横並びで省略されずに読める最低幅。未満は縦積み（カード全幅で3指標を表示） */
+  @container (max-width: 689px) {
     .comparison-cards {
       grid-template-columns: minmax(0, 1fr);
     }

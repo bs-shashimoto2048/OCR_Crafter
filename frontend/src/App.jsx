@@ -407,6 +407,10 @@ export default function App() {
 
   const [ocrEngine, setOcrEngine] = useState("paddleocr");
   const [ocrCharset, setOcrCharset] = useState(OCR_CHARSET_DEFAULT);
+  // 実験情報（Tesseract学習時にモデルメタへ保存。モデル比較の学習条件比較・次回学習提案で使用）
+  const [tessExperimentName, setTessExperimentName] = useState("");
+  const [tessParentModelId, setTessParentModelId] = useState("");
+  const [tessTrainingNote, setTessTrainingNote] = useState("");
   const [ocrMaxTextLength, setOcrMaxTextLength] = useState(8);
   const [ocrImageShape, setOcrImageShape] = useState("1,48,320");
   const [ocrUseAugmentation, setOcrUseAugmentation] = useState(false);
@@ -2265,6 +2269,10 @@ export default function App() {
         max_iterations: maxIterations,
         base_lang: "eng",
         psm: 7,
+        // 実験情報（未入力は空文字=モデルメタでは未記録扱い）
+        experiment_name: tessExperimentName.trim(),
+        parent_model_id: tessParentModelId.trim(),
+        training_note: tessTrainingNote.trim(),
       };
       const data = await request("/api/tesseract/train/start", {
         method: "POST",
@@ -3307,6 +3315,12 @@ export default function App() {
         ocrEngine={ocrEngine}
         setOcrEngine={setOcrEngine}
         ocrCharset={ocrCharset}
+        experimentName={tessExperimentName}
+        setExperimentName={setTessExperimentName}
+        parentModelId={tessParentModelId}
+        setParentModelId={setTessParentModelId}
+        trainingNote={tessTrainingNote}
+        setTrainingNote={setTessTrainingNote}
         setOcrCharset={setOcrCharset}
         ocrMaxTextLength={ocrMaxTextLength}
         setOcrMaxTextLength={setOcrMaxTextLength}
@@ -3431,6 +3445,20 @@ export default function App() {
             setOcrEvalTrainedModel(name);
           }
           setActiveView("ocr-eval");
+        }}
+        onCreateTrainingPlan={(plan) => {
+          // 次回学習提案からの設定引き継ぎ（学習は開始しない。学習画面でユーザーが編集・実行する）
+          if (plan.iterations) setEpochs(plan.iterations);
+          if (plan.ratios) {
+            setTrainRatio(plan.ratios.train);
+            setValRatio(plan.ratios.val);
+            setTestRatio(plan.ratios.test);
+          }
+          setTessExperimentName(plan.experimentName || "");
+          setTessParentModelId(plan.parentModelId || "");
+          setTessTrainingNote(plan.note || "");
+          setActiveView("ocr-training");
+          notify("info", "提案内容を学習設定へ反映しました。内容を確認・編集してから学習を開始してください");
         }}
       />
     );

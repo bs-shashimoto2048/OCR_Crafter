@@ -76,7 +76,7 @@
 | POST `/api/ocr/dataset/create` | `OcrDatasetCreateRequest`（`image_types`, `charset`, `max_text_length`, `image_shape`, 拡張設定, 比率, `text_case`） | 作成結果 | ラベル済み画像からOCR認識用データセット作成 |
 | POST `/api/ocr/dataset/from_logs` | `OcrDatasetFromLogsRequest`（`only_invalid`, `include_corrected` 等） | 作成結果 | 推論ログからOCRデータセット作成 |
 | POST `/api/ocr/train/start` | `OcrTrainStartRequest`（`engine`, `dataset_dir`, `device`, worker/AMP設定等） | `job_id`, `engine: paddleocr` | PaddleOCR学習ジョブ開始（paddleocrのみ許可）。同一プロジェクトでアクティブなOCRジョブがある場合は **409 Conflict** |
-| POST `/api/tesseract/train/start` | `TesseractTrainStartRequest`（`dataset_dir`, `charset`, `max_iterations`, `base_lang`, `psm`） | `job_id`, `engine: tesseract` | Tesseract LSTM fine-tune 開始。二重実行は **409 Conflict** |
+| POST `/api/tesseract/train/start` | `TesseractTrainStartRequest`（`dataset_dir`, `charset`, `max_iterations`, `base_lang`, `psm`, 任意: `experiment_name` / `parent_model_id` / `training_note`） | `job_id`, `engine: tesseract` | Tesseract LSTM fine-tune 開始。二重実行は **409 Conflict**。実験情報はジョブ（`training_jobs.experiment_meta` JSON列）経由でモデルメタへ保存（未指定=従来動作） |
 | GET `/api/ocr/train/active` | Query: `project_id?` | `{project_id, job}` | プロジェクトのアクティブ（queued/running）なOCR学習ジョブを返す（無ければ `job: null`）。画面再読込時の再接続用 |
 | GET `/api/ocr/train/status/{job_id}` | Path | ジョブ状態 | OCR学習状態取得 |
 | POST `/api/ocr/train/stop/{job_id}` | Query: `delete_artifacts?` | 停止結果 | OCR学習停止 |
@@ -87,7 +87,7 @@
 | Method / Path | リクエスト | レスポンス主要キー | 概要 |
 |---|---|---|---|
 | GET `/models` | Query: `project_id?` | `items` | 保存済みモデル一覧 |
-| GET `/models/info` | Query: `project_id?` | `items` | モデル詳細情報一覧（`model_size_mb`=モデル実体サイズMB。tesseract=traineddata・分類=.ptファイル。実体なし/PaddleOCRはnull=UIでは未記録表示。`model_id`=管理No「M0001」形式：作成日時順に自動採番・OCR Crafter全体で一意・削除後も再利用しない。`data/model_ids.json` へ永続化し未登録モデルは一覧取得時に一括採番） |
+| GET `/models/info` | Query: `project_id?` | `items` | モデル詳細情報一覧（`model_size_mb`=モデル実体サイズMB。tesseract=traineddata・分類=.ptファイル。実体なし/PaddleOCRはnull=UIでは未記録表示。`model_id`=管理No「M0001」形式：作成日時順に自動採番・OCR Crafter全体で一意・削除後も再利用しない。`data/model_ids.json` へ永続化し未登録モデルは一覧取得時に一括採番。tesseractモデルは実験情報 `experiment_name` / `parent_model_id`（親モデルの管理No。ベース直学習は空）/ `training_note` / `training_duration_seconds`（秒・旧モデルはnull）を含む=学習条件比較で使用。旧メタは空値/nullで後方互換） |
 | GET `/models/latest` | Query: `model_type?`, `training_family`, `engine?` | `model` | 最新モデル名 |
 | GET `/model-types` | Query: `project_id?` | `items` | モデル種別一覧 |
 | DELETE `/models/{model_name}` | Query: `project_id?` | `deleted` | モデル削除（models配下限定の安全検証あり） |
