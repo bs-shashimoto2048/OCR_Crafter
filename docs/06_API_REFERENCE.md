@@ -1,7 +1,7 @@
 # 06. API リファレンス
 
 すべてのルートは `src/app/main.py` に定義されている（`APIRouter` / `include_router` は不使用）。
-リクエストスキーマは `src/app/schemas.py` を参照。**全55エンドポイント**。
+リクエストスキーマは `src/app/schemas.py` を参照。**全71エンドポイント**。
 
 - アプリ定義: `FastAPI(title="OCR Crafter API", version="0.2.0")`
 - ベースURL（開発時）: `http://127.0.0.1:8000`
@@ -105,7 +105,7 @@
 | POST `/api/ocr/log/save` | `OcrLogSaveRequest`（`predicted_text`, `corrected_text?` 等） | 保存結果 | OCR修正ログ保存 |
 | GET `/api/ocr/log/state` | Query: `project_id?` | 最新状態 | OCR修正画面の最新状態取得 |
 
-## 学習画像作成（YOLO検出）
+## データ作成（YOLO検出・評価データ作成）
 
 | Method / Path | リクエスト | レスポンス主要キー | 概要 |
 |---|---|---|---|

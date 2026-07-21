@@ -36,9 +36,10 @@ whitelist は**推論時の制御**であり、学習処理（lstmf生成・lstm
 
 ## 評価
 
-- 比較は **case-sensitive の完全一致**（trimのみ）。`KT` と `kt` は別物として評価する。
+- 比較は **case-sensitive の完全一致**（trim＋Unicode NFC正規化のみ。NFKCは半角/全角等を同一視するため不使用）。`KT` と `kt` は別物として評価する。
 - `charset` パラメータ: 既定=実運用 whitelist ／ 空文字=whitelistなし ／ 任意文字列=カスタム。
-- 学習前(eng)・学習後(latest)を同一前処理入力で比較し、`comparison` に増減・改善率を返す。
+- 主指標は **CER**（全画像のLevenshtein編集距離総和÷正解文字数総和のマイクロ平均。画像ごとのCER平均ではない）。完全一致率（Accuracy）は業務指標として併記。
+- 学習前(eng)・学習後(latest)を同一前処理入力で比較し、`comparison` に CER差・CER相対改善率・改善/同等/悪化・完全一致へ改善/から悪化を返す。
 
 ## UI表示
 

@@ -99,7 +99,7 @@ ocr_crafter/
 | `OcrBatchView.jsx` | バッチ推論 |
 | `OcrEvaluationView.jsx` | OCRモデル評価 |
 | `EvaluationView.jsx` | 分類モデル評価（実験機能） |
-| `TrainingImageBuilderView.jsx` | 学習画像作成 Step1〜4（YOLO） |
+| `TrainingImageBuilderView.jsx` | データ作成 Step1〜4（YOLO検出〜クロップ出力） |
 
 ## 主要な共通コンポーネント（components/）
 

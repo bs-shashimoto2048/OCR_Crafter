@@ -32,24 +32,38 @@
 ### 復旧関連
 
 - 旧cursiveプロジェクトの実画像・学習済みモデル・旧評価出力の消失（未回収）
-- 未復元ドキュメントあり（AGENTS.md / PROJECT_OVERVIEW.md 等）
+- 未復元ドキュメントあり（AGENTS.md。※PROJECT_OVERVIEW は `docs/00_PROJECT_OVERVIEW.md` として再作成済み）
 - `requirements.txt` が **UTF-16** で pip から直接利用できない場合がある（UTF-8再保存が推奨として記録）
 - `paddleocrOfficialTooltip.js` は原文消失後の再作成版（文言未確認）
 
-### 改善案（未着手として記録されているもの）
+### 改善案の状況（2026-07時点で整理）
+
+**完了**（実装済み。詳細は `docs/15_CHANGELOG_AI.md`）:
+
+- 評価UIでの誤認識パターン集計表示 → 混同集計（置換/脱落/挿入TOP・混同比較の横棒グラフ）として実装済み
+- 学習設定引き継ぎ → 次回学習提案の「この条件で学習設定を作成」として実装済み
+
+**継続・未着手**:
 
 - Tesseract学習のlstmf生成が1枚ずつサブプロセス起動で遅い（500枚≈2分、並列化余地）
 - 精度改善（lt系サンプル増強、イテレーション増、実画像混入）
-- 評価UIでの誤認識パターン集計表示
+
+**今後の候補**:
+
+- モデル系譜の可視化（parent_model_id は保存済み。系譜ツリー表示は未実装）
+- 評価履歴の複数保持（現状はモデル×データセットごとに最新1件を上書き）
+- 運用評価とRaw評価（whitelistなし）の分離管理
+- CER推移グラフ（評価履歴の時系列可視化）
+- モデルライフサイクル管理（アーカイブ・タグ付け等）
+- 学習前処理・Augmentationのモデルメタ保存（Tesseract学習に該当設定が存在しないため現状「未記録」）
 
 ## 技術的な注意点
 
 | 項目 | 内容 |
 |---|---|
-| `main.py` / `App.jsx` / `ocr_pipeline.py` の巨大化 | それぞれ約2460行 / 約3300行 / 約1850行の単一ファイル |
-| 環境記述の不一致 | Pipfile=Python3.9、usage.md=Python3.11+/macOS、settings.yaml=WindowsのTesseractパス既定 |
+| `main.py` / `App.jsx` / `ocr_pipeline.py` の巨大化 | それぞれ約3190行 / 約3760行 / 約1860行の単一ファイル |
+| 環境記述の不一致 | Pipfile=Python3.9（docs類はPython3.11+/Windows前提へ統一済み） |
 | `settings.yaml` の絶対パス | `tesseract.tessdata_dir` に開発機の絶対パスがハードコードされている |
-| `readme.md` のリンク | usage.md へのリンクが旧macOS環境の絶対パスになっている |
 | Paddleキャッシュ隔離 | `HOME` 等の環境変数をプロセス内で上書きする実装（`services/ocr_pipeline.py`） |
 | broad except | `# noqa: BLE001` 付きの広域catchが50箇所以上（意図的な設計） |
 

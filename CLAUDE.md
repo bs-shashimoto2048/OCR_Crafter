@@ -4,7 +4,7 @@
 
 ローカル完結のOCR学習環境。画像取込→前処理→ラベル付け→データセット作成→学習（PaddleOCR/Tesseract/分類）→評価→推論・修正 を1つのUIで行う。
 
-- バックエンド: FastAPI（`src/app/main.py`、port 8000、全55エンドポイント）
+- バックエンド: FastAPI（`src/app/main.py`、port 8000、全71エンドポイント）
 - フロントエンド: React 18 + Vite 5 + Tailwind（`frontend/`、port 5173、状態管理はReact標準hooksのみ）
 - データ: `data/projects/<project_id>/` にプロジェクト単位で分離（gitignore対象）
 
@@ -103,7 +103,7 @@ python -m src.app.ocr_tuning --project-id <id> --engine both --image-types wide
 - **OCR前処理**（`services/preprocess.py`）と **YOLO検出前処理**（`services/detection_preprocess.py`）は完全に独立させること
 - 設定・保存（localStorageキー含む）・処理系を共有しないこと
 
-### Bounding Box（学習画像作成 Step3）
+### Bounding Box（データ作成 Step3）
 
 - Step3は**編集画面**である
 - 移動・サイズ変更・新規追加・削除は**編集モードON時のみ**許可する

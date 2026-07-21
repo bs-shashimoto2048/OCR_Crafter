@@ -25,8 +25,15 @@
 | 削除 | `delete_training_jobs_by_project(project_id)`（プロジェクト削除時） |
 | 区別列 | `training_family`（classification / ocr）、`engine`（paddleocr / tesseract 等） |
 | シリアライズ | `image_shape` 等の list/dict は JSON 文字列で格納し、読出時に復元 |
+| 実験情報 | `experiment_meta`（JSON文字列・NULL可）: Tesseract学習開始時の `experiment_name` / `parent_model_id` / `training_note` を保持し、ジョブ完了時にモデルメタ（`.tess.json`）へ引き継ぐ |
 
 分類・PaddleOCR・Tesseract の全学習ジョブがこの1テーブルに保存される。
+
+### その他の全体共有ファイル
+
+| ファイル | 内容 |
+|---|---|
+| `data/model_ids.json` | モデル管理Noの登録簿（`{"counter": n, "models": {"<project_id>/<モデル名>": "M0001"}}`。全プロジェクト共通・削除後も番号を再利用しない） |
 
 ## ファイルベースの永続化
 

@@ -4,28 +4,26 @@
 
 ## 1. 前提
 
-- macOS（Apple Silicon）
+- Windows 11（PowerShell）。macOS等でも動作するが、現行の既定設定（Tesseractパス等）はWindows前提
 - Python 3.11 以上
 - Node.js / npm
+- Tesseract学習を行う場合はUB-Mannheimビルド等（lstmtraining同梱。`docs/11_TESSERACT_CHECKLIST.md`）
 
 確認コマンド:
 
-```bash
-python3.11 --version
+```powershell
+python --version
 node --version
 npm --version
 ```
 
 ## 2. 初回セットアップ
 
-```bash
-cd /Users/hashimoto/vscode/_app/ocr_crafter
-python3.11 -m venv .venv
-source .venv/bin/activate
+```powershell
+cd <リポジトリのパス>
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-```
-
-```bash
 cd frontend
 npm install
 ```
@@ -34,25 +32,21 @@ npm install
 
 ### 3.1 バックエンド（FastAPI）
 
-```bash
-cd /Users/hashimoto/vscode/_app/ocr_crafter
-source .venv/bin/activate
+```powershell
+.\.venv\Scripts\Activate.ps1
 uvicorn src.app.main:app --reload --port 8000
 ```
 
-ヘルスチェック:
-
-```bash
-curl http://127.0.0.1:8000/health
-```
+ヘルスチェック: `curl http://127.0.0.1:8000/health`
 
 ### 3.2 フロントエンド（React + Vite）
 
-```bash
-cd /Users/hashimoto/vscode/_app/ocr_crafter/frontend
-echo 'VITE_API_BASE=http://127.0.0.1:8000' > .env
-npm run dev
+```powershell
+cd frontend
+npm run dev    # http://localhost:5173
 ```
+
+必要なら `frontend/.env` に `VITE_API_BASE=http://127.0.0.1:8000` を設定。
 
 ## 4. 学習の進め方（推奨手順）
 
@@ -106,10 +100,10 @@ Accuracy、クラス別精度、混同行列、誤認識一覧を確認します
 
 ### 5.2 デバイス
 
-- `torch.backends.mps.is_available()` かつ `is_built()` のとき `mps`
-- それ以外は `cpu`
+- `device=auto` はGPU（CUDA）検出時にGPU、無ければCPU（macOSではMPS）
+- TesseractはCPUのみ対応
 
-### 5.3 学習パラメータ（M1 16GBの初期目安）
+### 5.3 学習パラメータ（初期目安）
 
 - エポック: 10
 - バッチサイズ: 16（重ければ8）
@@ -134,6 +128,8 @@ Accuracy、クラス別精度、混同行列、誤認識一覧を確認します
 - 元画像（`raw`）は上書きしません（回転操作を除く明示操作時）。
 
 ## 7. API一覧（主要）
+
+> 全エンドポイント（71本）の正確な仕様は `docs/06_API_REFERENCE.md` を参照。以下は主要なもののみ。
 
 - `GET /health`
 - `GET /api/system/check`（GPU可否 / PaddleGPU可否 / torch CUDA可否 / PaddleOCRパス / 推奨プロファイル）
@@ -183,22 +179,21 @@ Accuracy、クラス別精度、混同行列、誤認識一覧を確認します
 
 ### 9.1 追加依存（任意）
 
-```bash
-source .venv/bin/activate
+```powershell
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements-ocr-tuning.txt
 ```
 
 ### 9.2 学習用データをエクスポート
 
-```bash
-cd /Users/hashimoto/vscode/_app/ocr_crafter
-source .venv/bin/activate
-python -m src.app.ocr_tuning \
-  --project-id default \
-  --engine both \
-  --image-types wide \
-  --train-ratio 0.8 \
-  --val-ratio 0.1 \
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -m src.app.ocr_tuning `
+  --project-id default `
+  --engine both `
+  --image-types wide `
+  --train-ratio 0.8 `
+  --val-ratio 0.1 `
   --test-ratio 0.1
 ```
 
@@ -224,15 +219,11 @@ python -m src.app.ocr_tuning \
 - Python 3.9で `unsupported operand type(s) for |` が出る  
   Python 3.11以上で仮想環境を作り直してください。
 
-- `mps_available=False`  
-  次で確認してください:
+- GPUが認識されない  
+  次で確認してください（`GET /api/system/check` でも確認可能）:
 
-```bash
-source .venv/bin/activate
-python - <<'PY'
-import torch
-print(torch.backends.mps.is_built(), torch.backends.mps.is_available())
-PY
+```powershell
+.\.venv\Scripts\python.exe -c "import torch; print(torch.cuda.is_available())"
 ```
 
 - ポート競合  
@@ -242,17 +233,17 @@ PY
 
 ### A. 初回モデル作成（最短）
 
-1. `モデル作成 > ダッシュボード` でプロジェクトを選択/作成する。
-2. `モデル作成 > 画像` で学習画像を取り込む。
-3. `モデル作成 > ラベル編集` で文字列ラベルを保存する。
-4. `モデル作成 > 学習` を開き、`学習方式 = ocr`、`OCRタイプ = PaddleOCR` を選ぶ。
+1. `プロジェクト > ダッシュボード` でプロジェクトを選択/作成する。
+2. `データ作成 > 画像` で学習画像を取り込む。
+3. `データ作成 > ラベル編集` で文字列ラベルを保存する。
+4. `OCRモデル > データ作成・学習` を開き、`学習方式 = ocr`、`OCRタイプ = PaddleOCR` を選ぶ。
 5. `charset`、`max_text_length`、`image_shape(3,48,320)` を確認する。
 6. `Augmentationを使用` と `Aug強度(1-3)` を必要に応じて設定する。
    - 適用処理（ランダム）: コントラスト変化、軽微ガウシアンブラー、ガウシアンノイズ、微小回転（±1〜2度）
    - 強度1〜3で適用確率と強さが上がる
 7. `OCRデータ作成` を実行する。
 8. `PaddleOCR リポジトリ` は `PADDLEOCR_PATH` または `config/settings.yaml` の `ocr_training.paddleocr_repo_dir` を使って解決されます。設定を確認して `OCR学習開始` を押す。
-9. 学習ログが `completed` になれば、推論用 `inference` モデルが自動exportされ、`モデル作成 > モデル` に OCRモデルが追加される。
+9. 学習ログが `completed` になれば、推論用 `inference` モデルが自動exportされ、`OCRモデル > モデル管理` に OCRモデルが追加される。
 10. `3. 学習パラメータ` の `実行環境` 表示で、学習時設定を確認できる。
     - `GPU: <name> (<vram_gb>GB)`
     - `Batch: <size>（自動/手動）`
@@ -270,11 +261,11 @@ PY
 
 ### B. 今日追加した強化機能を使った再学習ループ（推奨）
 
-1. `モデル作成 > 高速OCR修正` を開く。
+1. `OCRモデル > OCR修正` を開く。
 2. OCR結果を確認し、ヒートマップの赤/黄文字をクリックして1文字修正する。
 3. `Enter` で確定して次へ、`Shift+Enter` で保留する。
 4. 修正結果は OCRログに保存される。
-5. `モデル作成 > 学習` に戻り、`ログ再学習データ作成` を実行する。
+5. `OCRモデル > データ作成・学習` に戻り、`ログ再学習データ作成` を実行する。
 6. `invalidのみ対象 / correctedを優先` を必要に応じて切替える。
 7. 生成された再学習データで再度 `OCR学習開始` を実行する。
 
@@ -326,7 +317,7 @@ tesseract:
 
 ### 12.2 手順（UI）
 
-1. `モデル作成 > 学習` で `学習方式 = ocr`、`OCRタイプ = Tesseract` を選ぶ。
+1. `OCRモデル > データ作成・学習` で `学習方式 = ocr`、`OCRタイプ = Tesseract` を選ぶ。
 2. 学習対象文字セットは既定で `ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt`（A-Z / 0-9 / 筆記体klt）。
 3. `OCRデータ作成` を実行（ラベルは大小変換せずそのまま使用。charset外の文字を含むラベルはサンプル除外）。
 4. `最大イテレーション` を設定し `OCR学習開始`。
@@ -336,12 +327,12 @@ tesseract:
 ### 12.3 CLI 推論
 
 ```bash
-python3 -m src.app.predict path/to/image.png --project-id default --engine tesseract
+python -m src.app.predict path/to/image.png --project-id default --engine tesseract
 ```
 
 ### 12.4 補足・制約
 
-- `学習 > OCR認識モデル` 配下の各画面（モデル管理 / 推論 / OCR修正 / バッチ推論 / モデル評価）でTesseractを選択できます。
+- サイドバー `OCRモデル` 配下の各画面（モデル管理 / 推論 / OCR修正 / バッチ推論 / モデル評価）でTesseractを選択できます。
   - **モデル管理**: `.tess.json`（Tesseractモデル）を一覧表示（traineddataパス・charset・学習条件）。削除、`.traineddata` のダウンロードに対応。最新表示は PaddleOCR / Tesseract を並記。
   - **バッチ推論 / OCR修正**: エンジンに `Tesseract` を追加。モデルは「最新（学習済み）」「Tesseract標準英語モデル eng.traineddata」「学習済みTesseractモデル一覧」から選択（学習済みが無い場合は eng.traineddata を選択）。推論時 whitelist は既定 `A-Z / 0-9 / 小文字筆記体 k,l,t`（学習済みモデルはメタの charset を継承）。
   - **バッチ推論の結果CSV出力**: 各行に engine / model を記録。Tesseract結果は大小文字を保持して出力。
@@ -352,14 +343,16 @@ python3 -m src.app.predict path/to/image.png --project-id default --engine tesse
 - 学習用の行画像は OCRデータ作成の出力（`image_shape` で高さ正規化・レターボックス）を使用します。
 - この環境には学習ツールが未導入のため、エンドツーエンドの学習実行は未検証です（配線・事前チェック・小文字データ生成・推論経路は検証済み）。
 
-### 12.5 モデル評価（学習前後の比較）
+### 12.5 モデル評価（学習前後の比較・CER主指標）
 
-UI: `モデル作成 > 学習 > 6. モデル評価`（`ocr-eval`）。学習前モデル（`eng.traineddata`）と学習後モデルを
-同一データで推論し、認識率・増減・改善率・誤認識一覧を表示する（API: `POST /api/ocr/evaluate`）。
+UI: サイドバー `OCRモデル > モデル評価`（`ocr-eval`）。学習前モデル（`eng.traineddata`）と学習後モデルを
+同一データで推論し、CER中心の指標と誤認識一覧を表示する（API: `POST /api/ocr/evaluate`）。
 
 - **学習前モデル (eng.traineddata)**: Tesseract 標準の英語モデル（未学習のベースライン）。
 - **学習後モデル**: 本アプリで学習した `.tess.json`（`latest` または個別選択）。
-- 表示項目: 認識率 / 増減（学習後−学習前）/ 改善率（増減÷学習前）/ 誤認識一覧 / CSV出力。
+- 主指標: **CER**（全画像のLevenshtein編集距離総和÷正解文字数総和のマイクロ平均。低いほど良い）。
+- 補助指標: 文字正解率（1−CER）/ 完全一致率（正解数/総数）/ 誤認識数 / CER差・CER相対改善率（学習前比）/ 改善・同等・悪化件数 / 完全一致へ改善・から悪化 / 混同TOP（置換・脱落・挿入）。
+- 評価条件（データセット・画像数・OCR前処理・Whitelist・評価日時）と評価履歴はモデル管理のカルテ・比較画面でも参照できる。CSV出力あり。
 
 #### 正解CSVの形式
 
@@ -387,16 +380,22 @@ sample_003.png,ct
 | `prediction` | モデルの認識結果 |
 | `match` | 一致=`1` / 不一致=`0` |
 | `model` | モデル表示名（例 `eng.traineddata（学習前）`） |
+| `model_id` | 管理No（M0001形式。ベース疑似モデルは空欄） |
+| `edit_distance` / `sub_count` / `del_count` / `ins_count` | 編集距離と置換/脱落/挿入の件数 |
+| `vs_base` | 学習前との比較（improved / unchanged / regressed） |
 
-末尾にモデル別サマリ（accuracy summary）:
+末尾にモデル別サマリ:
 
 | 列 | 内容 |
 |---|---|
-| `model` | モデル表示名 |
-| `total` | 評価画像数 |
-| `correct` | 正解数 |
-| `accuracy_percent` | 認識率(%) |
+| `model` / `model_id` | モデル表示名・管理No |
+| `total` / `correct` | 評価画像数・正解数 |
+| `accuracy_percent` | 完全一致率(%) |
 | `mismatch_count` | 誤認識数 |
+| `cer_percent` / `char_accuracy_percent` | CER(%)・文字正解率(%) |
+| `edit_distance_total` / `ref_length_total` | 編集距離総和・正解文字数総和 |
+
+さらに混同集計セクション（`model, model_id, kind, from, to, from_codepoint, to_codepoint, count`。画面で表示できない文字もU+XXXXで解析可能）。
 
 #### エラー時の案内
 

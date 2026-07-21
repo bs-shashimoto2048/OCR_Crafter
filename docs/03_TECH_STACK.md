@@ -29,7 +29,7 @@
 | paddleocr | 3.5.0 | OCRエンジン（遅延import） | `src/app/predict.py` |
 | paddlepaddle | 3.3.1（`paddlepaddle-gpu==2.6.2` も記載あり） | PaddleOCR ランタイム | OCR学習・推論 |
 | paddlex | 3.5.2 | PaddleOCR 3.x 依存 | PaddleOCR経由 |
-| ultralytics | 8.4.41 | YOLO 検出（学習画像作成） | `services/training_image_builder.py` |
+| ultralytics | 8.4.41 | YOLO 検出（データ作成 Step2） | `services/training_image_builder.py` |
 | opencv-python | 4.13.0.92（contrib 4.10.0.84 / headless 併記） | 画像処理（requirementsに存在。CI用メモでは遅延import扱い） | `requirements.txt`, `requirements-ci.txt` コメント |
 | scikit-learn | 1.7.2 | 評価指標 | `services/evaluation.py` |
 | matplotlib | 3.10.9 | 評価グラフ（混同行列等） | `services/evaluation.py` |

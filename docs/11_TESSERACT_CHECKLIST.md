@@ -49,7 +49,7 @@ tesseract:
 
 ## 4. 学習データセット作成（新規作成）
 
-UI: `モデル作成 > 学習` で `学習方式=ocr` / `OCRタイプ=Tesseract` → `OCRデータ作成`。
+UI: サイドバー `OCRモデル > データ作成・学習` で `学習方式=ocr` / `OCRタイプ=Tesseract` → `OCRデータ作成`。
 API: `POST /api/ocr/dataset/create`（`charset=A-Z0-9klt`, `text_case=keep`, `image_shape=[1,48,320]`）
 
 - [ ] `meta.json` の `charset` が `ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt`、`text_case` が `keep`
@@ -79,9 +79,10 @@ API: `POST /api/ocr/dataset/create`（`charset=A-Z0-9klt`, `text_case=keep`, `im
 ## 7. モデル登録・管理
 
 - [ ] `GET /models` に `<name>.tess.json` が出る
-- [ ] `GET /models/info` に engine=tesseract / charset / traineddata_path / ocr_inference_ready が入る
+- [ ] `GET /models/info` に engine=tesseract / charset / traineddata_path / ocr_inference_ready / `model_id`（管理No: M0001形式・全プロジェクト横断で一意）が入る
+- [ ] 学習時に実験名等を指定した場合、`experiment_name` / `parent_model_id` / `training_note` / `training_duration_seconds` がメタに入る（未指定は空/null=UIで「未記録」）
 - [ ] `GET /models/latest?training_family=tesseract` がモデル名を返す
-- [ ] UI `モデル管理` に traineddataパス・charset・学習条件が表示される
+- [ ] UI `モデル管理` に管理No・traineddataパス・charset・学習条件が表示される
 - [ ] `GET /api/models/download/<name>.tess.json` で `.traineddata` を取得できる
 
 ## 8. 推論（engine=tesseract）
@@ -94,13 +95,14 @@ API: `POST /api/ocr/dataset/create`（`charset=A-Z0-9klt`, `text_case=keep`, `im
 - [ ] TSV信頼度（confidence）が返る
 - [ ] Tesseract未導入環境では導入案内つきエラー（クラッシュしない）
 
-## 9. 評価（学習前後比較）
+## 9. 評価（学習前後比較・CER主指標）
 
-UI: `モデル作成 > 学習 > 6. モデル評価`。API: `POST /api/ocr/evaluate`
+UI: サイドバー `OCRモデル > モデル評価`。API: `POST /api/ocr/evaluate`
 （targets に eng と latest、`charset=A-Z0-9klt`＝実運用whitelist、空文字=whitelistなし）。
 
-- [ ] 比較は **case-sensitive**（`KT` と `kt` は別物）
-- [ ] `comparison` に増減・改善率が入る
+- [ ] 比較は **case-sensitive**（`KT` と `kt` は別物。trim＋Unicode NFC正規化のみ・NFKC不使用）
+- [ ] `targets` に `cer`（マイクロ平均）/ `char_accuracy` / `confusions`（置換/脱落/挿入TOP10）が入る
+- [ ] `comparison` に `cer_delta` / `cer_relative_improvement` / `improved` / `unchanged` / `regressed` / `perfect_fixed` / `perfect_regressed` が入る
 - [ ] 正解CSVは `filename,text` 形式・実運用の表記どおり（例: `CHYBkt`）
 
 ## 10. バッチ推論 / OCR修正
