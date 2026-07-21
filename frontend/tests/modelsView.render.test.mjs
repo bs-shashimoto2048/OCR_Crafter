@@ -80,12 +80,50 @@ test("状態列の「最新」ラベルは維持される", () => {
   assert.ok(html.includes("最新"), "状態列の「最新」が消えている");
 });
 
-test("レイアウト: 右ペイン最低幅520pxの2カラム（1400px以上）と縦積み（未満）のクラス構成", () => {
+test("レイアウト: 両列minmax(0,…)の流体2カラム（1250px以上）と縦積み（未満）のクラス構成", () => {
   const html = renderToString(React.createElement(ModelsView, baseProps()));
-  // 1400px以上で 左2fr:右minmax(520px,1fr)
-  assert.ok(html.includes("min-[1400px]:grid-cols-[minmax(0,2fr)_minmax(520px,1fr)]"), "右ペイン最低幅520pxのグリッド指定がない");
-  // 1400px未満は1カラム（右ペインを下段へ縦積み）
+  // 1250px以上で 左minmax(0,1.8fr):右minmax(0,1fr)（両列とも収縮可能・右ペインがはみ出さない）
+  assert.ok(
+    html.includes("min-[1250px]:grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)]"),
+    "両列minmax(0,…)の流体グリッド指定がない"
+  );
+  // 右ペインへ固定520pxを常時強制しない
+  assert.ok(!html.includes("minmax(520px"), "右ペインに固定520pxが残っている");
+  // 1250px未満は1カラム（右ペインを下段へ縦積み）
   assert.ok(html.includes("grid-cols-1"), "縦積み用のgrid-cols-1がない");
+  // 左右ペインの min-w-0（Flex/Grid既定のmin-width:autoで収縮不能にならない）
+  assert.ok(html.includes("min-w-0"), "ペインのmin-w-0がない");
+  // 右ペインは幅コンテナ（コンテナクエリの基準・min-width:0）
+  assert.ok(html.includes("model-side-pane"), "右ペインのmodel-side-paneクラスがない");
+});
+
+test("比較カード・テーブルの収縮定義（index.css）: minmax(0,1fr)と横スクロール限定ラッパー", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const css = await readFile(new URL("../src/index.css", import.meta.url), "utf-8");
+  // 比較カードは固定最小幅なし（minmax(0,1fr)×可変列数）＋狭い右ペインでは縦並び
+  assert.ok(css.includes("repeat(var(--cols, 3), minmax(0, 1fr))"), "比較カードのminmax(0,1fr)定義がない");
+  assert.ok(/@container \(max-width: \d+px\)/.test(css), "右ペイン幅基準のコンテナクエリがない");
+  assert.ok(css.includes("container-type: inline-size"), "model-side-paneのコンテナ定義がない");
+  // 横スクロールはテーブルラッパー内のみに限定
+  assert.ok(css.includes(".comparison-table-wrap"), "テーブル専用ラッパー定義がない");
+  assert.ok(/\.comparison-table-wrap\s*\{[^}]*overflow-x: auto/.test(css), "ラッパーのoverflow-x:autoがない");
+  assert.ok(/\.comparison-card\s*\{[^}]*min-width: 0/.test(css), "比較カードのmin-width:0がない");
+});
+
+test("長いモデル名は一覧で省略表示され、title属性で全文確認できる", () => {
+  const longName = "tess_20260715_145027_very_long_model_name_for_truncation_check.tess.json";
+  const html = renderToString(
+    React.createElement(
+      ModelsView,
+      baseProps({
+        models: [longName],
+        modelInfos: { [longName]: { model_id: "M0009", engine: "tesseract", training_family: "tesseract", created_at: "2026-07-15T10:00:00" } },
+        evalHistory: {},
+      })
+    )
+  );
+  assert.ok(html.includes(`title="${longName}"`), "モデル名のtitle（全文確認手段）がない");
+  assert.ok(html.includes("truncate"), "省略表示（truncate）がない");
 });
 
 test("一覧の列幅: モデル名はminmax相当の広い列・他列は固定幅", () => {

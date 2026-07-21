@@ -541,7 +541,7 @@ export default function ModelsView({
     const latest = latestEvalOf(evalHistory, name);
     const historyEntries = modelEvalEntries(evalHistory, name);
     return (
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="dark-scroll min-h-0 flex-[0_1_auto] space-y-3 overflow-y-auto pr-0.5 [overscroll-behavior:contain]">
           {/* カルテヘッダー（このモデル自身の状態のみ。Best/Recommended等の比較バッジは比較画面へ集約） */}
           <div>
@@ -874,7 +874,7 @@ export default function ModelsView({
     const stickyLabel =
       "sticky left-0 z-10 min-w-[110px] whitespace-nowrap bg-[#333c46] px-2 py-1.5 text-left text-[13px] font-normal text-muted";
     return (
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {/* 固定領域: 凡例 + 警告 + 推奨モデル + 主要3指標カード
             （画面が低い場合のみ内部スクロールし、下の詳細分析の最低高を確保する） */}
         <div className="dark-scroll min-h-0 flex-[0_1_auto] space-y-2 overflow-y-auto pr-0.5 [overscroll-behavior:contain]">
@@ -929,22 +929,15 @@ export default function ModelsView({
           )}
 
           {/* 主要3指標カード（モデルごと。最良との差分を併記。
-              狭い幅では縦積みにせず横スクロールの3列比較にする=固定領域の高さを一定に保つ） */}
-          <div className="dark-scroll overflow-x-auto pb-1">
-            <div
-              className="grid gap-2.5"
-              style={{
-                gridTemplateColumns: `repeat(${comparison.columns.length}, minmax(140px, 1fr))`,
-                minWidth: `${comparison.columns.length * 140 + (comparison.columns.length - 1) * 10}px`,
-              }}
-            >
+              minmax(0,1fr)でペインを押し広げず、右ペインが狭い場合はコンテナクエリで縦並びへ） */}
+          <div className="comparison-cards" style={{ "--cols": comparison.columns.length }}>
             {comparison.columns.map((col, index) => (
               <div
                 key={col.model}
-                className="rounded-lg border border-border bg-card/45 px-2.5 py-2"
+                className="comparison-card rounded-lg border border-border bg-card/45"
                 style={{ borderTop: `3px solid ${colorOf(col.model)}` }}
               >
-                <p className="text-lg font-bold leading-6" style={{ color: colorOf(col.model) }} title={compareTitle(col.model)}>
+                <p className="truncate text-lg font-bold leading-6" style={{ color: colorOf(col.model) }} title={compareTitle(col.model)}>
                   {compareLabel(col.model)}
                 </p>
                 <p className="truncate text-[11px] text-muted" title={col.model}>
@@ -984,7 +977,6 @@ export default function ModelsView({
                 </div>
               </div>
             ))}
-            </div>
           </div>
         </div>
 
@@ -996,7 +988,7 @@ export default function ModelsView({
               改善・悪化比較
               <InfoTooltip {...HELP_TEXTS.improvedRegressed} align="left" />
             </p>
-            <div className="overflow-x-auto">
+            <div className="comparison-table-wrap">
               <table className="w-full text-[14px] tabular-nums">
                 <thead>
                   <tr>
@@ -1049,7 +1041,7 @@ export default function ModelsView({
                 </span>
               ) : null}
             </p>
-            <div className="overflow-x-auto">
+            <div className="comparison-table-wrap">
               <table className="w-full text-[13px]">
                 <thead>
                   <tr>
@@ -1217,7 +1209,7 @@ export default function ModelsView({
           {/* モデル詳細情報（比較時の優先度が低いため初期は折り畳み） */}
           <details className="rounded-lg border border-border bg-card/45 px-2.5 py-2.5">
             <summary className="cursor-pointer select-none text-[15px] font-semibold text-text">モデル詳細情報</summary>
-            <div className="mt-2 overflow-x-auto">
+            <div className="comparison-table-wrap mt-2">
               <table className="w-full text-[13px]">
                 <thead>
                   <tr>
@@ -1282,11 +1274,12 @@ export default function ModelsView({
   }
 
   return (
-    // 1400px以上=左右2カラム（左2fr:右1fr・右ペインは最低520px）/ 1400px未満=右ペインを下段へ縦積み
+    // 1250px以上=左右2カラム（左1.8fr:右1fr≈64:36。両列とも minmax(0,…) で固定幅を持たず、
+    // ブラウザ幅に応じて連続的に収縮＝右ペインがはみ出さない）/ 1250px未満=右ペインを下段へ縦積み
     // （縦積み時は固定高を外して自然高にし、文字を縮小して押し込まない）
-    <div className="grid grid-cols-1 gap-3 min-[1400px]:h-[calc(100vh-238px)] min-[1400px]:min-h-[480px] min-[1400px]:grid-cols-[minmax(0,2fr)_minmax(520px,1fr)]">
-      {/* 左: サマリー + フィルタ + 一覧 */}
-      <div className="flex min-h-0 flex-col gap-2">
+    <div className="grid w-full min-w-0 grid-cols-1 gap-3 min-[1250px]:h-[calc(100vh-238px)] min-[1250px]:min-h-[480px] min-[1250px]:grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)]">
+      {/* 左: サマリー + フィルタ + 一覧（min-w-0でグリッド収縮を妨げない） */}
+      <div className="flex min-h-0 min-w-0 flex-col gap-2">
         <div className="flex shrink-0 gap-2">
           <SummaryCard
             title="推論使用モデル"
@@ -1350,7 +1343,7 @@ export default function ModelsView({
           </div>
         </div>
 
-        <div className="max-h-[60vh] min-h-0 flex-1 overflow-auto rounded-xl border border-border/60 min-[1400px]:max-h-none">
+        <div className="max-h-[60vh] min-h-0 flex-1 overflow-auto rounded-xl border border-border/60 min-[1250px]:max-h-none">
           <table className="w-full text-sm">
             <thead className="sticky top-0 z-10 bg-[#2f3841]/95 backdrop-blur">
               {/* モデル名列を1frで広く取り、他列は固定幅で左寄せ（バッジ削除で空いた分を活用） */}
@@ -1421,11 +1414,11 @@ export default function ModelsView({
         </div>
       </div>
 
-      {/* 右: モデル詳細 / 比較 */}
+      {/* 右: モデル詳細 / 比較（model-side-pane=幅コンテナ。固定最低幅なし・利用可能幅へ自動フィット） */}
       <Card
         title={compareMode ? "モデル比較" : "モデル詳細"}
         subtitle={compareMode ? `選択中 ${compareTargets.length}件 / 最大3件` : detailModel ? "一覧クリックで切替" : "一覧のモデルをクリック"}
-        className="flex h-full min-h-0 flex-col"
+        className="model-side-pane flex h-full min-h-0 flex-col"
       >
         {compareMode ? (
           renderCompare()

@@ -183,6 +183,45 @@
       monospace;
   }
 
+  /* モデル管理の右ペイン（モデル詳細/比較）: 自身の幅を基準に内部レイアウトを変える
+     コンテナ。固定幅を持たず、グリッド側の minmax(0,1fr) で利用可能幅に応じて収縮する */
+  .model-side-pane {
+    container-type: inline-size;
+    min-width: 0;
+    max-width: none;
+    width: 100%;
+  }
+
+  /* モデル比較の主要指標カード列: 固定最小幅でペインを押し広げない（minmax(0,1fr)）。
+     列数は --cols（モデル数1〜3）で可変。間隔・余白はブラウザ幅へ追従（clamp） */
+  .comparison-cards {
+    display: grid;
+    grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr));
+    gap: clamp(6px, 0.8vw, 10px);
+    min-width: 0;
+  }
+
+  .comparison-card {
+    min-width: 0;
+    overflow: hidden;
+    padding: clamp(8px, 0.9vw, 12px);
+  }
+
+  /* 右ペインが狭い場合はカードを縦並びへ（文字を縮小して3列へ詰め込まない） */
+  @container (max-width: 379px) {
+    .comparison-cards {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  /* 詳細・比較テーブルの共通ラッパー: 横スクロールはこの内側だけに限定し、
+     右ペイン・ページ全体を横方向へはみ出させない */
+  .comparison-table-wrap {
+    width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+  }
+
   /* 内部スクロール領域用のダークテーマスクロールバー（次回学習設定・重要イベント・詳細ログ等） */
   .dark-scroll {
     scrollbar-width: thin;
