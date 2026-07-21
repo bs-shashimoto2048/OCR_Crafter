@@ -204,13 +204,14 @@
   .comparison-card {
     min-width: 0;
     overflow: hidden;
-    padding: clamp(8px, 0.9vw, 12px);
+    /* 上下は控えめ・左右は数値3列の表示幅を優先（窮屈に見えない範囲で削減） */
+    padding: clamp(5px, 0.6vw, 9px) clamp(7px, 0.8vw, 11px);
   }
 
   /* 右ペインが狭い場合はカードを縦並びへ（文字を縮小して3列へ詰め込まない）。
-     閾値689px=カード内の主要3指標（22px数値×3列＝1カード約220px）が
-     3カード横並びで省略されずに読める最低幅。未満は縦積み（カード全幅で3指標を表示） */
-  @container (max-width: 689px) {
+     閾値719px=「34.65%」のような6グリフ値（20px数値×3列＝1カード約235px）でも
+     3カード横並びで途中で切れない最低幅。未満は縦積み（カード全幅で3指標を表示） */
+  @container (max-width: 719px) {
     .comparison-cards {
       grid-template-columns: minmax(0, 1fr);
     }

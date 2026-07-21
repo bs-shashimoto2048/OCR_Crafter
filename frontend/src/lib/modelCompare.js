@@ -18,6 +18,19 @@ export const COMPARE_METRICS = [
   { key: "perfectRegressed", label: "完全一致から悪化", better: "min", kind: "count" },
 ];
 
+// 比較カード用のモデル名短縮（管理Noが主識別子のため、ファイル名は日時部分だけで十分）。
+// 拡張子（.tess.json/.ocr.json/.json/.traineddata）を除去し、YYYYMMDD_HHMMSS を最優先で抽出。
+// 日時形式を抽出できない場合は拡張子を除いた名前を返す。表示専用（保存データ・APIのモデル名は変更しない）
+export function getComparisonModelLabel(filename) {
+  const base = String(filename || "")
+    .replace(/\.tess\.json$/i, "")
+    .replace(/\.ocr\.json$/i, "")
+    .replace(/\.json$/i, "")
+    .replace(/\.traineddata$/i, "");
+  const dateTime = base.match(/(\d{8}_\d{6})/);
+  return dateTime ? dateTime[1] : base;
+}
+
 // 比較モデルの固定識別色（表示順に割り当て: 1番目=ブルー / 2番目=オレンジ / 3番目=パープル。
 // 暗色背景でコントラストを確保した色。評価結果の良否色（緑/赤）とは役割を分ける）
 export const COMPARE_MODEL_COLORS = ["#60a5fa", "#fb923c", "#c084fc"];

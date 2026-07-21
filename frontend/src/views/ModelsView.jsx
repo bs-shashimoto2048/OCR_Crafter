@@ -35,6 +35,7 @@ import {
   confusionLabel,
   formatBestDiff,
   formatMetricValue,
+  getComparisonModelLabel,
   metricValue,
   recommendModel,
 } from "../lib/modelCompare";
@@ -87,6 +88,12 @@ function parseDownloadFilename(contentDisposition, fallback) {
   }
   return fallback;
 }
+
+// モデル一覧の共有列定義（ヘッダーと各データ行の両方へ適用。個別に異なる幅を設定しない）。
+// 選択28px / モデル名=minmax(280px,400px)の上限付き / Engine90 / 方式90 / 作成日145 / 評価150 / 状態70
+// （最小合計853px=1920px時の左ペインへ内部横スクロールなしで収まる。モデル名は上限400pxで
+// 余った幅いっぱいまで伸ばさず、Engine列との間に大きな空白を作らない）
+export const MODEL_LIST_GRID_COLUMNS = "28px minmax(280px, 400px) 90px 90px 145px 150px 70px";
 
 const ENGINE_LABELS = { tesseract: "Tesseract", easyocr: "EasyOCR", custom: "カスタム" };
 
@@ -847,6 +854,9 @@ export default function ModelsView({
     // 比較画面は管理No主体・ファイル名は補助表示（未付与の旧レスポンスは従来の短縮名へフォールバック）
     const compareLabel = (name) => modelIdOf(name) || shortName(name);
     const compareTitle = (name) => (modelIdOf(name) ? `${modelIdOf(name)} → ${name}` : name);
+    // カード等の補助モデル名は日時形式へ短縮（例: tess_20260715_131053.tess.json → 20260715_131053）。
+    // 元のファイル名はtitle（ホバー）で確認できる
+    const shortFileLabel = (name) => getComparisonModelLabel(displayName(name));
     // モデル識別色（比較表示順に固定: 1番目=ブルー/2番目=オレンジ/3番目=パープル。
     // 全セクションで同じマップを共有。評価結果の良否色（最良=緑/悪化=赤）とは併用しない別役割）
     const colorMap = buildCompareColorMap(compareTargets);
@@ -918,9 +928,9 @@ export default function ModelsView({
     const maxWins = Math.max(1, ...comparison.columns.map((col) => winLoss.wins[col.model] || 0));
     const winsSorted = [...comparison.columns].sort((a, b) => (winLoss.wins[b.model] || 0) - (winLoss.wins[a.model] || 0));
     // 横スクロール表の共通クラス（指標名列はsticky固定・管理Noは常に表示）
-    // 項目列は110px以上を確保しsticky固定（モデル値列が潰れないよう横スクロールと併用）
+    // 項目列は120〜145pxを確保しsticky固定（モデル値列が潰れないよう横スクロールと併用）
     const stickyLabel =
-      "sticky left-0 z-10 min-w-[110px] whitespace-nowrap bg-[#333c46] px-2 py-1.5 text-left text-[13px] font-normal text-muted";
+      "sticky left-0 z-10 min-w-[120px] max-w-[145px] whitespace-nowrap bg-[#333c46] px-2 py-1.5 text-left text-[13px] font-normal text-muted";
     return (
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {/* 固定領域: 凡例 + 警告 + 推奨モデル + 主要3指標カード
@@ -956,7 +966,7 @@ export default function ModelsView({
                   {compareLabel(recommended.model)}
                 </span>
                 <span className="min-w-0 truncate text-[12px] text-amber-100/70" title={recommended.model}>
-                  {displayName(recommended.model)}
+                  {shortFileLabel(recommended.model)}
                 </span>
               </div>
               {recommended.reasons.length > 0 ? (
@@ -984,7 +994,7 @@ export default function ModelsView({
                   {compareLabel(col.model)}
                 </p>
                 <p className="truncate text-[11px] text-muted" title={col.model}>
-                  {displayName(col.model)}
+                  {shortFileLabel(col.model)}
                 </p>
                 {/* 主要3指標を横3列で表示（縦積みしない=カード高さを約1/3へ削減）。
                     値(22px)の直下に略称ラベル＋差分（一致は正解/総数）を小さく表示 */}
@@ -1003,10 +1013,10 @@ export default function ModelsView({
                     return (
                       <div key={metric.key} className="min-w-0">
                         {value === null ? (
-                          <p className="text-[14px] font-medium leading-7 text-muted">—</p>
+                          <p className="text-[14px] font-medium leading-6 text-muted">—</p>
                         ) : (
                           <p
-                            className={`truncate text-[22px] font-bold leading-7 tabular-nums ${
+                            className={`truncate text-[20px] font-bold leading-6 tabular-nums ${
                               diff === "最良" ? "text-emerald-300" : "text-text"
                             }`}
                           >
@@ -1105,11 +1115,12 @@ export default function ModelsView({
                     {compareTargets.map((name) => (
                       <th
                         key={name}
-                        className="whitespace-nowrap px-2 py-1.5 text-left text-[13px] font-semibold"
-                        style={{ color: colorOf(name) }}
+                        className="min-w-[135px] whitespace-nowrap px-2 py-1.5 text-left align-top text-[13px] font-semibold"
                         title={compareTitle(name)}
                       >
-                        {compareLabel(name)}
+                        <span style={{ color: colorOf(name) }}>{compareLabel(name)}</span>
+                        {/* ヘッダー補足はファイル名の日時短縮表示（元名はホバーで確認） */}
+                        <span className="block max-w-[10rem] truncate text-[10px] font-normal text-muted">{shortFileLabel(name)}</span>
                       </th>
                     ))}
                   </tr>
@@ -1489,10 +1500,10 @@ export default function ModelsView({
   }
 
   return (
-    // 1250px以上=左右2カラム（左1.8fr:右1fr≈64:36。両列とも minmax(0,…) で固定幅を持たず、
-    // ブラウザ幅に応じて連続的に収縮＝右ペインがはみ出さない）/ 1250px未満=右ペインを下段へ縦積み
-    // （縦積み時は固定高を外して自然高にし、文字を縮小して押し込まない）
-    <div className="grid w-full min-w-0 grid-cols-1 gap-3 min-[1250px]:h-[calc(100vh-238px)] min-[1250px]:min-h-[480px] min-[1250px]:grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)]">
+    // 右=比較・分析の主領域として広く確保: 1600px以上=左1.2fr:右1fr（≈54.5:45.5）/
+    // 1366〜1599px=左1.05fr:右1fr（≈51:49）/ 1366px未満=右ペインを下段へ縦積み。
+    // 両列とも minmax(0,…) で固定幅を持たず連続的に収縮（縦積み時は固定高を外して自然高）
+    <div className="grid w-full min-w-0 grid-cols-1 gap-3 min-[1366px]:h-[calc(100vh-238px)] min-[1366px]:min-h-[480px] min-[1366px]:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)] min-[1600px]:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
       {/* 左: サマリー + フィルタ + 一覧（min-w-0でグリッド収縮を妨げない） */}
       <div className="flex min-h-0 min-w-0 flex-col gap-2">
         <div className="flex shrink-0 gap-2">
@@ -1558,74 +1569,72 @@ export default function ModelsView({
           </div>
         </div>
 
-        <div className="max-h-[60vh] min-h-0 flex-1 overflow-auto rounded-xl border border-border/60 min-[1250px]:max-h-none">
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 z-10 bg-[#2f3841]/95 backdrop-blur">
-              {/* モデル名列を1frで広く取り、他列は固定幅で左寄せ（バッジ削除で空いた分を活用） */}
-              <tr className="border-b border-border text-left text-muted">
-                <th className="w-8 px-2 py-2 font-medium" />
-                <th className="min-w-[280px] px-2 py-2 font-medium">モデル名</th>
-                <th className="w-[90px] px-2 py-2 font-medium">Engine</th>
-                <th className="w-[90px] px-2 py-2 font-medium">方式</th>
-                <th className="w-[150px] px-2 py-2 font-medium">作成日</th>
-                <th className="w-[150px] px-2 py-2 font-medium">評価</th>
-                <th className="w-[80px] px-2 py-2 font-medium">状態</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredModels.map((name) => {
-                const checked = selectedModels.includes(name);
-                const active = detailModel === name && !compareMode;
-                return (
-                  <tr
-                    key={name}
-                    onClick={() => openDetail(name)}
-                    className={`cursor-pointer border-b border-border/80 transition ${
-                      active ? "bg-accent/15" : "hover:bg-[#3b444e]/65"
-                    }`}
-                  >
-                    <td className="px-2 py-2" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={(e) => toggleOne(name, e.target.checked)}
-                        aria-label={`${name} を比較・削除対象に選択`}
-                        title="比較・削除対象として選択（比較は先頭3件まで）"
-                      />
-                    </td>
-                    <td className="px-2 py-2">
-                      {/* 一覧は管理No＋モデル名のみ（Best/Recommended等の比較バッジは比較画面へ集約） */}
-                      <p className="min-w-0 truncate text-text" title={name}>
-                        <ModelIdChip name={name} className="mr-1.5" />
-                        {displayName(name)}
+        <div className="max-h-[60vh] min-h-0 flex-1 overflow-auto rounded-xl border border-border/60 min-[1366px]:max-h-none">
+          {/* 一覧はCSS Grid（ヘッダーと各行で MODEL_LIST_GRID_COLUMNS を共有）。
+              モデル名列は minmax(280px,400px) の上限付き=余った幅いっぱいまで伸ばさず、
+              モデル名〜Engine間に大きな空白を作らない（長い名前はtruncate＋titleで全文確認） */}
+          <div className="min-w-full text-sm">
+            <div
+              className="sticky top-0 z-10 grid border-b border-border bg-[#2f3841]/95 text-left text-muted backdrop-blur"
+              style={{ gridTemplateColumns: MODEL_LIST_GRID_COLUMNS }}
+            >
+              <span className="px-2 py-2 font-medium" />
+              <span className="px-2 py-2 font-medium">モデル名</span>
+              <span className="px-2 py-2 font-medium">Engine</span>
+              <span className="px-2 py-2 font-medium">方式</span>
+              <span className="px-2 py-2 font-medium">作成日</span>
+              <span className="px-2 py-2 font-medium">評価</span>
+              <span className="px-2 py-2 font-medium">状態</span>
+            </div>
+            {filteredModels.map((name) => {
+              const checked = selectedModels.includes(name);
+              const active = detailModel === name && !compareMode;
+              return (
+                <div
+                  key={name}
+                  onClick={() => openDetail(name)}
+                  className={`grid cursor-pointer items-center border-b border-border/80 transition ${
+                    active ? "bg-accent/15" : "hover:bg-[#3b444e]/65"
+                  }`}
+                  style={{ gridTemplateColumns: MODEL_LIST_GRID_COLUMNS }}
+                >
+                  <span className="px-2 py-2" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(e) => toggleOne(name, e.target.checked)}
+                      aria-label={`${name} を比較・削除対象に選択`}
+                      title="比較・削除対象として選択（比較は先頭3件まで）"
+                    />
+                  </span>
+                  <span className="min-w-0 px-2 py-2">
+                    {/* 一覧は管理No＋モデル名のみ（Best/Recommended等の比較バッジは比較画面へ集約） */}
+                    <p className="min-w-0 truncate text-text" title={name}>
+                      <ModelIdChip name={name} className="mr-1.5" />
+                      {displayName(name)}
+                    </p>
+                    {aliases[name] ? (
+                      <p className="truncate text-[10px] text-muted" title={name}>
+                        {name}
                       </p>
-                      {aliases[name] ? (
-                        <p className="truncate text-[10px] text-muted" title={name}>
-                          {name}
-                        </p>
-                      ) : null}
-                    </td>
-                    <td className="px-2 py-2 text-muted">{engineLabelOf(engineName(name), trainingFamily(name))}</td>
-                    <td className="px-2 py-2 text-muted">{familyLabelOf(trainingFamily(name))}</td>
-                    <td className="whitespace-nowrap px-2 py-2 text-muted">{formatDateTime(createdAt(name))}</td>
-                    <td className="px-2 py-2">
-                      <ListEvalCell latest={latestEvalOf(evalHistory, name)} />
-                    </td>
-                    <td className="px-2 py-2">
-                      <StatusBadge status={statusOf(name)} />
-                    </td>
-                  </tr>
-                );
-              })}
-              {filteredModels.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-3 py-6 text-center text-sm text-muted">
-                    条件に一致するモデルがありません
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
+                    ) : null}
+                  </span>
+                  <span className="px-2 py-2 text-muted">{engineLabelOf(engineName(name), trainingFamily(name))}</span>
+                  <span className="px-2 py-2 text-muted">{familyLabelOf(trainingFamily(name))}</span>
+                  <span className="whitespace-nowrap px-2 py-2 text-muted">{formatDateTime(createdAt(name))}</span>
+                  <span className="min-w-0 px-2 py-2">
+                    <ListEvalCell latest={latestEvalOf(evalHistory, name)} />
+                  </span>
+                  <span className="px-2 py-2">
+                    <StatusBadge status={statusOf(name)} />
+                  </span>
+                </div>
+              );
+            })}
+            {filteredModels.length === 0 ? (
+              <p className="px-3 py-6 text-center text-sm text-muted">条件に一致するモデルがありません</p>
+            ) : null}
+          </div>
         </div>
       </div>
 

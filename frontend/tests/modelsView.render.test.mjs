@@ -10,6 +10,7 @@ import { createServer } from "vite";
 
 let server;
 let ModelsView;
+let MODEL_LIST_GRID_COLUMNS;
 
 before(async () => {
   server = await createServer({
@@ -18,7 +19,7 @@ before(async () => {
     server: { middlewareMode: true, hmr: false },
     optimizeDeps: { noDiscovery: true },
   });
-  ({ default: ModelsView } = await server.ssrLoadModule("/src/views/ModelsView.jsx"));
+  ({ default: ModelsView, MODEL_LIST_GRID_COLUMNS } = await server.ssrLoadModule("/src/views/ModelsView.jsx"));
 });
 
 after(async () => {
@@ -80,16 +81,20 @@ test("状態列の「最新」ラベルは維持される", () => {
   assert.ok(html.includes("最新"), "状態列の「最新」が消えている");
 });
 
-test("レイアウト: 両列minmax(0,…)の流体2カラム（1250px以上）と縦積み（未満）のクラス構成", () => {
+test("レイアウト: 右ペイン拡張の流体2カラム（1366px/1600px段階）と縦積み（未満）のクラス構成", () => {
   const html = renderToString(React.createElement(ModelsView, baseProps()));
-  // 1250px以上で 左minmax(0,1.8fr):右minmax(0,1fr)（両列とも収縮可能・右ペインがはみ出さない）
+  // 1366〜1599px: 左1.05fr:右1fr（右≈49%） / 1600px以上: 左1.2fr:右1fr（右≈45.5%）
   assert.ok(
-    html.includes("min-[1250px]:grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)]"),
-    "両列minmax(0,…)の流体グリッド指定がない"
+    html.includes("min-[1366px]:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]"),
+    "1366px以上の流体グリッド指定がない"
+  );
+  assert.ok(
+    html.includes("min-[1600px]:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]"),
+    "1600px以上の右ペイン拡張比率がない"
   );
   // 右ペインへ固定520pxを常時強制しない
   assert.ok(!html.includes("minmax(520px"), "右ペインに固定520pxが残っている");
-  // 1250px未満は1カラム（右ペインを下段へ縦積み）
+  // 1366px未満は1カラム（右ペインを下段へ縦積み）
   assert.ok(html.includes("grid-cols-1"), "縦積み用のgrid-cols-1がない");
   // 左右ペインの min-w-0（Flex/Grid既定のmin-width:autoで収縮不能にならない）
   assert.ok(html.includes("min-w-0"), "ペインのmin-w-0がない");
@@ -126,9 +131,14 @@ test("長いモデル名は一覧で省略表示され、title属性で全文確
   assert.ok(html.includes("truncate"), "省略表示（truncate）がない");
 });
 
-test("一覧の列幅: モデル名はminmax相当の広い列・他列は固定幅", () => {
+test("一覧の列定義: モデル名に最大幅400px・ヘッダーとデータ行が同じ列定義を共有", () => {
+  // 共有定数: モデル名は minmax(280px,400px) の上限付き（余った幅いっぱいまで伸ばさない）
+  assert.equal(MODEL_LIST_GRID_COLUMNS, "28px minmax(280px, 400px) 90px 90px 145px 150px 70px");
   const html = renderToString(React.createElement(ModelsView, baseProps()));
-  assert.ok(html.includes("min-w-[280px]"), "モデル名列の最低幅280pxがない");
-  assert.ok(html.includes("w-[150px]"), "作成日/評価列の固定幅がない");
-  assert.ok(html.includes("w-[80px]"), "状態列の固定幅がない");
+  // ヘッダー1 + データ行2件 = 同じgrid-template-columnsが3回以上出現（列定義の共有）
+  const needle = "minmax(280px, 400px)";
+  const count = html.split(needle).length - 1;
+  assert.ok(count >= 3, `列定義の共有回数が不足（${count}回）`);
+  // 長いモデル名は省略表示＋title（Engine列との間に過剰な空白を作らず、列を押し広げない）
+  assert.ok(html.includes("truncate"), "モデル名の省略表示がない");
 });

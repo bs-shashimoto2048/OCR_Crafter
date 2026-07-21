@@ -13,6 +13,7 @@ import {
   confusionLabel,
   formatBestDiff,
   formatMetricValue,
+  getComparisonModelLabel,
   recommendModel,
 } from "../src/lib/modelCompare.js";
 
@@ -262,4 +263,18 @@ test("buildCompareColorMap: 全セクションで同じマップを共有すれ�
   comparison.columns.forEach((col, index) => {
     assert.equal(map[col.model], COMPARE_MODEL_COLORS[index]);
   });
+});
+
+test("getComparisonModelLabel: 比較カード用のモデル名短縮（日時抽出・拡張子除去フォールバック）", () => {
+  // YYYYMMDD_HHMMSS を最優先で抽出
+  assert.equal(getComparisonModelLabel("tess_20260715_131053.tess.json"), "20260715_131053");
+  assert.equal(getComparisonModelLabel("paddle_20260715_145027.ocr.json"), "20260715_145027");
+  assert.equal(getComparisonModelLabel("model_20260101_000000.traineddata"), "20260101_000000");
+  // 日時形式を抽出できない場合は拡張子を除いた名前
+  assert.equal(getComparisonModelLabel("custom_model_alpha_v2.tess.json"), "custom_model_alpha_v2");
+  assert.equal(getComparisonModelLabel("eng.traineddata"), "eng");
+  assert.equal(getComparisonModelLabel("plain.json"), "plain");
+  // 拡張子なし・空も安全
+  assert.equal(getComparisonModelLabel("no_ext_name"), "no_ext_name");
+  assert.equal(getComparisonModelLabel(""), "");
 });
