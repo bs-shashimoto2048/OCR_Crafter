@@ -18,6 +18,7 @@ import {
 } from "../lib/modelEval";
 import {
   COMPARE_METRICS,
+  buildCompareColorMap,
   buildConditionComparison,
   buildConfusionComparison,
   buildModelComparison,
@@ -836,6 +837,10 @@ export default function ModelsView({
     // 比較画面は管理No主体・ファイル名は補助表示（未付与の旧レスポンスは従来の短縮名へフォールバック）
     const compareLabel = (name) => modelIdOf(name) || shortName(name);
     const compareTitle = (name) => (modelIdOf(name) ? `${modelIdOf(name)} → ${name}` : name);
+    // モデル識別色（比較表示順に固定: 1番目=ブルー/2番目=オレンジ/3番目=パープル。
+    // 全セクションで同じマップを共有。評価結果の良否色（最良=緑/悪化=赤）とは併用しない別役割）
+    const colorMap = buildCompareColorMap(compareTargets);
+    const colorOf = (name) => colorMap[name];
     const bestText = "font-semibold text-emerald-300";
     // 主要3指標（カード表示）と改善・悪化比較（画像単位の学習前比）の行定義
     const mainMetrics = ["cer", "charAccuracy", "percent"].map((key) => COMPARE_METRICS.find((m) => m.key === key));
@@ -867,9 +872,20 @@ export default function ModelsView({
     const stickyLabel = "sticky left-0 z-10 whitespace-nowrap bg-[#333c46] px-2 py-1.5 text-left text-[13px] font-normal text-muted";
     return (
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        {/* 固定領域: 警告 + 推奨モデル + 主要3指標カード
+        {/* 固定領域: 凡例 + 警告 + 推奨モデル + 主要3指標カード
             （画面が低い場合のみ内部スクロールし、下の詳細分析の最低高を確保する） */}
         <div className="dark-scroll min-h-0 flex-[0_1_auto] space-y-2 overflow-y-auto pr-0.5 [overscroll-behavior:contain]">
+          {/* 凡例（モデル識別色。ファイル名はホバーで確認） */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-0.5">
+            {compareTargets.map((name) => (
+              <span key={name} className="inline-flex items-center gap-1 text-[12px]" title={compareTitle(name)}>
+                <span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: colorOf(name) }} />
+                <span className="font-semibold" style={{ color: colorOf(name) }}>
+                  {compareLabel(name)}
+                </span>
+              </span>
+            ))}
+          </div>
           {conditions.match === false ? (
             <div className="rounded-lg border border-amber-400/50 bg-amber-400/10 px-3 py-2">
               <p className="text-[13px] font-semibold text-amber-200">注意</p>
@@ -883,7 +899,7 @@ export default function ModelsView({
           {recommended ? (
             <div className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2.5">
               <p className="text-[13px] text-amber-200">推奨モデル</p>
-              <p className="text-xl font-bold leading-7 text-amber-100" title={compareTitle(recommended.model)}>
+              <p className="text-xl font-bold leading-7" style={{ color: colorOf(recommended.model) }} title={compareTitle(recommended.model)}>
                 {compareLabel(recommended.model)}
               </p>
               <p className="truncate text-[12px] text-amber-100/70" title={recommended.model}>
@@ -920,8 +936,12 @@ export default function ModelsView({
               }}
             >
             {comparison.columns.map((col, index) => (
-              <div key={col.model} className="rounded-lg border border-border bg-card/45 px-2.5 py-2">
-                <p className="text-lg font-bold leading-6 text-text" title={compareTitle(col.model)}>
+              <div
+                key={col.model}
+                className="rounded-lg border border-border bg-card/45 px-2.5 py-2"
+                style={{ borderTop: `3px solid ${colorOf(col.model)}` }}
+              >
+                <p className="text-lg font-bold leading-6" style={{ color: colorOf(col.model) }} title={compareTitle(col.model)}>
                   {compareLabel(col.model)}
                 </p>
                 <p className="truncate text-[11px] text-muted" title={col.model}>
@@ -979,7 +999,12 @@ export default function ModelsView({
                   <tr>
                     <th className={stickyLabel}></th>
                     {comparison.columns.map((col) => (
-                      <th key={col.model} className="whitespace-nowrap px-2 py-1.5 text-left text-[13px] font-semibold text-text" title={compareTitle(col.model)}>
+                      <th
+                        key={col.model}
+                        className="whitespace-nowrap px-2 py-1.5 text-left text-[13px] font-semibold"
+                        style={{ color: colorOf(col.model) }}
+                        title={compareTitle(col.model)}
+                      >
                         {compareLabel(col.model)}
                       </th>
                     ))}
@@ -1027,7 +1052,12 @@ export default function ModelsView({
                   <tr>
                     <th className={stickyLabel}></th>
                     {comparison.columns.map((col) => (
-                      <th key={col.model} className="whitespace-nowrap px-2 py-1.5 text-left text-[13px] font-semibold text-text" title={compareTitle(col.model)}>
+                      <th
+                        key={col.model}
+                        className="whitespace-nowrap px-2 py-1.5 text-left text-[13px] font-semibold"
+                        style={{ color: colorOf(col.model) }}
+                        title={compareTitle(col.model)}
+                      >
                         {compareLabel(col.model)}
                       </th>
                     ))}
@@ -1090,7 +1120,8 @@ export default function ModelsView({
                       {row.counts.map((count, index) => (
                         <div key={comparison.columns[index].model} className="flex items-center gap-1.5">
                           <span
-                            className="w-14 shrink-0 truncate text-[12px] text-muted"
+                            className="w-14 shrink-0 truncate text-[12px] font-semibold"
+                            style={{ color: colorOf(comparison.columns[index].model) }}
                             title={compareTitle(comparison.columns[index].model)}
                           >
                             {compareLabel(comparison.columns[index].model)}
@@ -1101,8 +1132,11 @@ export default function ModelsView({
                           <div className="min-w-0 flex-1">
                             {count !== null && count > 0 ? (
                               <div
-                                className="h-2.5 rounded-sm bg-accent/60"
-                                style={{ width: `${Math.max(3, (count / confusionMax) * 100)}%` }}
+                                className="h-2.5 rounded-sm"
+                                style={{
+                                  width: `${Math.max(3, (count / confusionMax) * 100)}%`,
+                                  backgroundColor: colorOf(comparison.columns[index].model),
+                                }}
                               />
                             ) : null}
                           </div>
@@ -1123,11 +1157,16 @@ export default function ModelsView({
                 {winLoss.rows.map((row) => (
                   <tr key={row.metric.key} className="border-t border-border/50 first:border-t-0">
                     <td className="whitespace-nowrap py-1.5 pr-2 text-[13px] text-muted">{row.metric.label}</td>
-                    <td className="py-1.5 text-[14px] font-semibold text-emerald-300">
+                    <td className="py-1.5 text-[14px] font-semibold">
                       {row.winners.length > 0 ? (
-                        <span title={row.winners.map((w) => compareTitle(w)).join(" / ")}>
-                          {row.winners.map((w) => compareLabel(w)).join(" / ")}
-                        </span>
+                        row.winners.map((w, i) => (
+                          <span key={w}>
+                            {i > 0 ? <span className="font-normal text-muted"> / </span> : null}
+                            <span style={{ color: colorOf(w) }} title={compareTitle(w)}>
+                              {compareLabel(w)}
+                            </span>
+                          </span>
+                        ))
                       ) : (
                         <span className="font-normal text-muted">—</span>
                       )}
@@ -1144,17 +1183,27 @@ export default function ModelsView({
             <div className="space-y-1.5">
               {winsSorted.map((col) => {
                 const wins = winLoss.wins[col.model] || 0;
+                // 棒はモデル識別色を維持（最多だけ緑にしない）。最多は「最多」ラベルで示す
+                const isTop = wins > 0 && wins === maxWins;
                 return (
                   <div key={col.model} className="flex items-center gap-2">
-                    <span className="w-14 shrink-0 truncate text-[13px] text-text" title={compareTitle(col.model)}>
+                    <span
+                      className="w-14 shrink-0 truncate text-[13px] font-semibold"
+                      style={{ color: colorOf(col.model) }}
+                      title={compareTitle(col.model)}
+                    >
                       {compareLabel(col.model)}
                     </span>
                     <span className="w-10 shrink-0 text-right text-lg font-bold tabular-nums text-text">{wins}</span>
                     <span className="shrink-0 text-[12px] text-muted">勝</span>
-                    <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 flex-1 items-center gap-1.5">
                       {wins > 0 ? (
-                        <div className="h-3 rounded-sm bg-emerald-400/70" style={{ width: `${(wins / maxWins) * 100}%` }} />
+                        <div
+                          className="h-3 rounded-sm"
+                          style={{ width: `${(wins / maxWins) * 100}%`, backgroundColor: colorOf(col.model) }}
+                        />
                       ) : null}
+                      {isTop ? <span className="shrink-0 text-[11px] text-emerald-300">最多</span> : null}
                     </div>
                   </div>
                 );
@@ -1172,7 +1221,9 @@ export default function ModelsView({
                     <th className={stickyLabel}></th>
                     {compareTargets.map((name) => (
                       <th key={name} className="whitespace-nowrap px-2 py-1.5 text-left align-top" title={compareTitle(name)}>
-                        <span className="text-[13px] font-semibold text-text">{compareLabel(name)}</span>
+                        <span className="text-[13px] font-semibold" style={{ color: colorOf(name) }}>
+                          {compareLabel(name)}
+                        </span>
                         <span className="mt-0.5 block max-w-[9rem] truncate text-[11px] font-normal text-muted" title={name}>
                           {displayName(name)}
                         </span>

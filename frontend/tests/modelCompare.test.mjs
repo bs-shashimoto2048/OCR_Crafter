@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 
 import {
   COMPARE_METRICS,
+  COMPARE_MODEL_COLORS,
+  buildCompareColorMap,
   buildConditionComparison,
   buildConfusionComparison,
   buildModelComparison,
@@ -207,4 +209,57 @@ test("buildConfusionComparison: 合計多い順の並び・TOP8制限とInfinity
     all.map((r) => r.total),
     [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
   );
+});
+
+test("buildCompareColorMap: 表示順に固定色（ブルー/オレンジ/パープル）を割り当て・3モデルは全て異なる色", () => {
+  const map = buildCompareColorMap(["m1", "m2", "m3"]);
+  assert.equal(map.m1, COMPARE_MODEL_COLORS[0]); // 1番目=ブルー
+  assert.equal(map.m2, COMPARE_MODEL_COLORS[1]); // 2番目=オレンジ
+  assert.equal(map.m3, COMPARE_MODEL_COLORS[2]); // 3番目=パープル
+  assert.equal(new Set(Object.values(map)).size, 3); // 3モデルで色が重複しない
+});
+
+test("buildCompareColorMap: 同一比較セッション内（同じ配列）は再描画でも同じ色", () => {
+  const targets = ["m1", "m2", "m3"];
+  const first = buildCompareColorMap(targets);
+  const second = buildCompareColorMap(targets); // 再描画のたびに呼ばれても同一入力→同一出力
+  assert.deepEqual(first, second);
+});
+
+test("buildCompareColorMap: 全セクションで同じマップを共有すれば同じモデルは常に同じ色", () => {
+  // 混同比較（件数0のモデルを含む）・指標別結果（同率2モデル）・総合勝利数を同じマップで引く
+  const history = {
+    m1: {
+      ds: {
+        percent: 38.6, at: "2026-07-17T00:00:00Z", cer: 0.1, char_accuracy: 0.9,
+        confusions: [{ kind: "sub", from: "0", to: "O", count: 7 }],
+      },
+    },
+    m2: {
+      ds: {
+        percent: 38.6, at: "2026-07-17T00:00:00Z", cer: 0.12, char_accuracy: 0.88,
+        confusions: [], // 0→O は0件（棒なしでも管理Noの色は維持される）
+      },
+    },
+  };
+  const targets = ["m1", "m2"];
+  const map = buildCompareColorMap(targets);
+  const comparison = buildModelComparison(history, targets);
+  const winLoss = buildWinLoss(comparison);
+
+  // 指標別結果: 完全一致率は同率（m1/m2併記）→ それぞれの固定色で表示できる
+  const percentRow = winLoss.rows.find((row) => row.metric.key === "percent");
+  assert.deepEqual(percentRow.winners, ["m1", "m2"]);
+  const winnerColors = percentRow.winners.map((w) => map[w]);
+  assert.deepEqual(winnerColors, [COMPARE_MODEL_COLORS[0], COMPARE_MODEL_COLORS[1]]); // 同率でも複数色を維持
+
+  // 混同比較: 0件のモデル（m2）でも色マップから同じ色が引ける
+  const confusion = buildConfusionComparison(comparison)[0];
+  assert.equal(confusion.counts[1], 0);
+  assert.equal(map[targets[1]], COMPARE_MODEL_COLORS[1]);
+
+  // 総合勝利数・棒グラフ: 列順とマップの対応が一致（m1=ブルー/m2=オレンジ）
+  comparison.columns.forEach((col, index) => {
+    assert.equal(map[col.model], COMPARE_MODEL_COLORS[index]);
+  });
 });

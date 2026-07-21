@@ -18,6 +18,21 @@ export const COMPARE_METRICS = [
   { key: "perfectRegressed", label: "完全一致から悪化", better: "min", kind: "count" },
 ];
 
+// 比較モデルの固定識別色（表示順に割り当て: 1番目=ブルー / 2番目=オレンジ / 3番目=パープル。
+// 暗色背景でコントラストを確保した色。評価結果の良否色（緑/赤）とは役割を分ける）
+export const COMPARE_MODEL_COLORS = ["#60a5fa", "#fb923c", "#c084fc"];
+
+// 比較表示順（index）→固定色。管理Noへ永続保存はせず、現在の比較配列の並びに対して割り当てる
+// （同じ比較セッション内では配列が同じ順序のため、再描画しても色は変わらない）
+export function compareModelColor(index) {
+  return COMPARE_MODEL_COLORS[index] || COMPARE_MODEL_COLORS[COMPARE_MODEL_COLORS.length - 1];
+}
+
+// 比較対象配列→{モデル名: 色} のマップ。全セクションでこのマップを共有し、同じモデルは常に同じ色にする
+export function buildCompareColorMap(models) {
+  return Object.fromEntries((models || []).map((model, index) => [model, compareModelColor(index)]));
+}
+
 // 混同表示ラベル（脱落/挿入は∅で表現）
 export function confusionLabel(c) {
   const from = String(c?.from || "") || "∅";
