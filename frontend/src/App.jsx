@@ -18,7 +18,7 @@ import TrainingImageBuilderView from "./views/TrainingImageBuilderView";
 import RapidOCRView from "./views/RapidOCRView";
 import OcrBatchView from "./views/OcrBatchView";
 import { API_BASE, imageUrl, request } from "./lib/api";
-import { charCodepoints } from "./lib/confusionFormat";
+import { charCodepoints, confusionLabel } from "./lib/confusionFormat";
 import { buildAugmentationPayload, defaultAugmentationState } from "./lib/augmentation";
 import { viewBoundaryKey } from "./lib/viewKey";
 import { lowercaseToggleApplicable } from "./lib/lowercase";
@@ -3118,12 +3118,15 @@ export default function App() {
     });
     // 混同集計（モデル別TOP10: 置換/脱落/挿入）
     lines.push("");
-    // from_codepoint/to_codepoint: 画面で表示できない文字（制御文字・U+FFFD等）も解析できるようU+XXXX表記を併記
-    lines.push(["model", "model_id", "kind", "from", "to", "from_codepoint", "to_codepoint", "count"].map(escape).join(","));
+    // from_codepoint/to_codepoint: 画面で表示できない文字（制御文字・U+FFFD等）も解析できるようU+XXXX表記を併記。
+    // display_label=画面と同じ表示ラベル（空文字=[空文字]等）。解析用の from/to は生値のまま変更しない
+    lines.push(
+      ["model", "model_id", "kind", "from", "to", "from_codepoint", "to_codepoint", "count", "display_label"].map(escape).join(",")
+    );
     targets.forEach((t) => {
       (t.confusions || []).forEach((c) => {
         lines.push(
-          [t.label, modelIdOf(t.label), c.kind, c.from, c.to, charCodepoints(c.from), charCodepoints(c.to), c.count]
+          [t.label, modelIdOf(t.label), c.kind, c.from, c.to, charCodepoints(c.from), charCodepoints(c.to), c.count, confusionLabel(c)]
             .map(escape)
             .join(",")
         );

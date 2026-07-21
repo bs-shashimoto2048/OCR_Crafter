@@ -27,15 +27,16 @@ export function charCodepoints(value) {
     .join(" ");
 }
 
-// 1コードポイントの表示変換（表示できない・紛らわしい文字を可視化する）
+// 1コードポイントの表示変換（表示できない・紛らわしい文字を可視化する）。
+// 記号（␠・⇥等）はフォント依存で読みづらいため、日本語の[〜]表記で明示する
 function formatSingleChar(ch) {
   const code = ch.codePointAt(0);
-  if (ch === " ") return "␠"; // 半角スペース
-  if (ch === "　") return "□"; // 全角スペース（半角と区別する）
-  if (ch === "\t") return "⇥";
-  if (ch === "\n") return "↵";
-  if (ch === "\r") return "CR";
-  if (code === 0) return "NUL";
+  if (ch === " ") return "[半角空白]";
+  if (ch === "　") return "[全角空白]"; // 半角と区別する
+  if (ch === "\t") return "[タブ]";
+  if (ch === "\n") return "[改行]";
+  if (ch === "\r") return "[復帰]";
+  if (code === 0) return "[NUL]";
   if (ch === "�") return "U+FFFD"; // 置換文字（元の文字は失われている）
   // 孤立サロゲート（JSのUTF-16で対がないもの）
   if (code >= 0xd800 && code <= 0xdfff) return `U+${code.toString(16).toUpperCase().padStart(4, "0")}`;
@@ -46,11 +47,12 @@ function formatSingleChar(ch) {
   return ch;
 }
 
-// 表示用の文字変換。空文字は∅、制御文字等は可視化表記へ。
+// 表示用の文字変換。空文字は[空文字]（∅は数学記号やΦに見え直感的でないため不使用）、
+// 制御文字等は可視化表記へ。内部データは変更せず表示時のみ変換する。
 // サロゲートペア（絵文字・補助平面文字）を壊さないよう Array.from でコードポイント単位に分割する
 export function formatConfusionChar(value) {
   const text = String(value ?? "");
-  if (text === "") return "∅";
+  if (text === "") return "[空文字]";
   return Array.from(text).map(formatSingleChar).join("");
 }
 
@@ -76,7 +78,7 @@ export function confusionCharInfo(value) {
   return specials.map((ch) => `文字コード：${charCodepoints(ch)} / 種別：${describe(ch)}`).join("\n");
 }
 
-// 混同表示ラベル（例: "0 → O" / "Y → ∅" / "∅ → N"）
+// 混同表示ラベル（例: "0 → O" / "Y → [空文字]" / "[空文字] → N"）
 export function confusionLabel(c) {
   return `${formatConfusionChar(c?.from)} → ${formatConfusionChar(c?.to)}`;
 }
@@ -88,11 +90,11 @@ export function confusionTitle(c) {
   const to = formatConfusionChar(c?.to);
   let base;
   if (kind === "del") {
-    base = `脱落：正解文字「${from}」が認識結果から欠落`;
+    base = `脱落：正解にある「${from}」をOCRが読み飛ばしました。`;
   } else if (kind === "ins") {
-    base = `挿入：正解にはない「${to}」が認識結果へ追加`;
+    base = `挿入：正解にはない「${to}」がOCR結果へ余分に追加されました。`;
   } else {
-    base = `置換：正解文字「${from}」を「${to}」と誤認識`;
+    base = `置換：正解の「${from}」をOCRが「${to}」と認識しました。`;
   }
   const extras = [confusionCharInfo(c?.from), confusionCharInfo(c?.to)].filter(Boolean);
   return extras.length > 0 ? `${base}\n${extras.join("\n")}` : base;
@@ -104,8 +106,9 @@ function parseLegacyConfusionKey(key, count) {
   const text = String(key ?? "");
   const index = text.indexOf("→");
   if (index < 0) return null;
-  const from = text.slice(0, index);
-  const to = text.slice(index + 1);
+  // 旧表示形式の "∅"（空を表す記号）は内部の空文字へ戻す（例: "∅→1" / "Y→∅"）
+  const from = text.slice(0, index).replace(/^∅$/, "");
+  const to = text.slice(index + 1).replace(/^∅$/, "");
   const kind = from === "" ? "ins" : to === "" ? "del" : "sub";
   return { kind, from, to, count: Number(count) || 0 };
 }

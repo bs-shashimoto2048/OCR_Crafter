@@ -187,8 +187,8 @@ test("buildConfusionComparison: 全モデルの混同を統合しモデル別件
   const b8 = rows.find((row) => row.label === "B → 8");
   assert.deepEqual(b8.counts, [6, 0, null]); // データありで未出現=0
   assert.equal(b8.total, 6);
-  assert.equal(confusionLabel({ from: "Y", to: "" }), "Y → ∅");
-  assert.equal(confusionLabel({ from: "", to: "1" }), "∅ → 1");
+  assert.equal(confusionLabel({ from: "Y", to: "" }), "Y → [空文字]");
+  assert.equal(confusionLabel({ from: "", to: "1" }), "[空文字] → 1");
 });
 
 test("buildConfusionComparison: 合計多い順の並び・TOP8制限とInfinityで全件", () => {
