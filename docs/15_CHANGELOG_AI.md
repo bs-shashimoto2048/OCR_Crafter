@@ -19,6 +19,25 @@ timeline
 
 ## 2026-07
 
+### 学習時オーグメンテーションと決定的データ分割（最大剰余法）
+
+**概要**
+①**分割枚数のバグ修正**: 従来の `int(n * ratio)` は浮動小数点誤差で期待値からずれていた（例: `1000×0.85=849.999...→849枚`。1000枚・0.8/0.1/0.1でも組み合わせによりズレる）。`compute_split_counts`（**最大剰余法**: floor＋epsilon補正→残りを小数部分の大きい順に配分・同値はTrain→Val→Test優先）へ変更し、**合計=有効画像数を常に保証**（重複・欠落なし）。比率検証は `math.isclose`（フロントも許容誤差つき）。②**学習時オーグメンテーション**: 回転/明るさ/コントラスト/ぼかし/ノイズの個別設定（有効・値・適用確率）＋プリセット（なし/弱い/カスタム。強いは文字形状を壊すため提供しない）＋生成倍率（1.5倍推奨）。**Trainのみへ適用**し（Val/Test/固定評価データには適用しない）、**元画像は必ずTrainへ残し**追加分だけ `train_aug_*.png` として生成（正解ラベルは元画像と同一=不変）。方式は**事前生成**（Tesseractのlstmf学習は静的な画像リストを前提とするため動的適用は不採用。生成先は学習実行専用のデータセットディレクトリで元画像は上書きしない）。プレビューAPIで適用前後を事前確認できる。③**UI**: 比率0.05刻み・**Test自動計算（方式A: Test=1.0−Train−Val・読み取り専用）**・Split Seed入力・分割枚数の事前確認（入力/有効/除外内訳＋予定枚数）・比率エラーは入力欄付近へ表示。④**メタ保存**: dataset meta.json→モデルメタ（.tess.json/.ocr.json経由）へ 分割比率/Seed/分割方式/augmentation設定/生成枚数を保存し、**学習条件比較**へ Train/Val/Test比率・Split Seed・分割方式・Augプリセット/設定/生成枚数の行を追加（旧モデルは未記録）。
+
+**変更理由**
+1000枚を0.8/0.1/0.1で分割しても800/100/100にならないのは `int()` 切り捨て＋浮動小数点誤差の不具合。オーグメンテーションは旧 `use_augmentation/aug_strength`（強度1-3の一括指定・Train画像自体を加工）しかなく、変換別の制御・プレビュー・Trainへの追加生成ができなかった。
+
+**注意事項**
+- **後方互換**: 旧 `use_augmentation`/`aug_strength` はAPI・動作とも維持（新 `augmentation` 未指定時のみ有効）。旧UIの「Augmentationを使用/強度」は新セクションへ置き換え
+- 分割は**画像単位**のみ（`split_method: "image"`）。グループ/Series単位分割は未実装（master.csvにグループ概念がないため今後候補。実装時は比率と実枚数の差分表示が必要）
+- 生成倍率は元Train枚数に対する増加後の倍率。`counts.train` は元画像のみ（生成分は `augmentation_generated` で別掲）
+- weakプリセット既定: 回転±2°/30%・明るさ±10%/30%・コントラスト±10%/30%・ぼかし弱/10%・ノイズ弱/10%・倍率1.5
+
+**影響範囲**
+`ocr_pipeline.py`（compute_split_counts / parse_augmentation_config / _apply_augmentation_config / preview系 / create_ocr_dataset）、`schemas.py` / `main.py`（新API2本・構造化400）、`tesseract_pipeline.py` / `model_registry.py`（メタ引き継ぎ）、`lib/ratio.js`（0.05刻み・autoTestRatio）、`lib/augmentation.js`（新規）、`lib/trainingCompare.js`（行追加）、`TrainingView.jsx` / `App.jsx`、`tests/test_dataset_split_augmentation.py`（新規）
+
+---
+
 ### InfoTooltipのポータル化（?ヘルプが埋もれる問題の修正）
 
 **概要**

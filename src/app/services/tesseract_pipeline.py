@@ -375,6 +375,17 @@ def register_tesseract_model(
 ) -> Path:
     paths = ensure_project_directories(project_id)
     extra = extra_meta if isinstance(extra_meta, dict) else {}
+    # データセットのmeta.jsonから分割・オーグメンテーション情報を引き継ぐ（学習条件比較用。
+    # 無い/読めない旧データセットは空=UIで「未記録」表示）
+    dataset_meta: dict[str, Any] = {}
+    try:
+        meta_file = Path(dataset_root) / "meta.json"
+        if meta_file.is_file():
+            loaded = json.loads(meta_file.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                dataset_meta = loaded
+    except (OSError, ValueError):
+        dataset_meta = {}
     meta = {
         "engine": "tesseract",
         "training_family": "tesseract",
@@ -395,6 +406,24 @@ def register_tesseract_model(
         "parent_model_id": str(extra.get("parent_model_id") or ""),
         "training_note": str(extra.get("training_note") or ""),
         "training_duration_seconds": int(training_duration_seconds) if training_duration_seconds is not None else None,
+        # 分割・オーグメンテーション情報（学習条件比較用。旧データセットはNone/空=未記録）
+        "dataset_split_ratio": (
+            {
+                "train": float(dataset_meta.get("train_ratio", 0.0) or 0.0),
+                "val": float(dataset_meta.get("val_ratio", 0.0) or 0.0),
+                "test": float(dataset_meta.get("test_ratio", 0.0) or 0.0),
+            }
+            if "train_ratio" in dataset_meta
+            else None
+        ),
+        "split_seed": int(dataset_meta["seed"]) if isinstance(dataset_meta.get("seed"), (int, float)) else None,
+        "split_method": str(dataset_meta.get("split_method") or ""),
+        "augmentation_config": dataset_meta.get("augmentation") if isinstance(dataset_meta.get("augmentation"), dict) else None,
+        "augmentation_generated": (
+            int(dataset_meta["augmentation_generated"])
+            if isinstance(dataset_meta.get("augmentation_generated"), (int, float))
+            else None
+        ),
     }
     meta_path = paths.models / f"{lang}{TESSERACT_MODEL_SUFFIX}"
     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")

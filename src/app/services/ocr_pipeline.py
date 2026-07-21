@@ -1,5 +1,8 @@
+import base64
+import io
 import json
 import importlib.util
+import math
 import random
 import shutil
 import subprocess
@@ -345,6 +348,139 @@ def preprocess_ocr_image(image: Any, image_shape: Optional[list[int]] = None, st
     return Image.merge("RGB", (canvas, canvas, canvas))
 
 
+def compute_split_counts(total: int, train_ratio: float, val_ratio: float, test_ratio: float) -> dict[str, int]:
+    """Train/Val/Test の分割枚数を最大剰余法（Largest Remainder Method）で算出する。
+
+    - `int(n*ratio)` の単純切り捨ては浮動小数点誤差で期待値からずれる
+      （例: 1000*0.85 = 849.9999... → 849）ため使用しない。
+    - 各分割は floor（微小誤差はepsilonで補正）で仮確定し、残り枚数を小数部分の大きい順に1枚ずつ配分する。
+    - 小数部分が同値の場合の優先順位は Train → Val → Test で固定（仕様）。
+    - 常に train+val+test == total を保証する（重複・欠落なし）。
+    """
+    n = int(total)
+    if n <= 0:
+        return {"train": 0, "val": 0, "test": 0}
+    ratios = [float(train_ratio), float(val_ratio), float(test_ratio)]
+    eps = 1e-9
+    raw = [n * r for r in ratios]
+    counts = [math.floor(v + eps) for v in raw]
+    remaining = n - sum(counts)
+    # 小数部分の大きい順（同値はindex昇順=Train優先）へ残りを配分
+    fractions = sorted(
+        ((max(0.0, raw[i] - counts[i]), -i) for i in range(3)),
+        reverse=True,
+    )
+    for frac, neg_index in fractions:
+        if remaining <= 0:
+            break
+        counts[-neg_index] += 1
+        remaining -= 1
+    # train_ratio > 0 なのに train=0 になる極小ケースは train を最低1枚確保
+    if counts[0] <= 0 and ratios[0] > 0 and n > 0:
+        donor = 1 if counts[1] > 0 else 2
+        counts[donor] -= 1
+        counts[0] = 1
+    return {"train": counts[0], "val": counts[1], "test": counts[2]}
+
+
+# 学習時オーグメンテーションの既定（弱いプリセット）。
+# OCRの短い文字列・筆記体を破壊しない弱い値のみ（強いプリセットは意図的に提供しない）
+WEAK_AUGMENTATION_CONFIG: dict[str, Any] = {
+    "preset": "weak",
+    "multiplier": 1.5,
+    "rotation": {"enabled": True, "max_degrees": 2.0, "probability": 0.3},
+    "brightness": {"enabled": True, "range": 0.1, "probability": 0.3},
+    "contrast": {"enabled": True, "range": 0.1, "probability": 0.3},
+    "blur": {"enabled": True, "strength": "weak", "probability": 0.1},
+    "noise": {"enabled": True, "strength": "weak", "probability": 0.1},
+}
+
+
+def _clamp(value: Any, low: float, high: float, default: float) -> float:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(v):
+        return default
+    return max(low, min(high, v))
+
+
+def parse_augmentation_config(raw: Any) -> Optional[dict[str, Any]]:
+    """学習時オーグメンテーション設定を正規化する。無効（None/preset=none）は None を返す。
+
+    値は安全範囲へクランプ: 回転±10°以内 / 明るさ・コントラスト±50%以内 / 確率0〜1 /
+    強度は weak のみ（将来拡張用にmediumも許容）/ 生成倍率1.0〜3.0。
+    """
+    if not isinstance(raw, dict):
+        return None
+    preset = str(raw.get("preset") or "custom").strip().lower()
+    if preset == "none":
+        return None
+    if preset not in {"weak", "custom"}:
+        preset = "custom"
+
+    def _transform(key: str, defaults: dict[str, Any], value_key: Optional[str] = None, value_range=(0.0, 0.5)) -> dict[str, Any]:
+        entry = raw.get(key) if isinstance(raw.get(key), dict) else {}
+        # weak=未指定の変換も推奨値で有効 / custom=明示的にenabledにした変換のみ有効
+        default_enabled = bool(defaults.get("enabled", False)) if preset == "weak" else False
+        out: dict[str, Any] = {
+            "enabled": bool(entry.get("enabled", default_enabled)),
+            "probability": _clamp(entry.get("probability", defaults.get("probability", 0.3)), 0.0, 1.0, defaults.get("probability", 0.3)),
+        }
+        if value_key == "max_degrees":
+            out["max_degrees"] = _clamp(entry.get("max_degrees", defaults.get("max_degrees", 2.0)), 0.0, 10.0, defaults.get("max_degrees", 2.0))
+        elif value_key == "range":
+            out["range"] = _clamp(entry.get("range", defaults.get("range", 0.1)), value_range[0], value_range[1], defaults.get("range", 0.1))
+        elif value_key == "strength":
+            strength = str(entry.get("strength", defaults.get("strength", "weak")) or "weak").strip().lower()
+            out["strength"] = strength if strength in {"weak", "medium"} else "weak"
+        return out
+
+    config = {
+        "preset": preset,
+        "multiplier": _clamp(raw.get("multiplier", 1.5), 1.0, 3.0, 1.5),
+        "rotation": _transform("rotation", WEAK_AUGMENTATION_CONFIG["rotation"], "max_degrees"),
+        "brightness": _transform("brightness", WEAK_AUGMENTATION_CONFIG["brightness"], "range"),
+        "contrast": _transform("contrast", WEAK_AUGMENTATION_CONFIG["contrast"], "range"),
+        "blur": _transform("blur", WEAK_AUGMENTATION_CONFIG["blur"], "strength"),
+        "noise": _transform("noise", WEAK_AUGMENTATION_CONFIG["noise"], "strength"),
+    }
+    if not any(config[key]["enabled"] for key in ("rotation", "brightness", "contrast", "blur", "noise")):
+        return None
+    return config
+
+
+def _apply_augmentation_config(image: Image.Image, rng: random.Random, config: dict[str, Any]) -> Image.Image:
+    """設定に基づくランダム変換をTrain画像へ適用する（ラベルは変更しない）。"""
+    pil = image.convert("RGB")
+    rot = config.get("rotation") or {}
+    if rot.get("enabled") and rng.random() < float(rot.get("probability", 0)):
+        max_deg = float(rot.get("max_degrees", 2.0))
+        angle = rng.uniform(-max_deg, max_deg)
+        pil = pil.rotate(angle, resample=Image.Resampling.BICUBIC, expand=False, fillcolor=(255, 255, 255))
+    bri = config.get("brightness") or {}
+    if bri.get("enabled") and rng.random() < float(bri.get("probability", 0)):
+        r = float(bri.get("range", 0.1))
+        pil = ImageEnhance.Brightness(pil).enhance(rng.uniform(1.0 - r, 1.0 + r))
+    con = config.get("contrast") or {}
+    if con.get("enabled") and rng.random() < float(con.get("probability", 0)):
+        r = float(con.get("range", 0.1))
+        pil = ImageEnhance.Contrast(pil).enhance(rng.uniform(1.0 - r, 1.0 + r))
+    blur = config.get("blur") or {}
+    if blur.get("enabled") and rng.random() < float(blur.get("probability", 0)):
+        radius = rng.uniform(0.3, 0.6) if str(blur.get("strength")) != "medium" else rng.uniform(0.5, 0.9)
+        pil = pil.filter(ImageFilter.GaussianBlur(radius=radius))
+    noise = config.get("noise") or {}
+    if noise.get("enabled") and rng.random() < float(noise.get("probability", 0)):
+        sigma = 3.0 if str(noise.get("strength")) != "medium" else 6.0
+        arr = np.asarray(pil).astype(np.float32)
+        np_rng = np.random.default_rng(rng.randrange(0, 2**32 - 1))
+        arr = np.clip(arr + np_rng.normal(loc=0.0, scale=sigma, size=arr.shape).astype(np.float32), 0, 255).astype(np.uint8)
+        pil = Image.fromarray(arr, mode="RGB")
+    return pil
+
+
 def _apply_augmentation(image: Image.Image, rng: random.Random, aug_strength: int) -> Image.Image:
     strength = max(1, min(3, int(aug_strength)))
     pil = image.convert("RGB")
@@ -676,6 +812,136 @@ def create_ocr_dataset_from_logs(
     return {**meta, "meta_path": str(meta_path)}
 
 
+def _validate_split_ratios(train_ratio: float, val_ratio: float, test_ratio: float) -> None:
+    """比率合計の検証（浮動小数点誤差を許容）。"""
+    ratio_sum = float(train_ratio) + float(val_ratio) + float(test_ratio)
+    if not math.isclose(ratio_sum, 1.0, rel_tol=0, abs_tol=1e-6):
+        raise ValueError("train/val/test ratio must sum to 1.0")
+
+
+def _collect_ocr_candidates(
+    paths: Any,
+    selected_types: list[str],
+    normalized_charset: str,
+    max_text_length: int,
+    text_case: str,
+) -> tuple[list[dict[str, Any]], dict[str, int], int]:
+    """ラベル行から分割対象の有効サンプルを集める。
+
+    戻り値: (candidates, skipped内訳, 入力行数)。除外理由=対象外type / ラベル不正（空・charset外・長さ超過）/ 元画像なし。
+    """
+    rows = read_labels(paths.project_id)
+    candidates: list[dict[str, Any]] = []
+    skipped_invalid_label = 0
+    skipped_missing_source = 0
+    skipped_type = 0
+    input_count = 0
+    for row in rows:
+        image_name = str(row.get("filename") or row.get("image") or "").strip()
+        if not image_name:
+            continue
+        input_count += 1
+        image_type = str(row.get("type") or "").strip().lower()
+        if image_type not in selected_types:
+            skipped_type += 1
+            continue
+        text = _sanitize_text(str(row.get("label") or ""), normalized_charset, int(max_text_length), text_case)
+        if not text:
+            skipped_invalid_label += 1
+            continue
+        src = _resolve_source_image(paths.root, image_name, image_type)
+        if src is None:
+            skipped_missing_source += 1
+            continue
+        candidates.append({"image_name": image_name, "type": image_type, "text": text, "source": src})
+    skipped = {
+        "type": skipped_type,
+        "invalid_label": skipped_invalid_label,
+        "missing_source": skipped_missing_source,
+    }
+    return candidates, skipped, input_count
+
+
+def preview_ocr_dataset_split(
+    project_id: Optional[str],
+    image_types: Optional[list[str]] = None,
+    charset: Optional[str] = None,
+    max_text_length: int = 8,
+    text_case: str = "upper",
+    train_ratio: float = 0.8,
+    val_ratio: float = 0.1,
+    test_ratio: float = 0.1,
+) -> dict[str, Any]:
+    """データセット作成前の分割予定枚数プレビュー（画像は生成しない）。
+
+    入力画像数（ラベル行数）と有効画像数（分割対象）を分けて返し、除外内訳も返す。
+    枚数は作成時と同じ最大剰余法（compute_split_counts）で算出する。
+    """
+    selected_types = [str(x).strip().lower() for x in (image_types or ["wide"]) if str(x).strip()] or ["wide"]
+    if any(x not in {"single", "wide"} for x in selected_types):
+        raise ValueError("image_types must be single and/or wide")
+    _validate_split_ratios(train_ratio, val_ratio, test_ratio)
+    normalized_charset = _normalize_charset(charset, text_case)
+    paths = ensure_project_directories(project_id)
+    candidates, skipped, input_count = _collect_ocr_candidates(
+        paths, selected_types, normalized_charset, int(max_text_length), text_case
+    )
+    valid_count = len(candidates)
+    counts = compute_split_counts(valid_count, train_ratio, val_ratio, test_ratio)
+    return {
+        "project_id": paths.project_id,
+        "input_count": input_count,
+        "valid_count": valid_count,
+        "skipped": skipped,
+        "counts": counts,
+        "split_method": "image",
+        "ratios": {"train": float(train_ratio), "val": float(val_ratio), "test": float(test_ratio)},
+    }
+
+
+def preview_ocr_augmentation(
+    project_id: Optional[str],
+    augmentation: Optional[dict[str, Any]],
+    image_types: Optional[list[str]] = None,
+    charset: Optional[str] = None,
+    max_text_length: int = 8,
+    text_case: str = "upper",
+    image_shape: Optional[list[int]] = None,
+    sample_count: int = 3,
+    seed: Optional[int] = None,
+) -> dict[str, Any]:
+    """学習前のオーグメンテーションプレビュー。ランダムなサンプル画像へ設定を適用し、
+    元画像/適用後をbase64で返す（ディスクへは書き込まない・ラベルは変更しない）。"""
+    config = parse_augmentation_config(augmentation)
+    if config is None:
+        raise ValueError("augmentation config is empty (preset=none or all transforms disabled)")
+    selected_types = [str(x).strip().lower() for x in (image_types or ["wide"]) if str(x).strip()] or ["wide"]
+    normalized_charset = _normalize_charset(charset, text_case)
+    shape = _normalize_image_shape(image_shape)
+    paths = ensure_project_directories(project_id)
+    candidates, _, _ = _collect_ocr_candidates(paths, selected_types, normalized_charset, int(max_text_length), text_case)
+    if not candidates:
+        raise ValueError("No valid OCR samples found. Check labels/type/charset/max_text_length.")
+    # seed未指定は毎回異なるサンプル・変換（強すぎる設定の発見が目的のため）
+    rng = random.Random(int(seed) if seed is not None else time.time_ns())
+    count = max(1, min(int(sample_count or 3), 5, len(candidates)))
+    samples = rng.sample(candidates, count)
+
+    def _b64(img: Image.Image) -> str:
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+    items = []
+    for sample in samples:
+        original = preprocess_ocr_image(sample["source"], image_shape=shape, strong=False)
+        augmented = preprocess_ocr_image(
+            _apply_augmentation_config(original, rng=rng, config=config), image_shape=shape, strong=False
+        )
+        items.append({"image_name": sample["image_name"], "label": sample["text"], "original": _b64(original), "augmented": _b64(augmented)})
+    return {"items": items, "config": config}
+
+
 def create_ocr_dataset(
     project_id: Optional[str],
     image_types: Optional[list[str]] = None,
@@ -691,6 +957,7 @@ def create_ocr_dataset(
     output_dir: Optional[str] = None,
     overwrite: bool = False,
     text_case: str = "upper",
+    augmentation: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     selected_types = [str(x).strip().lower() for x in (image_types or ["wide"]) if str(x).strip()]
     if any(x not in {"single", "wide"} for x in selected_types):
@@ -704,41 +971,15 @@ def create_ocr_dataset(
         raise ValueError("max_text_length must be > 0")
     if int(aug_strength) < 1 or int(aug_strength) > 3:
         raise ValueError("aug_strength must be between 1 and 3")
-    ratio_sum = float(train_ratio) + float(val_ratio) + float(test_ratio)
-    if abs(ratio_sum - 1.0) > 1e-6:
-        raise ValueError("train/val/test ratio must sum to 1.0")
+    _validate_split_ratios(train_ratio, val_ratio, test_ratio)
+    # 新形式のオーグメンテーション設定（回転/明るさ/コントラスト/ぼかし/ノイズの個別設定＋生成倍率）。
+    # 無効（None）なら旧 use_augmentation/aug_strength の従来動作（後方互換）
+    aug_config = parse_augmentation_config(augmentation)
 
     paths = ensure_project_directories(project_id)
-    rows = read_labels(paths.project_id)
-
-    candidates: list[dict[str, Any]] = []
-    skipped_invalid_label = 0
-    skipped_missing_source = 0
-    skipped_type = 0
-    for row in rows:
-        image_name = str(row.get("filename") or row.get("image") or "").strip()
-        if not image_name:
-            continue
-        image_type = str(row.get("type") or "").strip().lower()
-        if image_type not in selected_types:
-            skipped_type += 1
-            continue
-        text = _sanitize_text(str(row.get("label") or ""), normalized_charset, int(max_text_length), text_case)
-        if not text:
-            skipped_invalid_label += 1
-            continue
-        src = _resolve_source_image(paths.root, image_name, image_type)
-        if src is None:
-            skipped_missing_source += 1
-            continue
-        candidates.append(
-            {
-                "image_name": image_name,
-                "type": image_type,
-                "text": text,
-                "source": src,
-            }
-        )
+    candidates, skipped, input_count = _collect_ocr_candidates(
+        paths, selected_types, normalized_charset, int(max_text_length), text_case
+    )
 
     if not candidates:
         raise ValueError("No valid OCR samples found. Check labels/type/charset/max_text_length.")
@@ -746,15 +987,11 @@ def create_ocr_dataset(
     rng = random.Random(int(seed))
     rng.shuffle(candidates)
     n = len(candidates)
-    n_train = int(n * float(train_ratio))
-    n_val = int(n * float(val_ratio))
-    n_test = n - n_train - n_val
-    if n_train <= 0:
-        n_train = 1
-        if n_val > 0:
-            n_val -= 1
-        elif n_test > 0:
-            n_test -= 1
+    # 最大剰余法で train+val+test == n を保証（int切り捨ての浮動小数点ずれを排除）
+    split_counts = compute_split_counts(n, float(train_ratio), float(val_ratio), float(test_ratio))
+    n_train = split_counts["train"]
+    n_val = split_counts["val"]
+    n_test = split_counts["test"]
 
     split_map = {
         "train": candidates[:n_train],
@@ -787,11 +1024,31 @@ def create_ocr_dataset(
                 sample["source"],
                 shape,
                 rng=rng,
-                use_augmentation=bool(use_augmentation and split == "train"),
+                # 新形式設定時は元画像を無加工で必ず残す（追加分だけを別生成）。
+                # 旧 use_augmentation は従来どおり train 画像自体へ適用（後方互換）
+                use_augmentation=bool(use_augmentation and aug_config is None and split == "train"),
                 aug_strength=int(aug_strength),
             )
             img.save(dst)
             label_lines[split].append(f"{rel_path}\t{sample['text']}")
+
+    # 新形式オーグメンテーション: Trainのみへ適用した追加画像を生成（Val/Test/評価データには適用しない）。
+    # 生成枚数 = (生成倍率 - 1.0) × Train枚数。元画像と同じ正解ラベルを使う（ラベル不変）
+    augmented_count = 0
+    if aug_config is not None and split_map["train"]:
+        extra_total = int(round((float(aug_config.get("multiplier", 1.5)) - 1.0) * len(split_map["train"])))
+        train_images_dir = dataset_root / "train" / "images"
+        for i in range(extra_total):
+            sample = split_map["train"][i % len(split_map["train"])]
+            augmented_count += 1
+            file_name = f"train_aug_{augmented_count:06d}.png"
+            rel_path = f"train/images/{file_name}"
+            base = preprocess_ocr_image(sample["source"], image_shape=shape, strong=False)
+            img = preprocess_ocr_image(
+                _apply_augmentation_config(base, rng=rng, config=aug_config), image_shape=shape, strong=False
+            )
+            img.save(train_images_dir / file_name)
+            label_lines["train"].append(f"{rel_path}\t{sample['text']}")
 
     train_file = dataset_root / "train.txt"
     val_file = dataset_root / "val.txt"
@@ -813,16 +1070,19 @@ def create_ocr_dataset(
         "image_shape": shape,
         "use_augmentation": bool(use_augmentation),
         "aug_strength": int(aug_strength),
+        # 新形式のオーグメンテーション設定（None=未使用。学習条件比較で表示）
+        "augmentation": aug_config,
+        "augmentation_generated": int(augmented_count),
         "train_ratio": float(train_ratio),
         "val_ratio": float(val_ratio),
         "test_ratio": float(test_ratio),
         "seed": int(seed),
+        # 分割方式（現状は画像単位のみ。グループ/Series単位は未実装）
+        "split_method": "image",
+        "input_count": int(input_count),
+        "valid_count": int(n),
         "counts": {k: len(v) for k, v in split_map.items()},
-        "skipped": {
-            "type": skipped_type,
-            "invalid_label": skipped_invalid_label,
-            "missing_source": skipped_missing_source,
-        },
+        "skipped": skipped,
         "created_at": datetime.now().isoformat(),
     }
     meta_path = dataset_root / "meta.json"

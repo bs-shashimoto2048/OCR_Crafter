@@ -241,6 +241,16 @@ def list_model_infos(project_id: Optional[str] = None) -> list[dict]:
                         if payload.get("training_duration_seconds") is not None
                         else None
                     ),
+                    # 分割・オーグメンテーション情報（学習条件比較用。旧メタはNone/空=未記録）
+                    "dataset_split_ratio": payload.get("dataset_split_ratio") if isinstance(payload.get("dataset_split_ratio"), dict) else None,
+                    "split_seed": _safe_int(payload.get("split_seed")) if payload.get("split_seed") is not None else None,
+                    "split_method": str(payload.get("split_method") or ""),
+                    "augmentation_config": payload.get("augmentation_config") if isinstance(payload.get("augmentation_config"), dict) else None,
+                    "augmentation_generated": (
+                        _safe_int(payload.get("augmentation_generated"))
+                        if payload.get("augmentation_generated") is not None
+                        else None
+                    ),
                 }
             )
         elif path.name.endswith(".ocr.json"):
@@ -321,6 +331,15 @@ def list_model_infos(project_id: Optional[str] = None) -> list[dict]:
                     "ocr_dataset_root": dataset_root,
                     "ocr_dataset_counts": dataset_counts,
                     "ocr_dataset_meta_created_at": str(dataset_meta.get("created_at") or ""),
+                    # 分割・オーグメンテーション情報（学習条件比較用。旧データセットはNone/空=未記録）
+                    "split_seed": _safe_int(dataset_meta.get("seed")) if dataset_meta.get("seed") is not None else None,
+                    "split_method": str(dataset_meta.get("split_method") or ""),
+                    "augmentation_config": dataset_meta.get("augmentation") if isinstance(dataset_meta.get("augmentation"), dict) else None,
+                    "augmentation_generated": (
+                        _safe_int(dataset_meta.get("augmentation_generated"))
+                        if dataset_meta.get("augmentation_generated") is not None
+                        else None
+                    ),
                     "ocr_preprocess": {
                         "image_shape": image_shape,
                         "image_types": image_types,

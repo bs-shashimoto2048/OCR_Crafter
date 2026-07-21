@@ -19,6 +19,7 @@ import RapidOCRView from "./views/RapidOCRView";
 import OcrBatchView from "./views/OcrBatchView";
 import { API_BASE, imageUrl, request } from "./lib/api";
 import { charCodepoints } from "./lib/confusionFormat";
+import { buildAugmentationPayload, defaultAugmentationState } from "./lib/augmentation";
 import { viewBoundaryKey } from "./lib/viewKey";
 import { lowercaseToggleApplicable } from "./lib/lowercase";
 import {
@@ -413,8 +414,15 @@ export default function App() {
   const [tessTrainingNote, setTessTrainingNote] = useState("");
   const [ocrMaxTextLength, setOcrMaxTextLength] = useState(8);
   const [ocrImageShape, setOcrImageShape] = useState("1,48,320");
-  const [ocrUseAugmentation, setOcrUseAugmentation] = useState(false);
-  const [ocrAugStrength, setOcrAugStrength] = useState(1);
+  // 学習時オーグメンテーション（新形式: preset/変換別設定/生成倍率。既定=なし）
+  const [ocrAugmentation, setOcrAugmentation] = useState(() => defaultAugmentationState());
+  const [ocrAugPreview, setOcrAugPreview] = useState(null);
+  const [ocrAugPreviewLoading, setOcrAugPreviewLoading] = useState(false);
+  // データ分割: Seed（再現性）・分割予定枚数プレビュー・比率エラー（入力欄付近へ表示）
+  const [ocrSplitSeed, setOcrSplitSeed] = useState(42);
+  const [ocrSplitPreview, setOcrSplitPreview] = useState(null);
+  const [ocrSplitPreviewLoading, setOcrSplitPreviewLoading] = useState(false);
+  const [ocrRatioError, setOcrRatioError] = useState("");
   const [ocrDatasetDir, setOcrDatasetDir] = useState("");
   const [ocrDatasetCreateMode, setOcrDatasetCreateMode] = useState("new");
   const [ocrDatasetInfo, setOcrDatasetInfo] = useState(null);
@@ -2125,14 +2133,17 @@ export default function App() {
         text_case: isTesseract ? "keep" : "upper",
         max_text_length: isTesseract ? 64 : Number(ocrMaxTextLength),
         image_shape: imageShape,
-        use_augmentation: Boolean(ocrUseAugmentation),
-        aug_strength: Number(ocrAugStrength),
+        use_augmentation: false,
+        aug_strength: 1,
+        augmentation: buildAugmentationPayload(ocrAugmentation),
         train_ratio: Number(trainRatio),
         val_ratio: Number(valRatio),
         test_ratio: Number(testRatio),
+        seed: Number(ocrSplitSeed) || 42,
         output_dir: null,
         overwrite: false,
       };
+      setOcrRatioError("");
       const data = await request("/api/ocr/dataset/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2142,11 +2153,102 @@ export default function App() {
       setOcrDatasetDir(data.dataset_root || "");
       resetTrainingLog("OCRデータセットを作成します");
       pushLog(
-        `OCRデータ作成: train=${data?.counts?.train ?? 0}, val=${data?.counts?.val ?? 0}, test=${data?.counts?.test ?? 0}`
+        `OCRデータ作成: train=${data?.counts?.train ?? 0}, val=${data?.counts?.val ?? 0}, test=${data?.counts?.test ?? 0}` +
+          (data?.augmentation_generated ? `, aug=${data.augmentation_generated}` : "")
       );
       notify("success", "OCRデータセットを作成しました");
     } catch (error) {
+      // 比率エラー（INVALID_SPLIT_RATIO）は入力欄付近へ表示（通知だけにしない）
+      const structured = parseStructuredRatioError(error);
+      if (structured) {
+        setOcrRatioError(structured);
+      }
+      notify("error", structured || error.message);
+    }
+  }
+
+  // 構造化された比率エラー（{detail:{code:"INVALID_SPLIT_RATIO",...}}）からメッセージを取り出す
+  function parseStructuredRatioError(error) {
+    try {
+      const payload = JSON.parse(String(error?.message || ""));
+      const detail = payload?.detail;
+      if (detail?.code === "INVALID_SPLIT_RATIO") {
+        const v = detail.values || {};
+        return `${detail.message}（現在の合計: ${v.sum}）`;
+      }
+    } catch {
+      // 構造化エラーではない
+    }
+    return "";
+  }
+
+  // データセット作成前の分割予定枚数プレビュー（入力/有効/除外内訳＋最大剰余法の予定枚数）
+  async function previewOcrSplit() {
+    if (!projectId) {
+      notify("error", "プロジェクトを作成または選択してください");
+      return;
+    }
+    setOcrSplitPreviewLoading(true);
+    try {
+      const isTesseract = ocrEngine === "tesseract";
+      const data = await request("/api/ocr/dataset/split-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: projectId,
+          image_types: ["wide"],
+          charset: isTesseract ? ocrCharset || TESSERACT_CHARSET_DEFAULT : (ocrCharset || OCR_CHARSET_DEFAULT).toUpperCase(),
+          text_case: isTesseract ? "keep" : "upper",
+          max_text_length: isTesseract ? 64 : Number(ocrMaxTextLength),
+          train_ratio: Number(trainRatio),
+          val_ratio: Number(valRatio),
+          test_ratio: Number(testRatio),
+        }),
+      });
+      setOcrSplitPreview(data);
+      setOcrRatioError("");
+    } catch (error) {
+      const structured = parseStructuredRatioError(error);
+      if (structured) setOcrRatioError(structured);
+      notify("error", structured || error.message);
+    } finally {
+      setOcrSplitPreviewLoading(false);
+    }
+  }
+
+  // 学習前のオーグメンテーションプレビュー（元画像/適用後のペアを表示）
+  async function previewOcrAugmentation() {
+    if (!projectId) {
+      notify("error", "プロジェクトを作成または選択してください");
+      return;
+    }
+    const payload = buildAugmentationPayload(ocrAugmentation);
+    if (!payload) {
+      notify("error", "オーグメンテーションが「なし」のためプレビューできません");
+      return;
+    }
+    setOcrAugPreviewLoading(true);
+    try {
+      const isTesseract = ocrEngine === "tesseract";
+      const data = await request("/api/ocr/dataset/augmentation-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: projectId,
+          image_types: ["wide"],
+          charset: isTesseract ? ocrCharset || TESSERACT_CHARSET_DEFAULT : (ocrCharset || OCR_CHARSET_DEFAULT).toUpperCase(),
+          text_case: isTesseract ? "keep" : "upper",
+          max_text_length: isTesseract ? 64 : Number(ocrMaxTextLength),
+          image_shape: parseOcrImageShape(ocrImageShape),
+          augmentation: payload,
+          sample_count: 3,
+        }),
+      });
+      setOcrAugPreview(data);
+    } catch (error) {
       notify("error", error.message);
+    } finally {
+      setOcrAugPreviewLoading(false);
     }
   }
 
@@ -3326,10 +3428,17 @@ export default function App() {
         setOcrMaxTextLength={setOcrMaxTextLength}
         ocrImageShape={ocrImageShape}
         setOcrImageShape={setOcrImageShape}
-        ocrUseAugmentation={ocrUseAugmentation}
-        setOcrUseAugmentation={setOcrUseAugmentation}
-        ocrAugStrength={ocrAugStrength}
-        setOcrAugStrength={setOcrAugStrength}
+        ocrAugmentation={ocrAugmentation}
+        setOcrAugmentation={setOcrAugmentation}
+        ocrAugPreview={ocrAugPreview}
+        ocrAugPreviewLoading={ocrAugPreviewLoading}
+        onPreviewAugmentation={previewOcrAugmentation}
+        ocrSplitSeed={ocrSplitSeed}
+        setOcrSplitSeed={setOcrSplitSeed}
+        ocrSplitPreview={ocrSplitPreview}
+        ocrSplitPreviewLoading={ocrSplitPreviewLoading}
+        onPreviewSplit={previewOcrSplit}
+        ratioError={ocrRatioError}
         ocrDatasetDir={ocrDatasetDir}
         ocrDatasetCreateMode={ocrDatasetCreateMode}
         setOcrDatasetCreateMode={setOcrDatasetCreateMode}

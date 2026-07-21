@@ -75,6 +75,14 @@ export const HELP_TEXTS = {
     title: "単一条件比較",
     body: "前モデルから1つの学習条件だけを変更した比較です。\n性能変化の原因を判断しやすい実験です。",
   },
+  splitSeed: {
+    title: "Split Seed",
+    body: "データ分割（シャッフル）に使う乱数の種です。\n同じ画像集合・同じ比率・同じSeedなら、Train / Validation / Testの割り当てが完全に同じになります（再現性の保証）。",
+  },
+  splitMethod: {
+    title: "分割方式",
+    body: "画像単位=1枚ずつ独立に分割（枚数は指定比率へ厳密一致）。\nグループ単位=同じ元画像・Series由来の画像を同じ分割へまとめる方式（現在は未実装）。",
+  },
   multiConditionChange: {
     title: "複数条件変更",
     body: "前モデルから2つ以上の学習条件が変更された比較です。\n性能が変化しても、どの条件が要因かは特定できません。",

@@ -2,22 +2,35 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { normalizeRatioInput, summarizeRatios } from "../src/lib/ratio.js";
+import { autoTestRatio, normalizeRatioInput, summarizeRatios } from "../src/lib/ratio.js";
 
-test("normalizeRatioInput: 浮動小数点誤差を小数第1位へ丸める", () => {
+test("normalizeRatioInput: 浮動小数点誤差を0.05刻みへ丸める", () => {
   assert.equal(normalizeRatioInput("0.30000000000000004"), "0.3");
   assert.equal(normalizeRatioInput("0.7999999999999999"), "0.8");
 });
 
-test("normalizeRatioInput: 丸め不要な値はそのままの表記で返す", () => {
+test("normalizeRatioInput: 0.05刻みの値はそのままの表記で返す", () => {
   assert.equal(normalizeRatioInput("0.7"), "0.7");
+  assert.equal(normalizeRatioInput("0.85"), "0.85");
+  assert.equal(normalizeRatioInput("0.05"), "0.05");
   assert.equal(normalizeRatioInput("0"), "0");
   assert.equal(normalizeRatioInput("1"), "1");
 });
 
-test("normalizeRatioInput: 小数第2位以下は第1位へ丸める（0.1単位入力）", () => {
-  assert.equal(normalizeRatioInput("0.15"), "0.2");
-  assert.equal(normalizeRatioInput("0.04"), "0");
+test("normalizeRatioInput: 0.05未満の端数は0.05刻みへ丸める", () => {
+  assert.equal(normalizeRatioInput("0.15"), "0.15");
+  assert.equal(normalizeRatioInput("0.13"), "0.15");
+  assert.equal(normalizeRatioInput("0.02"), "0");
+  assert.equal(normalizeRatioInput("0.04"), "0.05");
+});
+
+test("autoTestRatio: Test = 1.0 − Train − Val を0.05刻みで自動計算", () => {
+  assert.equal(autoTestRatio("0.85", "0.1"), 0.05);
+  assert.equal(autoTestRatio("0.8", "0.1"), 0.1);
+  assert.equal(autoTestRatio("0.7", "0.2"), 0.1); // 浮動小数点誤差でも0.1
+  assert.equal(autoTestRatio("0.9", "0.1"), 0);
+  assert.equal(autoTestRatio("1", "0.5"), 0); // 負にならない
+  assert.equal(autoTestRatio("abc", "0.1"), 0);
 });
 
 test("normalizeRatioInput: 入力途中の文字列は変更しない", () => {

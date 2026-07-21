@@ -165,6 +165,32 @@ class OcrDatasetCreateRequest(BaseModel):
     text_case: Literal["upper", "lower", "keep"] = Field(
         default="upper", description="ラベル/文字セットの大小文字処理（Tesseractの小文字学習はlower）"
     )
+    # 新形式の学習時オーグメンテーション設定（Trainのみへ適用・元画像は必ず残す）。
+    # {preset, multiplier, rotation:{enabled,max_degrees,probability}, brightness/contrast:{enabled,range,probability},
+    #  blur/noise:{enabled,strength,probability}}。None/preset=none=未使用（従来動作）
+    augmentation: Optional[dict] = Field(default=None, description="学習時オーグメンテーション設定（Trainのみ）")
+
+
+class OcrDatasetSplitPreviewRequest(BaseModel):
+    project_id: Optional[str] = Field(default="default")
+    image_types: list[str] = Field(default_factory=lambda: ["wide"])
+    charset: str = Field(default="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+    max_text_length: int = Field(default=8, ge=1, le=64)
+    text_case: Literal["upper", "lower", "keep"] = Field(default="upper")
+    train_ratio: float = Field(default=0.8, gt=0)
+    val_ratio: float = Field(default=0.1, ge=0)
+    test_ratio: float = Field(default=0.1, ge=0)
+
+
+class OcrAugmentationPreviewRequest(BaseModel):
+    project_id: Optional[str] = Field(default="default")
+    image_types: list[str] = Field(default_factory=lambda: ["wide"])
+    charset: str = Field(default="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+    max_text_length: int = Field(default=8, ge=1, le=64)
+    text_case: Literal["upper", "lower", "keep"] = Field(default="upper")
+    image_shape: list[int] = Field(default_factory=lambda: [3, 48, 320])
+    augmentation: dict = Field(..., description="プレビューするオーグメンテーション設定")
+    sample_count: int = Field(default=3, ge=1, le=5)
 
 
 class OcrEvalTarget(BaseModel):

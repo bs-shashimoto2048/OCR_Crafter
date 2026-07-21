@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Card from "../components/Card";
 import Button from "../components/Button";
 import { PADDLEOCR_OFFICIAL_MODELS_TOOLTIP } from "../lib/paddleocrOfficialTooltip";
-import { normalizeRatioInput, summarizeRatios } from "../lib/ratio";
+import { autoTestRatio, normalizeRatioInput, summarizeRatios } from "../lib/ratio";
+import { AUG_PRESET_LABELS, applyAugmentationPreset } from "../lib/augmentation";
 import {
   UI_TRAINING_STATE_LABELS,
   classifyLogLine,
@@ -72,10 +73,17 @@ export default function TrainingView({
   setOcrMaxTextLength,
   ocrImageShape,
   setOcrImageShape,
-  ocrUseAugmentation,
-  setOcrUseAugmentation,
-  ocrAugStrength,
-  setOcrAugStrength,
+  ocrAugmentation,
+  setOcrAugmentation,
+  ocrAugPreview,
+  ocrAugPreviewLoading,
+  onPreviewAugmentation,
+  ocrSplitSeed,
+  setOcrSplitSeed,
+  ocrSplitPreview,
+  ocrSplitPreviewLoading,
+  onPreviewSplit,
+  ratioError,
   ocrDatasetDir,
   ocrDatasetCreateMode,
   setOcrDatasetCreateMode,
@@ -868,18 +876,22 @@ export default function TrainingView({
                     <div className="min-w-0">
                       <label className="app-label">
                         データ分割
-                        <InfoHint text="Train / Validation / Test の分割比率（合計1.00）。0.1単位で変更できます。Tesseractでは Train→train.list / Validation→eval.list / Test→評価用 として使われます。" />
+                        <InfoHint text="Train / Validation / Test の分割比率（合計1.00）。0.05単位で変更でき、TestはTrain・Validationから自動計算されます（Test = 1.0 − Train − Val）。枚数は最大剰余法で算出され合計が必ず有効画像数と一致します。Tesseractでは Train→train.list / Validation→eval.list / Test→評価用 として使われます。" />
                       </label>
-                      {/* 0.1単位入力。スピナー操作の浮動小数点誤差は normalizeRatioInput で小数第1位へ丸める。
+                      {/* 0.05単位入力。Testは自動計算（方式A）で合計エラーを構造的に防ぐ。
                           minmax(0,1fr)×3 + min-w-0 でサイドバー表示時も入力欄が潰れない */}
                       <div className="grid grid-cols-3 gap-1">
                         <input
                           type="number"
                           min="0"
                           max="1"
-                          step="0.1"
+                          step="0.05"
                           value={trainRatio}
-                          onChange={(e) => setTrainRatio(normalizeRatioInput(e.target.value))}
+                          onChange={(e) => {
+                            const next = normalizeRatioInput(e.target.value);
+                            setTrainRatio(next);
+                            setTestRatio(autoTestRatio(next, valRatio));
+                          }}
                           className="app-input min-w-0 px-2"
                           title="Train 比率"
                         />
@@ -887,27 +899,202 @@ export default function TrainingView({
                           type="number"
                           min="0"
                           max="1"
-                          step="0.1"
+                          step="0.05"
                           value={valRatio}
-                          onChange={(e) => setValRatio(normalizeRatioInput(e.target.value))}
+                          onChange={(e) => {
+                            const next = normalizeRatioInput(e.target.value);
+                            setValRatio(next);
+                            setTestRatio(autoTestRatio(trainRatio, next));
+                          }}
                           className="app-input min-w-0 px-2"
                           title="Validation 比率"
                         />
                         <input
                           type="number"
-                          min="0"
-                          max="1"
-                          step="0.1"
                           value={testRatio}
-                          onChange={(e) => setTestRatio(normalizeRatioInput(e.target.value))}
-                          className="app-input min-w-0 px-2"
-                          title="Test 比率"
+                          readOnly
+                          className="app-input min-w-0 px-2 opacity-80"
+                          title="Test 比率（自動計算: 1.0 − Train − Val）"
                         />
                       </div>
                       <p className={`mt-1 text-[11px] ${ratioSummary.valid ? "text-muted" : "text-amber-100"}`}>
                         Train/Val/Test 合計: {ratioSummary.total}
-                        {ratioSummary.valid ? "" : "（1.00 になるよう調整してください）"}
+                        {ratioSummary.valid ? "（Testは自動計算）" : "（1.00 になるよう調整してください）"}
                       </p>
+                      {ratioError ? <p className="mt-1 text-[11px] text-red-300">{ratioError}</p> : null}
+                      <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2">
+                        <div>
+                          <label className="app-label">
+                            Split Seed
+                            <InfoHint text="データ分割（シャッフル）に使う乱数の種です。同じ画像集合・同じ比率・同じSeedなら分割結果が完全に再現されます。モデルメタへ保存され学習条件比較で確認できます。" />
+                          </label>
+                          <input
+                            type="number"
+                            className="app-input"
+                            value={ocrSplitSeed ?? 42}
+                            onChange={(e) => setOcrSplitSeed?.(e.target.value)}
+                          />
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="h-9 whitespace-nowrap px-2.5 text-[12px]"
+                          disabled={Boolean(ocrSplitPreviewLoading)}
+                          onClick={() => onPreviewSplit?.()}
+                          title="現在の条件（charset・比率）での入力/有効画像数と分割予定枚数を確認します"
+                        >
+                          {ocrSplitPreviewLoading ? "確認中..." : "分割枚数を確認"}
+                        </Button>
+                      </div>
+                      {ocrSplitPreview ? (
+                        <div className="mt-2 rounded-lg border border-border/70 bg-card/55 px-2.5 py-2 text-[12px] tabular-nums">
+                          <p className="text-text">
+                            入力画像数 {ocrSplitPreview.input_count}枚 / 有効画像数 {ocrSplitPreview.valid_count}枚
+                            {ocrSplitPreview.input_count - ocrSplitPreview.valid_count > 0
+                              ? ` / 除外 ${ocrSplitPreview.input_count - ocrSplitPreview.valid_count}枚`
+                              : ""}
+                          </p>
+                          {ocrSplitPreview.input_count - ocrSplitPreview.valid_count > 0 ? (
+                            <p className="text-muted">
+                              除外内訳: 対象外タイプ {ocrSplitPreview.skipped?.type ?? 0} / ラベル不正（charset外・空）{" "}
+                              {ocrSplitPreview.skipped?.invalid_label ?? 0} / 元画像なし {ocrSplitPreview.skipped?.missing_source ?? 0}
+                            </p>
+                          ) : null}
+                          <p className="mt-0.5 text-text">
+                            予定: Train {ocrSplitPreview.counts?.train}枚（
+                            {((ocrSplitPreview.counts?.train / Math.max(1, ocrSplitPreview.valid_count)) * 100).toFixed(2)}%）/ Val{" "}
+                            {ocrSplitPreview.counts?.val}枚 / Test {ocrSplitPreview.counts?.test}枚 = 合計{" "}
+                            {(ocrSplitPreview.counts?.train ?? 0) + (ocrSplitPreview.counts?.val ?? 0) + (ocrSplitPreview.counts?.test ?? 0)}枚
+                          </p>
+                          <p className="text-muted">分割方式: 画像単位（設定比率と実枚数比率は端数処理でわずかに異なる場合があります）</p>
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="min-w-0">
+                      <label className="app-label">
+                        学習オーグメンテーション
+                        <InfoHint text="学習データ（Trainのみ）へ回転・明るさ・コントラスト・ぼかし・ノイズをランダム適用した追加画像を生成します。Validation・Test・評価データには適用しません。元画像は必ずTrainへ残り、正解ラベルは変更されません。設定はモデルメタへ保存され学習条件比較で確認できます。" />
+                      </label>
+                      <div className="grid grid-cols-2 gap-1">
+                        <select
+                          className="app-select min-w-0"
+                          value={ocrAugmentation?.preset || "none"}
+                          onChange={(e) => setOcrAugmentation?.(applyAugmentationPreset(ocrAugmentation, e.target.value))}
+                          title="プリセット（なし=無効 / 弱い=OCR文字を壊しにくい推奨値 / カスタム=個別編集）"
+                        >
+                          {Object.entries(AUG_PRESET_LABELS).map(([key, label]) => (
+                            <option key={key} value={key}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          className="app-select min-w-0"
+                          value={String(ocrAugmentation?.multiplier ?? 1.5)}
+                          disabled={(ocrAugmentation?.preset || "none") === "none"}
+                          onChange={(e) => setOcrAugmentation?.({ ...ocrAugmentation, multiplier: Number(e.target.value) })}
+                          title="生成倍率（Train枚数に対する増加後の倍率。元画像は必ず残り、追加分だけ生成されます）"
+                        >
+                          <option value="1.5">生成倍率 1.5倍</option>
+                          <option value="2">生成倍率 2.0倍</option>
+                          <option value="3">生成倍率 3.0倍</option>
+                        </select>
+                      </div>
+                      {(ocrAugmentation?.preset || "none") !== "none" ? (
+                        <div className="mt-1 space-y-1">
+                          {[
+                            { key: "rotation", label: "回転", valueKey: "max_degrees", valueLabel: "±度", min: 0, max: 10, step: 0.5 },
+                            { key: "brightness", label: "明るさ", valueKey: "range", valueLabel: "±%", min: 0, max: 0.5, step: 0.05, percent: true },
+                            { key: "contrast", label: "コントラスト", valueKey: "range", valueLabel: "±%", min: 0, max: 0.5, step: 0.05, percent: true },
+                            { key: "blur", label: "ぼかし", valueKey: null },
+                            { key: "noise", label: "ノイズ", valueKey: null },
+                          ].map((def) => {
+                            const entry = ocrAugmentation?.[def.key] || {};
+                            const update = (patch) =>
+                              setOcrAugmentation?.({
+                                ...ocrAugmentation,
+                                preset: "custom",
+                                [def.key]: { ...entry, ...patch },
+                              });
+                            return (
+                              <div key={def.key} className="grid grid-cols-[minmax(0,7rem)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-1 text-[12px]">
+                                <label className="inline-flex min-w-0 items-center gap-1.5 text-text">
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(entry.enabled)}
+                                    onChange={(e) => update({ enabled: e.target.checked })}
+                                  />
+                                  <span className="truncate">{def.label}</span>
+                                </label>
+                                {def.valueKey ? (
+                                  <input
+                                    type="number"
+                                    min={def.min}
+                                    max={def.max}
+                                    step={def.step}
+                                    className="app-input min-w-0 px-2 py-1 text-[12px]"
+                                    value={def.percent ? Math.round((entry[def.valueKey] ?? 0.1) * 100) : entry[def.valueKey] ?? 2}
+                                    disabled={!entry.enabled}
+                                    onChange={(e) =>
+                                      update({ [def.valueKey]: def.percent ? Number(e.target.value) / 100 : Number(e.target.value) })
+                                    }
+                                    title={def.percent ? "変化範囲（±%）" : "最大角度（±度）"}
+                                  />
+                                ) : (
+                                  <select
+                                    className="app-select min-w-0 px-2 py-1 text-[12px]"
+                                    value={entry.strength || "weak"}
+                                    disabled={!entry.enabled}
+                                    onChange={(e) => update({ strength: e.target.value })}
+                                    title="強度"
+                                  >
+                                    <option value="weak">弱</option>
+                                    <option value="medium">中</option>
+                                  </select>
+                                )}
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max="100"
+                                  step="5"
+                                  className="app-input min-w-0 px-2 py-1 text-[12px]"
+                                  value={Math.round((entry.probability ?? 0.3) * 100)}
+                                  disabled={!entry.enabled}
+                                  onChange={(e) => update({ probability: Number(e.target.value) / 100 })}
+                                  title="適用確率（%）"
+                                />
+                              </div>
+                            );
+                          })}
+                          <p className="text-[11px] text-muted">各行: 有効 / 値（±度・±%・強度）/ 適用確率%。Trainのみへ適用されます</p>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            className="h-7 px-2.5 text-[12px]"
+                            disabled={Boolean(ocrAugPreviewLoading)}
+                            onClick={() => onPreviewAugmentation?.()}
+                            title="ランダムなサンプル画像へ現在の設定を適用し、文字が読めなくなるほど強い設定を事前に確認します"
+                          >
+                            {ocrAugPreviewLoading ? "生成中..." : "オーグメンテーションをプレビュー"}
+                          </Button>
+                          {ocrAugPreview?.items?.length ? (
+                            <div className="space-y-1 rounded-lg border border-border/70 bg-card/55 px-2 py-1.5">
+                              {ocrAugPreview.items.map((item) => (
+                                <div key={item.image_name} className="min-w-0">
+                                  <p className="truncate text-[11px] text-muted" title={item.image_name}>
+                                    {item.image_name}（{item.label}）
+                                  </p>
+                                  <div className="grid grid-cols-2 gap-1">
+                                    <img src={item.original} alt="元画像" className="h-10 w-full rounded border border-border/60 object-contain" />
+                                    <img src={item.augmented} alt="適用後" className="h-10 w-full rounded border border-border/60 object-contain" />
+                                  </div>
+                                </div>
+                              ))}
+                              <p className="text-[10px] text-muted">左=元画像 / 右=適用後（実行のたびにランダム）</p>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
                     <div>
                       <label className="app-label">
@@ -1295,28 +1482,6 @@ export default function TrainingView({
                               placeholder="320"
                             />
                           </div>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <label className="inline-flex items-center gap-2 rounded-lg border border-border/70 bg-card/55 px-3 py-2 text-sm text-text">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(ocrUseAugmentation)}
-                            onChange={(e) => setOcrUseAugmentation(e.target.checked)}
-                          />
-                          Augmentationを使用
-                        </label>
-                        <div>
-                          <label className="app-label">Aug強度 (1-3)</label>
-                          <input
-                            type="number"
-                            min="1"
-                            max="3"
-                            className="app-input"
-                            value={ocrAugStrength}
-                            onChange={(e) => setOcrAugStrength(e.target.value)}
-                            disabled={!ocrUseAugmentation}
-                          />
                         </div>
                       </div>
                       <div className="grid grid-cols-2 gap-2">

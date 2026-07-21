@@ -73,7 +73,9 @@
 
 | Method / Path | リクエスト | レスポンス主要キー | 概要 |
 |---|---|---|---|
-| POST `/api/ocr/dataset/create` | `OcrDatasetCreateRequest`（`image_types`, `charset`, `max_text_length`, `image_shape`, 拡張設定, 比率, `text_case`） | 作成結果 | ラベル済み画像からOCR認識用データセット作成 |
+| POST `/api/ocr/dataset/create` | `OcrDatasetCreateRequest`（`image_types`, `charset`, `max_text_length`, `image_shape`, 比率, `seed`, `text_case`, 任意: `augmentation`=新形式オーグメンテーション設定） | 作成結果（`counts`＋`input_count`/`valid_count`/`skipped`内訳/`split_method: image`/`augmentation`/`augmentation_generated`） | ラベル済み画像からOCR認識用データセット作成。**分割枚数は最大剰余法**（合計=有効画像数を保証。同値小数部はTrain→Val→Test優先）。`augmentation` 指定時は**Trainのみ**へ追加画像を生成（元画像は必ず残る・ラベル不変・生成枚数=(倍率-1)×Train枚数）。比率合計≠1.0は **400**（`detail={code: INVALID_SPLIT_RATIO, message, values}` の構造化エラー） |
+| POST `/api/ocr/dataset/split-preview` | `OcrDatasetSplitPreviewRequest`（`image_types`, `charset`, `max_text_length`, `text_case`, 比率） | `input_count`, `valid_count`, `skipped{type,invalid_label,missing_source}`, `counts`, `split_method`, `ratios` | データセット作成前の分割予定枚数プレビュー（画像は生成しない。作成時と同じ最大剰余法） |
+| POST `/api/ocr/dataset/augmentation-preview` | `OcrAugmentationPreviewRequest`（`augmentation`, `sample_count`=1〜5, `image_shape` 等） | `items[{image_name,label,original,augmented}]`（base64 PNG）, `config` | 学習前のオーグメンテーションプレビュー（ランダムサンプルへ適用。強すぎる設定の事前確認用） |
 | POST `/api/ocr/dataset/from_logs` | `OcrDatasetFromLogsRequest`（`only_invalid`, `include_corrected` 等） | 作成結果 | 推論ログからOCRデータセット作成 |
 | POST `/api/ocr/train/start` | `OcrTrainStartRequest`（`engine`, `dataset_dir`, `device`, worker/AMP設定等） | `job_id`, `engine: paddleocr` | PaddleOCR学習ジョブ開始（paddleocrのみ許可）。同一プロジェクトでアクティブなOCRジョブがある場合は **409 Conflict** |
 | POST `/api/tesseract/train/start` | `TesseractTrainStartRequest`（`dataset_dir`, `charset`, `max_iterations`, `base_lang`, `psm`, 任意: `experiment_name` / `parent_model_id` / `training_note`） | `job_id`, `engine: tesseract` | Tesseract LSTM fine-tune 開始。二重実行は **409 Conflict**。実験情報はジョブ（`training_jobs.experiment_meta` JSON列）経由でモデルメタへ保存（未指定=従来動作） |

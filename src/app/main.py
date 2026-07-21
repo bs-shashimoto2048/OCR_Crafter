@@ -10,6 +10,7 @@ import asyncio
 import hashlib
 import io
 import json
+import math
 import base64
 import shutil
 import zipfile
@@ -52,6 +53,8 @@ from .schemas import (
     ImportImagesRequest,
     LabelUpdateRequest,
     OcrDatasetCreateRequest,
+    OcrDatasetSplitPreviewRequest,
+    OcrAugmentationPreviewRequest,
     OcrDatasetFromLogsRequest,
     OcrEvaluateRequest,
     OcrLogSaveRequest,
@@ -90,6 +93,8 @@ from .services.ocr_pipeline import (
     OCR_CHARSET_DEFAULT,
     create_ocr_dataset_from_logs,
     create_ocr_dataset,
+    preview_ocr_dataset_split,
+    preview_ocr_augmentation,
     migrate_ocr_models_to_inference,
     PADDLE_INFERENCE_MARKERS,
     read_latest_rapid_ocr_states,
@@ -2061,9 +2066,29 @@ def train_stop(job_id: str, delete_artifacts: bool = Query(default=False)) -> di
     return _stop_training_worker(job_id, expected_family="classification", delete_artifacts=delete_artifacts)
 
 
+def _split_ratio_error_detail(train: float, val: float, test: float) -> Optional[dict[str, Any]]:
+    """比率合計の事前検証（構造化エラー）。合計1.0（許容誤差1e-6）でなければ詳細を返す。"""
+    total = float(train) + float(val) + float(test)
+    if math.isclose(total, 1.0, rel_tol=0, abs_tol=1e-6):
+        return None
+    return {
+        "code": "INVALID_SPLIT_RATIO",
+        "message": "Train・Validation・Testの合計を1.00にしてください。",
+        "values": {
+            "train": float(train),
+            "validation": float(val),
+            "test": float(test),
+            "sum": round(total, 6),
+        },
+    }
+
+
 @app.post("/api/ocr/dataset/create")
 def api_ocr_dataset_create(req: OcrDatasetCreateRequest) -> dict[str, Any]:
     resolved = _resolve_project_id(req.project_id)
+    ratio_error = _split_ratio_error_detail(req.train_ratio, req.val_ratio, req.test_ratio)
+    if ratio_error is not None:
+        raise HTTPException(status_code=400, detail=ratio_error)
     try:
         return create_ocr_dataset(
             project_id=resolved,
@@ -2080,9 +2105,51 @@ def api_ocr_dataset_create(req: OcrDatasetCreateRequest) -> dict[str, Any]:
             output_dir=req.output_dir,
             overwrite=req.overwrite,
             text_case=req.text_case,
+            augmentation=req.augmentation,
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/api/ocr/dataset/split-preview")
+def api_ocr_dataset_split_preview(req: OcrDatasetSplitPreviewRequest) -> dict[str, Any]:
+    """データセット作成前の分割予定枚数プレビュー（入力/有効/除外内訳＋最大剰余法の予定枚数）。"""
+    resolved = _resolve_project_id(req.project_id)
+    ratio_error = _split_ratio_error_detail(req.train_ratio, req.val_ratio, req.test_ratio)
+    if ratio_error is not None:
+        raise HTTPException(status_code=400, detail=ratio_error)
+    try:
+        return preview_ocr_dataset_split(
+            project_id=resolved,
+            image_types=req.image_types,
+            charset=req.charset,
+            max_text_length=req.max_text_length,
+            text_case=req.text_case,
+            train_ratio=req.train_ratio,
+            val_ratio=req.val_ratio,
+            test_ratio=req.test_ratio,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/api/ocr/dataset/augmentation-preview")
+def api_ocr_dataset_augmentation_preview(req: OcrAugmentationPreviewRequest) -> dict[str, Any]:
+    """学習前のオーグメンテーションプレビュー（元画像/適用後のペアをbase64で返す）。"""
+    resolved = _resolve_project_id(req.project_id)
+    try:
+        return preview_ocr_augmentation(
+            project_id=resolved,
+            augmentation=req.augmentation,
+            image_types=req.image_types,
+            charset=req.charset,
+            max_text_length=req.max_text_length,
+            text_case=req.text_case,
+            image_shape=req.image_shape,
+            sample_count=req.sample_count,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 

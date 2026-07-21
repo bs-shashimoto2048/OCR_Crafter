@@ -2,6 +2,8 @@
 // モデル情報（/models/info の item）から学習条件を正規化し、
 // 表示行・前後モデルの差分・比較可能性・ルールベースの次回学習候補を組み立てる。
 
+import { augmentationPresetLabel, augmentationSummary } from "./augmentation.js";
+
 const MISSING = "未記録";
 
 // 数値の桁区切り表示（未記録はそのまま）
@@ -19,12 +21,25 @@ export function normalizeTrainingCondition(info = {}) {
   const test = Number(counts.test || 0);
   const total = train + val + test;
   const aug = info.ocr_augmentation || {};
-  const augText =
+  const legacyAugText =
     aug?.enabled === null || aug?.enabled === undefined ? "" : aug.enabled ? `ON（強度 ${Number(aug.strength || 0) || "-"}）` : "OFF";
+  const augConfig = info.augmentation_config && typeof info.augmentation_config === "object" ? info.augmentation_config : null;
   // Number(null)===0 のため null/undefined/空は先に弾く（0秒への化け防止）
   const rawDuration = info.training_duration_seconds;
   const duration = rawDuration === null || rawDuration === undefined || rawDuration === "" ? NaN : Number(rawDuration);
+  const rawSeed = info.split_seed;
+  const rawGenerated = info.augmentation_generated;
+  const ratioObj = info.dataset_split_ratio && typeof info.dataset_split_ratio === "object" ? info.dataset_split_ratio : null;
+  const ratioText =
+    ratioObj && [ratioObj.train, ratioObj.val, ratioObj.test].some((v) => Number(v) > 0)
+      ? `${Number(ratioObj.train).toFixed(2)} / ${Number(ratioObj.val).toFixed(2)} / ${Number(ratioObj.test).toFixed(2)}`
+      : "";
   return {
+    splitRatio: ratioText,
+    splitSeed: rawSeed === null || rawSeed === undefined || rawSeed === "" ? null : Number(rawSeed),
+    splitMethod: String(info.split_method || ""),
+    augPreset: augmentationPresetLabel(augConfig, aug?.enabled === null || aug?.enabled === undefined ? null : Boolean(aug.enabled)),
+    augGenerated: rawGenerated === null || rawGenerated === undefined || rawGenerated === "" ? null : Number(rawGenerated),
     experimentName: String(info.experiment_name || ""),
     parentModelId: String(info.parent_model_id || ""),
     baseModel: String(info.base_lang || params.init_source_value || ""),
@@ -33,7 +48,8 @@ export function normalizeTrainingCondition(info = {}) {
     split: total > 0 ? `${train || "-"} / ${val || "-"} / ${test || "-"}` : "",
     splitCounts: total > 0 ? { train, val, test } : null,
     trainingPreprocess: "", // Tesseract学習は学習前処理設定を持たない（将来拡張用・現状は未記録）
-    augmentation: augText,
+    // 新形式（augmentation_config）を優先し、旧 use_augmentation/aug_strength はON/OFF表示で互換
+    augmentation: augmentationSummary(augConfig, legacyAugText),
     charset: String(info.charset || ""),
     durationSeconds: Number.isFinite(duration) && duration >= 0 ? duration : null,
     createdAt: String(info.created_at || info.modified_at || ""),
@@ -65,8 +81,13 @@ export const TRAINING_CONDITION_ROWS = [
   { key: "iterations", label: "Iteration", helpKey: "iteration", value: (c) => (c.iterations === null ? MISSING : fmtNum(c.iterations)) },
   { key: "imageTotal", label: "学習画像数", value: (c) => (c.imageTotal === null ? MISSING : fmtNum(c.imageTotal)) },
   { key: "split", label: "Train / Val / Test", helpKey: "trainValTest", value: (c) => c.split || MISSING },
+  { key: "splitRatio", label: "Train / Val / Test 比率", helpKey: "trainValTest", value: (c) => c.splitRatio || MISSING },
+  { key: "splitSeed", label: "Split Seed", helpKey: "splitSeed", value: (c) => (c.splitSeed === null || c.splitSeed === undefined ? MISSING : String(c.splitSeed)) },
+  { key: "splitMethod", label: "分割方式", helpKey: "splitMethod", value: (c) => (c.splitMethod === "image" ? "画像単位" : c.splitMethod || MISSING) },
   { key: "trainingPreprocess", label: "学習前処理", helpKey: "ocrPreprocess", value: (c) => c.trainingPreprocess || MISSING },
-  { key: "augmentation", label: "Augmentation", helpKey: "augmentation", value: (c) => c.augmentation || MISSING },
+  { key: "augPreset", label: "Augプリセット", helpKey: "augmentation", value: (c) => c.augPreset || MISSING },
+  { key: "augmentation", label: "Augmentation設定", helpKey: "augmentation", value: (c) => c.augmentation || MISSING },
+  { key: "augGenerated", label: "Aug生成枚数", value: (c) => (c.augGenerated === null || c.augGenerated === undefined ? MISSING : `${c.augGenerated}枚`) },
   { key: "charset", label: "Charset", helpKey: "charset", value: (c) => c.charset || MISSING },
   { key: "durationSeconds", label: "学習時間", value: (c) => durationLabel(c.durationSeconds) },
   { key: "createdAt", label: "学習日時", value: (c) => dateLabel(c.createdAt) },
