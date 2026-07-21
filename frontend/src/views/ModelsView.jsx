@@ -315,12 +315,12 @@ export default function ModelsView({
   }
 
   // 管理No表示チップ（ホバーで「M0004 → ファイル名」のツールチップ）
-  function ModelIdChip({ name, className = "" }) {
+  function ModelIdChip({ name, className = "mr-1" }) {
     const id = modelIdOf(name);
     if (!id) return null;
     return (
       <span
-        className={`mr-1 inline-block shrink-0 rounded bg-accent/15 px-1 font-mono text-[10px] font-semibold text-accent ${className}`}
+        className={`inline-block shrink-0 rounded bg-accent/15 px-1 font-mono text-[10px] font-semibold text-accent ${className}`}
         title={`${id} → ${name}`}
       >
         {id}
@@ -870,7 +870,9 @@ export default function ModelsView({
     const maxWins = Math.max(1, ...comparison.columns.map((col) => winLoss.wins[col.model] || 0));
     const winsSorted = [...comparison.columns].sort((a, b) => (winLoss.wins[b.model] || 0) - (winLoss.wins[a.model] || 0));
     // 横スクロール表の共通クラス（指標名列はsticky固定・管理Noは常に表示）
-    const stickyLabel = "sticky left-0 z-10 whitespace-nowrap bg-[#333c46] px-2 py-1.5 text-left text-[13px] font-normal text-muted";
+    // 項目列は110px以上を確保しsticky固定（モデル値列が潰れないよう横スクロールと併用）
+    const stickyLabel =
+      "sticky left-0 z-10 min-w-[110px] whitespace-nowrap bg-[#333c46] px-2 py-1.5 text-left text-[13px] font-normal text-muted";
     return (
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {/* 固定領域: 凡例 + 警告 + 推奨モデル + 主要3指標カード
@@ -930,10 +932,10 @@ export default function ModelsView({
               狭い幅では縦積みにせず横スクロールの3列比較にする=固定領域の高さを一定に保つ） */}
           <div className="dark-scroll overflow-x-auto pb-1">
             <div
-              className="grid gap-2"
+              className="grid gap-2.5"
               style={{
-                gridTemplateColumns: `repeat(${comparison.columns.length}, minmax(8.5rem, 1fr))`,
-                minWidth: `${comparison.columns.length * 8.5 + (comparison.columns.length - 1) * 0.5}rem`,
+                gridTemplateColumns: `repeat(${comparison.columns.length}, minmax(140px, 1fr))`,
+                minWidth: `${comparison.columns.length * 140 + (comparison.columns.length - 1) * 10}px`,
               }}
             >
             {comparison.columns.map((col, index) => (
@@ -1077,7 +1079,7 @@ export default function ModelsView({
                       {row.values.map((value, index) => (
                         <td
                           key={comparison.columns[index].model}
-                          className="min-w-0 max-w-[9rem] truncate px-2 py-1.5 text-[13px] text-text"
+                          className="min-w-0 max-w-[12rem] truncate px-2 py-1.5 text-[13px] text-text"
                           title={value}
                         >
                           {value}
@@ -1260,7 +1262,11 @@ export default function ModelsView({
                         </span>
                       </td>
                       {compareTargets.map((name) => (
-                        <td key={name} className="min-w-0 max-w-[10rem] truncate px-2 py-1.5 text-[14px] font-medium text-text" title={String(row.value(name))}>
+                        <td
+                          key={name}
+                          className="min-w-[130px] max-w-[14rem] truncate px-2 py-1.5 text-[14px] font-medium text-text"
+                          title={String(row.value(name))}
+                        >
                           {row.value(name)}
                         </td>
                       ))}
@@ -1276,7 +1282,9 @@ export default function ModelsView({
   }
 
   return (
-    <div className="grid h-[calc(100vh-238px)] min-h-[480px] grid-cols-[minmax(0,7fr)_minmax(300px,3fr)] gap-3">
+    // 1400px以上=左右2カラム（左2fr:右1fr・右ペインは最低520px）/ 1400px未満=右ペインを下段へ縦積み
+    // （縦積み時は固定高を外して自然高にし、文字を縮小して押し込まない）
+    <div className="grid grid-cols-1 gap-3 min-[1400px]:h-[calc(100vh-238px)] min-[1400px]:min-h-[480px] min-[1400px]:grid-cols-[minmax(0,2fr)_minmax(520px,1fr)]">
       {/* 左: サマリー + フィルタ + 一覧 */}
       <div className="flex min-h-0 flex-col gap-2">
         <div className="flex shrink-0 gap-2">
@@ -1342,17 +1350,18 @@ export default function ModelsView({
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-border/60">
+        <div className="max-h-[60vh] min-h-0 flex-1 overflow-auto rounded-xl border border-border/60 min-[1400px]:max-h-none">
           <table className="w-full text-sm">
             <thead className="sticky top-0 z-10 bg-[#2f3841]/95 backdrop-blur">
+              {/* モデル名列を1frで広く取り、他列は固定幅で左寄せ（バッジ削除で空いた分を活用） */}
               <tr className="border-b border-border text-left text-muted">
                 <th className="w-8 px-2 py-2 font-medium" />
-                <th className="px-2 py-2 font-medium">モデル名</th>
-                <th className="px-2 py-2 font-medium">Engine</th>
-                <th className="px-2 py-2 font-medium">方式</th>
-                <th className="px-2 py-2 font-medium">作成日</th>
-                <th className="px-2 py-2 font-medium">評価</th>
-                <th className="px-2 py-2 font-medium">状態</th>
+                <th className="min-w-[280px] px-2 py-2 font-medium">モデル名</th>
+                <th className="w-[90px] px-2 py-2 font-medium">Engine</th>
+                <th className="w-[90px] px-2 py-2 font-medium">方式</th>
+                <th className="w-[150px] px-2 py-2 font-medium">作成日</th>
+                <th className="w-[150px] px-2 py-2 font-medium">評価</th>
+                <th className="w-[80px] px-2 py-2 font-medium">状態</th>
               </tr>
             </thead>
             <tbody>
@@ -1377,9 +1386,10 @@ export default function ModelsView({
                       />
                     </td>
                     <td className="px-2 py-2">
+                      {/* 一覧は管理No＋モデル名のみ（Best/Recommended等の比較バッジは比較画面へ集約） */}
                       <p className="min-w-0 truncate text-text" title={name}>
-                        <ModelIdChip name={name} />
-                        {displayName(name)} <ModelBadgeChips names={badgeMap[name]} />
+                        <ModelIdChip name={name} className="mr-1.5" />
+                        {displayName(name)}
                       </p>
                       {aliases[name] ? (
                         <p className="truncate text-[10px] text-muted" title={name}>

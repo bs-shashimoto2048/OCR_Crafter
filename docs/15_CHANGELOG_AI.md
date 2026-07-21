@@ -16,6 +16,24 @@ timeline
 
 ## 2026-07
 
+### モデル一覧の簡素化と右ペイン拡張
+
+**概要**
+モデル一覧からモデル名横の比較・順位バッジ（Best Accuracy / Latest Best / Best CER / Best Char Acc / Recommended と🏆⭐🟢🔵の装飾）を削除し、一覧は「管理No（色付きチップ・名前との間隔6px）＋モデル名／Engine／方式／作成日／評価／状態」のみへ簡素化（状態列の「最新」ラベルは維持）。左右比率を `minmax(0,7fr):minmax(300px,3fr)` → **1400px以上で `minmax(0,2fr):minmax(520px,1fr)`（右ペイン最低520px・約67:33）**へ変更し、1400px未満は右ペインを下段へ縦積み（固定高を外し自然高・一覧はmax-h-60vhで内部スクロール）。右ペインの拡張に合わせ、比較カードを `repeat(3, minmax(140px,1fr))`・gap 10px へ、詳細表の項目列をmin 110px・モデル値列をmin 130pxへ拡大した。
+
+**変更理由**
+バッジ類は比較画面（モデル詳細情報の展開部・推奨モデル・指標別結果）で確認できるため一覧では冗長で、モデル名列の幅を圧迫していた。一覧の簡素化で空いた幅を右側のモデル詳細・比較ダッシュボードへ再配分し、比較カードや詳細表が潰れないようにした。狭い画面では文字縮小ではなくレイアウト切替（縦積み）で対応する。
+
+**注意事項**
+- バッジ判定ロジック（`modelBadges`）自体は不変。表示箇所が比較画面のモデル詳細情報のみになった
+- Charset等の長い値は truncate＋title（ホバーで全文）を維持
+- レンダリング回帰は `frontend/tests/modelsView.render.test.mjs`（vite ssrLoadModule + renderToString）で検証
+
+**影響範囲**
+`ModelsView.jsx`（一覧セル・ルートグリッド・列幅・比較カード幅・詳細表列幅）、`frontend/tests/modelsView.render.test.mjs`（新規）
+
+---
+
 ### 混同表示の特殊文字・Unicode安全化
 
 **概要**
