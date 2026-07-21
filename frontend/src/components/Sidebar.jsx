@@ -86,7 +86,7 @@ export const SIDEBAR_SECTIONS = [
     description: "分類モデルなど通常ワークフロー外の実験的な機能です。",
     defaultOpen: false,
     items: [
-      { id: "cls-training", label: "前処理・データセット作成・学習" },
+      { id: "cls-training", label: "分類学習" },
       { id: "cls-models", label: "分類モデル管理" },
       { id: "cls-inference", label: "分類推論" },
       { id: "cls-evaluation", label: "分類評価" },
