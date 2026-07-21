@@ -3,10 +3,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  COMPARE_METRICS,
+  buildConditionComparison,
   buildConfusionComparison,
   buildModelComparison,
   buildWinLoss,
   confusionLabel,
+  formatBestDiff,
   formatMetricValue,
   recommendModel,
 } from "../src/lib/modelCompare.js";
@@ -68,7 +71,7 @@ test("buildModelComparison: 各指標の最良値（CER=最小・文字正解率
   assert.equal(formatMetricValue(rowOf("cer").metric, comparison.columns[2].latest), "未記録");
 });
 
-test("buildWinLoss: 指標ごとの勝者と勝利数（タイ・欠損は勝者なし）", () => {
+test("buildWinLoss: 指標ごとの勝者と勝利数（単独最良）", () => {
   const comparison = buildModelComparison(HISTORY, MODELS);
   const winLoss = buildWinLoss(comparison);
   const winnerOf = (key) => winLoss.rows.find((row) => row.metric.key === key).winner;
@@ -79,6 +82,74 @@ test("buildWinLoss: 指標ごとの勝者と勝利数（タイ・欠損は勝者
   assert.equal(winLoss.wins.model_a, 9); // 全9指標で最良
   assert.equal(winLoss.wins.model_b, 0);
   assert.equal(winLoss.wins.model_c, 0);
+});
+
+test("buildWinLoss: 同率最良は全モデルをwinnersへ併記し各モデルへ1勝（勝者なしにしない）", () => {
+  const history = {
+    a: { ds: { percent: 38.6, at: "2026-07-17T00:00:00Z", cer: 0.1, char_accuracy: 0.9, correct_count: 88, total_count: 228 } },
+    b: { ds: { percent: 38.6, at: "2026-07-17T00:00:00Z", cer: 0.12, char_accuracy: 0.88, correct_count: 88, total_count: 228 } },
+  };
+  const comparison = buildModelComparison(history, ["a", "b"]);
+  const winLoss = buildWinLoss(comparison);
+  const rowOf = (key) => winLoss.rows.find((row) => row.metric.key === key);
+  // 完全一致率は同率 → 両方winners・単独勝者(winner)はnull
+  assert.deepEqual(rowOf("percent").winners, ["a", "b"]);
+  assert.equal(rowOf("percent").winner, null);
+  // CERは単独最良
+  assert.deepEqual(rowOf("cer").winners, ["a"]);
+  assert.equal(rowOf("cer").winner, "a");
+  // 勝利数: 同率でも各モデルへ1勝（a=cer,charAcc,percent,correct=4 / b=percent,correct=2）
+  assert.equal(winLoss.wins.a, 4);
+  assert.equal(winLoss.wins.b, 2);
+});
+
+test("formatBestDiff: 最良との差分表示（最良/pt/件・未記録はnull）", () => {
+  const metricOf = (key) => COMPARE_METRICS.find((m) => m.key === key);
+  const comparison = buildModelComparison(HISTORY, MODELS);
+  const rowOf = (key) => comparison.rows.find((r) => r.metric.key === key);
+  const colA = comparison.columns[0].latest;
+  const colB = comparison.columns[1].latest;
+  const colC = comparison.columns[2].latest;
+  // CER（min指標）: 最良=最小。劣る側は+pt表示
+  assert.equal(formatBestDiff(metricOf("cer"), colA, rowOf("cer").best), "最良");
+  assert.equal(formatBestDiff(metricOf("cer"), colB, rowOf("cer").best), "+1.6pt"); // 12.8% - 11.2%
+  // 文字正解率（max指標）: 劣る側は-pt表示
+  assert.equal(formatBestDiff(metricOf("charAccuracy"), colB, rowOf("charAccuracy").best), "-1.6pt");
+  // 完全一致率（percent）: pt差
+  assert.equal(formatBestDiff(metricOf("percent"), colB, rowOf("percent").best), "-1.2pt");
+  // 件数系
+  assert.equal(formatBestDiff(metricOf("regressed"), colB, rowOf("regressed").best), "+6件");
+  // 未記録（旧形式）はnull
+  assert.equal(formatBestDiff(metricOf("cer"), colC, rowOf("cer").best), null);
+});
+
+test("buildConditionComparison: 条件一致の判定と表示行", () => {
+  // 全モデル同条件 → match=true
+  const matched = {
+    a: { ds: { percent: 30, at: "2026-07-17T08:04:00Z", cer: 0.1, total_count: 228, dataset: "eval_x", whitelist: "default", pre: { source: "step5", summary: "Gray/固定90" } } },
+    b: { ds: { percent: 28, at: "2026-07-17T08:35:00Z", cer: 0.12, total_count: 228, dataset: "eval_x", whitelist: "default", pre: { source: "step5", summary: "Gray/固定90" } } },
+  };
+  const c1 = buildConditionComparison(buildModelComparison(matched, ["a", "b"]));
+  assert.equal(c1.match, true);
+  assert.deepEqual(c1.mismatched, []);
+  assert.equal(c1.rows.find((r) => r.key === "dataset").values[0], "eval_x");
+  assert.equal(c1.rows.find((r) => r.key === "preprocess").values[0], "Step5: Gray/固定90");
+
+  // OCR前処理と画像数が異なる → match=false・mismatchedへ列挙（評価日時の差は警告対象外）
+  const mismatched = {
+    a: { ds: { percent: 30, at: "2026-07-17T08:04:00Z", cer: 0.1, total_count: 228, dataset: "eval_x", whitelist: "default", pre: { source: "step5", summary: "Gray/固定90" } } },
+    b: { ds: { percent: 28, at: "2026-07-18T09:00:00Z", cer: 0.12, total_count: 200, dataset: "eval_x", whitelist: "default", pre: { source: "none" } } },
+  };
+  const c2 = buildConditionComparison(buildModelComparison(mismatched, ["a", "b"]));
+  assert.equal(c2.match, false);
+  assert.deepEqual(c2.mismatched, ["評価画像数", "OCR前処理"]);
+
+  // 評価データのあるモデルが1件だけ → 判定不能（match=null・警告も一致表示もしない）
+  const single = { a: matched.a };
+  const c3 = buildConditionComparison(buildModelComparison(single, ["a", "no_eval"]));
+  assert.equal(c3.match, null);
+  // 評価未実施モデルの表示は—
+  assert.equal(c3.rows.find((r) => r.key === "dataset").values[1], "—");
 });
 
 test("recommendModel: 勝利数で総合推奨（理由付き・Accuracy単独で決めない）", () => {
@@ -108,9 +179,32 @@ test("buildConfusionComparison: 全モデルの混同を統合しモデル別件
   const comparison = buildModelComparison(HISTORY, MODELS);
   const rows = buildConfusionComparison(comparison);
   assert.equal(rows[0].label, "0→O"); // 合計件数最多（12+19）
+  assert.equal(rows[0].total, 31); // 全モデル合計
   assert.deepEqual(rows[0].counts, [12, 19, null]); // 旧形式モデルはnull（-表示）
   const b8 = rows.find((row) => row.label === "B→8");
   assert.deepEqual(b8.counts, [6, 0, null]); // データありで未出現=0
+  assert.equal(b8.total, 6);
   assert.equal(confusionLabel({ from: "Y", to: "" }), "Y→∅");
   assert.equal(confusionLabel({ from: "", to: "1" }), "∅→1");
+});
+
+test("buildConfusionComparison: 合計多い順の並び・TOP8制限とInfinityで全件", () => {
+  // 10種類の混同を持つ履歴を生成（件数=キー番号で合計順が一意に決まる）
+  const confusions = Array.from({ length: 10 }, (_, i) => ({ kind: "sub", from: `${i}`, to: "X", count: i + 1 }));
+  const history = {
+    a: { ds: { percent: 30, at: "2026-07-17T00:00:00Z", cer: 0.1, confusions } },
+    b: { ds: { percent: 28, at: "2026-07-17T00:00:00Z", cer: 0.12, confusions: [] } },
+  };
+  const comparison = buildModelComparison(history, ["a", "b"]);
+  const top8 = buildConfusionComparison(comparison, 8);
+  assert.equal(top8.length, 8);
+  assert.equal(top8[0].label, "9→X"); // 件数最多が先頭
+  assert.equal(top8[0].counts[1], 0); // 評価データありで未出現=0（棒なし表示）
+  const all = buildConfusionComparison(comparison, Infinity);
+  assert.equal(all.length, 10); // Infinityで全件
+  // 並びは全件でも合計降順を維持（比較中は同じ混同が同じ位置）
+  assert.deepEqual(
+    all.map((r) => r.total),
+    [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
+  );
 });

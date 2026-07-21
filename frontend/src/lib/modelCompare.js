@@ -2,7 +2,8 @@
 // 最新評価履歴（lib/modelEval.js で正規化済み）から比較テーブル・勝敗表・推奨モデルを組み立てる。
 // Accuracy（完全一致率）は業務指標として比較項目に残すが、順位決定はAccuracy単独では行わない。
 
-import { latestEvalOf } from "./modelEval.js";
+import { latestEvalOf, whitelistLabelOf } from "./modelEval.js";
+import { historyPreprocessLabel } from "./evalHistory.js";
 
 // 比較項目定義（better: min=小さいほど良い / max=大きいほど良い）
 export const COMPARE_METRICS = [
@@ -54,22 +55,64 @@ export function buildModelComparison(evalHistory, models) {
   return { columns, rows };
 }
 
-// 勝敗表: 指標ごとに最良のモデルへ1勝（2モデル以上に値があり、単独最良のときだけ勝者）
+// 勝敗表（指標別結果）: 指標ごとに最良のモデルへ1勝。
+// 【同率最良の扱い】2モデル以上に値があるとき、最良値を持つ全モデルを winners に併記し、
+// **同率でも各モデルへ1勝ずつ与える**（「勝者なし」にはしない）。winner は単独最良時のみ設定（後方互換）。
 export function buildWinLoss(comparison) {
   const wins = Object.fromEntries(comparison.columns.map((col) => [col.model, 0]));
   const rows = comparison.rows.map((row) => {
     const numeric = row.values.map((value, index) => ({ value, index })).filter((x) => x.value !== null);
-    let winner = null;
+    let winners = [];
     if (numeric.length >= 2 && row.best !== null) {
-      const holders = numeric.filter((x) => x.value === row.best);
-      if (holders.length === 1) {
-        winner = comparison.columns[holders[0].index].model;
-        wins[winner] += 1;
-      }
+      winners = numeric.filter((x) => x.value === row.best).map((x) => comparison.columns[x.index].model);
+      winners.forEach((model) => {
+        wins[model] += 1;
+      });
     }
-    return { metric: row.metric, values: row.values, best: row.best, winner };
+    return { metric: row.metric, values: row.values, best: row.best, winners, winner: winners.length === 1 ? winners[0] : null };
   });
   return { rows, wins };
+}
+
+// 最良値との差分表示（主要指標カード用）。
+// 未記録=null / 最良="最良" / それ以外=最良との符号付き差（ratioPct・percent=pt、count系=件）。
+// CERのような min 指標では +1.9pt =「最良より1.9pt悪い」、max 指標では -1.9pt =「最良より1.9pt低い」。
+export function formatBestDiff(metric, entry, best) {
+  const value = metricValue(metric, entry);
+  if (value === null || best === null) return null;
+  if (value === best) return "最良";
+  const diff = metric.kind === "ratioPct" ? (value - best) * 100 : value - best;
+  const unit = metric.kind === "count" || metric.kind === "correctTotal" ? "件" : "pt";
+  const rounded = Math.round(diff * 10) / 10;
+  return `${rounded > 0 ? "+" : ""}${rounded}${unit}`;
+}
+
+// 評価条件の比較行と一致判定。
+// 警告対象（dataset / OCR前処理 / Whitelist / 評価画像数）がモデル間で異なれば mismatched へラベルを列挙。
+// 評価データのあるモデルが2件未満なら判定不能（match=null）。旧形式で未記録の値も文字列比較の対象
+// （「未記録」同士は一致扱い）。評価日時は表示のみで一致判定には含めない。
+export function buildConditionComparison(comparison) {
+  const defs = [
+    { key: "dataset", label: "評価データセット", value: (latest) => latest.dataset || "未記録", check: true },
+    { key: "total", label: "評価画像数", value: (latest) => (latest.total === null ? "未記録" : String(latest.total)), check: true },
+    { key: "preprocess", label: "OCR前処理", value: (latest) => historyPreprocessLabel(latest), check: true },
+    { key: "whitelist", label: "Whitelist", value: (latest) => whitelistLabelOf(latest.whitelist), check: true },
+    { key: "at", label: "評価日時", value: (latest) => (latest.at ? latest.at.slice(5, 16).replace("T", " ") : "未記録"), check: false },
+  ];
+  const evaluated = comparison.columns.filter((col) => col.latest);
+  const rows = defs.map((def) => ({
+    key: def.key,
+    label: def.label,
+    values: comparison.columns.map((col) => (col.latest ? def.value(col.latest) : "—")),
+  }));
+  if (evaluated.length < 2) {
+    return { rows, match: null, mismatched: [] };
+  }
+  const mismatched = defs
+    .filter((def) => def.check)
+    .filter((def) => new Set(evaluated.map((col) => def.value(col.latest))).size > 1)
+    .map((def) => def.label);
+  return { rows, match: mismatched.length === 0, mismatched };
 }
 
 // 推奨モデル: 勝利数最多 → タイはCER最小 → 文字正解率最大（Accuracy単独では決めない）。
@@ -100,8 +143,10 @@ export function recommendModel(comparison, winLoss) {
   return { model, wins: winLoss.wins[model] || 0, reasons };
 }
 
-// 混同比較: 全モデルの混同上位を件数合計で統合し、モデル別件数を並べる。
-// counts: 評価データがあるモデルは件数（未出現=0）、評価未実施はnull（-表示）
+// 混同比較: 全モデルの混同を件数合計で統合し、合計が多い順にモデル別件数を並べる
+// （比較中は同じ混同が全モデルで同じ位置に並ぶ）。limit=Infinity で全件。
+// counts: 評価データがあるモデルは件数（未出現=0）、評価未実施はnull（-表示）。
+// total=全モデル合計、maxCount=全行の最大件数（横棒グラフのスケール基準）
 export function buildConfusionComparison(comparison, limit = 8) {
   const totals = new Map();
   for (const col of comparison.columns) {
@@ -110,10 +155,8 @@ export function buildConfusionComparison(comparison, limit = 8) {
       totals.set(key, (totals.get(key) || 0) + Number(c.count || 0));
     }
   }
-  const keys = [...totals.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, limit)
-    .map(([key]) => key);
+  const entries = [...totals.entries()].sort((a, b) => b[1] - a[1]);
+  const keys = (Number.isFinite(limit) ? entries.slice(0, limit) : entries).map(([key]) => key);
   return keys.map((key) => {
     const [kind, from, to] = key.split("|");
     const counts = comparison.columns.map((col) => {
@@ -123,6 +166,6 @@ export function buildConfusionComparison(comparison, limit = 8) {
       const hit = (col.latest.confusions || []).find((c) => c.kind === kind && c.from === from && c.to === to);
       return hit ? Number(hit.count) : 0;
     });
-    return { kind, from, to, label: confusionLabel({ from, to }), counts };
+    return { kind, from, to, label: confusionLabel({ from, to }), counts, total: totals.get(key) || 0 };
   });
 }

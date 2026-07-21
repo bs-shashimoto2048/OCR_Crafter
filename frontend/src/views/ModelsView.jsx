@@ -17,11 +17,15 @@ import {
   whitelistLabelOf,
 } from "../lib/modelEval";
 import {
+  COMPARE_METRICS,
+  buildConditionComparison,
   buildConfusionComparison,
   buildModelComparison,
   buildWinLoss,
   confusionLabel,
+  formatBestDiff,
   formatMetricValue,
+  metricValue,
   recommendModel,
 } from "../lib/modelCompare";
 
@@ -257,6 +261,8 @@ export default function ModelsView({
   const [selectedModels, setSelectedModels] = useState([]);
   const [detailModel, setDetailModel] = useState("");
   const [compareMode, setCompareMode] = useState(false);
+  // 混同比較の全件展開（初期=TOP8のみ）
+  const [confusionExpanded, setConfusionExpanded] = useState(false);
   const [downloadingModelName, setDownloadingModelName] = useState("");
   const [filterSearch, setFilterSearch] = useState("");
   const [filterEngine, setFilterEngine] = useState("all");
@@ -810,7 +816,8 @@ export default function ModelsView({
     );
   }
 
-  // 右ペイン: 比較（最大3件・CER中心。比較テーブル+混同比較+勝敗表+推奨モデル）
+  // 右ペイン: 比較ダッシュボード（最大3件・CER中心・管理No主体）。
+  // 固定領域=警告/推奨モデル/主要3指標カード、スクロール領域=改善・悪化比較/評価条件/混同比較/指標別結果/総合勝利数/モデル詳細情報
   function renderCompare() {
     if (compareTargets.length === 0) {
       return <p className="text-xs text-muted">一覧でモデルを選択してください。</p>;
@@ -818,175 +825,400 @@ export default function ModelsView({
     const comparison = buildModelComparison(evalHistory, compareTargets);
     const winLoss = buildWinLoss(comparison);
     const recommended = recommendModel(comparison, winLoss);
-    const confusionRows = buildConfusionComparison(comparison, 8);
+    const conditions = buildConditionComparison(comparison);
+    const allConfusions = buildConfusionComparison(comparison, Infinity);
+    const confusionRows = confusionExpanded ? allConfusions : allConfusions.slice(0, 8);
+    const confusionMax = Math.max(1, ...allConfusions.flatMap((row) => row.counts.filter((v) => v !== null)));
     const shortName = (name) => {
       const label = displayName(name);
       return label.length > 14 ? `${label.slice(0, 13)}…` : label;
     };
-    // 比較画面は管理No主体・ファイル名はツールチップ/カード下部の補助表示（未付与時は従来の短縮名）
+    // 比較画面は管理No主体・ファイル名は補助表示（未付与の旧レスポンスは従来の短縮名へフォールバック）
     const compareLabel = (name) => modelIdOf(name) || shortName(name);
     const compareTitle = (name) => (modelIdOf(name) ? `${modelIdOf(name)} → ${name}` : name);
-    const bestCell = "bg-emerald-500/15 font-semibold text-emerald-300";
+    const bestText = "font-semibold text-emerald-300";
+    // 主要3指標（カード表示）と改善・悪化比較（画像単位の学習前比）の行定義
+    const mainMetrics = ["cer", "charAccuracy", "percent"].map((key) => COMPARE_METRICS.find((m) => m.key === key));
+    const mainHelp = { cer: HELP_TEXTS.cer, charAccuracy: HELP_TEXTS.charAccuracy, percent: HELP_TEXTS.exactMatch };
+    const deltaRows = [
+      { key: "improved", label: "改善件数", better: "max", help: HELP_TEXTS.improvedRegressed },
+      { key: "unchanged", label: "同等件数", better: null },
+      { key: "regressed", label: "悪化件数", better: "min" },
+      { key: "perfectFixed", label: "完全一致へ改善", better: "max", help: HELP_TEXTS.perfectTransition },
+      { key: "perfectRegressed", label: "完全一致から悪化", better: "min" },
+      { key: "cerRelativeImprovement", label: "CER相対改善率", better: "max", ratioPct: true, help: HELP_TEXTS.cerRelativeImprovement },
+    ].map((def) => {
+      const values = comparison.columns.map((col) => {
+        const v = col.latest?.[def.key];
+        return Number.isFinite(v) ? v : null;
+      });
+      const numeric = values.filter((v) => v !== null);
+      const best =
+        def.better && numeric.length >= 2 ? (def.better === "min" ? Math.min(...numeric) : Math.max(...numeric)) : null;
+      return { ...def, values, best };
+    });
+    const fmtDelta = (def, value) => {
+      if (value === null) return "未記録";
+      return def.ratioPct ? `${(value * 100).toFixed(1)}%` : `${value}`;
+    };
+    const maxWins = Math.max(1, ...comparison.columns.map((col) => winLoss.wins[col.model] || 0));
+    const winsSorted = [...comparison.columns].sort((a, b) => (winLoss.wins[b.model] || 0) - (winLoss.wins[a.model] || 0));
+    // 横スクロール表の共通クラス（指標名列はsticky固定・管理Noは常に表示）
+    const stickyLabel = "sticky left-0 z-10 whitespace-nowrap bg-[#333c46] px-2 py-1.5 text-left text-[13px] font-normal text-muted";
     return (
-      <div className="dark-scroll min-h-0 flex-1 space-y-2 overflow-y-auto pr-0.5 [overscroll-behavior:contain]">
-        {/* 総合評価: 推奨モデル（Accuracy単独では決めない。勝利数→CER→文字正解率） */}
-        {recommended ? (
-          <div className="rounded-lg border border-amber-400/50 bg-amber-400/10 px-2.5 py-2">
-            <p className="text-[11px] font-semibold text-amber-200">
-              🏆 推奨モデル: <span title={compareTitle(recommended.model)}>{compareLabel(recommended.model)}</span>
-            </p>
-            <p className="truncate text-[10px] text-amber-100/80" title={recommended.model}>
-              {displayName(recommended.model)}
-            </p>
-            <p className="mt-0.5 text-[10px] text-amber-100/90">
-              {recommended.wins}勝{recommended.reasons.length > 0 ? ` / ${recommended.reasons.join("・")}` : ""}
-            </p>
-          </div>
-        ) : (
-          <p className="text-[11px] text-muted">評価済みのモデルがありません（モデル評価画面で実行してください）</p>
-        )}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {/* 固定領域: 警告 + 推奨モデル + 主要3指標カード
+            （画面が低い場合のみ内部スクロールし、下の詳細分析の最低高を確保する） */}
+        <div className="dark-scroll min-h-0 flex-[0_1_auto] space-y-2 overflow-y-auto pr-0.5 [overscroll-behavior:contain]">
+          {conditions.match === false ? (
+            <div className="rounded-lg border border-amber-400/50 bg-amber-400/10 px-3 py-2">
+              <p className="text-[13px] font-semibold text-amber-200">注意</p>
+              <p className="mt-0.5 text-[12px] leading-relaxed text-amber-100/90">
+                選択モデル間で{conditions.mismatched.join("・")}が一致していません。比較結果は参考値として確認してください。
+              </p>
+            </div>
+          ) : null}
 
-        {/* 比較テーブル（各行の最良値を緑ハイライト） */}
-        <div className="overflow-x-auto rounded-lg border border-border bg-card/45 px-1 py-1">
-          <table className="w-full text-[10px] tabular-nums">
-            <thead className="text-left text-muted">
-              <tr>
-                <th className="px-1.5 py-1 font-medium">指標</th>
-                {comparison.columns.map((col) => (
-                  <th key={col.model} className="px-1.5 py-1 font-medium" title={compareTitle(col.model)}>
-                    {compareLabel(col.model)}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {comparison.rows.map((row) => (
-                <tr key={row.metric.key} className="border-t border-border/50">
-                  <td className="whitespace-nowrap px-1.5 py-1 text-muted">{row.metric.label}</td>
-                  {row.values.map((value, index) => (
-                    <td
-                      key={comparison.columns[index].model}
-                      className={`whitespace-nowrap px-1.5 py-1 ${
-                        value !== null && value === row.best ? bestCell : "text-text"
-                      }`}
+          {/* 比較結果の要約: 推奨モデル（勝利数→CER→文字正解率。Accuracy単独では決めない） */}
+          {recommended ? (
+            <div className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2.5">
+              <p className="text-[13px] text-amber-200">推奨モデル</p>
+              <p className="text-xl font-bold leading-7 text-amber-100" title={compareTitle(recommended.model)}>
+                {compareLabel(recommended.model)}
+              </p>
+              <p className="truncate text-[12px] text-amber-100/70" title={recommended.model}>
+                {displayName(recommended.model)}
+              </p>
+              {recommended.reasons.length > 0 ? (
+                <div className="mt-1.5 flex flex-wrap gap-1" title={recommended.reasons.join("・")}>
+                  {recommended.reasons.slice(0, 4).map((reason) => (
+                    <span
+                      key={reason}
+                      className="rounded-full border border-amber-300/30 bg-amber-300/10 px-2 py-0.5 text-[12px] text-amber-100/90"
                     >
-                      {formatMetricValue(row.metric, comparison.columns[index].latest)}
-                    </td>
+                      {reason}
+                    </span>
                   ))}
-                </tr>
-              ))}
-              {/* 評価条件行（比較の前提確認用） */}
-              {[
-                { label: "評価データセット", value: (col) => col.latest?.dataset || "未記録" },
-                { label: "OCR前処理", value: (col) => (col.latest ? historyPreprocessLabel(col.latest) : "未記録") },
-                { label: "Whitelist", value: (col) => whitelistLabelOf(col.latest?.whitelist) },
-                { label: "評価日時", value: (col) => (col.latest?.at ? col.latest.at.slice(5, 16).replace("T", " ") : "未記録") },
-              ].map((row) => (
-                <tr key={row.label} className="border-t border-border/50">
-                  <td className="whitespace-nowrap px-1.5 py-1 text-muted">{row.label}</td>
-                  {comparison.columns.map((col) => (
-                    <td key={col.model} className="min-w-0 max-w-[7rem] truncate px-1.5 py-1 text-muted" title={row.value(col)}>
-                      {row.value(col)}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  {recommended.reasons.length > 4 ? (
+                    <span className="px-1 py-0.5 text-[12px] text-amber-100/70">ほか{recommended.reasons.length - 4}項目で最良</span>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <p className="text-[13px] text-muted">評価済みのモデルがありません（モデル評価画面で実行してください）</p>
+          )}
+
+          {/* 主要3指標カード（モデルごと。最良との差分を併記。
+              狭い幅では縦積みにせず横スクロールの3列比較にする=固定領域の高さを一定に保つ） */}
+          <div className="dark-scroll overflow-x-auto pb-1">
+            <div
+              className="grid gap-2"
+              style={{
+                gridTemplateColumns: `repeat(${comparison.columns.length}, minmax(8.5rem, 1fr))`,
+                minWidth: `${comparison.columns.length * 8.5 + (comparison.columns.length - 1) * 0.5}rem`,
+              }}
+            >
+            {comparison.columns.map((col, index) => (
+              <div key={col.model} className="rounded-lg border border-border bg-card/45 px-2.5 py-2">
+                <p className="text-lg font-bold leading-6 text-text" title={compareTitle(col.model)}>
+                  {compareLabel(col.model)}
+                </p>
+                <p className="truncate text-[11px] text-muted" title={col.model}>
+                  {displayName(col.model)}
+                </p>
+                <div className="mt-2 space-y-2.5">
+                  {mainMetrics.map((metric) => {
+                    const row = comparison.rows.find((r) => r.metric.key === metric.key);
+                    const value = metricValue(metric, col.latest);
+                    const diff = formatBestDiff(metric, col.latest, row.best);
+                    return (
+                      <div key={metric.key}>
+                        <p className="flex items-center text-[13px] text-muted">
+                          {metric.label}
+                          <InfoTooltip {...mainHelp[metric.key]} align={index === 0 ? "left" : "right"} />
+                        </p>
+                        {value === null ? (
+                          <p className="text-[14px] font-medium text-muted">未記録</p>
+                        ) : (
+                          <>
+                            <p className={`text-[22px] font-bold leading-7 tabular-nums ${diff === "最良" ? "text-emerald-300" : "text-text"}`}>
+                              {formatMetricValue(metric, col.latest)}
+                            </p>
+                            {metric.key === "percent" && col.latest?.correct !== null ? (
+                              <p className="text-[12px] tabular-nums text-muted">
+                                {col.latest.correct} / {col.latest.total}
+                              </p>
+                            ) : null}
+                            <p className={`text-[13px] tabular-nums ${diff === "最良" ? "text-emerald-300" : "text-muted"}`}>
+                              {diff || ""}
+                            </p>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+            </div>
+          </div>
         </div>
 
-        {/* 混同比較（モデル別件数。少ないほど良い=最小を緑） */}
-        {confusionRows.length > 0 ? (
-          <div className="overflow-x-auto rounded-lg border border-border bg-card/45 px-1 py-1">
-            <p className="px-1.5 pt-1 text-[10px] font-semibold text-muted">混同比較（件数・少ないほど良い）</p>
-            <table className="w-full text-[10px] tabular-nums">
-              <tbody>
-                {confusionRows.map((row) => {
-                  const numeric = row.counts.filter((v) => v !== null);
-                  const best = numeric.length >= 2 ? Math.min(...numeric) : null;
-                  return (
-                    <tr key={`${row.kind}-${row.from}-${row.to}`} className="border-t border-border/50">
-                      <td
-                        className="whitespace-nowrap px-1.5 py-1 font-mono text-muted"
-                        title={row.kind === "sub" ? "置換" : row.kind === "del" ? "脱落" : "挿入"}
-                      >
-                        {row.label}
+        {/* スクロール領域: 詳細分析（主要指標を確認したままスクロールできる） */}
+        <div className="dark-scroll mt-2 min-h-[150px] flex-1 space-y-3 overflow-y-auto border-t border-border/50 pt-2 pr-0.5 [overscroll-behavior:contain]">
+          {/* 改善・悪化比較（画像単位の学習前比） */}
+          <div className="rounded-lg border border-border bg-card/45 px-2.5 py-2.5">
+            <p className="mb-1.5 flex items-center text-[15px] font-semibold text-text">
+              改善・悪化比較
+              <InfoTooltip {...HELP_TEXTS.improvedRegressed} align="left" />
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[14px] tabular-nums">
+                <thead>
+                  <tr>
+                    <th className={stickyLabel}></th>
+                    {comparison.columns.map((col) => (
+                      <th key={col.model} className="whitespace-nowrap px-2 py-1.5 text-left text-[13px] font-semibold text-text" title={compareTitle(col.model)}>
+                        {compareLabel(col.model)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {deltaRows.map((def) => (
+                    <tr key={def.key} className="border-t border-border/50">
+                      <td className={stickyLabel}>
+                        <span className="flex items-center">
+                          {def.label}
+                          {def.help ? <InfoTooltip {...def.help} align="left" /> : null}
+                        </span>
                       </td>
-                      {row.counts.map((count, index) => (
+                      {def.values.map((value, index) => {
+                        const isBest = value !== null && def.best !== null && value === def.best;
+                        const color = value === null ? "text-muted" : isBest ? bestText : "text-text";
+                        return (
+                          <td key={comparison.columns[index].model} className={`whitespace-nowrap px-2 py-1.5 text-[15px] ${value === null ? "text-[13px]" : ""} ${color}`}>
+                            {fmtDelta(def, value)}
+                            {isBest ? <span className="ml-1 align-middle text-[11px] text-emerald-300/80">最良</span> : null}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* 評価条件（比較の前提確認。警告対象=データセット/前処理/Whitelist/画像数） */}
+          <div className="rounded-lg border border-border bg-card/45 px-2.5 py-2.5">
+            <p className="mb-1.5 flex items-center gap-2 text-[15px] font-semibold text-text">
+              評価条件
+              {conditions.match === true ? (
+                <span className="rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[11px] font-normal text-success">
+                  評価条件一致
+                </span>
+              ) : null}
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[13px]">
+                <thead>
+                  <tr>
+                    <th className={stickyLabel}></th>
+                    {comparison.columns.map((col) => (
+                      <th key={col.model} className="whitespace-nowrap px-2 py-1.5 text-left text-[13px] font-semibold text-text" title={compareTitle(col.model)}>
+                        {compareLabel(col.model)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {conditions.rows.map((row) => (
+                    <tr key={row.key} className="border-t border-border/50">
+                      <td className={stickyLabel}>
+                        <span className="flex items-center">
+                          {row.label}
+                          {row.key === "preprocess" ? <InfoTooltip {...HELP_TEXTS.ocrPreprocess} align="left" /> : null}
+                          {row.key === "whitelist" ? <InfoTooltip {...HELP_TEXTS.whitelist} align="left" /> : null}
+                        </span>
+                      </td>
+                      {row.values.map((value, index) => (
                         <td
                           key={comparison.columns[index].model}
-                          className={`whitespace-nowrap px-1.5 py-1 ${
-                            count !== null && best !== null && count === best ? bestCell : "text-text"
-                          }`}
+                          className="min-w-0 max-w-[9rem] truncate px-2 py-1.5 text-[13px] text-text"
+                          title={value}
                         >
-                          {count === null ? "-" : `${count}件`}
+                          {value}
                         </td>
                       ))}
                     </tr>
-                  );
-                })}
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* 混同比較（全モデル合計の多い順。横棒で件数を可視化・0件は棒なし） */}
+          {allConfusions.length > 0 ? (
+            <div className="rounded-lg border border-border bg-card/45 px-2.5 py-2.5">
+              <div className="mb-1.5 flex items-center justify-between">
+                <p className="flex items-center text-[15px] font-semibold text-text">
+                  混同比較{confusionExpanded ? `（全${allConfusions.length}件）` : " TOP8"}
+                  <InfoTooltip {...HELP_TEXTS.confusionCompare} align="left" />
+                </p>
+                {allConfusions.length > 8 ? (
+                  <button
+                    type="button"
+                    className="rounded border border-border px-2 py-0.5 text-[12px] text-muted transition-colors hover:border-accent/60 hover:text-accent"
+                    onClick={() => setConfusionExpanded((v) => !v)}
+                  >
+                    {confusionExpanded ? "TOP8のみ" : "すべて表示"}
+                  </button>
+                ) : null}
+              </div>
+              <div className="space-y-2.5">
+                {confusionRows.map((row) => (
+                  <div key={`${row.kind}-${row.from}-${row.to}`}>
+                    <p
+                      className="font-mono text-[14px] font-semibold text-text"
+                      title={`${row.kind === "sub" ? "置換" : row.kind === "del" ? "脱落" : "挿入"} / 全モデル合計 ${row.total}件`}
+                    >
+                      {row.label}
+                    </p>
+                    <div className="mt-0.5 space-y-0.5">
+                      {row.counts.map((count, index) => (
+                        <div key={comparison.columns[index].model} className="flex items-center gap-1.5">
+                          <span
+                            className="w-14 shrink-0 truncate text-[12px] text-muted"
+                            title={compareTitle(comparison.columns[index].model)}
+                          >
+                            {compareLabel(comparison.columns[index].model)}
+                          </span>
+                          <span className="w-10 shrink-0 text-right text-[13px] tabular-nums text-text">
+                            {count === null ? "—" : `${count}件`}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            {count !== null && count > 0 ? (
+                              <div
+                                className="h-2.5 rounded-sm bg-accent/60"
+                                style={{ width: `${Math.max(3, (count / confusionMax) * 100)}%` }}
+                              />
+                            ) : null}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {/* 指標別結果（同率最良は全モデルを併記。同率でも各モデルへ1勝） */}
+          <div className="rounded-lg border border-border bg-card/45 px-2.5 py-2.5">
+            <p className="mb-1 text-[15px] font-semibold text-text">指標別結果</p>
+            <table className="w-full text-[13px]">
+              <tbody>
+                {winLoss.rows.map((row) => (
+                  <tr key={row.metric.key} className="border-t border-border/50 first:border-t-0">
+                    <td className="whitespace-nowrap py-1.5 pr-2 text-[13px] text-muted">{row.metric.label}</td>
+                    <td className="py-1.5 text-[14px] font-semibold text-emerald-300">
+                      {row.winners.length > 0 ? (
+                        <span title={row.winners.map((w) => compareTitle(w)).join(" / ")}>
+                          {row.winners.map((w) => compareLabel(w)).join(" / ")}
+                        </span>
+                      ) : (
+                        <span className="font-normal text-muted">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
-        ) : null}
 
-        {/* 勝敗表（指標ごとの勝者と勝利数） */}
-        <div className="overflow-x-auto rounded-lg border border-border bg-card/45 px-1 py-1">
-          <p className="px-1.5 pt-1 text-[10px] font-semibold text-muted">勝敗表</p>
-          <table className="w-full text-[10px] tabular-nums">
-            <tbody>
-              {winLoss.rows.map((row) => (
-                <tr key={row.metric.key} className="border-t border-border/50">
-                  <td className="whitespace-nowrap px-1.5 py-1 text-muted">{row.metric.label}</td>
-                  <td className="whitespace-nowrap px-1.5 py-1 text-text">
-                    {row.winner ? (
-                      <span title={compareTitle(row.winner)}>🟢 {compareLabel(row.winner)}</span>
-                    ) : (
-                      <span className="text-muted">—</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              <tr className="border-t border-border">
-                <td className="whitespace-nowrap px-1.5 py-1 font-semibold text-text">勝利数</td>
-                <td className="px-1.5 py-1 text-text">
-                  {comparison.columns
-                    .map((col) => `${compareLabel(col.model)} ${winLoss.wins[col.model] || 0}勝`)
-                    .join(" / ")}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        {/* モデル基本情報（従来の比較情報を維持） */}
-        {compareTargets.map((name) => {
-          const counts = datasetCounts(name);
-          const entries = evalEntriesOf(evalHistory, name);
-          return (
-            <div key={name} className="rounded-lg border border-border bg-card/45 px-2.5 py-2">
-              <p className="truncate text-xs font-semibold text-text" title={compareTitle(name)}>
-                {modelIdOf(name) ? <ModelIdChip name={name} /> : displayName(name)} <ModelBadgeChips names={badgeMap[name]} />
-              </p>
-              {/* ファイル名はカード下部（補助表示） */}
-              {modelIdOf(name) ? (
-                <p className="truncate text-[10px] text-muted" title={name}>
-                  {displayName(name)}
-                </p>
-              ) : null}
-              <div className="mt-1 space-y-0.5">
-                <DetailRow label="Engine" value={engineLabelOf(engineName(name), trainingFamily(name))} />
-                <DetailRow label="Iteration" value={iterationText(name)} />
-                <DetailRow label="データ" value={`${counts.train} / ${counts.val} / ${counts.test}`} />
-                <DetailRow label="作成" value={formatDateTime(createdAt(name))} />
-                <DetailRow label="状態" value={statusOf(name)} />
-              </div>
-              <div className="mt-1">
-                <EvalBadges entries={entries} />
-              </div>
+          {/* 総合勝利数（推奨モデル判定と同じ勝利数。横棒で差を可視化） */}
+          <div className="rounded-lg border border-border bg-card/45 px-2.5 py-2.5">
+            <p className="mb-1.5 text-[15px] font-semibold text-text">総合勝利数</p>
+            <div className="space-y-1.5">
+              {winsSorted.map((col) => {
+                const wins = winLoss.wins[col.model] || 0;
+                return (
+                  <div key={col.model} className="flex items-center gap-2">
+                    <span className="w-14 shrink-0 truncate text-[13px] text-text" title={compareTitle(col.model)}>
+                      {compareLabel(col.model)}
+                    </span>
+                    <span className="w-10 shrink-0 text-right text-lg font-bold tabular-nums text-text">{wins}</span>
+                    <span className="shrink-0 text-[12px] text-muted">勝</span>
+                    <div className="min-w-0 flex-1">
+                      {wins > 0 ? (
+                        <div className="h-3 rounded-sm bg-emerald-400/70" style={{ width: `${(wins / maxWins) * 100}%` }} />
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          );
-        })}
+          </div>
+
+          {/* モデル詳細情報（比較時の優先度が低いため初期は折り畳み） */}
+          <details className="rounded-lg border border-border bg-card/45 px-2.5 py-2.5">
+            <summary className="cursor-pointer select-none text-[15px] font-semibold text-text">モデル詳細情報</summary>
+            <div className="mt-2 overflow-x-auto">
+              <table className="w-full text-[13px]">
+                <thead>
+                  <tr>
+                    <th className={stickyLabel}></th>
+                    {compareTargets.map((name) => (
+                      <th key={name} className="whitespace-nowrap px-2 py-1.5 text-left align-top" title={compareTitle(name)}>
+                        <span className="text-[13px] font-semibold text-text">{compareLabel(name)}</span>
+                        <span className="mt-0.5 block max-w-[9rem] truncate text-[11px] font-normal text-muted" title={name}>
+                          {displayName(name)}
+                        </span>
+                        <ModelBadgeChips names={badgeMap[name]} />
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    { label: "Engine", value: (name) => engineLabelOf(engineName(name), trainingFamily(name)) },
+                    { label: "方式", value: (name) => familyLabelOf(trainingFamily(name)) },
+                    { label: "ベースモデル", value: (name) => infoOf(name).base_lang || "-", help: HELP_TEXTS.baseModel },
+                    { label: "Iteration", value: (name) => iterationText(name), help: HELP_TEXTS.iteration },
+                    { label: "学習画像数", value: (name) => trainingImageTotal(name) },
+                    {
+                      label: "Train / Val / Test",
+                      value: (name) => {
+                        const counts = datasetCounts(name);
+                        return `${counts.train} / ${counts.val} / ${counts.test}`;
+                      },
+                    },
+                    { label: "Charset", value: (name) => infoOf(name).charset || "-" },
+                    { label: "Augmentation", value: (name) => augText(name) },
+                    { label: "モデルサイズ", value: (name) => modelSizeText(name) },
+                    { label: "学習日時", value: (name) => formatDateTime(createdAt(name)) },
+                  ].map((row) => (
+                    <tr key={row.label} className="border-t border-border/50">
+                      <td className={stickyLabel}>
+                        <span className="flex items-center">
+                          {row.label}
+                          {row.help ? <InfoTooltip {...row.help} align="left" /> : null}
+                        </span>
+                      </td>
+                      {compareTargets.map((name) => (
+                        <td key={name} className="min-w-0 max-w-[10rem] truncate px-2 py-1.5 text-[14px] font-medium text-text" title={String(row.value(name))}>
+                          {row.value(name)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </details>
+        </div>
       </div>
     );
   }
@@ -1130,7 +1362,7 @@ export default function ModelsView({
       {/* 右: モデル詳細 / 比較 */}
       <Card
         title={compareMode ? "モデル比較" : "モデル詳細"}
-        subtitle={compareMode ? `選択中 ${compareTargets.length} 件（最大3件）` : detailModel ? "一覧クリックで切替" : "一覧のモデルをクリック"}
+        subtitle={compareMode ? `選択中 ${compareTargets.length}件 / 最大3件` : detailModel ? "一覧クリックで切替" : "一覧のモデルをクリック"}
         className="flex h-full min-h-0 flex-col"
       >
         {compareMode ? (
