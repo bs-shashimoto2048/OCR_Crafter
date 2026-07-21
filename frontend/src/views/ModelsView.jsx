@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 
 import Card from "../components/Card";
 import Button from "../components/Button";
+import InfoTooltip from "../components/InfoTooltip";
 import { API_BASE } from "../lib/api";
+import { HELP_TEXTS } from "../lib/helpTexts";
 import { historyPreprocessLabel } from "../lib/evalHistory";
 import {
   MODEL_BADGE_LABELS,
@@ -173,6 +175,47 @@ function DetailRow({ label, value }) {
       <span className="break-all text-right font-medium text-text" title={String(value ?? "-")}>
         {value ?? "-"}
       </span>
+    </div>
+  );
+}
+
+// モデルカルテ用: セクション見出し（16px。?ヘルプ付き）
+function SectionTitle({ children, help }) {
+  return (
+    <p className="mb-2 flex items-center text-base font-semibold text-text">
+      {children}
+      {help ? <InfoTooltip {...help} align="left" /> : null}
+    </p>
+  );
+}
+
+// モデルカルテ用: ラベル（13px・muted）と値（15px・太字）にメリハリを付けた行
+function SpecRow({ label, value, help, valueClass = "text-text" }) {
+  return (
+    <div className="flex items-start justify-between gap-3 py-0.5">
+      <span className="flex shrink-0 items-center text-[13px] text-muted">
+        {label}
+        {help ? <InfoTooltip {...help} align="left" /> : null}
+      </span>
+      <span className={`break-all text-right text-[15px] font-semibold tabular-nums ${valueClass}`} title={String(value ?? "-")}>
+        {value ?? "-"}
+      </span>
+    </div>
+  );
+}
+
+// モデルカルテ用: 評価サマリーカード（数字を主役に大きく表示。未記録はmuted）
+function SummaryStatCard({ label, count, colorClass, help }) {
+  const missing = count === null || count === undefined;
+  return (
+    <div className="rounded-lg border border-border/70 bg-card/60 px-2 py-2 text-center">
+      <p className="flex items-center justify-center text-[12px] leading-4 text-muted">
+        {label}
+        {help ? <InfoTooltip {...help} /> : null}
+      </p>
+      <p className={`mt-1 text-xl font-bold leading-6 tabular-nums ${missing ? "text-[13px] font-medium text-muted" : colorClass}`}>
+        {missing ? "未記録" : `${count}件`}
+      </p>
     </div>
   );
 }
@@ -491,58 +534,47 @@ export default function ModelsView({
     const historyEntries = modelEvalEntries(evalHistory, name);
     return (
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="dark-scroll min-h-0 flex-[0_1_auto] space-y-2 overflow-y-auto pr-0.5 [overscroll-behavior:contain]">
+        <div className="dark-scroll min-h-0 flex-[0_1_auto] space-y-3 overflow-y-auto pr-0.5 [overscroll-behavior:contain]">
+          {/* カルテヘッダー（このモデル自身の状態のみ。Best/Recommended等の比較バッジは比較画面へ集約） */}
           <div>
-            <p className="truncate text-sm font-semibold text-text" title={name}>
+            <p className="truncate text-lg font-semibold leading-6 text-text" title={name}>
               <ModelIdChip name={name} />
               {displayName(name)}
             </p>
             {aliases[name] ? (
-              <p className="truncate text-[10px] text-muted" title={name}>
+              <p className="truncate text-[11px] text-muted" title={name}>
                 {name}
               </p>
             ) : null}
-            <div className="mt-1 flex flex-wrap items-center gap-1">
+            <div className="mt-1.5 flex flex-wrap items-center gap-1">
               <StatusBadge status={statusOf(name)} />
-              <ModelBadgeChips names={badgeMap[name]} />
             </div>
           </div>
 
-          <div className="space-y-1 rounded-lg border border-border bg-card/45 px-2.5 py-2">
-            <p className="text-[11px] font-semibold text-text">モデル情報</p>
-            <DetailRow label="管理No" value={modelIdOf(name) || "-"} />
-            <DetailRow label="Engine" value={engineLabelOf(engineName(name), trainingFamily(name))} />
-            <DetailRow label="方式" value={familyLabelOf(trainingFamily(name))} />
-            <DetailRow label="ベースモデル" value={info.base_lang || "-"} />
-            <DetailRow label="Charset" value={info.charset || "-"} />
-            <DetailRow label="Iteration" value={iterationText(name)} />
-            <DetailRow label="学習画像数" value={trainingImageTotal(name)} />
-            <DetailRow label="Train / Val / Test" value={`${counts.train} / ${counts.val} / ${counts.test}`} />
-            <DetailRow label="Augmentation" value={augText(name)} />
-            <DetailRow label="モデルサイズ" value={modelSizeText(name)} />
-            <DetailRow label="学習時間" value={info.training_duration || "-"} />
-            <DetailRow label="学習日時" value={formatDateTime(createdAt(name))} />
-            <DetailRow label="Export状態" value={exportReady(name) ? "Export済" : "未Export"} />
-          </div>
-
-          {/* 最新評価（CER主指標。完全一致率=業務指標として併記。学習前との改善/悪化も表示） */}
-          <div className="rounded-lg border border-border bg-card/45 px-2.5 py-2">
-            <p className="mb-1 text-[11px] font-semibold text-text">最新評価</p>
+          {/* ① 最新評価（画面の主役。CERを最大サイズで表示し「このモデルは良いのか」に即答する） */}
+          <div className="rounded-lg border border-border bg-card/45 px-3 py-3">
+            <div className="flex items-baseline justify-between">
+              <SectionTitle help={HELP_TEXTS.cer}>最新評価</SectionTitle>
+              <span className="text-[11px] text-muted">{latest?.at ? latest.at.slice(0, 16).replace("T", " ") : ""}</span>
+            </div>
             {latest ? (
               <>
-                <div className="flex items-baseline justify-between">
+                <div className="text-center">
+                  <p className="flex items-center justify-center text-[13px] text-muted">
+                    {latest.cer !== null ? "CER" : "完全一致率（CER未記録）"}
+                    <InfoTooltip {...(latest.cer !== null ? HELP_TEXTS.cer : HELP_TEXTS.exactMatch)} />
+                  </p>
                   {latest.cer !== null ? (
-                    <span className="text-xl font-semibold tabular-nums text-text">
-                      CER {ratioPct(latest.cer)}
-                    </span>
+                    <p className="text-[32px] font-bold leading-tight tabular-nums text-emerald-300">
+                      {(latest.cer * 100).toFixed(1)}%
+                    </p>
                   ) : (
-                    <span className={`text-xl font-semibold tabular-nums ${evalColorClass(latest.percent)}`}>
+                    <p className={`text-[32px] font-bold leading-tight tabular-nums ${evalColorClass(latest.percent)}`}>
                       {latest.percent}%
-                    </span>
+                    </p>
                   )}
-                  <span className="text-[10px] text-muted">{latest.at ? latest.at.slice(0, 16).replace("T", " ") : "-"}</span>
                 </div>
-                <div className="mt-1 h-1.5 w-full overflow-hidden rounded-sm bg-border/40">
+                <div className="mt-2 h-2 w-full overflow-hidden rounded-sm bg-border/40">
                   <div
                     className={`h-full rounded-sm ${evalBarClass(latest.charAccuracy !== null ? latest.charAccuracy * 100 : latest.percent)}`}
                     style={{
@@ -550,80 +582,134 @@ export default function ModelsView({
                     }}
                   />
                 </div>
-                <div className="mt-1.5 space-y-1">
-                  <DetailRow label="文字正解率（1-CER）" value={ratioPct(latest.charAccuracy)} />
-                  <DetailRow label="完全一致率（業務指標）" value={`${correctTotalLabel(latest)}（${latest.percent}%）`} />
-                  <DetailRow label="誤認識" value={latest.mismatch === null ? "未記録" : `${latest.mismatch}件`} />
-                  <DetailRow
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <div className="text-center">
+                    <p className="flex items-center justify-center text-[13px] text-muted">
+                      文字正解率
+                      <InfoTooltip {...HELP_TEXTS.charAccuracy} />
+                    </p>
+                    <p className="mt-0.5 text-lg font-bold leading-6 tabular-nums text-text">{ratioPct(latest.charAccuracy)}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="flex items-center justify-center text-[13px] text-muted">
+                      完全一致率
+                      <InfoTooltip {...HELP_TEXTS.exactMatch} />
+                    </p>
+                    <p className="mt-0.5 text-lg font-bold leading-6 tabular-nums text-blue-300">
+                      {correctTotalLabel(latest)}
+                      {Number.isFinite(Number(latest.percent)) ? `（${latest.percent}%）` : ""}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-3 space-y-0.5 border-t border-border/50 pt-2">
+                  <SpecRow
+                    label="誤認識"
+                    value={latest.mismatch === null ? "未記録" : `${latest.mismatch}件`}
+                    valueClass={latest.mismatch === null ? "text-muted" : "text-danger"}
+                  />
+                  <SpecRow
                     label="CER改善（学習前比）"
+                    help={HELP_TEXTS.cerImprovement}
                     value={
                       latest.cerDelta === null
                         ? "未記録"
                         : `${latest.cerDelta > 0 ? "+" : ""}${(latest.cerDelta * 100).toFixed(1)}pt / 相対 ${ratioPct(latest.cerRelativeImprovement)}`
                     }
-                  />
-                  <DetailRow
-                    label="改善 / 同等 / 悪化"
-                    value={
-                      latest.improved === null
-                        ? "未記録"
-                        : `${latest.improved}件 / ${latest.unchanged ?? "-"}件 / ${latest.regressed ?? "-"}件`
-                    }
-                  />
-                  <DetailRow
-                    label="完全一致の増減"
-                    value={
-                      latest.perfectFixed === null
-                        ? "未記録"
-                        : `+${latest.perfectFixed}件 / -${latest.perfectRegressed ?? 0}件`
+                    valueClass={
+                      latest.cerDelta === null
+                        ? "text-muted"
+                        : latest.cerDelta < 0
+                          ? "text-success"
+                          : latest.cerDelta > 0
+                            ? "text-danger"
+                            : "text-text"
                     }
                   />
                 </div>
               </>
             ) : (
-              <p className="text-[11px] text-muted">評価未実施（モデル評価画面で実行すると表示されます）</p>
+              <p className="text-[13px] text-muted">評価未実施（モデル評価画面で実行すると表示されます）</p>
             )}
           </div>
 
-          {/* 混同TOP5（最新評価のLevenshteinアラインメント由来） */}
+          {/* ② 評価サマリー（学習前比の内訳をカード化。数字を主役に大きく表示） */}
+          {latest ? (
+            <div className="rounded-lg border border-border bg-card/45 px-3 py-3">
+              <SectionTitle help={HELP_TEXTS.improvedRegressed}>評価サマリー（学習前比）</SectionTitle>
+              <div className="grid grid-cols-3 gap-2">
+                <SummaryStatCard label="改善" count={latest.improved} colorClass="text-success" />
+                <SummaryStatCard label="同等" count={latest.unchanged} colorClass="text-text" />
+                <SummaryStatCard label="悪化" count={latest.regressed} colorClass="text-danger" />
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <SummaryStatCard
+                  label="完全一致へ改善"
+                  count={latest.perfectFixed}
+                  colorClass="text-success"
+                  help={HELP_TEXTS.perfectTransition}
+                />
+                <SummaryStatCard label="完全一致から悪化" count={latest.perfectRegressed} colorClass="text-danger" />
+              </div>
+            </div>
+          ) : null}
+
+          {/* ③ 混同TOP5（最新評価のLevenshteinアラインメント由来。縦2行チップの横並び） */}
           {latest && (latest.confusions || []).length > 0 ? (
-            <div className="rounded-lg border border-border bg-card/45 px-2.5 py-2">
-              <p className="mb-1 text-[11px] font-semibold text-text">混同TOP5</p>
-              <div className="flex flex-wrap gap-1">
+            <div className="rounded-lg border border-border bg-card/45 px-3 py-3">
+              <SectionTitle help={HELP_TEXTS.confusionTop}>混同TOP5</SectionTitle>
+              <div className="flex flex-wrap gap-1.5">
                 {(latest.confusions || []).slice(0, 5).map((c) => (
                   <span
                     key={`${c.kind}-${c.from}-${c.to}`}
-                    className="inline-flex h-5 items-center gap-1 rounded border border-border/70 bg-card/60 px-1.5 text-[10px] tabular-nums text-text"
+                    className="inline-flex min-w-[3.5rem] flex-col items-center rounded-md border border-border/70 bg-card/60 px-2 py-1 tabular-nums"
                     title={c.kind === "sub" ? "置換" : c.kind === "del" ? "脱落" : "挿入"}
                   >
-                    <span className="font-mono">{confusionLabel(c)}</span>
-                    <span className="text-muted">{c.count}件</span>
+                    <span className="font-mono text-[14px] font-semibold text-text">{confusionLabel(c)}</span>
+                    <span className="text-[11px] text-muted">{c.count}件</span>
                   </span>
                 ))}
               </div>
             </div>
           ) : null}
 
-          {/* 評価条件（最新評価で実際に使用した条件） */}
+          {/* ④ 評価条件（最新評価で実際に使用した条件） */}
           {latest ? (
-            <div className="space-y-1 rounded-lg border border-border bg-card/45 px-2.5 py-2">
-              <p className="text-[11px] font-semibold text-text">評価条件</p>
-              <DetailRow label="評価データセット" value={latest.dataset || "未記録"} />
-              <DetailRow label="画像数" value={latest.total === null ? "未記録" : latest.total} />
-              <DetailRow label="OCR前処理" value={historyPreprocessLabel(latest)} />
-              <DetailRow label="Whitelist" value={whitelistLabelOf(latest.whitelist)} />
-              <DetailRow label="評価日時" value={latest.at ? latest.at.slice(0, 16).replace("T", " ") : "未記録"} />
+            <div className="rounded-lg border border-border bg-card/45 px-3 py-3">
+              <SectionTitle>評価条件</SectionTitle>
+              <SpecRow label="評価データセット" value={latest.dataset || "未記録"} />
+              <SpecRow label="評価画像数" value={latest.total === null ? "未記録" : latest.total} />
+              <SpecRow label="OCR前処理" value={historyPreprocessLabel(latest)} help={HELP_TEXTS.ocrPreprocess} />
+              <SpecRow label="Whitelist" value={whitelistLabelOf(latest.whitelist)} help={HELP_TEXTS.whitelist} />
+              <SpecRow label="評価日時" value={latest.at ? latest.at.slice(0, 16).replace("T", " ") : "未記録"} />
             </div>
           ) : null}
 
-          <div className="space-y-1 rounded-lg border border-border bg-card/45 px-2.5 py-2">
+          {/* ⑤ モデル情報（このモデル自身の学習条件・実体情報） */}
+          <div className="rounded-lg border border-border bg-card/45 px-3 py-3">
+            <SectionTitle>モデル情報</SectionTitle>
+            <SpecRow label="管理No" value={modelIdOf(name) || "-"} />
+            <SpecRow label="Engine" value={engineLabelOf(engineName(name), trainingFamily(name))} />
+            <SpecRow label="方式" value={familyLabelOf(trainingFamily(name))} />
+            <SpecRow label="ベースモデル" value={info.base_lang || "-"} help={HELP_TEXTS.baseModel} />
+            <SpecRow label="Charset" value={info.charset || "-"} />
+            <SpecRow label="Iteration" value={iterationText(name)} help={HELP_TEXTS.iteration} />
+            <SpecRow label="学習画像数" value={trainingImageTotal(name)} />
+            <SpecRow label="Train / Val / Test" value={`${counts.train} / ${counts.val} / ${counts.test}`} />
+            <SpecRow label="Augmentation" value={augText(name)} />
+            <SpecRow label="モデルサイズ" value={modelSizeText(name)} />
+            <SpecRow label="学習時間" value={info.training_duration || "-"} />
+            <SpecRow label="学習日時" value={formatDateTime(createdAt(name))} />
+            <SpecRow label="Export状態" value={exportReady(name) ? "Export済" : "未Export"} />
+          </div>
+
+          <div className="space-y-1 rounded-lg border border-border bg-card/45 px-3 py-2.5">
             <DetailRow label="traineddata" value={info.traineddata_path || "-"} />
             <DetailRow label="json" value={name.endsWith(".json") ? name : info.meta_path || "-"} />
             <DetailRow label="Export先" value={info.export_dir || info.inference_dir || (exportReady(name) ? "export済" : "-")} />
           </div>
 
-          <div className="rounded-lg border border-border bg-card/45 px-2.5 py-2">
-            <p className="mb-1 text-[11px] font-semibold text-text">表示名（Alias）</p>
+          <div className="rounded-lg border border-border bg-card/45 px-3 py-2.5">
+            <p className="mb-1 text-[13px] font-semibold text-text">表示名（Alias）</p>
             <div className="flex gap-1.5">
               <input
                 value={aliasDraft}
@@ -643,45 +729,45 @@ export default function ModelsView({
           </div>
         </div>
 
-        {/* 評価履歴: 残り高を使って内部スクロール（ヘッダーはsticky固定） */}
-        <div className="mt-2 flex min-h-[110px] flex-1 flex-col rounded-lg border border-border bg-card/45 px-2.5 py-2">
-          <p className="mb-1 shrink-0 text-[11px] font-semibold text-text">評価履歴（{historyEntries.length}件）</p>
+        {/* ⑥ 評価履歴: 残り高を使って内部スクロール（ヘッダーはsticky固定） */}
+        <div className="mt-3 flex min-h-[120px] flex-1 flex-col rounded-lg border border-border bg-card/45 px-3 py-2.5">
+          <p className="mb-1.5 shrink-0 text-base font-semibold text-text">評価履歴（{historyEntries.length}件）</p>
           {historyEntries.length > 0 ? (
             <div className="dark-scroll min-h-0 flex-1 overflow-auto [overscroll-behavior:contain] [scrollbar-gutter:stable]">
-              <table className="w-full text-[10px] tabular-nums">
+              <table className="w-full text-[12px] tabular-nums">
                 <thead className="sticky top-0 z-10 bg-[#333c46] text-left text-muted">
                   <tr>
-                    <th className="px-1 py-1 font-medium">日時</th>
-                    <th className="px-1 py-1 font-medium">CER</th>
-                    <th className="px-1 py-1 font-medium">文字</th>
-                    <th className="px-1 py-1 font-medium">一致</th>
-                    <th className="px-1 py-1 font-medium">正解</th>
-                    <th className="px-1 py-1 font-medium">改善</th>
-                    <th className="px-1 py-1 font-medium">悪化</th>
-                    <th className="px-1 py-1 font-medium">前処理</th>
+                    <th className="px-1.5 py-1.5 font-medium">日時</th>
+                    <th className="px-1.5 py-1.5 font-medium">CER</th>
+                    <th className="px-1.5 py-1.5 font-medium">文字</th>
+                    <th className="px-1.5 py-1.5 font-medium">一致</th>
+                    <th className="px-1.5 py-1.5 font-medium">正解</th>
+                    <th className="px-1.5 py-1.5 font-medium">改善</th>
+                    <th className="px-1.5 py-1.5 font-medium">悪化</th>
+                    <th className="px-1.5 py-1.5 font-medium">前処理</th>
                   </tr>
                 </thead>
                 <tbody>
                   {historyEntries.map((row) => (
                     <tr key={`${row.datasetKey}-${row.at}`} className="border-t border-border/50">
-                      <td className="whitespace-nowrap px-1 py-1 text-muted" title={`${row.dataset} / ${row.at}`}>
+                      <td className="whitespace-nowrap px-1.5 py-1.5 text-muted" title={`${row.dataset} / ${row.at}`}>
                         {row.at ? row.at.slice(5, 16).replace("T", " ") : "-"}
                       </td>
-                      <td className="whitespace-nowrap px-1 py-1 font-semibold text-text">
+                      <td className="whitespace-nowrap px-1.5 py-1.5 font-semibold text-emerald-300">
                         {row.cer !== null ? ratioPct(row.cer) : "未記録"}
                       </td>
-                      <td className="whitespace-nowrap px-1 py-1 text-text">
+                      <td className="whitespace-nowrap px-1.5 py-1.5 text-text">
                         {row.charAccuracy !== null ? ratioPct(row.charAccuracy) : "-"}
                       </td>
-                      <td className={`px-1 py-1 font-semibold ${evalColorClass(row.percent)}`}>{row.percent}%</td>
-                      <td className="whitespace-nowrap px-1 py-1 text-text">{correctTotalLabel(row)}</td>
-                      <td className="whitespace-nowrap px-1 py-1 text-success">
+                      <td className={`px-1.5 py-1.5 font-semibold ${evalColorClass(row.percent)}`}>{row.percent}%</td>
+                      <td className="whitespace-nowrap px-1.5 py-1.5 text-text">{correctTotalLabel(row)}</td>
+                      <td className="whitespace-nowrap px-1.5 py-1.5 text-success">
                         {row.improved === null ? "-" : `${row.improved}件`}
                       </td>
-                      <td className="whitespace-nowrap px-1 py-1 text-danger">
+                      <td className="whitespace-nowrap px-1.5 py-1.5 text-danger">
                         {row.regressed === null ? "-" : `${row.regressed}件`}
                       </td>
-                      <td className="min-w-0 max-w-[5rem] truncate px-1 py-1 text-muted" title={historyPreprocessLabel(row)}>
+                      <td className="min-w-0 max-w-[5rem] truncate px-1.5 py-1.5 text-muted" title={historyPreprocessLabel(row)}>
                         {historyPreprocessLabel(row)}
                       </td>
                     </tr>
@@ -690,7 +776,7 @@ export default function ModelsView({
               </table>
             </div>
           ) : (
-            <p className="text-[11px] text-muted">評価未実施</p>
+            <p className="text-[13px] text-muted">評価未実施</p>
           )}
         </div>
 
