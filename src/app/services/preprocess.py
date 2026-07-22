@@ -907,8 +907,14 @@ def run_preprocess(
     overrides: Optional[dict[str, Any]] = None,
     only_files: Optional[list[str]] = None,
 ) -> dict[str, Any]:
+    from .preprocess_snapshot import save_preprocess_snapshot
+
     paths = ensure_project_directories(project_id)
     cfg = _build_preprocess_config(overrides)
+    # 実行時点の実効パラメータを完全スナップショットとして保存する（学習・評価の再現用の正）。
+    # 手動マスク注入（attach_manual_masks_to_config）は cfg を画像単位で書き換えるため、
+    # 必ず注入前のクリーンな設定から構築する
+    snapshot = save_preprocess_snapshot(paths.root, copy.deepcopy(cfg))
     paths.raw.mkdir(parents=True, exist_ok=True)
     include = set(only_files) if only_files is not None else None
 
@@ -938,6 +944,12 @@ def run_preprocess(
         "type_counts": type_counts,
         "config": cfg,
         "files": results,
+        # 保存した前処理スナップショットの要約（実体は processed/meta/preprocess_snapshot.json）
+        "preprocess_snapshot": {
+            "snapshot_id": str(snapshot.get("snapshot_id") or ""),
+            "preprocess_hash": str(snapshot.get("preprocess_hash") or ""),
+            "created_at": str(snapshot.get("created_at") or ""),
+        },
     }
 
 

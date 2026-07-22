@@ -24,6 +24,7 @@ import { viewBoundaryKey } from "./lib/viewKey";
 import { lowercaseToggleApplicable } from "./lib/lowercase";
 import {
   DEFAULT_EVAL_PREPROCESS,
+  evalPreprocessModeForSource,
   evalPreprocessRequestObject,
   evalPreprocessSummary,
   readEvalPreprocess,
@@ -491,14 +492,29 @@ export default function App() {
   const [inferEasyOcrLangs, setInferEasyOcrLangs] = useState(["en"]);
   const [inferPaddleModel, setInferPaddleModel] = useState("latest");
   const [inferTesseractModel, setInferTesseractModel] = useState("latest");
+  // 推論前処理モード（Tesseract）。""=自動（学習時前処理の記録があればtraining=既定 / なければ従来動作）
+  const [inferPreprocessMode, setInferPreprocessMode] = useState("");
+  // 「latest」選択時に実際に使われるTesseractモデル（学習時前処理の記録有無の判定用）
+  const inferTessResolvedModel = useMemo(() => {
+    if (inferTesseractModel && inferTesseractModel !== "latest") return inferTesseractModel;
+    const sorted = [...tesseractModels].sort((a, b) =>
+      String(modelInfos[b]?.created_at || "").localeCompare(String(modelInfos[a]?.created_at || ""))
+    );
+    return sorted[0] || "";
+  }, [inferTesseractModel, tesseractModels, modelInfos]);
+  const inferTessPreRecorded = Boolean(modelInfos[inferTessResolvedModel]?.training_preprocess_hash);
+  // 自動時: 記録があれば学習時前処理を使用（運用時に学習条件と異なる入力を与えないため）。
+  // 記録がない旧モデルは従来動作（推測で前処理を割り当てない）
+  const inferEffectivePreprocessMode = inferPreprocessMode || (inferTessPreRecorded ? "training" : "");
   const [ocrEvalImageDir, setOcrEvalImageDir] = useState("");
   const [ocrEvalGtCsv, setOcrEvalGtCsv] = useState("");
   // 評価データセット（Step5で作成）の一覧・選択・学習データ重複チェック
   const [ocrEvalDatasets, setOcrEvalDatasets] = useState([]);
   const [ocrEvalDatasetId, setOcrEvalDatasetId] = useState("");
   const [ocrEvalOverlap, setOcrEvalOverlap] = useState(null);
-  // 評価時のOCR前処理（Step5と同じ設定定義を共用）。source: none=前処理なし / step5=Step5設定と同期 / custom=上書き
-  const [ocrEvalPreSource, setOcrEvalPreSource] = useState("none");
+  // 評価時のOCR前処理（Step5と同じ設定定義を共用）。
+  // source: training=学習時前処理（既定） / none=前処理なし / step5=Step5設定と同期 / custom=上書き
+  const [ocrEvalPreSource, setOcrEvalPreSource] = useState("training");
   const [ocrEvalPreCustom, setOcrEvalPreCustom] = useState({ ...DEFAULT_EVAL_PREPROCESS });
 
   // プロジェクト切替時は評価データセットの選択・一覧をリセット（他プロジェクトのデータを混在させない）
@@ -506,7 +522,7 @@ export default function App() {
     setOcrEvalDatasets([]);
     setOcrEvalDatasetId("");
     setOcrEvalOverlap(null);
-    setOcrEvalPreSource("none");
+    setOcrEvalPreSource("training");
     setOcrEvalPreCustom({ ...DEFAULT_EVAL_PREPROCESS });
   }, [projectId]);
 
@@ -2751,6 +2767,11 @@ export default function App() {
         formData.append("easyocr_langs", inferEasyOcrLangs.length > 0 ? inferEasyOcrLangs.join(",") : "en");
       } else if (inferEngine === "tesseract") {
         formData.append("model", inferTesseractModel || "latest");
+        // 推論前処理モード（training=モデルの学習時前処理 / manual=現在の前処理設定 / none=OCR入力整形のみ）。
+        // 未指定（記録なしの自動時）は従来動作
+        if (inferEffectivePreprocessMode) {
+          formData.append("preprocess_mode", inferEffectivePreprocessMode);
+        }
       } else if (inferEngine === "easyocr") {
         formData.append("easyocr_langs", inferEasyOcrLangs.length > 0 ? inferEasyOcrLangs.join(",") : "en");
       }
@@ -2904,8 +2925,9 @@ export default function App() {
 
     setOcrEvalLoading(true);
     try {
-      // 評価前処理（Step5と共通定義）。none または全設定OFFは未指定（従来動作）
-      const evalPreObject = evalPreprocessRequestObject(ocrEvalEffectivePreprocess);
+      // 評価前処理モード（training=学習時前処理 / none=前処理なし / step5・custom=手動設定）
+      const preprocessMode = evalPreprocessModeForSource(ocrEvalPreSource);
+      const evalPreObject = preprocessMode === "manual" ? evalPreprocessRequestObject(ocrEvalEffectivePreprocess) : null;
       const payload = {
         project_id: projectId,
         image_dir: ocrEvalImageDir,
@@ -2919,6 +2941,7 @@ export default function App() {
               ? ocrEvalWhitelistCustom
               : TESSERACT_WHITELIST_DEFAULT,
         psm: 7,
+        preprocess_mode: preprocessMode,
         ...(evalPreObject ? { eval_preprocess: evalPreObject, preprocess_source: ocrEvalPreSource } : {}),
       };
       const data = await request("/api/ocr/evaluate", {
@@ -2952,10 +2975,22 @@ export default function App() {
             .split(/[\\/]/)
             .pop() ||
           "eval";
-        // 前処理情報はサーバーが実際に適用した値（応答のecho）を保存する（UI選択中の値ではない）
+        // 前処理情報はサーバーが実際に適用した値（応答のecho）を保存する（UI選択中の値ではない）。
+        // 学習時前処理モードはハッシュも保存し、後から同じ評価を再現できるようにする
+        const appliedMode = String(data?.preprocess_mode || "");
         const appliedPre = {
           source: String(data?.preprocess_source || "none"),
-          summary: data?.eval_preprocess ? evalPreprocessSummary(data.eval_preprocess) : "前処理なし",
+          summary:
+            appliedMode === "training" || appliedMode === "training_individual"
+              ? "学習時前処理"
+              : data?.eval_preprocess
+                ? evalPreprocessSummary(data.eval_preprocess)
+                : "前処理なし",
+          ...(appliedMode ? { mode: appliedMode } : {}),
+          ...(data?.evaluation_preprocess?.preprocess_hash ? { hash: String(data.evaluation_preprocess.preprocess_hash) } : {}),
+          ...(data?.evaluation_preprocess?.source_model_id
+            ? { source_model_id: String(data.evaluation_preprocess.source_model_id) }
+            : {}),
         };
         // 同一評価実行のエントリは同じ評価日時を共有する（⭐Latest Bestバッジの同一実行判定に使う）
         const evaluatedAt = new Date().toISOString();
@@ -2995,6 +3030,9 @@ export default function App() {
                 perfect_regressed: hasImprovement ? (data.comparison.perfect_regressed ?? null) : null,
                 // 混同TOP5（モデルカルテ・比較用の要約のみ保持）
                 confusions: Array.isArray(target?.confusions) ? target.confusions.slice(0, 5) : [],
+                // 学習時前処理との一致（true/false/null=未記録。旧形式=キー無しは未記録扱い）
+                preprocess_match: target?.preprocess_match === true ? true : target?.preprocess_match === false ? false : null,
+                training_preprocess_hash: target?.training_preprocess_hash ? String(target.training_preprocess_hash) : null,
               },
             };
           }
@@ -3094,10 +3132,17 @@ export default function App() {
         "char_accuracy_percent",
         "edit_distance_total",
         "ref_length_total",
+        "evaluation_preprocess_mode",
+        "evaluation_preprocess_hash",
+        "training_preprocess_hash",
+        "preprocess_match",
       ]
         .map(escape)
         .join(",")
     );
+    // 前処理識別情報（旧結果=キー無しは空欄=未記録）。preprocess_match: 1=一致/0=不一致/空=未記録
+    const evalPreMode = String(ocrEvalResult.preprocess_mode || "");
+    const evalPreHash = String(ocrEvalResult.evaluation_preprocess?.preprocess_hash || "");
     targets.forEach((t) => {
       lines.push(
         [
@@ -3111,11 +3156,21 @@ export default function App() {
           t.char_accuracy_percent ?? "",
           t.edit_distance_total ?? "",
           t.ref_length_total ?? "",
+          evalPreMode,
+          evalPreHash,
+          t.training_preprocess_hash ?? "",
+          t.preprocess_match === true ? "1" : t.preprocess_match === false ? "0" : "",
         ]
           .map(escape)
           .join(",")
       );
     });
+    // 前処理スナップショット（評価で実際に適用した前処理の再現用。明細行へは繰り返さない）
+    if (ocrEvalResult.evaluation_preprocess) {
+      lines.push("");
+      lines.push(["evaluation_preprocess_json"].map(escape).join(","));
+      lines.push([JSON.stringify(ocrEvalResult.evaluation_preprocess)].map(escape).join(","));
+    }
     // 混同集計（モデル別TOP10: 置換/脱落/挿入）
     lines.push("");
     // from_codepoint/to_codepoint: 画面で表示できない文字（制御文字・U+FFFD等）も解析できるようU+XXXX表記を併記。
@@ -3608,6 +3663,10 @@ export default function App() {
         onRun={runInference}
         loading={inferLoading}
         result={inferResult}
+        preprocessMode={inferPreprocessMode}
+        setPreprocessMode={setInferPreprocessMode}
+        effectivePreprocessMode={inferEffectivePreprocessMode}
+        preprocessRecorded={inferTessPreRecorded}
       />
     );
   }
@@ -3742,6 +3801,7 @@ export default function App() {
         preprocessCustom={ocrEvalPreCustom}
         onChangePreprocessCustom={setOcrEvalPreCustom}
         step5Preprocess={step5EvalPreprocess}
+        modelInfos={modelInfos}
       />
     );
   }

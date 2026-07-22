@@ -26,6 +26,16 @@ import {
   normalizeTrainingCondition,
 } from "../lib/trainingCompare";
 import {
+  PREPROCESS_COMPARISON_ROWS,
+  buildPreprocessNotes,
+  diffTrainingPreprocess,
+  normalizeTrainingPreprocess,
+  preprocessDetailRows,
+  preprocessMatchLabels,
+  preprocessRowValue,
+  trainingPreprocessSummary,
+} from "../lib/preprocessCompare";
+import {
   COMPARE_METRICS,
   buildCompareColorMap,
   buildConditionComparison,
@@ -722,6 +732,12 @@ export default function ModelsView({
             <SpecRow label="学習画像数" value={trainingImageTotal(name)} />
             <SpecRow label="Train / Val / Test" value={`${counts.train} / ${counts.val} / ${counts.test}`} />
             <SpecRow label="Augmentation" value={augText(name)} />
+            {/* 学習時前処理（前処理スナップショット由来の要約。旧モデル=未記録） */}
+            <SpecRow
+              label="学習前処理"
+              value={trainingPreprocessSummary(normalizeTrainingPreprocess(info)) || "未記録"}
+              help={HELP_TEXTS.trainingPreprocess}
+            />
             <SpecRow label="モデルサイズ" value={modelSizeText(name)} />
             <SpecRow label="学習時間" value={info.training_duration || "-"} />
             <SpecRow label="学習日時" value={formatDateTime(createdAt(name))} />
@@ -874,6 +890,17 @@ export default function ModelsView({
       latestOf: latestOfModel,
     });
     const comparabilityNotes = buildComparabilityNotes({ targets: compareTargets, labelOf: compareLabel, conditionOf });
+    // 学習前処理比較（前処理スナップショット由来。旧モデルは未記録表示・推測しない）
+    const preOf = (name) => normalizeTrainingPreprocess(infoOf(name));
+    const preList = compareTargets.map(preOf);
+    const preMatchLabels = preprocessMatchLabels(preList);
+    const preprocessNotes = buildPreprocessNotes({ targets: compareTargets, labelOf: compareLabel, preOf });
+    // 前処理差分（隣接ペア。両方記録ありのペアのみ判定できる）
+    const preDiffs = compareTargets.slice(1).map((name, index) => ({
+      from: compareTargets[index],
+      to: name,
+      ...diffTrainingPreprocess(preList[index], preList[index + 1]),
+    }));
     const proposals = buildNextTrainingProposals({
       targets: compareTargets,
       labelOf: compareLabel,
@@ -1153,6 +1180,191 @@ export default function ModelsView({
                 </tbody>
               </table>
             </div>
+          </div>
+
+          {/* ⑤-2 学習前処理比較（前処理スナップショット由来。要約は表・詳細は折りたたみ。旧モデル=未記録） */}
+          <div className="rounded-lg border border-border bg-card/45 px-2.5 py-2.5">
+            <p className="mb-1.5 flex items-center gap-2 text-[15px] font-semibold text-text">
+              学習前処理比較
+              {preList.length >= 2 && preList.every((p) => p.recorded) && new Set(preList.map((p) => p.hash)).size === 1 ? (
+                <span className="rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[11px] font-normal text-success">
+                  学習時前処理一致
+                </span>
+              ) : null}
+            </p>
+            {preprocessNotes.length > 0 ? (
+              <div className="mb-2 rounded-lg border border-amber-400/50 bg-amber-400/10 px-2.5 py-1.5">
+                <p className="text-[12px] font-semibold text-amber-200">注意</p>
+                {preprocessNotes.map((note) => (
+                  <p key={note} className="mt-0.5 text-[12px] leading-relaxed text-amber-100/90">
+                    {note}
+                  </p>
+                ))}
+              </div>
+            ) : null}
+            <div className="comparison-table-wrap">
+              <table className="w-full text-[13px]">
+                <thead>
+                  <tr>
+                    <th className={stickyLabel}></th>
+                    {compareTargets.map((name) => (
+                      <th
+                        key={name}
+                        className="min-w-[135px] whitespace-nowrap px-2 py-1.5 text-left align-top text-[13px] font-semibold"
+                        title={compareTitle(name)}
+                      >
+                        <span style={{ color: colorOf(name) }}>{compareLabel(name)}</span>
+                        <span className="block max-w-[10rem] truncate text-[10px] font-normal text-muted">{shortFileLabel(name)}</span>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-t border-border/50">
+                    <td className={stickyLabel}>前処理一致</td>
+                    {compareTargets.map((name, index) => (
+                      <td
+                        key={name}
+                        className={`px-2 py-1.5 text-[13px] ${
+                          preMatchLabels[index] === "同一"
+                            ? "font-semibold text-success"
+                            : preMatchLabels[index] === "異なる"
+                              ? "font-semibold text-amber-300"
+                              : "text-muted"
+                        }`}
+                      >
+                        {preMatchLabels[index]}
+                      </td>
+                    ))}
+                  </tr>
+                  <tr className="border-t border-border/50">
+                    <td className={stickyLabel}>前処理ハッシュ</td>
+                    {compareTargets.map((name, index) => (
+                      <td
+                        key={name}
+                        className={`px-2 py-1.5 font-mono text-[12px] ${preList[index].recorded ? "text-text" : "text-muted"}`}
+                        title={preList[index].hash || "未記録"}
+                      >
+                        {preList[index].hashShort || "未記録"}
+                      </td>
+                    ))}
+                  </tr>
+                  {PREPROCESS_COMPARISON_ROWS.map((row) => (
+                    <tr key={row.key} className="border-t border-border/50">
+                      <td className={stickyLabel}>{row.label}</td>
+                      {compareTargets.map((name, index) => {
+                        const text = preprocessRowValue(row, preList[index]);
+                        return (
+                          <td
+                            key={name}
+                            className={`min-w-0 max-w-[12rem] truncate px-2 py-1.5 text-[13px] ${text === "未記録" ? "text-muted" : "text-text"}`}
+                            title={text}
+                          >
+                            {text}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* 前処理差分（隣接ペアの変更点のみ抽出。両方記録ありのペアだけ判定できる） */}
+            {preDiffs.some((diff) => diff.comparable) ? (
+              <div className="mt-2 space-y-1.5">
+                <p className="text-[12px] font-semibold text-muted">前処理差分</p>
+                {preDiffs.map((diff) => (
+                  <div key={`${diff.from}-${diff.to}`} className="rounded-lg border border-border/70 bg-card/60 px-2.5 py-1.5">
+                    <p className="text-[13px] font-semibold">
+                      <span style={{ color: colorOf(diff.from) }}>{compareLabel(diff.from)}</span>
+                      <span className="text-muted"> → </span>
+                      <span style={{ color: colorOf(diff.to) }}>{compareLabel(diff.to)}</span>
+                    </p>
+                    {!diff.comparable ? (
+                      <p className="text-[12px] text-muted">未記録モデルを含むため差分を判定できません。</p>
+                    ) : diff.changes.length === 0 ? (
+                      <p className="text-[12px] text-success">前処理差分なし</p>
+                    ) : (
+                      <div className="mt-0.5">
+                        <p className="text-[12px] font-semibold text-muted">変更</p>
+                        {diff.changes.map((change) => (
+                          <p key={change.key} className="text-[13px] text-text">
+                            ・{change.label}：{change.from} → {change.to}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {/* 前処理詳細（折りたたみ。工程順・有効状態・パラメータ・ハッシュ・スナップショットID・作成日時） */}
+            <details className="mt-2 rounded-lg border border-border/60 bg-card/40 px-2.5 py-1.5">
+              <summary className="cursor-pointer select-none text-[13px] font-semibold text-text">前処理詳細</summary>
+              <div className="mt-1.5 space-y-2">
+                {compareTargets.map((name, index) => {
+                  const pre = preList[index];
+                  return (
+                    <div key={name} className="rounded-lg border border-border/60 bg-card/55 px-2.5 py-2">
+                      <p className="text-[13px] font-semibold" style={{ color: colorOf(name) }}>
+                        {compareLabel(name)}
+                        <span className="ml-2 text-[11px] font-normal text-muted">{shortFileLabel(name)}</span>
+                      </p>
+                      {!pre.recorded ? (
+                        <p className="mt-0.5 text-[12px] text-muted">学習時前処理：未記録（旧モデル）</p>
+                      ) : (
+                        <>
+                          <div className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[12px]">
+                            <span className="text-muted">スナップショットID</span>
+                            <span className="text-text">{pre.snapshotId || "-"}</span>
+                            <span className="text-muted">作成日時</span>
+                            <span className="text-text">{formatDateTime(pre.createdAt)}</span>
+                            <span className="text-muted">前処理ハッシュ</span>
+                            <span className="break-all font-mono text-text">{pre.hash}</span>
+                            <span className="text-muted">対象種別</span>
+                            <span className="text-text">{pre.imageTypes.join(", ") || "-"}</span>
+                          </div>
+                          <div className="comparison-table-wrap mt-1.5">
+                            <table className="w-full text-[12px]">
+                              <thead>
+                                <tr className="text-left text-muted">
+                                  <th className="px-1.5 py-1 font-medium">#</th>
+                                  <th className="px-1.5 py-1 font-medium">工程</th>
+                                  <th className="px-1.5 py-1 font-medium">有効</th>
+                                  <th className="px-1.5 py-1 font-medium">パラメータ</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {preprocessDetailRows(pre).map((row, rowIndex) => (
+                                  <tr key={`${row.name}-${rowIndex}`} className="border-t border-border/40">
+                                    <td className="px-1.5 py-0.5 tabular-nums text-muted">{rowIndex + 1}</td>
+                                    <td className="px-1.5 py-0.5 text-text">{row.name}</td>
+                                    <td className={`px-1.5 py-0.5 ${row.enabled ? "text-success" : "text-muted"}`}>
+                                      {row.enabled ? "ON" : "OFF"}
+                                    </td>
+                                    <td className="min-w-0 max-w-[18rem] truncate px-1.5 py-0.5 text-muted" title={row.params}>
+                                      {row.params || "-"}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                          <details className="mt-1">
+                            <summary className="cursor-pointer select-none text-[11px] text-muted hover:text-text">JSONを表示</summary>
+                            <pre className="dark-scroll mt-1 max-h-48 overflow-auto rounded border border-border/60 bg-black/25 p-2 text-[10px] leading-4 text-slate-200">
+                              {JSON.stringify(pre.raw, null, 2)}
+                            </pre>
+                          </details>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </details>
           </div>
 
           {/* ⑥ 条件差分の要約（隣接ペアの変更項目・性能変化・判定。単一条件比較/複数条件変更を明示） */}

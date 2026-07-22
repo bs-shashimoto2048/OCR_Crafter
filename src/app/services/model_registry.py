@@ -251,6 +251,12 @@ def list_model_infos(project_id: Optional[str] = None) -> list[dict]:
                         if payload.get("augmentation_generated") is not None
                         else None
                     ),
+                    # 学習時前処理（.tess.jsonの確定保存値。旧モデルはNone/空=未記録表示）
+                    "training_preprocess": (
+                        payload.get("training_preprocess") if isinstance(payload.get("training_preprocess"), dict) else None
+                    ),
+                    "training_preprocess_hash": str(payload.get("training_preprocess_hash") or ""),
+                    "dataset_source_image_state": str(payload.get("dataset_source_image_state") or ""),
                 }
             )
         elif path.name.endswith(".ocr.json"):
@@ -340,6 +346,14 @@ def list_model_infos(project_id: Optional[str] = None) -> list[dict]:
                         if dataset_meta.get("augmentation_generated") is not None
                         else None
                     ),
+                    # 学習時前処理（PaddleOCR系はデータセットmeta.jsonから参照。未記録=None/空）
+                    "training_preprocess": (
+                        dataset_meta.get("training_preprocess")
+                        if isinstance(dataset_meta.get("training_preprocess"), dict)
+                        else None
+                    ),
+                    "training_preprocess_hash": str(dataset_meta.get("training_preprocess_hash") or ""),
+                    "dataset_source_image_state": str(dataset_meta.get("source_image_state") or ""),
                     "ocr_preprocess": {
                         "image_shape": image_shape,
                         "image_types": image_types,
@@ -676,6 +690,40 @@ def resolve_ocr_model_meta(
     except Exception:  # noqa: BLE001
         return None
     return None
+
+
+def resolve_model_training_preprocess(project_id: Optional[str], model: str = "latest") -> Optional[dict]:
+    """モデルの学習時前処理レコードを解決する（評価・推論・プレビューで共通利用）。
+
+    - `.tess.json`: モデルメタに保存された training_preprocess を返す
+    - `.ocr.json`: モデルメタに無ければデータセット meta.json から参照する
+    - 未記録（旧モデル）は None（呼び出し側でエラー/未記録表示。推測で補完しない）
+    戻り値: {model, training_preprocess, training_preprocess_hash} または None
+    """
+    name = str(model or "latest").strip()
+    meta: Optional[dict] = None
+    if name.endswith(".ocr.json"):
+        meta = resolve_ocr_model_meta(project_id, model=name, inference_ready_only=False)
+    else:
+        meta = resolve_tesseract_model_meta(project_id, model=name, ready_only=False)
+        if meta is None and name not in {"", "latest"} and not name.endswith(".tess.json"):
+            meta = resolve_ocr_model_meta(project_id, model=name, inference_ready_only=False)
+    if not isinstance(meta, dict):
+        return None
+    training_preprocess = meta.get("training_preprocess") if isinstance(meta.get("training_preprocess"), dict) else None
+    training_preprocess_hash = str(meta.get("training_preprocess_hash") or "")
+    if training_preprocess is None:
+        dataset_meta = _read_ocr_dataset_meta(str(meta.get("dataset_root") or ""))
+        if isinstance(dataset_meta.get("training_preprocess"), dict):
+            training_preprocess = dataset_meta["training_preprocess"]
+            training_preprocess_hash = str(dataset_meta.get("training_preprocess_hash") or "")
+    if training_preprocess is None:
+        return None
+    return {
+        "model": Path(str(meta.get("meta_file") or "")).name or name,
+        "training_preprocess": training_preprocess,
+        "training_preprocess_hash": training_preprocess_hash,
+    }
 
 
 def _is_tesseract_model_ready(payload: dict) -> bool:

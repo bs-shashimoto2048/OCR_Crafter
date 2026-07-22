@@ -3,6 +3,7 @@
 // 表示行・前後モデルの差分・比較可能性・ルールベースの次回学習候補を組み立てる。
 
 import { augmentationPresetLabel, augmentationSummary } from "./augmentation.js";
+import { normalizeTrainingPreprocess, trainingPreprocessSummary } from "./preprocessCompare.js";
 
 const MISSING = "未記録";
 
@@ -47,7 +48,8 @@ export function normalizeTrainingCondition(info = {}) {
     imageTotal: total > 0 ? total : null,
     split: total > 0 ? `${train || "-"} / ${val || "-"} / ${test || "-"}` : "",
     splitCounts: total > 0 ? { train, val, test } : null,
-    trainingPreprocess: "", // Tesseract学習は学習前処理設定を持たない（将来拡張用・現状は未記録）
+    // 学習時前処理（前処理スナップショット由来の要約。旧モデル=未記録は空文字）
+    trainingPreprocess: trainingPreprocessSummary(normalizeTrainingPreprocess(info)),
     // 新形式（augmentation_config）を優先し、旧 use_augmentation/aug_strength はON/OFF表示で互換
     augmentation: augmentationSummary(augConfig, legacyAugText),
     charset: String(info.charset || ""),

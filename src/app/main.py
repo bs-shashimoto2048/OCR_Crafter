@@ -69,13 +69,14 @@ from .schemas import (
     ProjectCreateRequest,
     RotateImageRequest,
     TesseractTrainStartRequest,
+    TrainingPreprocessPreviewRequest,
     TrainRequest,
 )
 from .services.data_manager import import_images_from_directory, list_raw_images, rotate_project_image
 from .services.dataset_builder import build_dataset, read_dataset_meta
 from .services.dialogs import select_directory_path, select_file_path
 from .services.evaluation import evaluate_dataset
-from .services.ocr_evaluation import evaluate_ocr
+from .services.ocr_evaluation import TRAINING_PREPROCESS_MISSING_MESSAGE, evaluate_ocr
 from .services.labels import ensure_master_csv, read_labels, upsert_label
 from .services.model_registry import (
     delete_model,
@@ -85,6 +86,7 @@ from .services.model_registry import (
     list_model_infos,
     list_model_types,
     list_models,
+    resolve_model_training_preprocess,
     resolve_ocr_model_meta,
     resolve_tesseract_model_meta,
 )
@@ -118,6 +120,7 @@ from .services.preprocess import (
     preprocess_image_for_model,
     run_preprocess,
 )
+from .services.preprocess_snapshot import apply_training_preprocess
 from .services.tesseract_pipeline import (
     TESSERACT_TARGET_CHARSET,
     ensure_tesseract_training_tools,
@@ -2594,6 +2597,7 @@ async def predict(
     include_lowercase: bool = Form(True),
     apply_preprocess: bool = Form(True),
     preprocess_overrides_json: str = Form(""),
+    preprocess_mode: str = Form(""),
     project_id: str = Form("default"),
 ) -> dict[str, Any]:
     resolved = _resolve_project_id(project_id)
@@ -2604,11 +2608,61 @@ async def predict(
         tmp.write(content)
         tmp_path = tmp.name
 
+    pre_tmp_path: Optional[str] = None
     try:
         langs = _normalize_easyocr_langs(easyocr_langs)
         overrides = _parse_preprocess_overrides_json(preprocess_overrides_json)
+        # 推論前処理モード: ""=従来動作 / none=OCR入力整形のみ / manual=現在の前処理設定 /
+        # training=モデルの学習時前処理（未記録の旧モデルは400・フォールバックしない）
+        mode = str(preprocess_mode or "").strip().lower()
+        if mode and mode not in {"none", "manual", "training"}:
+            raise HTTPException(status_code=400, detail=f"unsupported preprocess_mode: {preprocess_mode}")
+        inference_preprocess: Optional[dict[str, Any]] = None
+        predict_source = tmp_path
         preprocess_preview_data_url = ""
-        if bool(apply_preprocess):
+        if mode == "training":
+            if str(engine or "").strip().lower() == "custom":
+                raise HTTPException(status_code=400, detail="分類モデル（custom）では学習時前処理モードは使用できません")
+            record = resolve_model_training_preprocess(resolved, model)
+            if record is None:
+                raise HTTPException(status_code=400, detail=TRAINING_PREPROCESS_MISSING_MESSAGE)
+            from PIL import ImageOps as _ImageOps
+
+            with Image.open(tmp_path) as opened:
+                oriented = _ImageOps.exif_transpose(opened)
+                pre_img = apply_training_preprocess(oriented, record["training_preprocess"])
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as pre_tmp:
+                pre_tmp_path = pre_tmp.name
+            pre_img.save(pre_tmp_path)
+            predict_source = pre_tmp_path
+            preprocess_preview_data_url = _image_to_data_url(pre_img)
+            inference_preprocess = {
+                "mode": "training",
+                "model": record["model"],
+                "preprocess_hash": str(record.get("training_preprocess_hash") or ""),
+                "snapshot_id": str((record["training_preprocess"] or {}).get("snapshot_id") or ""),
+            }
+            # 学習時前処理と手動上書きは併用しない（この後エンジン側でOCR入力整形のみ適用される）
+            overrides = None
+            apply_preprocess = True
+        elif mode == "manual":
+            # 現在の前処理設定（前処理設定画面の設定＋上書き）を適用してからOCR入力整形へ渡す
+            preprocess_cfg = build_preprocess_config(overrides)
+            pre = preprocess_image_for_model(tmp_path, force_image_type=None, config=preprocess_cfg)
+            pre_img = Image.fromarray(pre["processed"], mode="L")
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as pre_tmp:
+                pre_tmp_path = pre_tmp.name
+            pre_img.save(pre_tmp_path)
+            predict_source = pre_tmp_path
+            preprocess_preview_data_url = _image_to_data_url(pre_img)
+            inference_preprocess = {"mode": "manual", "image_type": str(pre.get("type") or ""), "pipeline": list(pre.get("pipeline") or [])}
+            overrides = None
+            apply_preprocess = True
+        elif mode == "none":
+            # 取込前処理なし（エンジン側のOCR入力整形のみ。分類モデルは従来どおり前処理適用）
+            inference_preprocess = {"mode": "none"}
+            overrides = None
+        if not preprocess_preview_data_url and bool(apply_preprocess) and mode in {"", "none"}:
             try:
                 preprocess_cfg = build_preprocess_config(overrides) if overrides else None
                 pre = preprocess_image_for_model(tmp_path, force_image_type=None, config=preprocess_cfg)
@@ -2619,7 +2673,7 @@ async def predict(
             except Exception:  # noqa: BLE001
                 preprocess_preview_data_url = ""
         prediction = predict_from_image(
-            tmp_path,
+            predict_source,
             model_type=(model_type or None),
             model=model,
             project_id=resolved,
@@ -2630,6 +2684,8 @@ async def predict(
             include_lowercase=bool(include_lowercase),
         )
         prediction["preprocess_preview_data_url"] = preprocess_preview_data_url
+        if inference_preprocess is not None:
+            prediction["inference_preprocess"] = inference_preprocess
         save_ocr_prediction_log(
             resolved,
             {
@@ -2646,6 +2702,8 @@ async def predict(
             },
         )
         return prediction
+    except HTTPException:
+        raise
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
@@ -2654,6 +2712,8 @@ async def predict(
         raise HTTPException(status_code=400, detail=str(e)) from e
     finally:
         Path(tmp_path).unlink(missing_ok=True)
+        if pre_tmp_path:
+            Path(pre_tmp_path).unlink(missing_ok=True)
 
 
 @app.post("/api/ocr/log/save")
@@ -3227,12 +3287,51 @@ def api_ocr_evaluate(req: OcrEvaluateRequest) -> dict[str, Any]:
             psm=req.psm,
             eval_preprocess=req.eval_preprocess,
             preprocess_source=str(req.preprocess_source or "none"),
+            preprocess_mode=req.preprocess_mode,
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/api/ocr/training-preprocess/preview")
+def api_training_preprocess_preview(req: TrainingPreprocessPreviewRequest) -> dict[str, Any]:
+    """モデルの学習時前処理を適用したプレビュー（元画像→学習時前処理後→OCR入力整形後）。
+
+    学習時前処理が未記録の旧モデルは400（固定値へ自動フォールバックしない）。
+    元ファイルは変更しない（メモリ内変換のみ）。
+    """
+    from .services.ocr_pipeline import preprocess_ocr_image
+
+    resolved = _resolve_project_id(req.project_id)
+    record = resolve_model_training_preprocess(resolved, req.model)
+    if record is None:
+        raise HTTPException(status_code=400, detail=TRAINING_PREPROCESS_MISSING_MESSAGE)
+    try:
+        img = load_directory_image(req.directory, req.filename, rotation=0)
+        training_preprocess = record["training_preprocess"]
+        preprocessed = apply_training_preprocess(img, training_preprocess)
+        normalization = (
+            training_preprocess.get("ocr_input_normalization")
+            if isinstance(training_preprocess.get("ocr_input_normalization"), dict)
+            else {}
+        )
+        target_h = int(normalization.get("target_height") or 48)
+        canvas_w = int(normalization.get("canvas_width") or 320)
+        normalized = preprocess_ocr_image(preprocessed, image_shape=[1, target_h, canvas_w], strong=False)
+        return {
+            "model": record["model"],
+            "training_preprocess_hash": str(record.get("training_preprocess_hash") or ""),
+            "snapshot_id": str(training_preprocess.get("snapshot_id") or ""),
+            "preprocessed_data_url": _image_to_data_url(preprocessed, max_side=512),
+            "normalized_data_url": _image_to_data_url(normalized, max_side=512),
+        }
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 

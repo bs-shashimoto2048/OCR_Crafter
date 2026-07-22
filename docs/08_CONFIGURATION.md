@@ -97,7 +97,7 @@ localStorage（`try/catch` で不可環境でも動作継続）:
 | `ocr_preprocess_params_by_project_v1` | 前処理パラメータ | プロジェクト別 |
 | `ocr_preprocess_extra_slots_by_project_v1` | 推論比較スロット（モデル2/3） | プロジェクト別 |
 | `ocr_model_aliases_by_project_v1` | モデル表示名 | プロジェクト別 |
-| `ocr_model_eval_history_by_project_v1` | モデル評価履歴（`{モデル: {データセットラベル: {percent, at}}}`。データセット選択時はラベル=データセットID・手動指定時は画像フォルダ名。形式は従来から不変） | プロジェクト別 |
+| `ocr_model_eval_history_by_project_v1` | モデル評価履歴（`{モデル: {データセットラベル: {percent, at}}}`。データセット選択時はラベル=データセットID・手動指定時は画像フォルダ名。形式は従来から不変・追加キーのみ: `pre.mode`（評価前処理モード）/`pre.hash`（評価前処理ハッシュ）/`pre.source_model_id`/`preprocess_match`（学習時前処理との一致 true/false/null=未記録）/`training_preprocess_hash`。旧エントリはキー無し=未記録表示） | プロジェクト別 |
 | `ocr_include_lowercase_by_project_v1` | 小文字出力設定 | プロジェクト別 |
 | `ocr_candidate_dict_by_project_v1` | OCR候補辞書 | プロジェクト別 |
 | `ocr_label_text_align_by_project_v1` | ラベル編集の「現在のラベル」文字位置（left/center/right、既定center） | プロジェクト別 |

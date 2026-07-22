@@ -219,6 +219,22 @@ class OcrEvaluateRequest(BaseModel):
     preprocess_source: Optional[str] = Field(
         default="none", description="前処理設定の由来（none/step5/custom。応答へそのまま反映し履歴表示に使う）"
     )
+    # 評価前処理モード（none/manual/training/training_individual）。
+    # 未指定=旧動作（eval_preprocessの有無でmanual/none）・後方互換
+    preprocess_mode: Optional[str] = Field(
+        default=None,
+        description="評価前処理モード（none=前処理なし / manual=手動設定 / training=学習時前処理を共通適用 / "
+        "training_individual=各モデルの学習時前処理を個別適用。未指定=従来動作）",
+    )
+
+
+class TrainingPreprocessPreviewRequest(BaseModel):
+    """モデルの学習時前処理を適用したプレビュー（評価・推論画面用）。"""
+
+    project_id: Optional[str] = Field(default="default")
+    model: str = Field(default="latest", description="学習時前処理を参照するモデル（.tess.json / .ocr.json / latest）")
+    directory: str = Field(..., description="プレビュー対象画像のフォルダ")
+    filename: str = Field(..., description="プレビュー対象の画像ファイル名")
 
 
 class TesseractTrainStartRequest(BaseModel):

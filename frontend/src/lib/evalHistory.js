@@ -17,6 +17,10 @@ export function flattenEvalHistory(evalHistory) {
         at: String(entry?.at || ""),
         preSource: pre ? String(pre.source || "") : "",
         preSummary: pre ? String(pre.summary || "") : "",
+        // 評価前処理モード・ハッシュ・学習時前処理との一致（旧形式はnull=未記録）
+        preMode: pre && pre.mode ? String(pre.mode) : "",
+        preHash: pre && pre.hash ? String(pre.hash) : "",
+        preMatch: entry?.preprocess_match === true ? true : entry?.preprocess_match === false ? false : null,
         // CER主指標（旧形式はnull=未記録）
         cer: num(entry?.cer),
         charAccuracy: num(entry?.char_accuracy),
@@ -27,14 +31,20 @@ export function flattenEvalHistory(evalHistory) {
   return rows;
 }
 
-// 履歴の前処理列表示（旧形式=pre無しは「未記録」）
+// 履歴の前処理列表示（旧形式=pre無しは「未記録」）。
+// 学習時前処理モードは一致状態（不一致=⚠）も併記する
 export function historyPreprocessLabel(row) {
   if (!row || (!row.preSource && !row.preSummary)) {
     return "未記録";
   }
+  if (row.preSource === "training" || row.preSource === "training_individual") {
+    const base = row.preSource === "training_individual" ? "学習時前処理（個別）" : "学習時前処理";
+    return row.preMatch === false ? `⚠${base}` : base;
+  }
   if (row.preSource === "none") {
-    return "なし";
+    return row.preMatch === false ? "⚠なし（学習時と不一致）" : "なし";
   }
   const source = row.preSource === "step5" ? "Step5" : row.preSource === "custom" ? "カスタム" : row.preSource;
-  return row.preSummary ? `${source}: ${row.preSummary}` : source;
+  const label = row.preSummary ? `${source}: ${row.preSummary}` : source;
+  return row.preMatch === false ? `⚠${label}` : label;
 }

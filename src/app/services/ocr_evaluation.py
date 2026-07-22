@@ -90,6 +90,8 @@ def _build_tesseract_recognizer(project_id: Optional[str], model: str, charset: 
 
     tesseract_cmd = ensure_tesseract_inference_tool()
 
+    training_preprocess: Optional[dict[str, Any]] = None
+    training_preprocess_hash: Optional[str] = None
     if _is_base_model(model):
         tessdata_dir, _ = resolve_base_traineddata("eng", tesseract_cmd=tesseract_cmd)
         lang = "eng"
@@ -108,11 +110,24 @@ def _build_tesseract_recognizer(project_id: Optional[str], model: str, charset: 
         label = f"{model_id}（学習後）"
         if not tessdata_dir or not lang:
             raise FileNotFoundError("Tesseractモデルのメタ情報が不完全です（tessdata_dir/lang）。")
+        # 学習時前処理の記録（未記録の旧モデルは None のまま。推測で補完しない）
+        if isinstance(meta.get("training_preprocess"), dict):
+            training_preprocess = meta["training_preprocess"]
+        if meta.get("training_preprocess_hash"):
+            training_preprocess_hash = str(meta["training_preprocess_hash"])
 
     def recognize(processed_image_path: str) -> tuple[str, float]:
         return recognize_line(tesseract_cmd, processed_image_path, tessdata_dir, lang, charset, psm)
 
-    return {"label": label, "engine": "tesseract", "model": model_id, "is_base": _is_base_model(model), "recognize": recognize}
+    return {
+        "label": label,
+        "engine": "tesseract",
+        "model": model_id,
+        "is_base": _is_base_model(model),
+        "recognize": recognize,
+        "training_preprocess": training_preprocess,
+        "training_preprocess_hash": training_preprocess_hash,
+    }
 
 
 def build_recognizer(project_id: Optional[str], target: dict[str, Any], charset: str, psm: int) -> dict[str, Any]:
@@ -159,6 +174,147 @@ def _resolve_image(image_dir: Path, name: str) -> Optional[Path]:
     return None
 
 
+EVAL_PREPROCESS_MODES = {"none", "manual", "training", "training_individual"}
+
+TRAINING_PREPROCESS_MISSING_MESSAGE = (
+    "このモデルには学習時前処理の記録がありません。手動設定または前処理なしを選択してください。"
+)
+TRAINING_PREPROCESS_MISMATCH_MESSAGE = (
+    "比較対象モデル間で学習時前処理が異なります。各モデルの学習時前処理を個別適用（training_individual）するか、"
+    "全モデルへ共通の手動前処理（manual）を選択してください（推奨: 共通の手動前処理）。"
+)
+INDIVIDUAL_PREPROCESS_WARNING = (
+    "モデルごとに入力画像条件が異なるため、モデル本体だけの純粋比較ではありません。"
+)
+PREPROCESS_MISMATCH_WARNING = (
+    "この評価では、学習時前処理と異なる前処理が使用されています。CERや完全一致率は参考値として確認してください。"
+)
+TRAINING_PREPROCESS_UNRECORDED_WARNING = (
+    "学習時前処理が未記録のモデルが含まれます。前処理の一致は判定できません。"
+)
+
+
+def resolve_evaluation_preprocess_plan(
+    mode: Optional[str],
+    eval_preprocess: Optional[dict[str, Any]],
+    recognizer_metas: list[dict[str, Any]],
+    preprocess_source: str = "none",
+) -> dict[str, Any]:
+    """評価前処理モードから、認識器ごとの前処理適用計画を解決する（純ロジック・テスト対象）。
+
+    recognizer_metas: [{is_base, model, training_preprocess, training_preprocess_hash}]
+    戻り値: {mode, groups: {key: {kind, manual, training_preprocess, hash}},
+             assignment: [key,...], evaluation_preprocess, warnings}
+    学習時前処理が未記録のモデルがある場合はエラー（固定値等へ自動フォールバックしない）。
+    """
+    from .preprocess import parse_eval_preprocess
+
+    normalized_mode = str(mode or "").strip().lower()
+    if normalized_mode and normalized_mode not in EVAL_PREPROCESS_MODES:
+        raise ValueError(f"unsupported preprocess_mode: {mode}")
+    # 未指定（旧API・後方互換）: eval_preprocess があれば手動、なければ前処理なし
+    if not normalized_mode:
+        normalized_mode = "manual" if eval_preprocess is not None else "none"
+
+    parsed_manual: Optional[dict[str, Any]] = None
+    if normalized_mode == "manual" and eval_preprocess is not None:
+        parsed = parse_eval_preprocess(eval_preprocess)
+        if parsed["grayscale"] or parsed["binarize"]:
+            parsed_manual = parsed
+
+    warnings: list[str] = []
+    groups: dict[str, dict[str, Any]] = {}
+    assignment: list[str] = []
+    evaluation_preprocess: dict[str, Any] = {"mode": normalized_mode}
+
+    def _group(key: str, payload: dict[str, Any]) -> str:
+        if key not in groups:
+            groups[key] = payload
+        return key
+
+    trained = [m for m in recognizer_metas if not m.get("is_base")]
+    if normalized_mode == "training":
+        missing = [m for m in trained if not isinstance(m.get("training_preprocess"), dict)]
+        if not trained or missing:
+            raise ValueError(TRAINING_PREPROCESS_MISSING_MESSAGE)
+        hashes = {str(m.get("training_preprocess_hash") or "") for m in trained}
+        if len(hashes) > 1:
+            raise ValueError(TRAINING_PREPROCESS_MISMATCH_MESSAGE)
+        tp = trained[0]["training_preprocess"]
+        tp_hash = str(trained[0].get("training_preprocess_hash") or "")
+        key = _group("training", {"kind": "training", "manual": None, "training_preprocess": tp, "hash": tp_hash})
+        assignment = [key for _ in recognizer_metas]
+        evaluation_preprocess.update(
+            {
+                "source_model_id": str(trained[0].get("model") or ""),
+                "preprocess_hash": tp_hash,
+                "snapshot_id": str(tp.get("snapshot_id") or ""),
+                "ocr_input_normalization": tp.get("ocr_input_normalization"),
+            }
+        )
+    elif normalized_mode == "training_individual":
+        missing = [m for m in trained if not isinstance(m.get("training_preprocess"), dict)]
+        if not trained or missing:
+            raise ValueError(TRAINING_PREPROCESS_MISSING_MESSAGE)
+        for meta in recognizer_metas:
+            if meta.get("is_base") or not isinstance(meta.get("training_preprocess"), dict):
+                # ベースモデル（eng）は学習記録を持たないため前処理なしで評価する
+                assignment.append(_group("none", {"kind": "none", "manual": None, "training_preprocess": None, "hash": None}))
+                continue
+            tp_hash = str(meta.get("training_preprocess_hash") or "")
+            key = _group(
+                f"training:{tp_hash}",
+                {"kind": "training", "manual": None, "training_preprocess": meta["training_preprocess"], "hash": tp_hash},
+            )
+            assignment.append(key)
+        warnings.append(INDIVIDUAL_PREPROCESS_WARNING)
+        evaluation_preprocess.update(
+            {
+                "preprocess_hash": None,
+                "per_model_hashes": {
+                    str(m.get("model") or ""): str(m.get("training_preprocess_hash") or "") for m in trained
+                },
+            }
+        )
+    elif normalized_mode == "manual" and parsed_manual is not None:
+        key = _group("manual", {"kind": "manual", "manual": parsed_manual, "training_preprocess": None, "hash": None})
+        assignment = [key for _ in recognizer_metas]
+        evaluation_preprocess.update({"settings": parsed_manual, "source": str(preprocess_source or "custom")})
+    else:
+        key = _group("none", {"kind": "none", "manual": None, "training_preprocess": None, "hash": None})
+        assignment = [key for _ in recognizer_metas]
+
+    # 学習時前処理と評価前処理の一致判定（true / false / None=未記録）
+    matches: list[Optional[bool]] = []
+    for index, meta in enumerate(recognizer_metas):
+        train_hash = meta.get("training_preprocess_hash")
+        if meta.get("is_base"):
+            matches.append(None)
+            continue
+        if not train_hash:
+            matches.append(None)
+            continue
+        group = groups[assignment[index]]
+        if group["kind"] == "training":
+            matches.append(str(group.get("hash") or "") == str(train_hash))
+        else:
+            matches.append(False)
+    if any(m is False for m in matches):
+        warnings.append(PREPROCESS_MISMATCH_WARNING)
+    if any(m is None and not recognizer_metas[i].get("is_base") for i, m in enumerate(matches)):
+        warnings.append(TRAINING_PREPROCESS_UNRECORDED_WARNING)
+
+    return {
+        "mode": normalized_mode,
+        "groups": groups,
+        "assignment": assignment,
+        "matches": matches,
+        "manual": parsed_manual,
+        "evaluation_preprocess": evaluation_preprocess,
+        "warnings": warnings,
+    }
+
+
 def evaluate_ocr(
     project_id: Optional[str],
     image_dir: str,
@@ -168,6 +324,7 @@ def evaluate_ocr(
     psm: int = 7,
     eval_preprocess: Optional[dict[str, Any]] = None,
     preprocess_source: str = "none",
+    preprocess_mode: Optional[str] = None,
 ) -> dict[str, Any]:
     image_root = Path(image_dir or "").expanduser()
     if not image_root.exists() or not image_root.is_dir():
@@ -175,17 +332,6 @@ def evaluate_ocr(
 
     gt = _read_gt_csv(gt_csv)
 
-    # 評価前処理（Step5と共通の apply_eval_preprocess を共用。処理定義を複製しない）。
-    # 未指定または全設定OFFは従来動作（前処理なし）。
-    # 評価データセットの回転はデータセット作成時に画像ファイルへ焼き込み済み（構造A）のため、
-    # ここでは回転を適用しない（二重回転防止）
-    parsed_preprocess: Optional[dict[str, Any]] = None
-    if eval_preprocess is not None:
-        from .preprocess import parse_eval_preprocess
-
-        parsed = parse_eval_preprocess(eval_preprocess)
-        if parsed["grayscale"] or parsed["binarize"]:
-            parsed_preprocess = parsed
     # 評価時whitelist: None=既定(実運用whitelist) / 空文字=whitelistなし / 任意文字列=カスタム
     if charset is None:
         charset = TESSERACT_WHITELIST_DEFAULT
@@ -194,6 +340,27 @@ def evaluate_ocr(
         raise ValueError("評価対象モデルがありません")
 
     recognizers = [build_recognizer(project_id, t, normalized_charset, int(psm)) for t in targets]
+
+    # 評価前処理の適用計画（none / manual / training / training_individual）。
+    # 未指定（旧API）は eval_preprocess の有無で manual / none（従来動作・後方互換）。
+    # 評価データセットの回転はデータセット作成時に画像ファイルへ焼き込み済み（構造A）のため、
+    # ここでは回転を適用しない（二重回転防止）
+    plan = resolve_evaluation_preprocess_plan(
+        preprocess_mode,
+        eval_preprocess,
+        [
+            {
+                "is_base": bool(rec.get("is_base")),
+                "model": str(rec.get("model") or ""),
+                "training_preprocess": rec.get("training_preprocess"),
+                "training_preprocess_hash": rec.get("training_preprocess_hash"),
+            }
+            for rec in recognizers
+        ],
+        preprocess_source=preprocess_source,
+    )
+    parsed_preprocess = plan["manual"]
+
     for rec in recognizers:
         rec["total"] = 0
         rec["correct"] = 0
@@ -204,9 +371,36 @@ def evaluate_ocr(
         # 混同集計（Levenshteinアラインメント由来の置換/脱落/挿入）
         rec["confusions"] = Counter()
 
-    # 前処理を1回だけ行い全対象へ共通入力を与える（学習前後の比較を公平にする）。
-    # 処理順はStep5と共通: 元画像（回転焼き込み済み）→ 評価前処理（グレースケール/二値化）→ OCR入力整形
+    # 前処理はグループ単位で1回だけ行い、同一グループの全対象へ共通入力を与える
+    # （通常モードは全モデル1グループ=公平比較。training_individualのみモデル別グループ）。
+    # 処理順は共通仕様: 元画像（回転焼き込み済み）→ 選択した評価前処理 → OCR入力整形
     from .ocr_pipeline import preprocess_ocr_image
+
+    def _prepare_eval_input(image_path: Path, group: dict[str, Any]):
+        kind = str(group.get("kind") or "none")
+        if kind == "manual":
+            from PIL import Image
+
+            from .preprocess import apply_eval_preprocess
+
+            with Image.open(image_path) as opened:
+                source_image = apply_eval_preprocess(opened.convert("RGB"), group["manual"])
+            return preprocess_ocr_image(source_image, image_shape=[1, 48, 320], strong=False)
+        if kind == "training":
+            from PIL import Image, ImageOps
+
+            from .preprocess_snapshot import apply_training_preprocess
+
+            tp = group["training_preprocess"]
+            normalization = tp.get("ocr_input_normalization") if isinstance(tp.get("ocr_input_normalization"), dict) else {}
+            target_h = int(normalization.get("target_height") or 48)
+            canvas_w = int(normalization.get("canvas_width") or 320)
+            with Image.open(image_path) as opened:
+                oriented = ImageOps.exif_transpose(opened)
+                source_image = apply_training_preprocess(oriented, tp)
+            return preprocess_ocr_image(source_image, image_shape=[1, target_h, canvas_w], strong=False)
+        # 前処理なしはパスをそのまま渡す（従来動作・後方互換）
+        return preprocess_ocr_image(str(image_path), image_shape=[1, 48, 320], strong=False)
 
     rows_out: list[dict[str, Any]] = []
     skipped_missing = 0
@@ -215,26 +409,19 @@ def evaluate_ocr(
         if image_path is None:
             skipped_missing += 1
             continue
-        if parsed_preprocess is not None:
-            from PIL import Image
-
-            from .preprocess import apply_eval_preprocess
-
-            with Image.open(image_path) as opened:
-                source_image = apply_eval_preprocess(opened.convert("RGB"), parsed_preprocess)
-            processed = preprocess_ocr_image(source_image, image_shape=[1, 48, 320], strong=False)
-        else:
-            # 前処理未指定はパスをそのまま渡す（従来動作・後方互換）
-            processed = preprocess_ocr_image(str(image_path), image_shape=[1, 48, 320], strong=False)
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-        tmp_path = Path(tmp.name)
-        tmp.close()
-        processed.save(tmp_path)
+        input_by_group: dict[str, Path] = {}
         try:
+            for group_key, group in plan["groups"].items():
+                processed = _prepare_eval_input(image_path, group)
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+                tmp_path = Path(tmp.name)
+                tmp.close()
+                processed.save(tmp_path)
+                input_by_group[group_key] = tmp_path
             expected_cmp = _normalize_compare(expected)
             results: list[dict[str, Any]] = []
-            for rec in recognizers:
-                prediction, confidence = rec["recognize"](str(tmp_path))
+            for rec_index, rec in enumerate(recognizers):
+                prediction, confidence = rec["recognize"](str(input_by_group[plan["assignment"][rec_index]]))
                 pred_cmp = _normalize_compare(prediction)
                 match = bool(prediction.strip()) and pred_cmp == expected_cmp
                 # 編集距離とアラインメント（CER・混同集計・改善/悪化判定・CSVで使用）
@@ -265,7 +452,8 @@ def evaluate_ocr(
                 )
             rows_out.append({"image": name, "expected": expected, "results": results})
         finally:
-            tmp_path.unlink(missing_ok=True)
+            for tmp_file in input_by_group.values():
+                tmp_file.unlink(missing_ok=True)
 
     if not rows_out:
         raise ValueError(
@@ -274,7 +462,7 @@ def evaluate_ocr(
         )
 
     targets_summary: list[dict[str, Any]] = []
-    for rec in recognizers:
+    for rec_index, rec in enumerate(recognizers):
         total = int(rec["total"])
         correct = int(rec["correct"])
         accuracy = (correct / total) if total > 0 else 0.0
@@ -305,6 +493,9 @@ def evaluate_ocr(
                     {"kind": kind, "from": src, "to": dst, "count": int(count)}
                     for (kind, src, dst), count in rec["confusions"].most_common(10)
                 ],
+                # 学習時前処理との一致判定（true / false / None=未記録・ベースモデル）
+                "training_preprocess_hash": rec.get("training_preprocess_hash"),
+                "preprocess_match": plan["matches"][rec_index],
                 "mismatches": rec["mismatches"],
             }
         )
@@ -378,9 +569,18 @@ def evaluate_ocr(
         "count": len(rows_out),
         "gt_count": len(gt),
         "skipped_missing_image": skipped_missing,
-        # 実際に適用した前処理（UI選択中の値ではなくサーバー適用値。履歴・結果表示用）
-        "preprocess_source": (str(preprocess_source or "custom") if parsed_preprocess is not None else "none"),
+        # 実際に適用した前処理（UI選択中の値ではなくサーバー適用値。履歴・結果表示用）。
+        # 旧フィールド（preprocess_source / eval_preprocess）は後方互換のため維持する
+        "preprocess_source": (
+            plan["mode"]
+            if plan["mode"] in {"training", "training_individual"}
+            else (str(preprocess_source or "custom") if parsed_preprocess is not None else "none")
+        ),
         "eval_preprocess": parsed_preprocess,
+        # 新フィールド: 実際に適用した評価前処理（モード・ハッシュ・由来モデル等。履歴保存・再現用）
+        "preprocess_mode": plan["mode"],
+        "evaluation_preprocess": plan["evaluation_preprocess"],
+        "preprocess_warnings": plan["warnings"],
         "targets": targets_summary,
         "rows": rows_out,
         "comparison": comparison,

@@ -50,11 +50,12 @@ export default function OcrEvaluationView({
   overlap = null,
   evalHistory = {},
   projectId = "default",
-  preprocessSource = "none",
+  preprocessSource = "training",
   onChangePreprocessSource,
   preprocessCustom = DEFAULT_EVAL_PREPROCESS,
   onChangePreprocessCustom,
   step5Preprocess = DEFAULT_EVAL_PREPROCESS,
+  modelInfos = {},
 }) {
   const targets = Array.isArray(result?.targets) ? result.targets : [];
   const rows = Array.isArray(result?.rows) ? result.rows : [];
@@ -67,14 +68,27 @@ export default function OcrEvaluationView({
   const historyRows = flattenEvalHistory(evalHistory);
   const overrideBodyId = useId();
 
-  // 表示・編集対象の前処理値（step5=参照表示 / custom=編集可 / none=既定値を無効表示）
+  // 表示・編集対象の前処理値（step5=参照表示 / custom=編集可 / none・training=既定値を無効表示）
   const displayedPre = normalizeEvalPreprocess(
     preprocessSource === "custom" ? preprocessCustom : preprocessSource === "step5" ? step5Preprocess : DEFAULT_EVAL_PREPROCESS
   );
   const preEditable = preprocessSource === "custom";
-  const preSummaryText = `${evalPreprocessSourceLabel(preprocessSource)} / ${
-    preprocessSource === "none" ? "前処理なし" : evalPreprocessSummary(displayedPre)
-  }`;
+  const preSummaryText =
+    preprocessSource === "training"
+      ? "学習時前処理（モデルに記録された前処理を再現）"
+      : `${evalPreprocessSourceLabel(preprocessSource)} / ${
+          preprocessSource === "none" ? "前処理なし" : evalPreprocessSummary(displayedPre)
+        }`;
+
+  // 学習時前処理モードの記録有無（選択中の学習後モデル。latest=一覧の最新作成モデルで判定）
+  const resolvedTrainedModel = useMemo(() => {
+    if (trainedModel && trainedModel !== "latest") return trainedModel;
+    const sorted = [...(tesseractModels || [])].sort((a, b) =>
+      String(modelInfos[b]?.created_at || "").localeCompare(String(modelInfos[a]?.created_at || ""))
+    );
+    return sorted[0] || "";
+  }, [trainedModel, tesseractModels, modelInfos]);
+  const trainedPreRecorded = Boolean(modelInfos[resolvedTrainedModel]?.training_preprocess_hash);
 
   // 詳細設定（上書き）アコーディオン
   const [overrideOpen, setOverrideOpen] = useState(false);
@@ -83,6 +97,8 @@ export default function OcrEvaluationView({
   const [sampleFiles, setSampleFiles] = useState([]);
   const [sampleName, setSampleName] = useState("");
   const [previewProcessed, setPreviewProcessed] = useState("");
+  // 学習時前処理モード用: 前処理後（整形前）の中間画像（元画像→学習時前処理後→OCR入力整形後の3段表示）
+  const [previewIntermediate, setPreviewIntermediate] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState("");
   useEffect(() => {
@@ -90,6 +106,7 @@ export default function OcrEvaluationView({
     setSampleFiles([]);
     setSampleName("");
     setPreviewProcessed("");
+    setPreviewIntermediate("");
     setPreviewError("");
     if (!overrideOpen || !String(imageDir || "").trim()) {
       return undefined;
@@ -115,6 +132,26 @@ export default function OcrEvaluationView({
     setPreviewLoading(true);
     setPreviewError("");
     try {
+      if (preprocessSource === "training") {
+        // 学習時前処理モード: モデルに記録された前処理を適用（元画像→学習時前処理後→OCR入力整形後）
+        const res = await fetch(`${API_BASE}/api/ocr/training-preprocess/preview`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            project_id: projectId || "default",
+            model: trainedModel || "latest",
+            directory: imageDir,
+            filename: sampleName,
+          }),
+        });
+        if (!res.ok) {
+          throw new Error((await res.text()) || "プレビューの取得に失敗しました");
+        }
+        const data = await res.json();
+        setPreviewIntermediate(data?.preprocessed_data_url || "");
+        setPreviewProcessed(data?.normalized_data_url || "");
+        return;
+      }
       const form = new FormData();
       form.append("project_id", projectId || "default");
       form.append("source_directory", imageDir);
@@ -130,9 +167,11 @@ export default function OcrEvaluationView({
         throw new Error((await res.text()) || "プレビューの取得に失敗しました");
       }
       const data = await res.json();
+      setPreviewIntermediate("");
       setPreviewProcessed(data?.processed_data_url || "");
     } catch (e) {
       setPreviewProcessed("");
+      setPreviewIntermediate("");
       setPreviewError(String(e?.message || e));
     } finally {
       setPreviewLoading(false);
@@ -165,9 +204,16 @@ export default function OcrEvaluationView({
   const resultPreLabel = useMemo(() => {
     if (!result) return "";
     if (result.preprocess_source === undefined) return "未記録（旧形式の結果）";
+    if (result.preprocess_mode === "training" || result.preprocess_mode === "training_individual") {
+      const hash = String(result.evaluation_preprocess?.preprocess_hash || "");
+      const short = hash.startsWith("sha256:") ? hash.slice(7, 15) : hash.slice(0, 8);
+      return `${evalPreprocessSourceLabel(result.preprocess_mode)}${short ? `（${short}）` : ""}`;
+    }
     const source = evalPreprocessSourceLabel(result.preprocess_source);
     return result.eval_preprocess ? `${source} / ${evalPreprocessSummary(result.eval_preprocess)}` : source;
   }, [result]);
+  // サーバーが判定した前処理警告（学習時前処理との不一致・未記録・個別適用の注意）
+  const resultPreWarnings = Array.isArray(result?.preprocess_warnings) ? result.preprocess_warnings : [];
 
   return (
     // xl以上はビューポート内固定（ページスクロールなし・内部スクロールのみ）。xl未満は従来の縦積み/通常フロー
@@ -240,23 +286,37 @@ export default function OcrEvaluationView({
             {/* OCR評価条件（前処理はStep5と共通定義。UIで選択→評価APIへ送信し全画像へ同一適用） */}
             <div className="rounded-xl border border-border/80 bg-card/45 p-3">
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">OCR評価条件</p>
-              <label className="app-label">OCRプロファイル</label>
+              <label className="app-label">評価前処理モード</label>
               <select
                 className="app-select"
                 value={preprocessSource}
                 onChange={(e) => onChangePreprocessSource?.(e.target.value)}
               >
-                <option value="none">前処理なし（従来どおり）</option>
-                <option value="step5">Step5既定（保存済みのStep5前処理設定）</option>
-                <option value="custom">カスタム（この画面で指定）</option>
+                <option value="training">学習時前処理を使用（推奨・既定）</option>
+                <option value="step5">手動設定: Step5既定（保存済みのStep5前処理設定）</option>
+                <option value="custom">手動設定: カスタム（この画面で指定）</option>
+                <option value="none">前処理なし</option>
               </select>
+              {/* 学習時前処理モード: 選択モデルに記録がない場合は実行前に警告する（自動フォールバックしない） */}
+              {preprocessSource === "training" && !trainedPreRecorded ? (
+                <div className="mt-2 rounded-lg border border-amber-400/50 bg-amber-400/10 px-2.5 py-1.5 text-[11px] leading-relaxed text-amber-200">
+                  このモデルには学習時前処理の記録がありません。
+                  <br />
+                  手動設定または前処理なしを選択してください。
+                </div>
+              ) : null}
+              {preprocessSource !== "training" && trainedPreRecorded ? (
+                <p className="mt-1 text-[11px] leading-relaxed text-amber-200/90">
+                  注意: 学習時前処理と異なる前処理で評価すると、CERや完全一致率は参考値になります。
+                </p>
+              ) : null}
               <label className="mt-2 inline-flex h-5 cursor-pointer items-center gap-1.5 text-xs text-text">
                 <input
                   type="checkbox"
                   checked={preprocessSource === "step5"}
                   onChange={(e) => onChangePreprocessSource?.(e.target.checked ? "step5" : "custom")}
                 />
-                Step5の前処理設定と同期する
+                Step5の前処理設定と同期する（手動設定）
               </label>
               {/* 設定サマリー（閉じていても現在の評価条件が分かる。長い場合は省略+ツールチップ） */}
               <p className="mt-1 min-w-0 truncate text-[11px] text-muted" title={preSummaryText}>
@@ -304,6 +364,12 @@ export default function OcrEvaluationView({
                   {preprocessSource === "none" ? (
                     <p className="text-[11px] text-muted">
                       前処理なしを選択中です。編集するには「カスタム」プロファイルへ切り替えてください。
+                    </p>
+                  ) : null}
+                  {preprocessSource === "training" ? (
+                    <p className="text-[11px] text-blue-200">
+                      学習時前処理を使用中です。モデルに記録された前処理（二値化・照明ムラ補正など）を評価画像へ再現します。
+                      下のプレビューで適用結果を確認できます。
                     </p>
                   ) : null}
                   <label className={`inline-flex h-5 items-center gap-1.5 ${preEditable ? "cursor-pointer text-text" : "text-muted"}`}>
@@ -385,7 +451,7 @@ export default function OcrEvaluationView({
                             {previewLoading ? "生成中..." : "プレビュー更新"}
                           </Button>
                         </div>
-                        <div className="mt-1.5 grid grid-cols-2 gap-2">
+                        <div className={`mt-1.5 grid gap-2 ${previewIntermediate ? "grid-cols-3" : "grid-cols-2"}`}>
                           <div>
                             <p className="text-[10px] text-muted">元画像</p>
                             <img
@@ -394,8 +460,18 @@ export default function OcrEvaluationView({
                               className="max-h-16 rounded border border-border/60 bg-white object-contain"
                             />
                           </div>
+                          {previewIntermediate ? (
+                            <div>
+                              <p className="text-[10px] text-muted">学習時前処理後</p>
+                              <img
+                                src={previewIntermediate}
+                                alt="学習時前処理後"
+                                className="max-h-16 rounded border border-border/60 bg-white object-contain"
+                              />
+                            </div>
+                          ) : null}
                           <div>
-                            <p className="text-[10px] text-muted">前処理後（OCR入力）</p>
+                            <p className="text-[10px] text-muted">{previewIntermediate ? "OCR入力整形後" : "前処理後（OCR入力）"}</p>
                             {previewProcessed ? (
                               <img
                                 src={previewProcessed}
@@ -630,7 +706,24 @@ sample_003.png,CHYBkt`}</pre>
                 <span className="ml-2 min-w-0 text-emerald-200" title={resultPreLabel}>
                   評価条件: {resultPreLabel}
                 </span>
+                {(result.targets || []).some((t) => t.preprocess_match === true) ? (
+                  <span className="ml-2 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[10px] text-success">
+                    学習時前処理一致
+                  </span>
+                ) : null}
               </div>
+
+              {/* 前処理警告（学習時前処理との不一致・未記録等。サーバー判定値をそのまま表示） */}
+              {resultPreWarnings.length > 0 ? (
+                <div className="shrink-0 rounded-lg border border-amber-400/50 bg-amber-400/10 px-3 py-2">
+                  <p className="text-xs font-semibold text-amber-200">注意</p>
+                  {resultPreWarnings.map((warning) => (
+                    <p key={warning} className="mt-0.5 text-xs leading-relaxed text-amber-100/90">
+                      {warning}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
 
               {/* 指標カード（CER主指標。Accuracy=完全一致率は業務指標として併記） */}
               <div className="grid shrink-0 grid-cols-2 gap-2 xl:grid-cols-3">

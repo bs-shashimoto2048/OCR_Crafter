@@ -32,6 +32,10 @@ export default function InferenceView({
   onRun,
   loading,
   result,
+  preprocessMode = "",
+  setPreprocessMode,
+  effectivePreprocessMode = "",
+  preprocessRecorded = false,
 }) {
   const latestAny = String(latestModels?.any || "");
   const latestByType = latestModels?.byType || {};
@@ -194,6 +198,27 @@ export default function InferenceView({
                   学習済みTesseractモデルがありません。学習画面でTesseract学習を完了後に推論できます。
                 </p>
               ) : null}
+              {/* 推論前処理（既定=モデルの学習時前処理。学習条件と異なる入力を与えないため） */}
+              <div>
+                <label className="app-label">推論前処理</label>
+                <select
+                  value={preprocessMode || (preprocessRecorded ? "training" : "none")}
+                  onChange={(e) => setPreprocessMode?.(e.target.value)}
+                  className="app-select"
+                >
+                  <option value="training">モデルの学習時前処理（推奨）</option>
+                  <option value="manual">手動設定（現在の前処理設定を適用）</option>
+                  <option value="none">なし（OCR入力整形のみ）</option>
+                </select>
+                {!preprocessRecorded && (preprocessMode || "training") === "training" ? (
+                  <p className="mt-1 text-xs text-amber-200">
+                    このモデルには学習時前処理の記録がありません。手動設定または「なし」を選択してください。
+                  </p>
+                ) : null}
+                {effectivePreprocessMode === "training" ? (
+                  <p className="mt-1 text-xs text-muted">学習時と同じ前処理を適用してから推論します。</p>
+                ) : null}
+              </div>
             </>
           ) : (
             <div>
@@ -302,6 +327,16 @@ export default function InferenceView({
               ) : null}
               {result.validation ? <p>検証結果: {isValid ? "正常" : "要確認"}</p> : null}
               {validationReason ? <p>検証理由: {validationReason}</p> : null}
+              {result.inference_preprocess ? (
+                <p>
+                  推論前処理:{" "}
+                  {result.inference_preprocess.mode === "training"
+                    ? `学習時前処理（${String(result.inference_preprocess.preprocess_hash || "").slice(7, 15) || "-"}）`
+                    : result.inference_preprocess.mode === "manual"
+                      ? "手動設定（現在の前処理設定）"
+                      : "なし（OCR入力整形のみ）"}
+                </p>
+              ) : null}
               {result.retry_performed ? <p>再OCR: 実行 ({result.retry_used ? "再OCR結果を採用" : "初回結果を採用"})</p> : null}
             </div>
           </div>

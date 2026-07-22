@@ -48,7 +48,7 @@
 
 | Method / Path | リクエスト | レスポンス主要キー | 概要 |
 |---|---|---|---|
-| POST `/preprocess/run` | `PreprocessRequest`（`project_id?`, `overrides?`） | `count`, `type_counts`, `files` | 全画像の前処理実行 |
+| POST `/preprocess/run` | `PreprocessRequest`（`project_id?`, `overrides?`） | `count`, `type_counts`, `files`, `preprocess_snapshot{snapshot_id, preprocess_hash, created_at}` | 全画像の前処理実行。実行時点の**実効パラメータの完全スナップショット**（工程順序・有効/無効・実効パラメータ・OCR入力整形・schema/pipelineバージョン）を `processed/meta/preprocess_snapshot.json` へ保存（最終実行時点の設定が正。データセット作成時に確定コピーされる）。手動マスクの座標（画像単位）は含めない |
 | GET `/preprocess/preview` | Query: `image`, `engine`, `model`, `model_type?`, `easyocr_langs`, `include_lowercase` | プレビュー + 推論結果 | 前処理プレビュー＋OCR推論 |
 | POST `/preprocess/preview` | `PreprocessPreviewRequest`（上記 + `overrides?`） | プレビュー + 推論結果 | Body で前処理上書きを指定できる版 |
 
@@ -73,12 +73,12 @@
 
 | Method / Path | リクエスト | レスポンス主要キー | 概要 |
 |---|---|---|---|
-| POST `/api/ocr/dataset/create` | `OcrDatasetCreateRequest`（`image_types`, `charset`, `max_text_length`, `image_shape`, 比率, `seed`, `text_case`, 任意: `augmentation`=新形式オーグメンテーション設定） | 作成結果（`counts`＋`input_count`/`valid_count`/`skipped`内訳/`split_method: image`/`augmentation`/`augmentation_generated`） | ラベル済み画像からOCR認識用データセット作成。**分割枚数は最大剰余法**（合計=有効画像数を保証。同値小数部はTrain→Val→Test優先）。`augmentation` 指定時は**Trainのみ**へ追加画像を生成（元画像は必ず残る・ラベル不変・生成枚数=(倍率-1)×Train枚数）。比率合計≠1.0は **400**（`detail={code: INVALID_SPLIT_RATIO, message, values}` の構造化エラー） |
+| POST `/api/ocr/dataset/create` | `OcrDatasetCreateRequest`（`image_types`, `charset`, `max_text_length`, `image_shape`, 比率, `seed`, `text_case`, 任意: `augmentation`=新形式オーグメンテーション設定） | 作成結果（`counts`＋`input_count`/`valid_count`/`skipped`内訳/`split_method: image`/`augmentation`/`augmentation_generated`） | ラベル済み画像からOCR認識用データセット作成。**分割枚数は最大剰余法**（合計=有効画像数を保証。同値小数部はTrain→Val→Test優先）。`augmentation` 指定時は**Trainのみ**へ追加画像を生成（元画像は必ず残る・ラベル不変・生成枚数=(倍率-1)×Train枚数）。比率合計≠1.0は **400**（`detail={code: INVALID_SPLIT_RATIO, message, values}` の構造化エラー）。**meta.json へ学習時前処理を確定保存**: `training_preprocess`（作成時点の `processed/meta/preprocess_snapshot.json` のコピー＋`ocr_input_normalization`。スナップショット未保存の旧プロジェクトは `null`=推測補完しない）・`training_preprocess_hash`（sha256）・`source_image_state`（processed/mixed等）・`source_priority`・`source_state_counts`・`source_preprocess_snapshot_id`・`source_warning`（processed以外の混在時） |
 | POST `/api/ocr/dataset/split-preview` | `OcrDatasetSplitPreviewRequest`（`image_types`, `charset`, `max_text_length`, `text_case`, 比率） | `input_count`, `valid_count`, `skipped{type,invalid_label,missing_source}`, `counts`, `split_method`, `ratios` | データセット作成前の分割予定枚数プレビュー（画像は生成しない。作成時と同じ最大剰余法） |
 | POST `/api/ocr/dataset/augmentation-preview` | `OcrAugmentationPreviewRequest`（`augmentation`, `sample_count`=1〜5, `image_shape` 等） | `items[{image_name,label,original,augmented}]`（base64 PNG）, `config` | 学習前のオーグメンテーションプレビュー（ランダムサンプルへ適用。強すぎる設定の事前確認用） |
 | POST `/api/ocr/dataset/from_logs` | `OcrDatasetFromLogsRequest`（`only_invalid`, `include_corrected` 等） | 作成結果 | 推論ログからOCRデータセット作成 |
 | POST `/api/ocr/train/start` | `OcrTrainStartRequest`（`engine`, `dataset_dir`, `device`, worker/AMP設定等） | `job_id`, `engine: paddleocr` | PaddleOCR学習ジョブ開始（paddleocrのみ許可）。同一プロジェクトでアクティブなOCRジョブがある場合は **409 Conflict** |
-| POST `/api/tesseract/train/start` | `TesseractTrainStartRequest`（`dataset_dir`, `charset`, `max_iterations`, `base_lang`, `psm`, 任意: `experiment_name` / `parent_model_id` / `training_note`） | `job_id`, `engine: tesseract` | Tesseract LSTM fine-tune 開始。二重実行は **409 Conflict**。実験情報はジョブ（`training_jobs.experiment_meta` JSON列）経由でモデルメタへ保存（未指定=従来動作） |
+| POST `/api/tesseract/train/start` | `TesseractTrainStartRequest`（`dataset_dir`, `charset`, `max_iterations`, `base_lang`, `psm`, 任意: `experiment_name` / `parent_model_id` / `training_note`） | `job_id`, `engine: tesseract` | Tesseract LSTM fine-tune 開始。二重実行は **409 Conflict**。実験情報はジョブ（`training_jobs.experiment_meta` JSON列）経由でモデルメタへ保存（未指定=従来動作）。学習完了時にデータセット meta.json の `training_preprocess` / `training_preprocess_hash` / `source_image_state` を `.tess.json` へそのまま引き継ぐ（未記録=null） |
 | GET `/api/ocr/train/active` | Query: `project_id?` | `{project_id, job}` | プロジェクトのアクティブ（queued/running）なOCR学習ジョブを返す（無ければ `job: null`）。画面再読込時の再接続用 |
 | GET `/api/ocr/train/status/{job_id}` | Path | ジョブ状態 | OCR学習状態取得 |
 | POST `/api/ocr/train/stop/{job_id}` | Query: `delete_artifacts?` | 停止結果 | OCR学習停止 |
@@ -89,7 +89,7 @@
 | Method / Path | リクエスト | レスポンス主要キー | 概要 |
 |---|---|---|---|
 | GET `/models` | Query: `project_id?` | `items` | 保存済みモデル一覧 |
-| GET `/models/info` | Query: `project_id?` | `items` | モデル詳細情報一覧（`model_size_mb`=モデル実体サイズMB。tesseract=traineddata・分類=.ptファイル。実体なし/PaddleOCRはnull=UIでは未記録表示。`model_id`=管理No「M0001」形式：作成日時順に自動採番・OCR Crafter全体で一意・削除後も再利用しない。`data/model_ids.json` へ永続化し未登録モデルは一覧取得時に一括採番。tesseractモデルは実験情報 `experiment_name` / `parent_model_id`（親モデルの管理No。ベース直学習は空）/ `training_note` / `training_duration_seconds`（秒・旧モデルはnull）を含む=学習条件比較で使用。旧メタは空値/nullで後方互換） |
+| GET `/models/info` | Query: `project_id?` | `items` | モデル詳細情報一覧（`model_size_mb`=モデル実体サイズMB。tesseract=traineddata・分類=.ptファイル。実体なし/PaddleOCRはnull=UIでは未記録表示。`model_id`=管理No「M0001」形式：作成日時順に自動採番・OCR Crafter全体で一意・削除後も再利用しない。`data/model_ids.json` へ永続化し未登録モデルは一覧取得時に一括採番。tesseractモデルは実験情報 `experiment_name` / `parent_model_id`（親モデルの管理No。ベース直学習は空）/ `training_note` / `training_duration_seconds`（秒・旧モデルはnull）を含む=学習条件比較で使用。旧メタは空値/nullで後方互換。**学習時前処理**: `training_preprocess`（前処理スナップショット。tesseract=.tess.json保存値 / PaddleOCR=.ocr.jsonまたはデータセットmeta由来）・`training_preprocess_hash`・`dataset_source_image_state` を含む=モデル比較「学習前処理比較」・評価/推論の学習時前処理再現で使用。旧モデルはnull/空=未記録表示） |
 | GET `/models/latest` | Query: `model_type?`, `training_family`, `engine?` | `model` | 最新モデル名 |
 | GET `/model-types` | Query: `project_id?` | `items` | モデル種別一覧 |
 | DELETE `/models/{model_name}` | Query: `project_id?` | `deleted` | モデル削除（models配下限定の安全検証あり） |
@@ -101,7 +101,7 @@
 
 | Method / Path | リクエスト | レスポンス主要キー | 概要 |
 |---|---|---|---|
-| POST `/predict` | Form: `file`, `engine`, `model_type`, `model`, `easyocr_langs`, `include_lowercase`, `apply_preprocess`, `preprocess_overrides_json`, `project_id` | 推論結果 + `preprocess_preview_data_url` | 1画像のOCR推論（ログ保存） |
+| POST `/predict` | Form: `file`, `engine`, `model_type`, `model`, `easyocr_langs`, `include_lowercase`, `apply_preprocess`, `preprocess_overrides_json`, `preprocess_mode?`, `project_id` | 推論結果 + `preprocess_preview_data_url` + `inference_preprocess?` | 1画像のOCR推論（ログ保存）。`preprocess_mode`: 未指定=従来動作 / `training`=**モデルの学習時前処理を再現**してからOCR入力整形（未記録の旧モデルは400・自動フォールバックしない。分類モデルcustomは400）/ `manual`=現在の前処理設定パイプラインを適用 / `none`=OCR入力整形のみ。適用時は `inference_preprocess{mode, preprocess_hash?, snapshot_id?}` を返す |
 | POST `/api/ocr/predict/batch` | Form: `files[]` + 上記同様 | `items[]`, `include_lowercase` | 複数画像の一括推論 |
 | POST `/api/ocr/yolo/predict` | Form: `file`, YOLO設定（`yolo_model`, `conf_threshold` 等）+ OCR設定 | `detections[{bbox,text,confidence}]` | YOLO検出→切出し→OCRの複合推論 |
 | POST `/api/ocr/log/save` | `OcrLogSaveRequest`（`predicted_text`, `corrected_text?` 等） | 保存結果 | OCR修正ログ保存 |
@@ -135,7 +135,8 @@
 | Method / Path | リクエスト | レスポンス主要キー | 概要 |
 |---|---|---|---|
 | POST `/evaluate` | `EvaluateRequest`（`dataset` val/test, `model`, `overrides?`） | 評価結果 | 分類モデルの精度評価 |
-| POST `/api/ocr/evaluate` | `OcrEvaluateRequest`（`image_dir`, `gt_csv`, `targets[]`, `charset`, `psm`, `eval_preprocess?`（Step5と共通の評価前処理 `{grayscale, binarize, binarize_method: otsu/fixed, threshold}`。未指定=従来動作）, `preprocess_source?`（none/step5/custom）） | 評価結果（`preprocess_source` / `eval_preprocess` に**サーバーが実際に適用した前処理**をecho。**targets[] へCER主指標を追加**: `cer`/`cer_percent`（マイクロ平均=全画像の編集距離総和÷正解文字数総和・低いほど良い）・`char_accuracy`（=1-CER）・`edit_distance_total`・`ref_length_total`・`confusions`（Levenshteinアラインメント由来の置換/脱落/挿入TOP10）。**comparison へ** `base_cer`/`trained_cer`/`cer_delta`/`cer_delta_pt`/`cer_relative_improvement`（=(学習前-学習後)/学習前）と、画像単位の編集距離比較による `improved`/`unchanged`/`regressed`、完全一致の増減 `perfect_fixed`/`perfect_regressed` を追加。**rows[].results[] へ** `edit_distance`/`sub_count`/`del_count`/`ins_count` を追加。既存フィールドは不変=後方互換） | OCRモデル評価（Tesseract。正解CSV比較・CER主指標／Accuracy=完全一致率は業務指標）。前処理は全評価画像へ同一適用され、適用順は「元画像（回転はデータセット作成時に焼き込み済み=二重回転しない）→ 評価前処理（Step5共通の `apply_eval_preprocess`）→ OCR入力整形 → 推論 → whitelist → 完全一致評価」。不正な前処理値は400 |
+| POST `/api/ocr/evaluate` | `OcrEvaluateRequest`（`image_dir`, `gt_csv`, `targets[]`, `charset`, `psm`, `eval_preprocess?`（Step5と共通の評価前処理 `{grayscale, binarize, binarize_method: otsu/fixed, threshold}`。未指定=従来動作）, `preprocess_source?`（none/step5/custom）, `preprocess_mode?`（`none`=前処理なし / `manual`=手動設定 / `training`=**学習時前処理を全対象へ共通適用**（対象モデルの`training_preprocess`が未記録=400・全学習後モデルのハッシュ不一致=400でフォールバックしない） / `training_individual`=各モデルの学習時前処理を個別適用（ベースengは前処理なし・「純粋比較ではない」警告付き）。未指定=従来動作）） | 評価結果（**前処理関連の追加キー**: `preprocess_mode`（実際に適用したモード）・`evaluation_preprocess`（`{mode, preprocess_hash?, snapshot_id?, source_model_id?, settings?}`=再現用）・`preprocess_warnings[]`（不一致/未記録/個別適用の注意文）・targets[]へ `training_preprocess_hash` / `preprocess_match`（true/false/null=未記録）。`preprocess_source` / `eval_preprocess` に**サーバーが実際に適用した前処理**をecho。**targets[] へCER主指標を追加**: `cer`/`cer_percent`（マイクロ平均=全画像の編集距離総和÷正解文字数総和・低いほど良い）・`char_accuracy`（=1-CER）・`edit_distance_total`・`ref_length_total`・`confusions`（Levenshteinアラインメント由来の置換/脱落/挿入TOP10）。**comparison へ** `base_cer`/`trained_cer`/`cer_delta`/`cer_delta_pt`/`cer_relative_improvement`（=(学習前-学習後)/学習前）と、画像単位の編集距離比較による `improved`/`unchanged`/`regressed`、完全一致の増減 `perfect_fixed`/`perfect_regressed` を追加。**rows[].results[] へ** `edit_distance`/`sub_count`/`del_count`/`ins_count` を追加。既存フィールドは不変=後方互換） | OCRモデル評価（Tesseract。正解CSV比較・CER主指標／Accuracy=完全一致率は業務指標）。前処理は全評価画像へ同一適用され、適用順は「元画像（回転はデータセット作成時に焼き込み済み=二重回転しない）→ 評価前処理（Step5共通の `apply_eval_preprocess`）→ OCR入力整形 → 推論 → whitelist → 完全一致評価」。不正な前処理値は400 |
+| POST `/api/ocr/training-preprocess/preview` | `TrainingPreprocessPreviewRequest`（`project_id?`, `model`, `directory`, `filename`） | `{model, training_preprocess_hash, snapshot_id, preprocessed_data_url, normalized_data_url}` | モデルの**学習時前処理を適用したプレビュー**（元画像→学習時前処理後→OCR入力整形後。評価・推論画面用）。学習時前処理が未記録の旧モデルは400（フォールバックしない）。元ファイルは変更しない |
 | POST `/ocr/tuning/export` | `OcrTuningExportRequest`（`engine`, `image_types`, 比率） | 出力結果 | EasyOCR/PaddleOCR学習用データのエクスポート |
 
 ## ミドルウェア / 起動処理

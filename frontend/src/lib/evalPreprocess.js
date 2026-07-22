@@ -95,8 +95,10 @@ export function evalPreprocessSummary(settings) {
   return parts.length > 0 ? parts.join("/") : "前処理なし";
 }
 
-// 前処理の由来ラベル（none/step5/custom。過去履歴に情報がない場合は未記録）
+// 前処理の由来ラベル（training/none/step5/custom。過去履歴に情報がない場合は未記録）
 export const EVAL_PREPROCESS_SOURCE_LABELS = {
+  training: "学習時前処理",
+  training_individual: "学習時前処理（個別）",
   none: "前処理なし",
   step5: "Step5同期",
   custom: "カスタム",
@@ -104,4 +106,13 @@ export const EVAL_PREPROCESS_SOURCE_LABELS = {
 
 export function evalPreprocessSourceLabel(source) {
   return EVAL_PREPROCESS_SOURCE_LABELS[String(source || "")] || "未記録";
+}
+
+// UIの前処理プロファイル（source）→ /api/ocr/evaluate の preprocess_mode。
+// training=学習時前処理を共通適用 / none=前処理なし / step5・custom=手動設定（manual）
+export function evalPreprocessModeForSource(source) {
+  const s = String(source || "");
+  if (s === "training") return "training";
+  if (s === "none") return "none";
+  return "manual";
 }

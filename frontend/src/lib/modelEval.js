@@ -21,6 +21,10 @@ export function normalizeEvalEntry(datasetLabel, entry) {
     whitelist: entry?.whitelist ? String(entry.whitelist) : "",
     preSource: pre ? String(pre.source || "") : "",
     preSummary: pre ? String(pre.summary || "") : "",
+    // 評価前処理モード・学習時前処理との一致（旧形式はnull/空=未記録）
+    preMode: pre && pre.mode ? String(pre.mode) : "",
+    preHash: pre && pre.hash ? String(pre.hash) : "",
+    preMatch: entry?.preprocess_match === true ? true : entry?.preprocess_match === false ? false : null,
     // CER主指標（0〜1・低いほど良い）と関連指標（旧形式はnull=未記録）
     cer: num(entry?.cer),
     charAccuracy: num(entry?.char_accuracy),

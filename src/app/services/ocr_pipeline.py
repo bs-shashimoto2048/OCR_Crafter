@@ -21,6 +21,13 @@ from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 from ..project_paths import ensure_project_directories, safe_rmtree
 from .labels import read_labels
 from .model_registry import resolve_ocr_model_meta
+from .preprocess_snapshot import (
+    build_training_preprocess,
+    compute_training_preprocess_hash,
+    load_preprocess_snapshot,
+    source_state_of_path,
+    summarize_source_states,
+)
 
 OCR_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 CONF_THRESHOLD = 0.9
@@ -853,7 +860,11 @@ def _collect_ocr_candidates(
         if src is None:
             skipped_missing_source += 1
             continue
-        candidates.append({"image_name": image_name, "type": image_type, "text": text, "source": src})
+        # 学習ソース画像の由来（processed / interim / raw）。前処理適用状態の記録・警告に使う
+        source_state = source_state_of_path(src, paths.root)
+        candidates.append(
+            {"image_name": image_name, "type": image_type, "text": text, "source": src, "source_state": source_state}
+        )
     skipped = {
         "type": skipped_type,
         "invalid_label": skipped_invalid_label,
@@ -1060,6 +1071,15 @@ def create_ocr_dataset(
     charset_path = dataset_root / "charset.txt"
     charset_path.write_text("\n".join(list(normalized_charset)) + "\n", encoding="utf-8")
 
+    # 学習時前処理の確定保存: 作成時点の processed スナップショットをデータセットへ焼き込む。
+    # スナップショット未保存（旧プロジェクト等）は None（未記録。推測で補完しない）。
+    # processed/ 画像は既に前処理適用済みのため、ここでは再適用しない（二重前処理防止）
+    snapshot = load_preprocess_snapshot(paths.root)
+    training_preprocess = build_training_preprocess(snapshot, selected_types, shape)
+    training_preprocess_hash = compute_training_preprocess_hash(training_preprocess)
+    # 学習データの由来（processed / interim / raw）。processed 以外の混在は警告する
+    source_summary = summarize_source_states([str(c.get("source_state") or "") for c in candidates])
+
     meta = {
         "project_id": paths.project_id,
         "dataset_root": str(dataset_root),
@@ -1083,6 +1103,15 @@ def create_ocr_dataset(
         "valid_count": int(n),
         "counts": {k: len(v) for k, v in split_map.items()},
         "skipped": skipped,
+        # 学習時前処理（processedスナップショットの確定保存。未記録=None・推測補完しない）
+        "training_preprocess": training_preprocess,
+        "training_preprocess_hash": training_preprocess_hash,
+        # 学習データの由来（processed=前処理適用済み画像。二重適用防止の判定に使う）
+        "source_image_state": source_summary["overall"],
+        "source_priority": ["processed", "interim", "raw"],
+        "source_state_counts": source_summary["counts"],
+        "source_preprocess_snapshot_id": str((snapshot or {}).get("snapshot_id") or ""),
+        "source_warning": source_summary["warning"],
         "created_at": datetime.now().isoformat(),
     }
     meta_path = dataset_root / "meta.json"

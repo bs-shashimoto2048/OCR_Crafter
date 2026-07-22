@@ -424,6 +424,18 @@ def register_tesseract_model(
             if isinstance(dataset_meta.get("augmentation_generated"), (int, float))
             else None
         ),
+        # 学習時前処理（データセットmeta.jsonの確定保存値をそのまま引き継ぐ。
+        # 未記録=None・UIで「未記録」表示。推測で補完しない）
+        "training_preprocess": (
+            dataset_meta.get("training_preprocess") if isinstance(dataset_meta.get("training_preprocess"), dict) else None
+        ),
+        "training_preprocess_hash": (
+            str(dataset_meta.get("training_preprocess_hash"))
+            if dataset_meta.get("training_preprocess_hash")
+            else None
+        ),
+        # 学習データの由来（processed=取込前処理適用済み画像から作成）
+        "dataset_source_image_state": str(dataset_meta.get("source_image_state") or ""),
     }
     meta_path = paths.models / f"{lang}{TESSERACT_MODEL_SUFFIX}"
     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
