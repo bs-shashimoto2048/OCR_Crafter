@@ -12,6 +12,7 @@ import TrainingView from "./views/TrainingView";
 import ModelsView from "./views/ModelsView";
 import InferenceView from "./views/InferenceView";
 import ExperimentsView from "./views/ExperimentsView";
+import ReleasesView from "./views/ReleasesView";
 import PreprocessView from "./views/PreprocessView";
 import EvaluationView from "./views/EvaluationView";
 import OcrEvaluationView from "./views/OcrEvaluationView";
@@ -59,6 +60,7 @@ const viewMeta = {
   models: { title: "モデル", subtitle: "保存済みモデル管理" },
   "ocr-models": { title: "モデル", subtitle: "OCR認識モデルの管理" },
   experiments: { title: "実験管理", subtitle: "学習条件・結果・考察の一元管理と実験比較" },
+  releases: { title: "リリース管理", subtitle: "モデルのライフサイクル管理・本番適用・配布" },
   "cls-models": { title: "モデル", subtitle: "実験機能（分割学習）: モデル管理" },
   inference: { title: "推論", subtitle: "画像推論と精度確認" },
   "ocr-inference": { title: "推論", subtitle: "OCR認識モデルで推論" },
@@ -621,6 +623,9 @@ export default function App() {
   const [focusExperimentId, setFocusExperimentId] = useState("");
   // 実験→生成モデルの遷移でモデル管理のカルテを開くためのリクエスト
   const [modelDetailRequest, setModelDetailRequest] = useState(null);
+  // リリース管理（Model Release Management）。状態・履歴はサーバー保存（releases.json）
+  const [releases, setReleases] = useState({ production: "", statuses: {}, history: [] });
+  const [releasesLoading, setReleasesLoading] = useState(false);
   const [presetName, setPresetName] = useState("");
   const [selectedPreset, setSelectedPreset] = useState("");
   const [rapidPreprocessEnabled, setRapidPreprocessEnabled] = useState(true);
@@ -2060,6 +2065,27 @@ export default function App() {
     }
   }
 
+  // リリース状況の取得（リリース管理・モデル管理表示時）
+  async function loadReleases(pid = projectId) {
+    if (!pid) {
+      setReleases({ production: "", statuses: {}, history: [] });
+      return;
+    }
+    setReleasesLoading(true);
+    try {
+      const data = await request(`/api/releases?project_id=${encodeURIComponent(pid)}`);
+      setReleases({
+        production: String(data?.production || ""),
+        statuses: data?.statuses || {},
+        history: Array.isArray(data?.history) ? data.history : [],
+      });
+    } catch {
+      setReleases({ production: "", statuses: {}, history: [] });
+    } finally {
+      setReleasesLoading(false);
+    }
+  }
+
   // 実験カルテの更新（タグ・★・メモ等）→ 一覧を差し替え
   async function updateExperiment(experimentId, patch) {
     try {
@@ -2077,10 +2103,13 @@ export default function App() {
   }
 
 
-  // 実験管理・モデル管理を開いたときに実験一覧を取得（モデルカルテのExperimentリンク用）
+  // 実験管理・モデル管理・リリース管理を開いたときに実験一覧を取得（判定・リンク用）
   useEffect(() => {
-    if (activeView === "experiments" || activeView === "ocr-models") {
+    if (["experiments", "ocr-models", "releases"].includes(activeView)) {
       loadExperiments(projectId);
+    }
+    if (["releases", "ocr-models"].includes(activeView)) {
+      loadReleases(projectId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeView, projectId]);
@@ -3777,6 +3806,7 @@ export default function App() {
           setActiveView("experiments");
         }}
         detailRequest={modelDetailRequest}
+        releaseStatuses={releases.statuses}
       />
     );
   }
@@ -3810,6 +3840,61 @@ export default function App() {
           setActiveView("ocr-models");
         }}
         focusExperimentId={focusExperimentId}
+      />
+    );
+  }
+
+  if (activeView === "releases") {
+    view = (
+      <ReleasesView
+        projectId={projectId}
+        releases={releases}
+        experiments={experiments}
+        modelInfos={modelInfos}
+        loading={releasesLoading}
+        onRefresh={() => loadReleases(projectId)}
+        onSetStatus={async (model, status) => {
+          try {
+            await request("/api/releases/status", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ project_id: projectId, model, status }),
+            });
+            await loadReleases(projectId);
+          } catch (error) {
+            notify("error", `ステータス変更に失敗しました: ${error.message}`);
+          }
+        }}
+        onPromote={async (model, { note, author, version }) => {
+          try {
+            const data = await request("/api/releases/promote", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ project_id: projectId, model, note, author, version }),
+            });
+            notify("success", `Productionへ昇格しました: ${model} (v${data?.version})`);
+            await loadReleases(projectId);
+          } catch (error) {
+            notify("error", `昇格に失敗しました: ${error.message}`);
+          }
+        }}
+        onRollback={async (version, author) => {
+          try {
+            const data = await request("/api/releases/rollback", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ project_id: projectId, version, author }),
+            });
+            notify("success", `v${version} へロールバックしました（新Version v${data?.version}）`);
+            await loadReleases(projectId);
+          } catch (error) {
+            notify("error", `ロールバックに失敗しました: ${error.message}`);
+          }
+        }}
+        onOpenModel={(name) => {
+          setModelDetailRequest({ name, seq: Date.now() });
+          setActiveView("ocr-models");
+        }}
       />
     );
   }

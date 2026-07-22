@@ -59,7 +59,7 @@ test("OCRモデル配下の順序: モデル評価が推論より前", () => {
   const ids = section.items.map((item) => item.id);
   assert.ok(ids.indexOf("ocr-eval") < ids.indexOf("ocr-inference"));
   // 実験管理はモデル管理の直後（学習→管理→実験分析→評価の順）
-  assert.deepEqual(ids, ["ocr-training", "ocr-models", "experiments", "ocr-eval", "ocr-inference", "rapid-ocr", "ocr-batch"]);
+  assert.deepEqual(ids, ["ocr-training", "ocr-models", "experiments", "releases", "ocr-eval", "ocr-inference", "rapid-ocr", "ocr-batch"]);
 });
 
 test("ダッシュボードはプロジェクト配下・データ作成はフロー順（並び順固定）", () => {

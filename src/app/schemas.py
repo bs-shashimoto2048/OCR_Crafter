@@ -251,6 +251,33 @@ class ExperimentUpdateRequest(BaseModel):
     experiment_name: Optional[str] = Field(default=None, description="実験名")
 
 
+class ReleaseStatusRequest(BaseModel):
+    """モデルステータスの手動変更（Draft / Validated / Candidate / Archived）。"""
+
+    project_id: Optional[str] = Field(default="default")
+    model: str = Field(..., description="対象モデル（<name>.tess.json 等）")
+    status: str = Field(..., description="Draft / Validated / Candidate / Archived（ProductionはpromoteのみでArchived化も自動）")
+
+
+class ReleasePromoteRequest(BaseModel):
+    """Productionへの昇格（Release Note必須・旧Productionは自動Archived）。"""
+
+    project_id: Optional[str] = Field(default="default")
+    model: str = Field(..., description="昇格するモデル")
+    note: str = Field(..., description="Release Note（変更点・理由。必須）")
+    author: str = Field(default="", description="リリース実施者")
+    version: Optional[str] = Field(default=None, description="バージョン（未指定=直近Productionのマイナー加算。初回1.0.0）")
+
+
+class ReleaseRollbackRequest(BaseModel):
+    """過去のリリースVersionへのロールバック（新しい履歴エントリ・rollback=true）。"""
+
+    project_id: Optional[str] = Field(default="default")
+    version: str = Field(..., description="戻す対象のリリースVersion")
+    author: str = Field(default="", description="実施者")
+    note: str = Field(default="", description="理由（未指定は自動文言）")
+
+
 class ExperimentAnalysisToggleRequest(BaseModel):
     """実験の分析対象ON/OFF（失敗・途中停止・デバッグ実験の除外）。"""
 

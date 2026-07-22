@@ -95,6 +95,17 @@
 | PATCH `/api/experiments/{experiment_id}/analysis` | `ExperimentAnalysisToggleRequest`（`enabled`） | `{item}` | **分析対象ON/OFF**（失敗・途中停止・デバッグ実験を推薦・相関から除外）。バックフィル実験は既定で分析対象外（ONへ戻せる） |
 | POST `/api/experiments/attach-evaluation` | `ExperimentEvaluationAttachRequest`（`model`, `evaluation{cer, char_accuracy, accuracy_percent, improved, regressed, evaluated_at, dataset}`） | `{attached, item}` | 評価実行結果の要約をモデル名から該当実験へ保存（同一モデルが複数実験にある場合は最新の実験）。該当なしは `attached: false`（エラーにしない）。モデル評価実行時にフロントが自動送信する |
 
+## リリース管理（Model Release Management）
+
+| Method / Path | リクエスト | レスポンス主要キー | 概要 |
+|---|---|---|---|
+| GET `/api/releases` | Query: `project_id?` | `{production, statuses{model: {status, version, updated_at}}, history[]}` | リリース状況。Statusは Draft（既定=学習直後）/ Validated / Candidate / **Production（1プロジェクトに必ず1つ）** / Archived。履歴は新しい順。保存先 `data/projects/<id>/releases.json` |
+| POST `/api/releases/status` | `ReleaseStatusRequest`（`model`, `status`） | `{item}` | 手動ステータス変更（Draft/Validated/Candidate/Archived。**Candidate初回は 0.x を自動採番**。Productionへの直接変更は400=promoteのみ） |
+| POST `/api/releases/promote` | `ReleasePromoteRequest`（`model`, `note`=**必須**, `author?`, `version?`） | `{model, version, previous_production, entry}` | Productionへ昇格。**旧Productionは自動でArchived**。versionは未指定なら直近Productionのマイナー加算（初回 1.0.0）。Release Note空は400 |
+| POST `/api/releases/rollback` | `ReleaseRollbackRequest`（`version`, `author?`, `note?`） | `{model, version, entry}` | 過去のリリースVersionのモデルを再びProductionへ（**新しい履歴エントリ・rollback=true・rollback_from記録**）。現Productionへのロールバックは400・存在しないVersionは404 |
+| GET `/api/releases/model_card` | Query: `project_id?`, `model?`（未指定=現Production） | `{model, version, markdown}` | **Model Card（Markdown）自動生成**: 概要・Version・用途・対象文字・評価条件（Experiment/Group/データセット/Whitelist/前処理ハッシュ）・性能（CER/文字正解率/完全一致率）・既知の制約・更新履歴。Production未設定は404 |
+| GET `/api/releases/deployment_package` | Query: `project_id?` | ZIP（`deployment_<project>_v<version>.zip`） | **Deployment Package**: Productionモデルの traineddata / 設定JSON（model_config.json=.tess.json） / 前処理Snapshot / RELEASE_NOTE.md / MODEL_CARD.md をZIPでExport（ONNX等はモデルディレクトリに実在する場合のみ追加。Tesseractは通常なし） |
+
 ## モデル管理
 
 | Method / Path | リクエスト | レスポンス主要キー | 概要 |

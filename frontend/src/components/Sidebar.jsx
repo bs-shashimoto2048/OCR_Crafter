@@ -74,6 +74,7 @@ export const SIDEBAR_SECTIONS = [
       { id: "ocr-training", label: "データ作成・学習" },
       { id: "ocr-models", label: "モデル管理" },
       { id: "experiments", label: "実験管理" },
+      { id: "releases", label: "リリース管理" },
       { id: "ocr-eval", label: "モデル評価" },
       { id: "ocr-inference", label: "推論" },
       { id: "rapid-ocr", label: "OCR修正" },

@@ -256,11 +256,11 @@ function SummaryStatCard({ label, count, colorClass, help }) {
 
 function StatusBadge({ status }) {
   const cls =
-    status === "使用中"
+    status === "使用中" || status === "Candidate"
       ? "border-accent/50 bg-accent/15 text-blue-200"
-      : status === "最新"
+      : status === "最新" || status === "Production"
         ? "border-success/30 bg-success/10 text-success"
-        : status === "Export済"
+        : status === "Export済" || status === "Validated"
           ? "border-border bg-card/60 text-text"
           : "border-border/60 bg-card/40 text-muted";
   return <span className={`whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] ${cls}`}>{status}</span>;
@@ -286,6 +286,8 @@ export default function ModelsView({
   onOpenExperiment,
   // 実験管理からの「生成モデルを開く」リクエスト（{name, seq}。seq変化でカルテを開く）
   detailRequest = null,
+  // リリース管理: モデル別のStatus/Version（{model: {status, version}}。未設定=Draft相当で非表示）
+  releaseStatuses = {},
 }) {
   const latestAny = basename(latest.any || "");
   const latestByType = latest.byType || {};
@@ -356,6 +358,9 @@ export default function ModelsView({
   }
 
   function statusOf(name) {
+    // リリースステータス（Production/Candidate等）を最優先表示（Draftは従来表示のまま）
+    const release = releaseStatuses?.[name]?.status;
+    if (release && release !== "Draft") return release;
     if (name && name === inferenceInUseModel) return "使用中";
     if (latestNames.has(name)) return "最新";
     if (exportReady(name)) return "Export済";
@@ -732,6 +737,11 @@ export default function ModelsView({
             <SectionTitle>モデル情報</SectionTitle>
             {/* 管理Noは共通の等幅フォント（ModelIdBadgeと同一スタック）で表示 */}
             <SpecRow label="管理No" value={modelIdOf(name) || "-"} valueClass="model-id-font model-id-text--md text-text" />
+            {/* リリースステータス（Draft/Validated/Candidate/Production/Archived）とVersion */}
+            <SpecRow
+              label="リリースStatus"
+              value={`${releaseStatuses?.[name]?.status || "Draft"}${releaseStatuses?.[name]?.version ? `（v${releaseStatuses[name].version}）` : ""}`}
+            />
             {/* このモデルを作成したExperiment（実験管理へ遷移） */}
             <div className="flex items-start justify-between gap-3 py-0.5">
               <span className="flex shrink-0 items-center text-[13px] text-muted">Experiment</span>

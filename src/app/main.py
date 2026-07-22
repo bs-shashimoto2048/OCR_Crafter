@@ -70,6 +70,9 @@ from .schemas import (
     PreprocessPreviewRequest,
     PreprocessRequest,
     ProjectCreateRequest,
+    ReleasePromoteRequest,
+    ReleaseRollbackRequest,
+    ReleaseStatusRequest,
     RotateImageRequest,
     TesseractTrainStartRequest,
     TrainingPreprocessPreviewRequest,
@@ -137,6 +140,14 @@ from .services.experiment_tracker import (
     list_experiments,
     set_analysis_enabled,
     update_experiment,
+)
+from .services.release_manager import (
+    build_deployment_package,
+    build_model_card,
+    list_releases,
+    promote_model,
+    rollback_release,
+    set_model_status,
 )
 from .services.detection_preprocess import parse_detection_preprocess_json
 from .services.evaluation_dataset import (
@@ -2529,6 +2540,75 @@ def api_experiment_attach_evaluation(req: ExperimentEvaluationAttachRequest) -> 
     ensure_experiments_for_models(resolved)
     item = attach_evaluation(resolved, req.model, req.evaluation)
     return {"project_id": resolved, "attached": item is not None, "item": item}
+
+
+@app.get("/api/releases")
+def api_releases(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+    """リリース状況（モデル別Status/Version・現Production・リリース履歴=新しい順）。"""
+    resolved = _resolve_project_id(project_id)
+    return {"project_id": resolved, **list_releases(resolved)}
+
+
+@app.post("/api/releases/status")
+def api_release_status(req: ReleaseStatusRequest) -> dict[str, Any]:
+    """モデルステータスの手動変更（Draft/Validated/Candidate/Archived。Candidate初回は0.x採番）。"""
+    resolved = _resolve_project_id(req.project_id)
+    try:
+        return {"project_id": resolved, "item": set_model_status(resolved, req.model, req.status)}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/api/releases/promote")
+def api_release_promote(req: ReleasePromoteRequest) -> dict[str, Any]:
+    """Productionへ昇格（Release Note必須）。旧Productionは自動Archived・履歴へ追記。"""
+    resolved = _resolve_project_id(req.project_id)
+    try:
+        return {"project_id": resolved, **promote_model(resolved, req.model, req.note, author=req.author, version=req.version)}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/api/releases/rollback")
+def api_release_rollback(req: ReleaseRollbackRequest) -> dict[str, Any]:
+    """Productionを過去のリリースVersionへ戻す（新しい履歴エントリ・rollback=true）。"""
+    resolved = _resolve_project_id(req.project_id)
+    try:
+        return {"project_id": resolved, **rollback_release(resolved, req.version, author=req.author, note=req.note)}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.get("/api/releases/model_card")
+def api_release_model_card(
+    project_id: Optional[str] = Query(default="default"),
+    model: Optional[str] = Query(default=None, description="未指定=現Production"),
+) -> dict[str, Any]:
+    """Model Card（Markdown）の自動生成（概要・Version・用途・対象文字・評価条件・性能・制約・更新履歴）。"""
+    resolved = _resolve_project_id(project_id)
+    try:
+        return {"project_id": resolved, **build_model_card(resolved, model)}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+
+@app.get("/api/releases/deployment_package")
+def api_release_deployment_package(project_id: Optional[str] = Query(default="default")) -> Response:
+    """Productionモデルの配布パッケージ（ZIP: traineddata/設定JSON/前処理Snapshot/Release Note/Model Card）。"""
+    resolved = _resolve_project_id(project_id)
+    try:
+        filename, payload = build_deployment_package(resolved)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    return Response(
+        content=payload,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/models")
