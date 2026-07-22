@@ -48,7 +48,7 @@
 
 | Method / Path | リクエスト | レスポンス主要キー | 概要 |
 |---|---|---|---|
-| POST `/preprocess/run` | `PreprocessRequest`（`project_id?`, `overrides?`） | `count`, `type_counts`, `files`, `preprocess_snapshot{snapshot_id, preprocess_hash, created_at}` | 全画像の前処理実行。実行時点の**実効パラメータの完全スナップショット**（工程順序・有効/無効・実効パラメータ・OCR入力整形・schema/pipelineバージョン）を `processed/meta/preprocess_snapshot.json` へ保存（最終実行時点の設定が正。データセット作成時に確定コピーされる）。手動マスクの座標（画像単位）は含めない |
+| POST `/preprocess/run` | `PreprocessRequest`（`project_id?`, `overrides?`=前処理設定画面のUI設定。**プレビューと同一の共通ペイロード**） | `count`, `type_counts`, `files`, `preprocess_snapshot{snapshot_id, preprocess_hash, created_at}`, `preprocess_snapshot_id`, `preprocess_hash`, `effective_params{ratio_threshold, operations}`, `processed_count` | 全画像の前処理実行。**実効設定の優先順位: ①リクエストoverrides ②プロジェクト保存値（`data/projects/<id>/preprocess_config.json`=前回実行時のoverridesを自動保存。回転後の部分再処理・旧クライアントも同条件になる） ③settings.yaml既定 ④コード既定**。実効値は補完・クランプ後の値（threshold 0-255等）で、応答の `effective_params` とスナップショットへ**入力値ではなく実効値**を保存する。実行時点の完全スナップショット（工程順序・有効/無効・実効パラメータ）を `processed/meta/preprocess_snapshot.json` へ保存（最終実行時点の設定が正。データセット作成時に確定コピーされる）。同一設定なら `/preprocess/preview` の最終画像と**画素単位で一致**（テストで保証）。手動マスクの座標（画像単位）は含めない |
 | GET `/preprocess/preview` | Query: `image`, `engine`, `model`, `model_type?`, `easyocr_langs`, `include_lowercase` | プレビュー + 推論結果 | 前処理プレビュー＋OCR推論 |
 | POST `/preprocess/preview` | `PreprocessPreviewRequest`（上記 + `overrides?`） | プレビュー + 推論結果 | Body で前処理上書きを指定できる版 |
 

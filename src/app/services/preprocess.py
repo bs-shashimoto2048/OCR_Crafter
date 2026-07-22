@@ -160,11 +160,75 @@ def _build_preprocess_config(overrides: Optional[dict[str, Any]]) -> dict[str, A
             if key in overrides and overrides[key] is not None:
                 _set_nested(cfg, path, overrides[key])
 
-    return cfg
+    # preview / run / 推論プレビューの全経路で同一の実効値解決（補完＋クランプ）を通す
+    return _sanitize_preprocess_config(cfg)
 
 
 def build_preprocess_config(overrides: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     return _build_preprocess_config(overrides)
+
+
+# プロジェクト保存値: 「前処理を実行」で最後に使用した overrides をプロジェクト単位で永続化する。
+# overrides 未指定の実行（旧クライアント・回転後の再処理）でも直近のUI設定と同じ条件で処理される
+PROJECT_PREPROCESS_CONFIG_FILENAME = "preprocess_config.json"
+
+
+def _project_preprocess_config_path(project_root: Path) -> Path:
+    return Path(project_root) / PROJECT_PREPROCESS_CONFIG_FILENAME
+
+
+def load_project_preprocess_overrides(project_root: Path) -> Optional[dict[str, Any]]:
+    """プロジェクト保存値（前回実行時のoverrides）。無い/読めない場合は None（settings.yaml既定へ）。"""
+    path = _project_preprocess_config_path(project_root)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(payload, dict) and isinstance(payload.get("overrides"), dict):
+            return payload["overrides"]
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def save_project_preprocess_overrides(project_root: Path, overrides: dict[str, Any]) -> None:
+    """「前処理を実行」で使用した overrides をプロジェクト保存値として保存する（保存失敗は処理継続）。"""
+    from datetime import datetime
+
+    path = _project_preprocess_config_path(project_root)
+    try:
+        path.write_text(
+            json.dumps({"saved_at": datetime.now().isoformat(), "overrides": overrides}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+
+def _clamp_number(value: Any, low: float, high: float, default: float) -> float:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return default
+    return max(low, min(high, v))
+
+
+def _sanitize_preprocess_config(cfg: dict[str, Any]) -> dict[str, Any]:
+    """実効設定の安全クランプ。入力値そのままではなく、補完・クランプ後の値を実効値として使う
+    （スナップショットにもクランプ後の値が保存される）。各工程内の細かな正規化（奇数化等）は
+    従来どおり _op_* 側でも行われる。"""
+    cfg["ratio_threshold"] = _clamp_number(cfg.get("ratio_threshold"), 0.1, 10.0, 1.6)
+    ops = cfg.get("operations")
+    if not isinstance(ops, dict):
+        return cfg
+    threshold = ops.get("threshold")
+    if isinstance(threshold, dict):
+        threshold["value"] = int(_clamp_number(threshold.get("value"), 0, 255, 128))
+        threshold["block_size"] = int(_clamp_number(threshold.get("block_size"), 3, 255, 35))
+        threshold["c"] = int(_clamp_number(threshold.get("c"), -64, 64, 11))
+    resize = ops.get("resize")
+    if isinstance(resize, dict):
+        resize["single"] = int(_clamp_number(resize.get("single"), 8, 1024, 64))
+        resize["wide_height"] = int(_clamp_number(resize.get("wide_height"), 8, 1024, 48))
+    return cfg
 
 
 def _ensure_gray_uint8(value: Any) -> np.ndarray:
@@ -910,10 +974,19 @@ def run_preprocess(
     from .preprocess_snapshot import save_preprocess_snapshot
 
     paths = ensure_project_directories(project_id)
-    cfg = _build_preprocess_config(overrides)
-    # 実行時点の実効パラメータを完全スナップショットとして保存する（学習・評価の再現用の正）。
-    # 手動マスク注入（attach_manual_masks_to_config）は cfg を画像単位で書き換えるため、
-    # 必ず注入前のクリーンな設定から構築する
+    # 実効設定の優先順位: ①リクエストのoverrides ②プロジェクト保存値（前回実行時の設定）
+    # ③settings.yaml既定 ④コードの最終既定値（_build_preprocess_configが②③④を解決する）。
+    # overrides指定時はプロジェクト保存値として永続化し、以後のoverridesなし実行
+    # （回転後の部分再処理・旧クライアント）でも同じ条件で処理する
+    if overrides:
+        save_project_preprocess_overrides(paths.root, overrides)
+        effective_overrides: Optional[dict[str, Any]] = overrides
+    else:
+        effective_overrides = load_project_preprocess_overrides(paths.root)
+    cfg = _build_preprocess_config(effective_overrides)
+    # 実行時点の実効パラメータ（補完・クランプ後）を完全スナップショットとして保存する
+    # （学習・評価の再現用の正）。手動マスク注入（attach_manual_masks_to_config）は cfg を
+    # 画像単位で書き換えるため、必ず注入前のクリーンな設定から構築する
     snapshot = save_preprocess_snapshot(paths.root, copy.deepcopy(cfg))
     paths.raw.mkdir(parents=True, exist_ok=True)
     include = set(only_files) if only_files is not None else None
@@ -950,6 +1023,14 @@ def run_preprocess(
             "preprocess_hash": str(snapshot.get("preprocess_hash") or ""),
             "created_at": str(snapshot.get("created_at") or ""),
         },
+        # 実際に採用された実効設定（補完・クランプ後。スナップショットと同一の値）
+        "preprocess_snapshot_id": str(snapshot.get("snapshot_id") or ""),
+        "preprocess_hash": str(snapshot.get("preprocess_hash") or ""),
+        "effective_params": {
+            "ratio_threshold": cfg.get("ratio_threshold"),
+            "operations": snapshot.get("operations", {}),
+        },
+        "processed_count": len(results),
     }
 
 

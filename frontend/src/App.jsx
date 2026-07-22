@@ -23,6 +23,12 @@ import { buildAugmentationPayload, defaultAugmentationState } from "./lib/augmen
 import { viewBoundaryKey } from "./lib/viewKey";
 import { lowercaseToggleApplicable } from "./lib/lowercase";
 import {
+  buildPreprocessPreviewPayload,
+  buildPreprocessRunPayload,
+  normalizePreprocessOverrides,
+  preprocessRunConfirmText,
+} from "./lib/preprocessRequest";
+import {
   DEFAULT_EVAL_PREPROCESS,
   evalPreprocessModeForSource,
   evalPreprocessRequestObject,
@@ -696,93 +702,6 @@ export default function App() {
     }
   }
 
-  function buildPreprocessOverrides(params) {
-    return {
-      preprocess: {
-        ratio_threshold: Number(params.ratio_threshold),
-        operations: {
-          manual_mask: {
-            enabled: Boolean(params.manual_mask_enabled),
-            fill: params.manual_mask_fill || "white",
-            timing: params.manual_mask_timing || "post",
-          },
-          illumination: {
-            enabled: Boolean(params.illumination_enabled),
-            method: params.illumination_method || "gaussian",
-            background_size: Number(params.illumination_background_size) || 81,
-            strength: Number(params.illumination_strength),
-          },
-          threshold: {
-            type: params.threshold_type,
-            value: Number(params.threshold_value),
-          },
-          clahe: {
-            clip_limit: Number(params.clahe_clip_limit),
-            tile_grid_size: Number(params.clahe_tile_grid_size),
-          },
-          sharpen: {
-            enabled: Boolean(params.sharpen_enabled),
-            amount: Number(params.sharpen_amount),
-            sigma: Number(params.sharpen_sigma),
-          },
-          gamma: {
-            enabled: Boolean(params.gamma_enabled),
-            value: Number(params.gamma_value),
-          },
-          morph: {
-            enabled: Boolean(params.morph_enabled),
-            method: params.morph_method,
-            ksize: Number(params.morph_ksize),
-            iterations: Number(params.morph_iterations),
-          },
-          unsharp: {
-            enabled: Boolean(params.unsharp_enabled),
-            amount: Number(params.unsharp_amount),
-            radius: Number(params.unsharp_radius),
-            threshold: Number(params.unsharp_threshold),
-          },
-          bilateral: {
-            enabled: Boolean(params.bilateral_enabled),
-            diameter: Number(params.bilateral_diameter),
-            sigma_color: Number(params.bilateral_sigma_color),
-            sigma_space: Number(params.bilateral_sigma_space),
-          },
-          local_contrast: {
-            enabled: Boolean(params.local_contrast_enabled),
-            clip_limit: Number(params.local_contrast_clip_limit),
-            tile_grid_size: Number(params.local_contrast_tile_grid_size),
-          },
-          crop_margin: {
-            enabled: Boolean(params.crop_margin_enabled),
-            threshold: Number(params.crop_margin_threshold),
-            margin: Number(params.crop_margin_margin),
-          },
-          hist_equalize: {
-            enabled: Boolean(params.hist_equalize_enabled),
-          },
-          stroke_boost: {
-            enabled: Boolean(params.stroke_boost_enabled),
-            method: params.stroke_boost_method,
-            ksize: Number(params.stroke_boost_ksize),
-            iterations: Number(params.stroke_boost_iterations),
-          },
-          denoise: {
-            method: params.denoise_method,
-            ksize: Number(params.denoise_ksize),
-          },
-          deskew: {
-            enabled: Boolean(params.deskew_enabled),
-          },
-          resize: {
-            single: Number(params.single_size),
-            wide_height: Number(params.wide_height),
-            keep_ratio: Boolean(params.wide_keep_ratio),
-          },
-        },
-      },
-    };
-  }
-
   function persistPreprocessPresets(next) {
     setPreprocessPresets(next);
     localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(next));
@@ -1373,7 +1292,6 @@ export default function App() {
     setPreprocessError("");
 
     const timer = setTimeout(async () => {
-      const overrides = buildPreprocessOverrides(preprocessParams);
       const mainFields = {
         engine: preprocessPredictEngine,
         model:
@@ -1414,7 +1332,9 @@ export default function App() {
             const d = await request("/preprocess/preview", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ image: preprocessImage, project_id: projectId, overrides, ...fields }),
+              body: JSON.stringify(
+                buildPreprocessPreviewPayload({ image: preprocessImage, projectId, params: preprocessParams, fields })
+              ),
             });
             const prediction = String(d?.prediction || "").trim();
             return {
@@ -1434,12 +1354,9 @@ export default function App() {
         const data = await request("/preprocess/preview", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            image: preprocessImage,
-            project_id: projectId,
-            overrides,
-            ...mainFields,
-          }),
+          body: JSON.stringify(
+            buildPreprocessPreviewPayload({ image: preprocessImage, projectId, params: preprocessParams, fields: mainFields })
+          ),
         });
         setPreprocessPreview(data);
       } catch (error) {
@@ -1666,7 +1583,7 @@ export default function App() {
   const selectedImage = currentImages[selectedIndex] || null;
   const selectedLabel = selectedImage ? labelDrafts[selectedImage.image] ?? "" : "";
   const labelingPreprocessOverrides = useMemo(
-    () => buildPreprocessOverrides(preprocessParams),
+    () => normalizePreprocessOverrides(preprocessParams),
     [preprocessParams]
   );
   // ラベル編集のOCR候補（モデル2/3）は前処理画面の比較スロット設定を参照する
@@ -1710,7 +1627,7 @@ export default function App() {
     ]
   );
   const rapidPreprocessOverrides = useMemo(
-    () => buildPreprocessOverrides(preprocessParams),
+    () => normalizePreprocessOverrides(preprocessParams),
     [preprocessParams]
   );
 
@@ -2013,12 +1930,19 @@ export default function App() {
       notify("error", "プロジェクトを作成または選択してください");
       return;
     }
+    // 実行前の最終確認: 実際に送信するペイロード（プレビューと同一の共通関数で生成）から
+    // 設定要約を表示する。既存のprocessed画像・前処理スナップショットが更新される旨を注意
+    if (!window.confirm(preprocessRunConfirmText(preprocessParams))) {
+      return;
+    }
     resetTrainingLog("前処理を再実行します");
     try {
+      // プレビューと同一のUI設定（overrides）を /preprocess/run へ送信し、
+      // 学習用processed画像を画面で確認した条件そのままで生成する
       const data = await request("/preprocess/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project_id: projectId }),
+        body: JSON.stringify(buildPreprocessRunPayload({ projectId, params: preprocessParams })),
       });
       setWorkflowState((prev) => ({
         refreshed: prev.refreshed,
@@ -3272,7 +3196,7 @@ export default function App() {
         dataset: evalDataset,
         model: selectedModel,
         model_type: selectedModelType,
-        overrides: evalUseOverrides ? buildPreprocessOverrides(preprocessParams) : null,
+        overrides: evalUseOverrides ? normalizePreprocessOverrides(preprocessParams) : null,
       };
       const data = await request("/evaluate", {
         method: "POST",
