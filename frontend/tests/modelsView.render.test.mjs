@@ -132,11 +132,11 @@ test("長いモデル名は一覧で省略表示され、title属性で全文確
 });
 
 test("一覧の列定義: モデル名に最大幅400px・ヘッダーとデータ行が同じ列定義を共有", () => {
-  // 共有定数: モデル名は minmax(280px,400px) の上限付き（余った幅いっぱいまで伸ばさない）
-  assert.equal(MODEL_LIST_GRID_COLUMNS, "28px minmax(280px, 400px) 90px 90px 145px 150px 70px");
+  // 共有定数: モデル名は minmax(300px,420px) の上限付き（余った幅いっぱいまで伸ばさない）
+  assert.equal(MODEL_LIST_GRID_COLUMNS, "32px minmax(300px, 420px) 80px 85px 140px 140px 70px");
   const html = renderToString(React.createElement(ModelsView, baseProps()));
   // ヘッダー1 + データ行2件 = 同じgrid-template-columnsが3回以上出現（列定義の共有）
-  const needle = "minmax(280px, 400px)";
+  const needle = "minmax(300px, 420px)";
   const count = html.split(needle).length - 1;
   assert.ok(count >= 3, `列定義の共有回数が不足（${count}回）`);
   // 長いモデル名は省略表示＋title（Engine列との間に過剰な空白を作らず、列を押し広げない）

@@ -90,10 +90,12 @@ function parseDownloadFilename(contentDisposition, fallback) {
 }
 
 // モデル一覧の共有列定義（ヘッダーと各データ行の両方へ適用。個別に異なる幅を設定しない）。
-// 選択28px / モデル名=minmax(280px,400px)の上限付き / Engine90 / 方式90 / 作成日145 / 評価150 / 状態70
-// （最小合計853px=1920px時の左ペインへ内部横スクロールなしで収まる。モデル名は上限400pxで
-// 余った幅いっぱいまで伸ばさず、Engine列との間に大きな空白を作らない）
-export const MODEL_LIST_GRID_COLUMNS = "28px minmax(280px, 400px) 90px 90px 145px 150px 70px";
+// 選択32px（大きめチェックボックス用）/ モデル名=minmax(320px,420px)の上限付き / Engine80 /
+// 方式85 / 作成日140 / 評価140 / 状態70
+// （モデル名の視認性向上（15px表示）のため他列を詰めて名前列へ幅を配分。最小合計847px=
+// 1920px時の左ペインへ内部横スクロールなしで収まる。モデル名は上限420pxで余った幅
+// いっぱいまで伸ばさず、Engine列との間に大きな空白を作らない）
+export const MODEL_LIST_GRID_COLUMNS = "32px minmax(300px, 420px) 80px 85px 140px 140px 70px";
 
 const ENGINE_LABELS = { tesseract: "Tesseract", easyocr: "EasyOCR", custom: "カスタム" };
 
@@ -331,12 +333,12 @@ export default function ModelsView({
   }
 
   // 管理No表示チップ（ホバーで「M0004 → ファイル名」のツールチップ）
-  function ModelIdChip({ name, className = "mr-1" }) {
+  function ModelIdChip({ name, className = "mr-1 text-[10px]" }) {
     const id = modelIdOf(name);
     if (!id) return null;
     return (
       <span
-        className={`inline-block shrink-0 rounded bg-accent/15 px-1 font-mono text-[10px] font-semibold text-accent ${className}`}
+        className={`inline-block shrink-0 rounded bg-accent/15 px-1 font-mono font-semibold text-accent ${className}`}
         title={`${id} → ${name}`}
       >
         {id}
@@ -1598,9 +1600,11 @@ export default function ModelsView({
                   }`}
                   style={{ gridTemplateColumns: MODEL_LIST_GRID_COLUMNS }}
                 >
-                  <span className="px-2 py-2" onClick={(e) => e.stopPropagation()}>
+                  <span className="flex items-center px-1.5 py-2" onClick={(e) => e.stopPropagation()}>
+                    {/* 視認性・クリックしやすさのため大きめ（20px）のチェックボックス */}
                     <input
                       type="checkbox"
+                      className="h-5 w-5 cursor-pointer"
                       checked={checked}
                       onChange={(e) => toggleOne(name, e.target.checked)}
                       aria-label={`${name} を比較・削除対象に選択`}
@@ -1608,13 +1612,14 @@ export default function ModelsView({
                     />
                   </span>
                   <span className="min-w-0 px-2 py-2">
-                    {/* 一覧は管理No＋モデル名のみ（Best/Recommended等の比較バッジは比較画面へ集約） */}
-                    <p className="min-w-0 truncate text-text" title={name}>
-                      <ModelIdChip name={name} className="mr-1.5" />
+                    {/* 一覧は管理No＋モデル名のみ（Best/Recommended等の比較バッジは比較画面へ集約）。
+                        モデル名は視認性のため15px・管理Noチップも一回り大きく */}
+                    <p className="min-w-0 truncate text-[15px] text-text" title={name}>
+                      <ModelIdChip name={name} className="mr-1.5 text-[11px]" />
                       {displayName(name)}
                     </p>
                     {aliases[name] ? (
-                      <p className="truncate text-[10px] text-muted" title={name}>
+                      <p className="truncate text-[11px] text-muted" title={name}>
                         {name}
                       </p>
                     ) : null}
