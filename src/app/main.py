@@ -63,6 +63,7 @@ from .schemas import (
     EvaluationDatasetCreateRequest,
     EvaluationDatasetRenameRequest,
     EvaluationStateSaveRequest,
+    ExperimentAnalysisToggleRequest,
     ExperimentEvaluationAttachRequest,
     ExperimentUpdateRequest,
     OcrTuningExportRequest,
@@ -130,8 +131,11 @@ from .services.tesseract_pipeline import (
 )
 from .services.experiment_tracker import (
     attach_evaluation,
+    build_comparable_groups,
+    build_recommendations,
     ensure_experiments_for_models,
     list_experiments,
+    set_analysis_enabled,
     update_experiment,
 )
 from .services.detection_preprocess import parse_detection_preprocess_json
@@ -2462,9 +2466,38 @@ def api_ocr_models_official() -> dict[str, Any]:
 
 @app.get("/api/experiments")
 def api_experiments(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
-    """実験一覧（EXP-0001形式・管理No付与済み）。実験記録のない旧モデルは自動バックフィルされる。"""
+    """実験一覧（EXP-0001形式・管理No・Evaluation Hash・Comparable Group・分析対象付き）。
+
+    実験記録のない旧モデルは自動バックフィルされる（既定で分析対象外）。
+    """
     resolved = _resolve_project_id(project_id)
     return {"project_id": resolved, "items": list_experiments(resolved)}
+
+
+@app.get("/api/experiments/comparable_groups")
+def api_experiment_comparable_groups(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+    """Comparable Group一覧（Evaluation Hash単位・CG-0001形式・出現順採番）。"""
+    resolved = _resolve_project_id(project_id)
+    items = list_experiments(resolved)
+    return {"project_id": resolved, "groups": build_comparable_groups(items)}
+
+
+@app.get("/api/experiments/recommendation")
+def api_experiment_recommendation(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+    """比較可能Experimentのみから生成した条件推薦（根拠件数・5件未満はinsufficient・除外理由つき）。"""
+    resolved = _resolve_project_id(project_id)
+    return {"project_id": resolved, **build_recommendations(resolved)}
+
+
+@app.patch("/api/experiments/{experiment_id}/analysis")
+def api_experiment_analysis_toggle(experiment_id: str, req: ExperimentAnalysisToggleRequest) -> dict[str, Any]:
+    """実験の分析対象ON/OFF（失敗・途中停止・デバッグ実験を推薦・相関から除外する）。"""
+    resolved = _resolve_project_id(req.project_id)
+    try:
+        item = set_analysis_enabled(resolved, experiment_id, bool(req.enabled))
+        return {"project_id": resolved, "item": item}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
 
 @app.patch("/api/experiments/{experiment_id}")

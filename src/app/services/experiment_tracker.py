@@ -13,6 +13,7 @@
   追加する形で拡張できる（既存フィールドの意味は変えない）
 """
 
+import hashlib
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -27,6 +28,63 @@ _EXPERIMENTS_LOCK = Lock()
 # 自由タグの上限（1実験あたり）と1タグの最大長
 MAX_TAGS = 20
 MAX_TAG_LENGTH = 40
+
+# 評価の固定仕様（Evaluation Profileへ記録する。変更時はバージョンを上げて別条件として扱う）
+EVAL_NORMALIZATION_VERSION = "trim+NFC"  # _normalize_compare の仕様（case-sensitive・NFKC不使用）
+CER_VERSION = "cer-v1-micro"  # マイクロ平均CER（編集距離総和÷正解文字数総和）
+
+# 推薦の最低根拠件数（未満は「参考値・データ不足」）
+RECOMMENDATION_MIN_BASIS = 5
+
+
+def normalize_evaluation_profile(evaluation: dict[str, Any]) -> dict[str, Any]:
+    """評価実行の入力から Evaluation Profile（比較可能性を定義する評価条件）を正規化する。
+
+    評価データセット・画像数・ラベル数・評価前処理・エンジン・PSM・Whitelist・
+    文字正規化・CERバージョン・評価日時。欠損は空/None（推測しない）。
+    """
+    src = evaluation if isinstance(evaluation, dict) else {}
+    psm = src.get("psm")
+    return {
+        "dataset": str(src.get("dataset") or ""),
+        "dataset_id": str(src.get("dataset_id") or src.get("dataset") or ""),
+        "image_count": int(src["image_count"]) if isinstance(src.get("image_count"), (int, float)) else None,
+        "label_count": int(src["label_count"]) if isinstance(src.get("label_count"), (int, float)) else None,
+        # 評価前処理の識別子（学習時前処理モード=ハッシュ / 手動=設定シグネチャ / なし="none"）
+        "preprocess_signature": str(src.get("preprocess_signature") or ""),
+        "engine": str(src.get("engine") or "tesseract"),
+        "psm": int(psm) if isinstance(psm, (int, float)) else 7,
+        "whitelist": str(src.get("whitelist") or ""),
+        "normalization": EVAL_NORMALIZATION_VERSION,
+        "cer_version": CER_VERSION,
+        "evaluated_at": str(src.get("evaluated_at") or datetime.now().isoformat()),
+    }
+
+
+def compute_evaluation_hash(profile: Optional[dict[str, Any]]) -> str:
+    """Evaluation Profileから Evaluation Hash を生成する（同一Hash=同一条件評価）。
+
+    ハッシュ対象: データセットID・画像数・ラベル数・評価前処理・エンジン・PSM・Whitelist・
+    文字正規化・CERバージョン。評価日時・表示名は除外。
+    条件が特定できない（データセットID・前処理識別子の両方が空）場合は空文字（Hash生成不可）。
+    """
+    if not isinstance(profile, dict):
+        return ""
+    if not profile.get("dataset_id") and not profile.get("preprocess_signature"):
+        return ""
+    payload = {
+        "dataset_id": str(profile.get("dataset_id") or ""),
+        "image_count": profile.get("image_count"),
+        "label_count": profile.get("label_count"),
+        "preprocess_signature": str(profile.get("preprocess_signature") or ""),
+        "engine": str(profile.get("engine") or ""),
+        "psm": profile.get("psm"),
+        "whitelist": str(profile.get("whitelist") or ""),
+        "normalization": str(profile.get("normalization") or ""),
+        "cer_version": str(profile.get("cer_version") or ""),
+    }
+    canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _experiments_path(project_root: Path) -> Path:
@@ -131,8 +189,12 @@ def _experiment_from_model_meta(model_file: str, meta: dict[str, Any]) -> dict[s
             "generated": meta.get("augmentation_generated") if isinstance(meta.get("augmentation_generated"), int) else None,
         },
         "evaluation": None,
+        "evaluation_profile": None,
         "tags": [],
         "favorite": False,
+        # バックフィル実験は評価条件・学習経緯の完全性を保証できないため、既定で分析対象外
+        # （推薦・相関への影響を下げる。UIから分析対象へ戻せる）
+        "analysis_enabled": False,
         "source": "backfill",
     }
 
@@ -149,8 +211,10 @@ def record_experiment(project_id: Optional[str], payload: dict[str, Any]) -> dic
             "tags": _normalize_tags(payload.get("tags")),
             "favorite": bool(payload.get("favorite", False)),
             "evaluation": None,
+            "evaluation_profile": None,
+            "analysis_enabled": bool(payload.get("analysis_enabled", True)),
             "source": str(payload.get("source") or "training"),
-            **{k: v for k, v in payload.items() if k not in {"tags", "favorite", "source"}},
+            **{k: v for k, v in payload.items() if k not in {"tags", "favorite", "source", "analysis_enabled"}},
         }
         if not isinstance(experiment.get("models"), list):
             experiment["models"] = [str(experiment.get("models") or "")] if experiment.get("models") else []
@@ -208,8 +272,18 @@ def _model_id_map(project_id: str) -> dict[str, str]:
         return {}
 
 
+def _default_analysis_enabled(item: dict[str, Any]) -> bool:
+    """analysis_enabled 未設定の旧レコードの既定値（backfill=対象外 / それ以外=対象）。"""
+    if "analysis_enabled" in item:
+        return bool(item["analysis_enabled"])
+    return str(item.get("source") or "training") != "backfill"
+
+
 def list_experiments(project_id: Optional[str], backfill: bool = True) -> list[dict[str, Any]]:
-    """実験一覧（管理No付与済み）。backfill=True で旧モデル分を自動補完する。"""
+    """実験一覧（管理No・Evaluation Hash・Comparable Group・分析対象を付与済み）。
+
+    backfill=True で旧モデル分を自動補完する。
+    """
     paths = ensure_project_directories(project_id)
     if backfill:
         ensure_experiments_for_models(paths.project_id)
@@ -218,8 +292,151 @@ def list_experiments(project_id: Optional[str], backfill: bool = True) -> list[d
     items = []
     for item in registry["items"]:
         models = [str(m) for m in (item.get("models") or [])]
-        items.append({**item, "model_ids": [id_map.get(m, "") for m in models]})
+        items.append(
+            {
+                **item,
+                "model_ids": [id_map.get(m, "") for m in models],
+                "evaluation_hash": compute_evaluation_hash(item.get("evaluation_profile")),
+                "analysis_enabled": _default_analysis_enabled(item),
+            }
+        )
+    # Comparable Group（Evaluation Hash単位・出現順で CG-0001 から採番）を付与
+    groups = build_comparable_groups(items)
+    group_by_hash = {group["evaluation_hash"]: group["group_id"] for group in groups}
+    for item in items:
+        item["comparable_group"] = group_by_hash.get(item["evaluation_hash"], "")
     return items
+
+
+def build_comparable_groups(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Evaluation Hash単位の Comparable Group を生成する（CG-0001形式・出現順で決定的に採番）。
+
+    Hashのない実験（評価未実施・Hash生成不可）はグループへ含めない。
+    """
+    groups: dict[str, dict[str, Any]] = {}
+    for item in items:
+        eval_hash = str(item.get("evaluation_hash") or compute_evaluation_hash(item.get("evaluation_profile")))
+        if not eval_hash:
+            continue
+        if eval_hash not in groups:
+            profile = item.get("evaluation_profile") if isinstance(item.get("evaluation_profile"), dict) else {}
+            groups[eval_hash] = {
+                "group_id": f"CG-{len(groups) + 1:04d}",
+                "evaluation_hash": eval_hash,
+                "dataset": str(profile.get("dataset") or profile.get("dataset_id") or ""),
+                "whitelist": str(profile.get("whitelist") or ""),
+                "psm": profile.get("psm"),
+                "preprocess_signature": str(profile.get("preprocess_signature") or ""),
+                "experiments": [],
+            }
+        groups[eval_hash]["experiments"].append(str(item.get("experiment_id") or ""))
+    result = list(groups.values())
+    for group in result:
+        group["count"] = len(group["experiments"])
+    return result
+
+
+def set_analysis_enabled(project_id: Optional[str], experiment_id: str, enabled: bool) -> dict[str, Any]:
+    """実験の分析対象ON/OFF（失敗・途中停止・デバッグ実験の除外用）。"""
+    paths = ensure_project_directories(project_id)
+    with _EXPERIMENTS_LOCK:
+        registry = _load_registry(paths.root)
+        for item in registry["items"]:
+            if str(item.get("experiment_id")) == str(experiment_id):
+                item["analysis_enabled"] = bool(enabled)
+                _save_registry(paths.root, registry)
+                return item
+    raise FileNotFoundError(f"experiment not found: {experiment_id}")
+
+
+def analysis_exclusion_reason(item: dict[str, Any]) -> str:
+    """推薦・相関分析へ使用できない理由（空文字=使用可能）。
+
+    対象外: 分析対象OFF（バックフィル既定含む）/ 評価未実施・CERなし / Evaluation Hash生成不可。
+    """
+    if not _default_analysis_enabled(item):
+        return "backfill" if str(item.get("source") or "") == "backfill" else "analysis_disabled"
+    evaluation = item.get("evaluation") if isinstance(item.get("evaluation"), dict) else None
+    if evaluation is None:
+        return "not_evaluated"
+    if not isinstance(evaluation.get("cer"), (int, float)):
+        return "no_cer"
+    eval_hash = str(item.get("evaluation_hash") or compute_evaluation_hash(item.get("evaluation_profile")))
+    if not eval_hash:
+        return "no_evaluation_hash"
+    return ""
+
+
+def build_recommendations(project_id: Optional[str]) -> dict[str, Any]:
+    """比較可能Experimentのみから条件推薦を生成する（安全な推薦）。
+
+    - 分析対象外（バックフィル既定OFF・CERなし・評価未実施・Hash生成不可）は使用しない
+    - 最大の Comparable Group を根拠とし、根拠件数を必ず返す（5件未満は参考値=insufficient）
+    """
+    items = list_experiments(project_id)
+    eligible = [item for item in items if not analysis_exclusion_reason(item)]
+    excluded = [
+        {"experiment_id": str(item.get("experiment_id") or ""), "reason": analysis_exclusion_reason(item)}
+        for item in items
+        if analysis_exclusion_reason(item)
+    ]
+    # 最大グループを推薦根拠にする（同数は先に採番されたグループ）
+    by_group: dict[str, list[dict[str, Any]]] = {}
+    for item in eligible:
+        group = str(item.get("comparable_group") or "")
+        if group:
+            by_group.setdefault(group, []).append(item)
+    if not by_group:
+        return {"group_id": "", "basis_count": 0, "insufficient": True, "cards": [], "excluded": excluded, "safety": ""}
+    group_id = max(by_group.keys(), key=lambda g: (len(by_group[g]), -int(g.split("-")[1])))
+    basis = by_group[group_id]
+    insufficient = len(basis) < RECOMMENDATION_MIN_BASIS
+
+    def cer(item: dict[str, Any]) -> float:
+        return float(item["evaluation"]["cer"])
+
+    def iterations(item: dict[str, Any]) -> Optional[int]:
+        training = item.get("training") if isinstance(item.get("training"), dict) else {}
+        value = training.get("iterations")
+        return int(value) if isinstance(value, (int, float)) else None
+
+    cards: list[dict[str, Any]] = []
+    best = min(basis, key=cer)
+    best_iter = iterations(best)
+    if best_iter is not None:
+        higher = [item for item in basis if (iterations(item) or 0) > best_iter]
+        reason = f"{best['experiment_id']}（CER {cer(best) * 100:.1f}%）で最良"
+        if higher:
+            higher_mean = sum(cer(item) for item in higher) / len(higher)
+            if higher_mean > cer(best):
+                reason += f"。{best_iter:,}超は平均CER {higher_mean * 100:.1f}%と悪化（過学習傾向）"
+        cards.append({"id": "iteration", "title": "Iteration", "value": f"{best_iter:,} を推奨", "reason": reason})
+
+    def has_aug(item: dict[str, Any]) -> bool:
+        aug = item.get("augmentation") if isinstance(item.get("augmentation"), dict) else {}
+        return isinstance(aug.get("config"), dict)
+
+    with_aug = [item for item in basis if has_aug(item)]
+    without_aug = [item for item in basis if not has_aug(item)]
+    if with_aug and without_aug:
+        delta_pt = (sum(cer(i) for i in without_aug) / len(without_aug) - sum(cer(i) for i in with_aug) / len(with_aug)) * 100
+        cards.append(
+            {
+                "id": "augmentation",
+                "title": "Augmentation",
+                "value": "使用を推奨" if delta_pt > 0 else "なしを推奨",
+                "reason": f"Augあり平均とAugなし平均の差 {'+' if delta_pt >= 0 else ''}{delta_pt:.1f}pt（あり{len(with_aug)}件 / なし{len(without_aug)}件）",
+            }
+        )
+
+    return {
+        "group_id": group_id,
+        "basis_count": len(basis),
+        "insufficient": insufficient,
+        "cards": cards,
+        "excluded": excluded,
+        "safety": f"この推薦は{len(basis)}件の比較可能Experiment（{group_id}）から生成されています。",
+    }
 
 
 def update_experiment(project_id: Optional[str], experiment_id: str, patch: dict[str, Any]) -> dict[str, Any]:
@@ -264,6 +481,8 @@ def attach_evaluation(project_id: Optional[str], model: str, evaluation: dict[st
         "evaluated_at": str(evaluation.get("evaluated_at") or datetime.now().isoformat()),
         "dataset": str(evaluation.get("dataset") or ""),
     }
+    # Evaluation Profile（比較可能性の判定条件）も同時に保存する
+    profile = normalize_evaluation_profile(evaluation)
     with _EXPERIMENTS_LOCK:
         registry = _load_registry(paths.root)
         target = None
@@ -273,5 +492,6 @@ def attach_evaluation(project_id: Optional[str], model: str, evaluation: dict[st
         if target is None:
             return None
         target["evaluation"] = normalized
+        target["evaluation_profile"] = profile
         _save_registry(paths.root, registry)
         return target

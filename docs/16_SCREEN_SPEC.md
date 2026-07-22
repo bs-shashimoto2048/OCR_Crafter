@@ -269,8 +269,14 @@ OCRデータセット作成と学習ジョブの実行・監視（PaddleOCR / Te
 - **ベスト条件**: 最もCERが良かった実験の Iteration / Aug / 前処理 / Split / CER
 - **条件推薦**: 実験履歴からのルールベース推薦カード（例:「Iterationは10,000を推奨。理由: それ以上は平均CERが悪化（過学習傾向）」。AI推論ではない・性能向上を保証しない旨を明記）
 
+- **Experiment Validation（比較妥当性判定）**: 評価実行時に Evaluation Profile（データセットID・画像数・ラベル数・評価前処理識別子・エンジン・PSM・Whitelist・文字正規化・CERバージョン）を保存し、**Evaluation Hash**（sha256・評価日時除外）で同一条件評価を判定。**Comparable Group（CG-0001形式・色分けチップ＋グラフ凡例）**をHash単位で自動生成
+- **Scientific Mode**（既定ON・プロジェクト別保存）: ON=選択したComparable Group内の比較可能Experimentだけを推移・相関・ベスト・推薦の分析対象にする / OFF=全Experiment（混在の参考値である旨を表示）。CER推移は既定でグループ内のみ・「全Experimentを表示」でグループ色分けの全体表示
+- **分析対象ON/OFF**（一覧の「分析」列）: 失敗・途中停止・デバッグ実験を推薦・相関から除外。**バックフィル実験（Backfillバッジ表示）は既定で分析対象外**
+- **比較可能判定**: 選択実験のEvaluation Hash不一致時に「⚠ 比較条件が異なります。CERを直接比較できません。」を表示（比較自体は禁止しない）＋**比較品質★5段階**（★5=完全一致条件 / ★4=Whitelist違いのみ / ★3=PSM・評価前処理違い / ★2=データセット違い / ★1=比較不可）。条件差分は**学習条件/前処理/Aug/モデル/評価条件/その他**のカテゴリへ分類表示
+- **安全な推薦**: 「推薦根拠: Comparable Experiment N件」と「この推薦はN件の比較可能Experimentから生成されています。」を必ず表示。**5件未満は「参考値（データ不足）」バッジ**。ベスト条件はグループベスト＋全体ベスト（条件が異なる旨を付記）を分けて表示
+
 **データの流れ**
-学習完了時に自動記録（`register_tesseract_model`→`experiment_tracker.record_experiment`）。実験記録のない旧モデルは一覧取得時に自動バックフィル。評価実行時にフロントが `POST /api/experiments/attach-evaluation` で評価要約を自動保存。
+学習完了時に自動記録（`register_tesseract_model`→`experiment_tracker.record_experiment`）。実験記録のない旧モデルは一覧取得時に自動バックフィル（既定で分析対象外）。評価実行時にフロントが `POST /api/experiments/attach-evaluation` で評価要約＋Evaluation Profileを自動保存。
 
 **主操作**
 - 比較選択（最大4件）/ ★トグル / タグ編集（PATCH）/ CSV出力 / 更新

@@ -251,6 +251,13 @@ class ExperimentUpdateRequest(BaseModel):
     experiment_name: Optional[str] = Field(default=None, description="実験名")
 
 
+class ExperimentAnalysisToggleRequest(BaseModel):
+    """実験の分析対象ON/OFF（失敗・途中停止・デバッグ実験の除外）。"""
+
+    project_id: Optional[str] = Field(default="default")
+    enabled: bool = Field(..., description="true=推薦・相関分析の対象 / false=対象外")
+
+
 class ExperimentEvaluationAttachRequest(BaseModel):
     """評価実行結果を該当実験（モデル名で解決）へ保存する。"""
 

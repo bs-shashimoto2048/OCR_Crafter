@@ -59,7 +59,119 @@ export function normalizeExperiment(raw = {}) {
     tags: Array.isArray(raw.tags) ? raw.tags.map(String) : [],
     favorite: raw.favorite === true,
     source: String(raw.source || "training"),
+    // Experiment Validation: 評価条件（Evaluation Profile）・Evaluation Hash・Comparable Group・分析対象
+    evaluationHash: String(raw.evaluation_hash || ""),
+    comparableGroup: String(raw.comparable_group || ""),
+    analysisEnabled:
+      raw.analysis_enabled === undefined ? String(raw.source || "training") !== "backfill" : raw.analysis_enabled === true,
+    evalProfile: (() => {
+      const p = raw.evaluation_profile && typeof raw.evaluation_profile === "object" ? raw.evaluation_profile : null;
+      if (!p) return null;
+      return {
+        datasetId: String(p.dataset_id || p.dataset || ""),
+        imageCount: num(p.image_count),
+        labelCount: num(p.label_count),
+        preprocessSignature: String(p.preprocess_signature || ""),
+        engine: String(p.engine || ""),
+        psm: num(p.psm),
+        whitelist: String(p.whitelist || ""),
+      };
+    })(),
   };
+}
+
+// ---------- 分析対象の判定（推薦・相関へ使用できるか） ----------
+
+export const EXCLUSION_LABELS = {
+  backfill: "バックフィル（既定で分析対象外）",
+  analysis_disabled: "分析対象OFF",
+  not_evaluated: "評価未実施",
+  no_cer: "CERなし",
+  no_evaluation_hash: "評価条件不足（Hash生成不可）",
+};
+
+// 除外理由（空文字=分析へ使用可能）。バックエンド analysis_exclusion_reason と同じ規則
+export function analysisExclusionReason(e) {
+  if (!e.analysisEnabled) return e.source === "backfill" ? "backfill" : "analysis_disabled";
+  if (e.cer === null && e.evaluatedAt === "") return "not_evaluated";
+  if (e.cer === null) return "no_cer";
+  if (!e.evaluationHash) return "no_evaluation_hash";
+  return "";
+}
+
+// 分析スコープの解決。Scientific Mode ON=比較可能（同一Comparable Group内・分析対象のみ）、
+// OFF=全Experiment。groupId未指定は最大グループを自動選択
+export function resolveAnalysisScope(experiments, { scientificMode = true, groupId = "" } = {}) {
+  const all = experiments || [];
+  if (!scientificMode) {
+    return { items: all, groupId: "", basisCount: all.filter((e) => e.cer !== null).length, scientific: false };
+  }
+  const eligible = all.filter((e) => !analysisExclusionReason(e));
+  const byGroup = new Map();
+  for (const e of eligible) {
+    if (!e.comparableGroup) continue;
+    if (!byGroup.has(e.comparableGroup)) byGroup.set(e.comparableGroup, []);
+    byGroup.get(e.comparableGroup).push(e);
+  }
+  let resolvedGroup = groupId && byGroup.has(groupId) ? groupId : "";
+  if (!resolvedGroup) {
+    let bestSize = -1;
+    for (const [id, list] of byGroup.entries()) {
+      if (list.length > bestSize || (list.length === bestSize && id < resolvedGroup)) {
+        resolvedGroup = id;
+        bestSize = list.length;
+      }
+    }
+  }
+  const items = resolvedGroup ? byGroup.get(resolvedGroup) || [] : [];
+  return { items, groupId: resolvedGroup, basisCount: items.length, scientific: true };
+}
+
+// Comparable Group一覧（実験配列から。CG-ID昇順）
+export function collectComparableGroups(experiments) {
+  const map = new Map();
+  for (const e of experiments || []) {
+    if (!e.comparableGroup) continue;
+    if (!map.has(e.comparableGroup)) {
+      map.set(e.comparableGroup, { id: e.comparableGroup, dataset: e.evalProfile?.datasetId || e.evalDataset || "", count: 0 });
+    }
+    map.get(e.comparableGroup).count += 1;
+  }
+  return [...map.values()].sort((a, b) => a.id.localeCompare(b.id));
+}
+
+// Comparable Groupの固定色（グラフ凡例・一覧チップ用。CG-ID順に循環割り当て）
+export const GROUP_COLORS = ["#60a5fa", "#fb923c", "#c084fc", "#34d399", "#f472b6", "#facc15"];
+
+export function buildGroupColorMap(experiments) {
+  const map = {};
+  for (const group of collectComparableGroups(experiments)) {
+    map[group.id] = GROUP_COLORS[Object.keys(map).length % GROUP_COLORS.length];
+  }
+  return map;
+}
+
+// ---------- 比較品質（★5段階） ----------
+
+// 選択した実験群の比較品質。
+// ★5=Evaluation Hash完全一致 / ★4=Whitelist違いのみ / ★3=PSM・前処理等の違い（同一データセット）/
+// ★2=データセット違い / ★1=比較不可（評価未実施・エンジン違い・Hashなし）
+export function comparisonQuality(experiments) {
+  const list = experiments || [];
+  if (list.length < 2) return null;
+  const stars = (n, label) => ({ stars: n, starsLabel: "★".repeat(n) + "☆".repeat(5 - n), label });
+  if (list.some((e) => !e.evaluationHash || !e.evalProfile)) return stars(1, "比較不可（評価未実施・評価条件不足）");
+  const hashes = new Set(list.map((e) => e.evaluationHash));
+  if (hashes.size === 1) return stars(5, "完全一致条件");
+  const profiles = list.map((e) => e.evalProfile);
+  if (new Set(profiles.map((p) => p.engine)).size > 1) return stars(1, "比較不可（OCRエンジン違い）");
+  if (new Set(profiles.map((p) => p.datasetId)).size > 1) return stars(2, "データセット違い");
+  // データセット同一でWhitelist以外が一致 → ★4
+  const withoutWhitelist = new Set(
+    profiles.map((p) => JSON.stringify({ d: p.datasetId, i: p.imageCount, s: p.preprocessSignature, m: p.psm }))
+  );
+  if (withoutWhitelist.size === 1) return stars(4, "Whitelist違いのみ");
+  return stars(3, "PSM・評価前処理などの違い（同一データセット）");
 }
 
 // ---------- フィルタ（Iteration / CER / Aug / 前処理 / モデル / 日付 / タグ / ★ / フリーテキスト） ----------
@@ -102,44 +214,68 @@ export function filterExperiments(experiments, filters = {}) {
 
 const fmt = (value, suffix = "") => (value === null || value === undefined || value === "" ? "未記録" : `${value}${suffix}`);
 
+// 差分行はカテゴリ（学習条件 / 前処理 / Aug / モデル / 評価条件 / その他）へ分類して表示する
+export const DIFF_CATEGORIES = ["学習条件", "前処理", "Aug", "モデル", "評価条件", "その他"];
+
 export const EXPERIMENT_DIFF_ROWS = [
-  { key: "iterations", label: "Iteration", value: (e) => fmt(e.iterations === null ? null : e.iterations.toLocaleString("ja-JP")) },
-  { key: "split", label: "Split比率", value: (e) => fmt(e.splitRatioText) },
-  { key: "seed", label: "Split Seed", value: (e) => fmt(e.splitSeed) },
+  { key: "iterations", label: "Iteration", category: "学習条件", value: (e) => fmt(e.iterations === null ? null : e.iterations.toLocaleString("ja-JP")) },
+  { key: "split", label: "Split比率", category: "学習条件", value: (e) => fmt(e.splitRatioText) },
+  { key: "seed", label: "Split Seed", category: "学習条件", value: (e) => fmt(e.splitSeed) },
   {
     key: "counts",
     label: "Train / Val / Test",
+    category: "学習条件",
     value: (e) =>
       e.counts.train === null && e.counts.val === null && e.counts.test === null
         ? "未記録"
         : `${fmt(e.counts.train)} / ${fmt(e.counts.val)} / ${fmt(e.counts.test)}`,
   },
-  { key: "preprocess", label: "前処理", value: (e) => (e.preprocessHash ? `${e.preprocessSummary || "記録あり"}（${e.preprocessShort}）` : "未記録") },
-  { key: "augmentation", label: "Augmentation", value: (e) => e.augSummary || "なし" },
-  { key: "charset", label: "Charset", value: (e) => fmt(e.charset) },
-  { key: "base", label: "ベース / 親", value: (e) => `${e.baseLang || "未記録"}${e.parentModelId ? ` / ${e.parentModelId}` : ""}` },
-  { key: "cer", label: "CER", value: (e) => (e.cer === null ? "未評価" : `${(e.cer * 100).toFixed(1)}%`) },
+  { key: "charset", label: "Charset", category: "学習条件", value: (e) => fmt(e.charset) },
+  { key: "preprocess", label: "学習前処理", category: "前処理", value: (e) => (e.preprocessHash ? `${e.preprocessSummary || "記録あり"}（${e.preprocessShort}）` : "未記録") },
+  { key: "augmentation", label: "Augmentation", category: "Aug", value: (e) => e.augSummary || "なし" },
+  { key: "base", label: "ベース / 親", category: "モデル", value: (e) => `${e.baseLang || "未記録"}${e.parentModelId ? ` / ${e.parentModelId}` : ""}` },
+  { key: "evalDataset", label: "評価データセット", category: "評価条件", value: (e) => fmt(e.evalProfile?.datasetId || e.evalDataset || "") },
+  { key: "evalWhitelist", label: "Whitelist", category: "評価条件", value: (e) => (e.evalProfile ? fmt(e.evalProfile.whitelist) : "未記録") },
+  { key: "evalPsm", label: "PSM", category: "評価条件", value: (e) => (e.evalProfile ? fmt(e.evalProfile.psm) : "未記録") },
+  {
+    key: "evalPreprocess",
+    label: "評価前処理",
+    category: "評価条件",
+    value: (e) => (e.evalProfile?.preprocessSignature ? e.evalProfile.preprocessSignature.replace(/^sha256:/, "").slice(0, 16) : "未記録"),
+  },
+  { key: "cer", label: "CER", category: "その他", value: (e) => (e.cer === null ? "未評価" : `${(e.cer * 100).toFixed(1)}%`) },
 ];
 
-// 比較対象の実験群に対する差分行。changed=値が2種類以上（全て未記録は変更なし扱い）
+// 比較対象の実験群に対する差分行（カテゴリ付き）。changed=値が2種類以上（全て未記録は変更なし扱い）
 export function buildExperimentDiff(experiments) {
   return EXPERIMENT_DIFF_ROWS.map((row) => {
     const values = experiments.map((e) => row.value(e));
     const informative = values.filter((v) => v !== "未記録" && v !== "未評価");
     const changed = new Set(informative).size > 1;
-    return { key: row.key, label: row.label, values, changed };
+    return { key: row.key, label: row.label, category: row.category || "その他", values, changed };
   });
+}
+
+// Evaluation Hash不一致の比較警告（比較自体は禁止しない）
+export function comparisonWarning(experiments) {
+  const list = (experiments || []).filter((e) => e.evaluationHash);
+  if (list.length < 2) return "";
+  const hashes = new Set(list.map((e) => e.evaluationHash));
+  if (hashes.size > 1 || list.length !== (experiments || []).length) {
+    return "⚠ 比較条件が異なります。CERを直接比較できません。";
+  }
+  return "";
 }
 
 // ---------- グラフデータ（CER推移 / 完全一致率推移 / Iteration×CER / Aug倍率×CER） ----------
 
-// 実験ID順（=実行順）の推移。値が無い実験は除外
+// 実験ID順（=実行順）の推移。値が無い実験は除外。group=Comparable Group（凡例色分け用）
 export function buildTrendSeries(experiments, metric = "cer") {
   const sorted = [...(experiments || [])].sort((a, b) => a.id.localeCompare(b.id));
   const pick = (e) =>
     metric === "cer" ? (e.cer === null ? null : e.cer * 100) : metric === "accuracy" ? e.accuracyPercent : null;
   return sorted
-    .map((e) => ({ id: e.id, value: pick(e) }))
+    .map((e) => ({ id: e.id, value: pick(e), group: e.comparableGroup || "" }))
     .filter((p) => p.value !== null && Number.isFinite(p.value));
 }
 

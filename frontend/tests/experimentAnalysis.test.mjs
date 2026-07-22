@@ -189,7 +189,14 @@ test("ExperimentsView: 一覧・フィルタ・CSVボタン・グラフ・ベス
   ];
   raws[0].tags = ["Baseline"];
   raws[0].favorite = true;
-  const html = renderToString(
+  // Scientific Mode（既定ON）の分析対象になるよう Evaluation Hash / Comparable Group を付与
+  for (const raw of raws) {
+    raw.evaluation_hash = "sha256:same";
+    raw.comparable_group = "CG-0001";
+    raw.analysis_enabled = true;
+    raw.evaluation_profile = { dataset_id: "ds1", image_count: 100, label_count: 100, preprocess_signature: "sig", engine: "tesseract", psm: 7, whitelist: "AB" };
+  }
+  const htmlRaw = renderToString(
     React.createElement(ExperimentsView, {
       projectId: "p",
       experiments: raws,
@@ -199,6 +206,7 @@ test("ExperimentsView: 一覧・フィルタ・CSVボタン・グラフ・ベス
       onOpenModel: () => {},
     })
   );
+  const html = htmlRaw.replaceAll("<!-- -->", ""); // SSRのテキストノード間コメントを除去
   assert.ok(html.includes("実験一覧"), "一覧がない");
   assert.ok(html.includes("EXP-0001") && html.includes("EXP-0002"));
   assert.ok(html.includes("CSV / Excel出力"));
@@ -211,4 +219,102 @@ test("ExperimentsView: 一覧・フィルタ・CSVボタン・グラフ・ベス
   assert.ok(html.includes("★"), "お気に入りがない");
   assert.ok(html.includes("M0001"), "生成モデルリンク（管理No）がない");
   assert.ok(html.includes("<svg"), "SVGグラフがない");
+  // Experiment Validation UI
+  assert.ok(html.includes("Scientific Mode"), "Scientific Modeトグルがない");
+  assert.ok(html.includes("CG-0001"), "Comparable Group表示がない");
+  assert.ok(html.includes("推薦根拠"), "推薦根拠の件数表示がない");
+  assert.ok(html.includes("2件の比較可能Experiment"), "Recommendation Safetyの文言がない");
+  assert.ok(html.includes("参考値（データ不足）"), "5件未満のデータ不足表示がない");
+  assert.ok(html.includes("全Experimentを表示"), "CER推移の全件切替がない");
+});
+
+// ---------- Experiment Validation（比較妥当性判定） ----------
+
+test("Evaluation Hash/Comparable Group/分析対象の正規化と除外理由", async () => {
+  const mod = await import("../src/lib/experimentAnalysis.js");
+  const raw = makeRaw({ id: "EXP-0010", cer: 0.3 });
+  raw.evaluation_hash = "sha256:evalhash1";
+  raw.comparable_group = "CG-0001";
+  raw.evaluation_profile = { dataset_id: "ds1", image_count: 100, label_count: 100, preprocess_signature: "sig", engine: "tesseract", psm: 7, whitelist: "AB" };
+  const e = mod.normalizeExperiment(raw);
+  assert.equal(e.evaluationHash, "sha256:evalhash1");
+  assert.equal(e.comparableGroup, "CG-0001");
+  assert.equal(e.analysisEnabled, true);
+  assert.equal(e.evalProfile.whitelist, "AB");
+  assert.equal(mod.analysisExclusionReason(e), "");
+  // バックフィルはanalysis_enabled未指定なら既定で対象外
+  const backfill = mod.normalizeExperiment({ ...makeRaw({ id: "EXP-0011" }), source: "backfill" });
+  assert.equal(backfill.analysisEnabled, false);
+  assert.equal(mod.analysisExclusionReason(backfill), "backfill");
+  // 評価済みでもHashなしは対象外
+  const noHash = mod.normalizeExperiment({ ...makeRaw({ id: "EXP-0012", cer: 0.4 }) });
+  assert.equal(mod.analysisExclusionReason(noHash), "no_evaluation_hash");
+});
+
+function validated(id, { cer = 0.3, hash = "sha256:h1", group = "CG-0001", enabled = true, iterations = 1000, aug = null } = {}) {
+  const raw = makeRaw({ id, cer, iterations, aug });
+  raw.evaluation_hash = hash;
+  raw.comparable_group = group;
+  raw.analysis_enabled = enabled;
+  raw.evaluation_profile = { dataset_id: group === "CG-0001" ? "ds1" : "ds2", image_count: 100, label_count: 100, preprocess_signature: "sig", engine: "tesseract", psm: 7, whitelist: "AB" };
+  return raw;
+}
+
+test("resolveAnalysisScope: Scientific Mode ON=最大グループの比較可能実験のみ / OFF=全件", async () => {
+  const mod = await import("../src/lib/experimentAnalysis.js");
+  const items = [
+    validated("EXP-0001"),
+    validated("EXP-0002"),
+    validated("EXP-0003", { hash: "sha256:h2", group: "CG-0002" }),
+    validated("EXP-0004", { enabled: false }), // 分析対象OFFは除外
+  ].map(mod.normalizeExperiment);
+  const on = mod.resolveAnalysisScope(items, { scientificMode: true });
+  assert.equal(on.groupId, "CG-0001");
+  assert.equal(on.basisCount, 2); // OFFの1件は含まれない
+  assert.deepEqual(on.items.map((e) => e.id), ["EXP-0001", "EXP-0002"]);
+  const specific = mod.resolveAnalysisScope(items, { scientificMode: true, groupId: "CG-0002" });
+  assert.deepEqual(specific.items.map((e) => e.id), ["EXP-0003"]);
+  const off = mod.resolveAnalysisScope(items, { scientificMode: false });
+  assert.equal(off.items.length, 4);
+  assert.equal(off.scientific, false);
+});
+
+test("comparisonWarning/比較品質★: Hash一致=警告なし★5 / Whitelist違い★4 / データセット違い★2 / 未評価★1", async () => {
+  const mod = await import("../src/lib/experimentAnalysis.js");
+  const same = [validated("A"), validated("B")].map(mod.normalizeExperiment);
+  assert.equal(mod.comparisonWarning(same), "");
+  assert.equal(mod.comparisonQuality(same).stars, 5);
+  assert.equal(mod.comparisonQuality(same).label, "完全一致条件");
+
+  const wl = [validated("A"), validated("B", { hash: "sha256:h9" })].map(mod.normalizeExperiment);
+  wl[1].evalProfile.whitelist = "ABC"; // whitelistのみ違い
+  assert.ok(mod.comparisonWarning(wl).includes("比較条件が異なります"));
+  assert.equal(mod.comparisonQuality(wl).stars, 4);
+
+  const ds = [validated("A"), validated("B", { hash: "sha256:h9", group: "CG-0002" })].map(mod.normalizeExperiment);
+  assert.equal(mod.comparisonQuality(ds).stars, 2);
+  assert.equal(mod.comparisonQuality(ds).label, "データセット違い");
+
+  const notEvaluated = [validated("A"), mod.normalizeExperiment(makeRaw({ id: "B" }))];
+  assert.equal(mod.comparisonQuality(notEvaluated).stars, 1);
+});
+
+test("条件差分のカテゴリ分類（学習条件/前処理/Aug/モデル/評価条件/その他）とグループ凡例色", async () => {
+  const mod = await import("../src/lib/experimentAnalysis.js");
+  const pair = [validated("A"), validated("B")].map(mod.normalizeExperiment);
+  const rows = mod.buildExperimentDiff(pair);
+  const categories = new Set(rows.map((r) => r.category));
+  for (const c of ["学習条件", "前処理", "Aug", "モデル", "評価条件", "その他"]) {
+    assert.ok(categories.has(c), `カテゴリ ${c} がない`);
+  }
+  assert.equal(rows.find((r) => r.key === "evalWhitelist").category, "評価条件");
+  // グループ色: CG-ID順に固定色
+  const colors = mod.buildGroupColorMap(
+    [validated("A"), validated("B", { hash: "sha256:h2", group: "CG-0002" })].map(mod.normalizeExperiment)
+  );
+  assert.equal(colors["CG-0001"], mod.GROUP_COLORS[0]);
+  assert.equal(colors["CG-0002"], mod.GROUP_COLORS[1]);
+  // 推移データへグループが付与される
+  const trend = mod.buildTrendSeries([validated("A")].map(mod.normalizeExperiment), "cer");
+  assert.equal(trend[0].group, "CG-0001");
 });

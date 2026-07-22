@@ -3126,9 +3126,15 @@ export default function App() {
       } catch {
         // 記録失敗は評価結果表示に影響させない
       }
-      // 実験管理へ評価要約を保存（該当実験はサーバーがモデル名から解決。失敗しても評価表示に影響させない）
+      // 実験管理へ評価要約＋Evaluation Profile（比較可能性の判定条件）を保存
+      // （該当実験はサーバーがモデル名から解決。失敗しても評価表示に影響させない）
       try {
         const evaluatedAtIso = new Date().toISOString();
+        // 評価前処理の識別子: 学習時前処理モード=ハッシュ / 手動=設定JSON / なし="none"
+        const preprocessSignature = `${data?.preprocess_mode || "legacy"}:${
+          data?.evaluation_preprocess?.preprocess_hash ||
+          (data?.eval_preprocess ? JSON.stringify(data.eval_preprocess) : "none")
+        }`;
         await Promise.allSettled(
           (data?.targets || [])
             .filter((target) => !target?.is_base && target?.model)
@@ -3147,6 +3153,14 @@ export default function App() {
                     regressed: data?.comparison?.regressed ?? null,
                     evaluated_at: evaluatedAtIso,
                     dataset: ocrEvalDatasetId || "",
+                    // Evaluation Profile（Evaluation Hash生成用の評価条件）
+                    dataset_id: ocrEvalDatasetId || String(ocrEvalImageDir || ""),
+                    image_count: data?.count ?? null,
+                    label_count: data?.gt_count ?? null,
+                    preprocess_signature: preprocessSignature,
+                    engine: "tesseract",
+                    psm: data?.psm ?? 7,
+                    whitelist: String(data?.charset ?? ""),
                   },
                 }),
               })
@@ -3775,6 +3789,21 @@ export default function App() {
         loading={experimentsLoading}
         onRefresh={() => loadExperiments(projectId)}
         onUpdateExperiment={updateExperiment}
+        onToggleAnalysis={async (experimentId, enabled) => {
+          // 分析対象ON/OFF（失敗・途中停止・デバッグ実験を推薦・相関から除外する）
+          try {
+            const data = await request(`/api/experiments/${encodeURIComponent(experimentId)}/analysis`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ project_id: projectId, enabled }),
+            });
+            if (data?.item) {
+              setExperiments((prev) => prev.map((row) => (row.experiment_id === experimentId ? { ...row, ...data.item } : row)));
+            }
+          } catch (error) {
+            notify("error", `分析対象の切替に失敗しました: ${error.message}`);
+          }
+        }}
         onOpenModel={(name) => {
           // Experiment → 生成モデル（モデル管理のカルテを開く）
           setModelDetailRequest({ name, seq: Date.now() });
