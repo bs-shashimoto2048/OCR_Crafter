@@ -183,6 +183,62 @@
       monospace;
   }
 
+  /* 管理No（M0001形式・通しナンバー）の共通タイポグラフィ。
+     一覧・カルテ・比較の全画面で同一フォントを使用する（components/ModelIdBadge.jsx）。
+     フォントは新規同梱せず、Roboto Mono（あれば）→ Windows標準の Cascadia Mono → Consolas
+     の等幅スタック（0とO・1とIを判別しやすい字形）。letter-spacingで桁の読み取りを補助 */
+  .model-id-font,
+  .model-id-badge {
+    display: inline-block;
+    font-family:
+      "Roboto Mono",
+      "Cascadia Mono",
+      "Consolas",
+      monospace;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    line-height: 1;
+    white-space: nowrap;
+    flex-shrink: 0; /* 長いモデル名（truncate側）があっても管理Noを縮めない */
+  }
+
+  /* 一覧用バッジ（sm既定: 12px/600）。M0001〜M9999で横幅が変わらないよう最低幅を確保。
+     青系配色は維持しつつ、背景を塗りすぎず文字コントラストを改善 */
+  .model-id-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 48px;
+    padding: 4px 7px;
+    font-size: 12px;
+    border-radius: 5px;
+    background-color: rgba(37, 99, 235, 0.18);
+    border: 1px solid rgba(96, 165, 250, 0.35);
+    color: #7dd3fc;
+  }
+
+  /* md=モデルカルテ・比較表の列見出し */
+  .model-id-badge--md {
+    min-width: 52px;
+    padding: 5px 8px;
+    font-size: 13px;
+  }
+
+  /* バッジ背景なしのテキスト表示（比較画面のモデル識別色と併用。フォントは共通） */
+  .model-id-text--sm {
+    font-size: 12px;
+  }
+
+  .model-id-text--md {
+    font-size: 13px;
+  }
+
+  /* lg=比較カード・推奨モデルの主表示（背景バッジなし・識別色＋アクセント線が装飾） */
+  .model-id-text--lg {
+    font-size: 16px;
+    font-weight: 700;
+  }
+
   /* モデル管理の右ペイン（モデル詳細/比較）: 自身の幅を基準に内部レイアウトを変える
      コンテナ。固定幅を持たず、グリッド側の minmax(0,1fr) で利用可能幅に応じて収縮する */
   .model-side-pane {

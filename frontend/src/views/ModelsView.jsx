@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import Card from "../components/Card";
 import Button from "../components/Button";
 import InfoTooltip from "../components/InfoTooltip";
+import ModelIdBadge from "../components/ModelIdBadge";
 import { API_BASE } from "../lib/api";
 import { HELP_TEXTS } from "../lib/helpTexts";
 import { historyPreprocessLabel } from "../lib/evalHistory";
@@ -342,18 +343,11 @@ export default function ModelsView({
     return infoOf(name).model_id || "";
   }
 
-  // 管理No表示チップ（ホバーで「M0004 → ファイル名」のツールチップ）
-  function ModelIdChip({ name, className = "mr-1 text-[12px]" }) {
+  // 管理No表示チップ（共通 ModelIdBadge のラッパー。ホバーで「管理No：M0004 / モデル名」）
+  function ModelIdChip({ name, size = "sm", className = "" }) {
     const id = modelIdOf(name);
     if (!id) return null;
-    return (
-      <span
-        className={`inline-block shrink-0 rounded bg-accent/15 px-1 font-mono font-semibold text-accent ${className}`}
-        title={`${id} → ${name}`}
-      >
-        {id}
-      </span>
-    );
+    return <ModelIdBadge modelId={id} size={size} title={`管理No：${id}\nモデル名：${name}`} className={className} />;
   }
 
   function statusOf(name) {
@@ -573,9 +567,9 @@ export default function ModelsView({
         <div className="dark-scroll min-h-0 flex-[0_1_auto] space-y-3 overflow-y-auto pr-0.5 [overscroll-behavior:contain]">
           {/* カルテヘッダー（このモデル自身の状態のみ。Best/Recommended等の比較バッジは比較画面へ集約） */}
           <div>
-            <p className="truncate text-lg font-semibold leading-6 text-text" title={name}>
-              <ModelIdChip name={name} />
-              {displayName(name)}
+            <p className="flex min-w-0 items-center gap-2 text-lg font-semibold leading-6 text-text" title={name}>
+              <ModelIdChip name={name} size="md" />
+              <span className="min-w-0 truncate">{displayName(name)}</span>
             </p>
             {aliases[name] ? (
               <p className="truncate text-[11px] text-muted" title={name}>
@@ -723,7 +717,8 @@ export default function ModelsView({
           {/* ⑤ モデル情報（このモデル自身の学習条件・実体情報） */}
           <div className="rounded-lg border border-border bg-card/45 px-3 py-3">
             <SectionTitle>モデル情報</SectionTitle>
-            <SpecRow label="管理No" value={modelIdOf(name) || "-"} />
+            {/* 管理Noは共通の等幅フォント（ModelIdBadgeと同一スタック）で表示 */}
+            <SpecRow label="管理No" value={modelIdOf(name) || "-"} valueClass="model-id-font model-id-text--md text-text" />
             <SpecRow label="Engine" value={engineLabelOf(engineName(name), trainingFamily(name))} />
             <SpecRow label="方式" value={familyLabelOf(trainingFamily(name))} />
             <SpecRow label="ベースモデル" value={info.base_lang || "-"} help={HELP_TEXTS.baseModel} />
@@ -970,9 +965,7 @@ export default function ModelsView({
             {compareTargets.map((name) => (
               <span key={name} className="inline-flex items-center gap-1 text-[12px]" title={compareTitle(name)}>
                 <span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: colorOf(name) }} />
-                <span className="font-semibold" style={{ color: colorOf(name) }}>
-                  {compareLabel(name)}
-                </span>
+                <ModelIdBadge modelId={compareLabel(name)} size="sm" color={colorOf(name)} />
               </span>
             ))}
           </div>
@@ -991,9 +984,13 @@ export default function ModelsView({
             <div className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2">
               <div className="flex min-w-0 items-baseline gap-2">
                 <span className="shrink-0 text-[13px] text-amber-200">推奨モデル</span>
-                <span className="shrink-0 text-lg font-bold leading-6" style={{ color: colorOf(recommended.model) }} title={compareTitle(recommended.model)}>
-                  {compareLabel(recommended.model)}
-                </span>
+                <ModelIdBadge
+                  modelId={compareLabel(recommended.model)}
+                  size="lg"
+                  color={colorOf(recommended.model)}
+                  title={compareTitle(recommended.model)}
+                  className="shrink-0 leading-6"
+                />
                 <span className="min-w-0 truncate text-[12px] text-amber-100/70" title={recommended.model}>
                   {shortFileLabel(recommended.model)}
                 </span>
@@ -1019,8 +1016,8 @@ export default function ModelsView({
                 className="comparison-card rounded-lg border border-border bg-card/45"
                 style={{ borderTop: `3px solid ${colorOf(col.model)}` }}
               >
-                <p className="truncate text-lg font-bold leading-6" style={{ color: colorOf(col.model) }} title={compareTitle(col.model)}>
-                  {compareLabel(col.model)}
+                <p className="truncate leading-6" title={compareTitle(col.model)}>
+                  <ModelIdBadge modelId={compareLabel(col.model)} size="lg" color={colorOf(col.model)} />
                 </p>
                 <p className="truncate text-[11px] text-muted" title={col.model}>
                   {shortFileLabel(col.model)}
@@ -1088,11 +1085,10 @@ export default function ModelsView({
                     {comparison.columns.map((col) => (
                       <th
                         key={col.model}
-                        className="whitespace-nowrap px-2 py-1.5 text-left text-[13px] font-semibold"
-                        style={{ color: colorOf(col.model) }}
+                        className="whitespace-nowrap px-2 py-1.5 text-left"
                         title={compareTitle(col.model)}
                       >
-                        {compareLabel(col.model)}
+                        <ModelIdBadge modelId={compareLabel(col.model)} size="md" color={colorOf(col.model)} />
                       </th>
                     ))}
                   </tr>
@@ -1144,10 +1140,10 @@ export default function ModelsView({
                     {compareTargets.map((name) => (
                       <th
                         key={name}
-                        className="min-w-[135px] whitespace-nowrap px-2 py-1.5 text-left align-top text-[13px] font-semibold"
+                        className="min-w-[135px] whitespace-nowrap px-2 py-1.5 text-left align-top"
                         title={compareTitle(name)}
                       >
-                        <span style={{ color: colorOf(name) }}>{compareLabel(name)}</span>
+                        <ModelIdBadge modelId={compareLabel(name)} size="md" color={colorOf(name)} />
                         {/* ヘッダー補足はファイル名の日時短縮表示（元名はホバーで確認） */}
                         <span className="block max-w-[10rem] truncate text-[10px] font-normal text-muted">{shortFileLabel(name)}</span>
                       </th>
@@ -1210,10 +1206,10 @@ export default function ModelsView({
                     {compareTargets.map((name) => (
                       <th
                         key={name}
-                        className="min-w-[135px] whitespace-nowrap px-2 py-1.5 text-left align-top text-[13px] font-semibold"
+                        className="min-w-[135px] whitespace-nowrap px-2 py-1.5 text-left align-top"
                         title={compareTitle(name)}
                       >
-                        <span style={{ color: colorOf(name) }}>{compareLabel(name)}</span>
+                        <ModelIdBadge modelId={compareLabel(name)} size="md" color={colorOf(name)} />
                         <span className="block max-w-[10rem] truncate text-[10px] font-normal text-muted">{shortFileLabel(name)}</span>
                       </th>
                     ))}
@@ -1276,10 +1272,10 @@ export default function ModelsView({
                 <p className="text-[12px] font-semibold text-muted">前処理差分</p>
                 {preDiffs.map((diff) => (
                   <div key={`${diff.from}-${diff.to}`} className="rounded-lg border border-border/70 bg-card/60 px-2.5 py-1.5">
-                    <p className="text-[13px] font-semibold">
-                      <span style={{ color: colorOf(diff.from) }}>{compareLabel(diff.from)}</span>
+                    <p className="text-[13px]">
+                      <ModelIdBadge modelId={compareLabel(diff.from)} size="md" color={colorOf(diff.from)} />
                       <span className="text-muted"> → </span>
-                      <span style={{ color: colorOf(diff.to) }}>{compareLabel(diff.to)}</span>
+                      <ModelIdBadge modelId={compareLabel(diff.to)} size="md" color={colorOf(diff.to)} />
                     </p>
                     {!diff.comparable ? (
                       <p className="text-[12px] text-muted">未記録モデルを含むため差分を判定できません。</p>
@@ -1308,8 +1304,8 @@ export default function ModelsView({
                   const pre = preList[index];
                   return (
                     <div key={name} className="rounded-lg border border-border/60 bg-card/55 px-2.5 py-2">
-                      <p className="text-[13px] font-semibold" style={{ color: colorOf(name) }}>
-                        {compareLabel(name)}
+                      <p className="text-[13px]">
+                        <ModelIdBadge modelId={compareLabel(name)} size="md" color={colorOf(name)} />
                         <span className="ml-2 text-[11px] font-normal text-muted">{shortFileLabel(name)}</span>
                       </p>
                       {!pre.recorded ? (
@@ -1375,10 +1371,10 @@ export default function ModelsView({
                 {diffSummaries.map((summary) => (
                   <div key={summary.pair} className="rounded-lg border border-border/70 bg-card/60 px-2.5 py-2">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-[14px] font-semibold">
-                        <span style={{ color: colorOf(summary.from) }}>{compareLabel(summary.from)}</span>
+                      <span className="text-[14px]">
+                        <ModelIdBadge modelId={compareLabel(summary.from)} size="md" color={colorOf(summary.from)} />
                         <span className="text-muted"> → </span>
-                        <span style={{ color: colorOf(summary.to) }}>{compareLabel(summary.to)}</span>
+                        <ModelIdBadge modelId={compareLabel(summary.to)} size="md" color={colorOf(summary.to)} />
                       </span>
                       <span
                         className={`flex items-center rounded-full border px-2 py-0.5 text-[11px] ${
@@ -1487,11 +1483,10 @@ export default function ModelsView({
                     {comparison.columns.map((col) => (
                       <th
                         key={col.model}
-                        className="whitespace-nowrap px-2 py-1.5 text-left text-[13px] font-semibold"
-                        style={{ color: colorOf(col.model) }}
+                        className="whitespace-nowrap px-2 py-1.5 text-left"
                         title={compareTitle(col.model)}
                       >
-                        {compareLabel(col.model)}
+                        <ModelIdBadge modelId={compareLabel(col.model)} size="md" color={colorOf(col.model)} />
                       </th>
                     ))}
                   </tr>
@@ -1555,13 +1550,13 @@ export default function ModelsView({
                     <div className="mt-0.5 space-y-0.5">
                       {row.counts.map((count, index) => (
                         <div key={comparison.columns[index].model} className="flex items-center gap-1.5">
-                          <span
-                            className="w-14 shrink-0 truncate text-[12px] font-semibold"
-                            style={{ color: colorOf(comparison.columns[index].model) }}
+                          <ModelIdBadge
+                            modelId={compareLabel(comparison.columns[index].model)}
+                            size="sm"
+                            color={colorOf(comparison.columns[index].model)}
                             title={compareTitle(comparison.columns[index].model)}
-                          >
-                            {compareLabel(comparison.columns[index].model)}
-                          </span>
+                            className="w-14 truncate"
+                          />
                           <span className="w-10 shrink-0 text-right text-[13px] tabular-nums text-text">
                             {count === null ? "—" : `${count}件`}
                           </span>
@@ -1599,9 +1594,7 @@ export default function ModelsView({
                         row.winners.map((w, i) => (
                           <span key={w}>
                             {i > 0 ? <span className="font-normal text-muted"> / </span> : null}
-                            <span style={{ color: colorOf(w) }} title={compareTitle(w)}>
-                              {compareLabel(w)}
-                            </span>
+                            <ModelIdBadge modelId={compareLabel(w)} size="sm" color={colorOf(w)} title={compareTitle(w)} />
                           </span>
                         ))
                       ) : (
@@ -1622,13 +1615,13 @@ export default function ModelsView({
                 const isTop = wins > 0 && wins === maxWins;
                 return (
                   <div key={col.model} className="flex items-center gap-2">
-                    <span
-                      className="w-14 shrink-0 truncate text-[13px] font-semibold"
-                      style={{ color: colorOf(col.model) }}
+                    <ModelIdBadge
+                      modelId={compareLabel(col.model)}
+                      size="md"
+                      color={colorOf(col.model)}
                       title={compareTitle(col.model)}
-                    >
-                      {compareLabel(col.model)}
-                    </span>
+                      className="w-14 truncate"
+                    />
                     <span className="w-10 shrink-0 text-right text-lg font-bold tabular-nums text-text">{wins}</span>
                     <span className="shrink-0 text-[12px] text-muted">勝</span>
                     <div className="flex min-w-0 flex-1 items-center gap-1.5">
@@ -1656,9 +1649,7 @@ export default function ModelsView({
                     <th className={stickyLabel}></th>
                     {compareTargets.map((name) => (
                       <th key={name} className="whitespace-nowrap px-2 py-1.5 text-left align-top" title={compareTitle(name)}>
-                        <span className="text-[13px] font-semibold" style={{ color: colorOf(name) }}>
-                          {compareLabel(name)}
-                        </span>
+                        <ModelIdBadge modelId={compareLabel(name)} size="md" color={colorOf(name)} />
                         <span className="mt-0.5 block max-w-[9rem] truncate text-[11px] font-normal text-muted" title={name}>
                           {displayName(name)}
                         </span>
@@ -1825,10 +1816,11 @@ export default function ModelsView({
                   </span>
                   <span className="min-w-0 px-2 py-2">
                     {/* 一覧は管理No＋モデル名のみ（Best/Recommended等の比較バッジは比較画面へ集約）。
-                        モデル名は視認性のため15px・管理No（通しナンバー）は13pxでモデル名と並べて読める大きさ */}
-                    <p className="min-w-0 truncate text-[15px] text-text" title={name}>
-                      <ModelIdChip name={name} className="mr-1.5 text-[13px]" />
-                      {displayName(name)}
+                        モデル名は15px・管理No（通しナンバー）は共通ModelIdBadge（等幅12px/600・最低幅48px）。
+                        gap-2（8px）で管理Noとモデル名が一続きに見えないよう分離し、バッジは縮めない */}
+                    <p className="flex min-w-0 items-center gap-2 text-[15px] text-text" title={name}>
+                      <ModelIdChip name={name} />
+                      <span className="min-w-0 truncate">{displayName(name)}</span>
                     </p>
                     {aliases[name] ? (
                       <p className="truncate text-[11px] text-muted" title={name}>
