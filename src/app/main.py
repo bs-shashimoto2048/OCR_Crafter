@@ -63,6 +63,8 @@ from .schemas import (
     EvaluationDatasetCreateRequest,
     EvaluationDatasetRenameRequest,
     EvaluationStateSaveRequest,
+    ExperimentEvaluationAttachRequest,
+    ExperimentUpdateRequest,
     OcrTuningExportRequest,
     PreprocessPreviewRequest,
     PreprocessRequest,
@@ -125,6 +127,12 @@ from .services.tesseract_pipeline import (
     TESSERACT_TARGET_CHARSET,
     ensure_tesseract_training_tools,
     run_tesseract_training,
+)
+from .services.experiment_tracker import (
+    attach_evaluation,
+    ensure_experiments_for_models,
+    list_experiments,
+    update_experiment,
 )
 from .services.detection_preprocess import parse_detection_preprocess_json
 from .services.evaluation_dataset import (
@@ -2450,6 +2458,44 @@ def api_ocr_models_export_migrate(
 @app.get("/api/ocr/models/official")
 def api_ocr_models_official() -> dict[str, Any]:
     return {"items": list_paddleocr_official_rec_models()}
+
+
+@app.get("/api/experiments")
+def api_experiments(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+    """実験一覧（EXP-0001形式・管理No付与済み）。実験記録のない旧モデルは自動バックフィルされる。"""
+    resolved = _resolve_project_id(project_id)
+    return {"project_id": resolved, "items": list_experiments(resolved)}
+
+
+@app.patch("/api/experiments/{experiment_id}")
+def api_experiment_update(experiment_id: str, req: ExperimentUpdateRequest) -> dict[str, Any]:
+    """実験カルテの更新（タグ・お気に入り・メモ・学習者・実験名のみ。学習条件は不変）。"""
+    resolved = _resolve_project_id(req.project_id)
+    try:
+        item = update_experiment(
+            resolved,
+            experiment_id,
+            {
+                "tags": req.tags,
+                "favorite": req.favorite,
+                "note": req.note,
+                "operator": req.operator,
+                "experiment_name": req.experiment_name,
+            },
+        )
+        return {"project_id": resolved, "item": item}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+
+@app.post("/api/experiments/attach-evaluation")
+def api_experiment_attach_evaluation(req: ExperimentEvaluationAttachRequest) -> dict[str, Any]:
+    """評価実行結果（CER等の要約）をモデル名から該当実験へ保存する。該当なしは attached=false。"""
+    resolved = _resolve_project_id(req.project_id)
+    # 旧モデル評価時もバックフィル済み実験へ紐付くよう先に補完する
+    ensure_experiments_for_models(resolved)
+    item = attach_evaluation(resolved, req.model, req.evaluation)
+    return {"project_id": resolved, "attached": item is not None, "item": item}
 
 
 @app.get("/models")

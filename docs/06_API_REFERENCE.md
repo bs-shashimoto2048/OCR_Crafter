@@ -84,6 +84,14 @@
 | POST `/api/ocr/train/stop/{job_id}` | Query: `delete_artifacts?` | 停止結果 | OCR学習停止 |
 | GET `/api/ocr/train/log/{job_id}` | Query: `tail`（1〜5000） | `lines[]` | 学習ログのtail取得 |
 
+## 実験管理（Experiment Tracking）
+
+| Method / Path | リクエスト | レスポンス主要キー | 概要 |
+|---|---|---|---|
+| GET `/api/experiments` | Query: `project_id?` | `{project_id, items:[{experiment_id, created_at, started_at, finished_at, duration_seconds, models[], model_ids[], experiment_name, parent_model_id, note, operator, training{iterations, charset, base_lang, split_ratio, split_seed, split_method, counts}, preprocess{hash, snapshot_id, summary}, augmentation{config, generated}, evaluation, tags[], favorite, source}]}` | 実験一覧。実験IDは **EXP-0001形式・プロジェクト内一意・作成順・再利用しない**（モデル管理Noとは独立。1実験に複数モデルを紐付け可能=modelsはリスト）。学習完了時（`register_tesseract_model`）に自動記録され、**実験記録のない旧モデル（.tess.json）は一覧取得時に自動バックフィル**（source="backfill"・作成日時順採番）。保存先は `data/projects/<id>/experiments.json` |
+| PATCH `/api/experiments/{experiment_id}` | `ExperimentUpdateRequest`（`tags?`, `favorite?`, `note?`, `operator?`, `experiment_name?`） | `{item}` | 実験カルテの編集（自由タグ最大20件・★固定・メモ・学習者・実験名のみ。学習条件は不変）。存在しないIDは404 |
+| POST `/api/experiments/attach-evaluation` | `ExperimentEvaluationAttachRequest`（`model`, `evaluation{cer, char_accuracy, accuracy_percent, improved, regressed, evaluated_at, dataset}`） | `{attached, item}` | 評価実行結果の要約をモデル名から該当実験へ保存（同一モデルが複数実験にある場合は最新の実験）。該当なしは `attached: false`（エラーにしない）。モデル評価実行時にフロントが自動送信する |
+
 ## モデル管理
 
 | Method / Path | リクエスト | レスポンス主要キー | 概要 |

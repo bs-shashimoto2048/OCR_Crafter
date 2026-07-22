@@ -240,6 +240,28 @@ class TrainingPreprocessPreviewRequest(BaseModel):
     filename: str = Field(..., description="プレビュー対象の画像ファイル名")
 
 
+class ExperimentUpdateRequest(BaseModel):
+    """実験カルテの編集可能フィールド（タグ・お気に入り・メモ・学習者・実験名）。"""
+
+    project_id: Optional[str] = Field(default="default")
+    tags: Optional[list[str]] = Field(default=None, description="自由タグ（例: Baseline / Best / 失敗 / Aug試験）")
+    favorite: Optional[bool] = Field(default=None, description="★固定（重要実験のピン留め）")
+    note: Optional[str] = Field(default=None, description="メモ")
+    operator: Optional[str] = Field(default=None, description="学習者")
+    experiment_name: Optional[str] = Field(default=None, description="実験名")
+
+
+class ExperimentEvaluationAttachRequest(BaseModel):
+    """評価実行結果を該当実験（モデル名で解決）へ保存する。"""
+
+    project_id: Optional[str] = Field(default="default")
+    model: str = Field(..., description="評価したモデル（<name>.tess.json）")
+    evaluation: dict[str, Any] = Field(
+        default_factory=dict,
+        description="評価要約（cer / char_accuracy / accuracy_percent / improved / regressed / evaluated_at / dataset）",
+    )
+
+
 class TesseractTrainStartRequest(BaseModel):
     project_id: Optional[str] = Field(default="default")
     dataset_dir: str = Field(..., description="OCRデータ作成で生成したデータセットディレクトリ")

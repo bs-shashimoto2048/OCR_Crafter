@@ -16,7 +16,7 @@ import os
 import shutil
 import subprocess
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
@@ -439,6 +439,54 @@ def register_tesseract_model(
     }
     meta_path = paths.models / f"{lang}{TESSERACT_MODEL_SUFFIX}"
     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # 実験カルテを記録（EXP-0001形式・モデルIDとは独立）。記録失敗は学習成功へ影響させない
+    try:
+        from .experiment_tracker import record_experiment, summarize_threshold_from_preprocess
+
+        finished_at = datetime.now()
+        duration = int(training_duration_seconds) if training_duration_seconds is not None else None
+        dataset_counts = dataset_meta.get("counts") if isinstance(dataset_meta.get("counts"), dict) else {}
+        record_experiment(
+            project_id,
+            {
+                "started_at": (finished_at - timedelta(seconds=duration)).isoformat() if duration is not None else "",
+                "finished_at": finished_at.isoformat(),
+                "duration_seconds": duration,
+                "models": [meta_path.name],
+                "experiment_name": meta["experiment_name"],
+                "parent_model_id": meta["parent_model_id"],
+                "note": meta["training_note"],
+                "operator": "",
+                "training": {
+                    "iterations": int(max_iterations),
+                    "charset": charset,
+                    "base_lang": base_lang,
+                    "split_ratio": meta["dataset_split_ratio"],
+                    "split_seed": meta["split_seed"],
+                    "split_method": meta["split_method"],
+                    "counts": {
+                        "train": dataset_counts.get("train", counts.get("train")),
+                        "val": dataset_counts.get("val", counts.get("val")),
+                        "test": dataset_counts.get("test"),
+                    },
+                },
+                "preprocess": {
+                    "hash": str(meta.get("training_preprocess_hash") or ""),
+                    "snapshot_id": str((meta.get("training_preprocess") or {}).get("snapshot_id") or "")
+                    if isinstance(meta.get("training_preprocess"), dict)
+                    else "",
+                    "summary": summarize_threshold_from_preprocess(meta.get("training_preprocess")),
+                },
+                "augmentation": {
+                    "config": meta["augmentation_config"],
+                    "generated": meta["augmentation_generated"],
+                },
+                "source": "training",
+            },
+        )
+    except Exception:  # noqa: BLE001
+        pass
     return meta_path
 
 

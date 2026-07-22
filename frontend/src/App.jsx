@@ -11,6 +11,7 @@ import LabelingView from "./views/LabelingView";
 import TrainingView from "./views/TrainingView";
 import ModelsView from "./views/ModelsView";
 import InferenceView from "./views/InferenceView";
+import ExperimentsView from "./views/ExperimentsView";
 import PreprocessView from "./views/PreprocessView";
 import EvaluationView from "./views/EvaluationView";
 import OcrEvaluationView from "./views/OcrEvaluationView";
@@ -57,6 +58,7 @@ const viewMeta = {
   "cls-training": { title: "学習", subtitle: "実験機能（分割学習）: 前処理・データセット作成・学習" },
   models: { title: "モデル", subtitle: "保存済みモデル管理" },
   "ocr-models": { title: "モデル", subtitle: "OCR認識モデルの管理" },
+  experiments: { title: "実験管理", subtitle: "学習条件・結果・考察の一元管理と実験比較" },
   "cls-models": { title: "モデル", subtitle: "実験機能（分割学習）: モデル管理" },
   inference: { title: "推論", subtitle: "画像推論と精度確認" },
   "ocr-inference": { title: "推論", subtitle: "OCR認識モデルで推論" },
@@ -612,6 +614,13 @@ export default function App() {
   // 手動マスク更新カウンタ（マスクはサーバー保存のため、保存後にプレビューを再実行するトリガー）
   const [manualMaskVersion, setManualMaskVersion] = useState(0);
   const [preprocessPresets, setPreprocessPresets] = useState({});
+  // 実験管理（Experiment Tracking）。実験一覧はサーバー保存（experiments.json）・EXP-0001形式
+  const [experiments, setExperiments] = useState([]);
+  const [experimentsLoading, setExperimentsLoading] = useState(false);
+  // モデルカルテ→実験管理の遷移で対象実験を選択・スクロールするためのフォーカス指定
+  const [focusExperimentId, setFocusExperimentId] = useState("");
+  // 実験→生成モデルの遷移でモデル管理のカルテを開くためのリクエスト
+  const [modelDetailRequest, setModelDetailRequest] = useState(null);
   const [presetName, setPresetName] = useState("");
   const [selectedPreset, setSelectedPreset] = useState("");
   const [rapidPreprocessEnabled, setRapidPreprocessEnabled] = useState(true);
@@ -2034,6 +2043,48 @@ export default function App() {
     }
   }
 
+  // 実験一覧の取得（実験管理・モデル管理表示時。旧モデルはサーバー側で自動バックフィル）
+  async function loadExperiments(pid = projectId) {
+    if (!pid) {
+      setExperiments([]);
+      return;
+    }
+    setExperimentsLoading(true);
+    try {
+      const data = await request(`/api/experiments?project_id=${encodeURIComponent(pid)}`);
+      setExperiments(Array.isArray(data?.items) ? data.items : []);
+    } catch {
+      setExperiments([]);
+    } finally {
+      setExperimentsLoading(false);
+    }
+  }
+
+  // 実験カルテの更新（タグ・★・メモ等）→ 一覧を差し替え
+  async function updateExperiment(experimentId, patch) {
+    try {
+      const data = await request(`/api/experiments/${encodeURIComponent(experimentId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_id: projectId, ...patch }),
+      });
+      if (data?.item) {
+        setExperiments((prev) => prev.map((row) => (row.experiment_id === experimentId ? data.item : row)));
+      }
+    } catch (error) {
+      notify("error", `実験の更新に失敗しました: ${error.message}`);
+    }
+  }
+
+
+  // 実験管理・モデル管理を開いたときに実験一覧を取得（モデルカルテのExperimentリンク用）
+  useEffect(() => {
+    if (activeView === "experiments" || activeView === "ocr-models") {
+      loadExperiments(projectId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeView, projectId]);
+
   async function runPreprocess() {
     if (!projectId) {
       notify("error", "プロジェクトを作成または選択してください");
@@ -3075,6 +3126,35 @@ export default function App() {
       } catch {
         // 記録失敗は評価結果表示に影響させない
       }
+      // 実験管理へ評価要約を保存（該当実験はサーバーがモデル名から解決。失敗しても評価表示に影響させない）
+      try {
+        const evaluatedAtIso = new Date().toISOString();
+        await Promise.allSettled(
+          (data?.targets || [])
+            .filter((target) => !target?.is_base && target?.model)
+            .map((target) =>
+              request("/api/experiments/attach-evaluation", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  project_id: projectId,
+                  model: target.model,
+                  evaluation: {
+                    cer: target.cer ?? null,
+                    char_accuracy: target.char_accuracy ?? null,
+                    accuracy_percent: target.accuracy_percent ?? null,
+                    improved: data?.comparison?.improved ?? null,
+                    regressed: data?.comparison?.regressed ?? null,
+                    evaluated_at: evaluatedAtIso,
+                    dataset: ocrEvalDatasetId || "",
+                  },
+                }),
+              })
+            )
+        );
+      } catch {
+        // 実験への保存失敗は評価結果表示へ影響させない
+      }
       const acc = data?.comparison
         ? `学習前 ${(data.comparison.base_accuracy * 100).toFixed(1)}% → 学習後 ${(data.comparison.trained_accuracy * 100).toFixed(1)}%`
         : `対象 ${(data?.targets || []).length} 件`;
@@ -3590,6 +3670,17 @@ export default function App() {
     );
   }
 
+  // モデル名 → 実験ID の対応（モデルカルテの「このモデルを作成したExperiment」リンク用）
+  const experimentsByModel = useMemo(() => {
+    const map = {};
+    for (const row of experiments) {
+      for (const model of row?.models || []) {
+        map[String(model)] = String(row.experiment_id || "");
+      }
+    }
+    return map;
+  }, [experiments]);
+
   if (["models", "ocr-models", "cls-models"].includes(activeView)) {
     const modelItems = activeView === "ocr-models" ? ocrModels : activeView === "cls-models" ? classificationModels : models;
     const latestForView =
@@ -3666,6 +3757,30 @@ export default function App() {
           setActiveView("ocr-training");
           notify("info", "提案内容を学習設定へ反映しました。内容を確認・編集してから学習を開始してください");
         }}
+        experimentsByModel={experimentsByModel}
+        onOpenExperiment={(experimentId) => {
+          setFocusExperimentId(experimentId);
+          setActiveView("experiments");
+        }}
+        detailRequest={modelDetailRequest}
+      />
+    );
+  }
+
+  if (activeView === "experiments") {
+    view = (
+      <ExperimentsView
+        projectId={projectId}
+        experiments={experiments}
+        loading={experimentsLoading}
+        onRefresh={() => loadExperiments(projectId)}
+        onUpdateExperiment={updateExperiment}
+        onOpenModel={(name) => {
+          // Experiment → 生成モデル（モデル管理のカルテを開く）
+          setModelDetailRequest({ name, seq: Date.now() });
+          setActiveView("ocr-models");
+        }}
+        focusExperimentId={focusExperimentId}
       />
     );
   }

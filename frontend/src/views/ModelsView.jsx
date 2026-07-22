@@ -281,6 +281,11 @@ export default function ModelsView({
   onUseForInference,
   onOpenEvaluation,
   onCreateTrainingPlan,
+  // 実験管理との連携: モデル名→実験IDの対応と「このモデルを作成したExperiment」リンク
+  experimentsByModel = {},
+  onOpenExperiment,
+  // 実験管理からの「生成モデルを開く」リクエスト（{name, seq}。seq変化でカルテを開く）
+  detailRequest = null,
 }) {
   const latestAny = basename(latest.any || "");
   const latestByType = latest.byType || {};
@@ -443,6 +448,14 @@ export default function ModelsView({
     setCompareMode(false);
     setDetailModel(name);
   }
+
+  // 実験管理からの遷移リクエスト（seq変化のたびに対象モデルのカルテを開く）
+  useEffect(() => {
+    if (detailRequest?.name) {
+      openDetail(detailRequest.name);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailRequest?.seq]);
 
   function canDownload(name) {
     return !isOcrFamily(name) || exportReady(name);
@@ -719,6 +732,22 @@ export default function ModelsView({
             <SectionTitle>モデル情報</SectionTitle>
             {/* 管理Noは共通の等幅フォント（ModelIdBadgeと同一スタック）で表示 */}
             <SpecRow label="管理No" value={modelIdOf(name) || "-"} valueClass="model-id-font model-id-text--md text-text" />
+            {/* このモデルを作成したExperiment（実験管理へ遷移） */}
+            <div className="flex items-start justify-between gap-3 py-0.5">
+              <span className="flex shrink-0 items-center text-[13px] text-muted">Experiment</span>
+              {experimentsByModel[name] ? (
+                <button
+                  type="button"
+                  className="model-id-font model-id-text--md text-blue-200 underline-offset-2 hover:underline"
+                  onClick={() => onOpenExperiment?.(experimentsByModel[name])}
+                  title="このモデルを作成したExperimentを実験管理で開きます"
+                >
+                  {experimentsByModel[name]}
+                </button>
+              ) : (
+                <span className="text-[15px] font-semibold text-muted">未記録</span>
+              )}
+            </div>
             <SpecRow label="Engine" value={engineLabelOf(engineName(name), trainingFamily(name))} />
             <SpecRow label="方式" value={familyLabelOf(trainingFamily(name))} />
             <SpecRow label="ベースモデル" value={info.base_lang || "-"} help={HELP_TEXTS.baseModel} />
