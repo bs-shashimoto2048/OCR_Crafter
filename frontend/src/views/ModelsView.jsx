@@ -343,7 +343,7 @@ export default function ModelsView({
   }
 
   // 管理No表示チップ（ホバーで「M0004 → ファイル名」のツールチップ）
-  function ModelIdChip({ name, className = "mr-1 text-[10px]" }) {
+  function ModelIdChip({ name, className = "mr-1 text-[12px]" }) {
     const id = modelIdOf(name);
     if (!id) return null;
     return (
@@ -1825,9 +1825,9 @@ export default function ModelsView({
                   </span>
                   <span className="min-w-0 px-2 py-2">
                     {/* 一覧は管理No＋モデル名のみ（Best/Recommended等の比較バッジは比較画面へ集約）。
-                        モデル名は視認性のため15px・管理Noチップも一回り大きく */}
+                        モデル名は視認性のため15px・管理No（通しナンバー）は13pxでモデル名と並べて読める大きさ */}
                     <p className="min-w-0 truncate text-[15px] text-text" title={name}>
-                      <ModelIdChip name={name} className="mr-1.5 text-[11px]" />
+                      <ModelIdChip name={name} className="mr-1.5 text-[13px]" />
                       {displayName(name)}
                     </p>
                     {aliases[name] ? (
