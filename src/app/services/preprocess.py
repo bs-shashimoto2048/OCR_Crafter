@@ -416,6 +416,10 @@ def _op_threshold(value: Any, _: str, operations: dict[str, Any]) -> np.ndarray:
     cfg = operations.get("threshold", {})
     mode = str(cfg.get("type", "otsu")).lower()
 
+    if mode == "none":
+        # 二値化なし（グレースケールのまま後段へ）。新設の追加値のため既存設定の挙動は不変
+        return gray
+
     if mode == "otsu":
         if cv2 is not None:
             _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)

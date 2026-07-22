@@ -29,6 +29,17 @@ import {
   preprocessRunConfirmText,
 } from "./lib/preprocessRequest";
 import {
+  DEFAULT_PREPROCESS_PREDICT_SETTINGS,
+  DEFAULT_PREPROCESS_UI_STATE,
+  readPreprocessPredictSettings,
+  readPreprocessPresets,
+  readPreprocessUiState,
+  writePreprocessPredictSettings,
+  writePreprocessPresets,
+  writePreprocessUiState,
+} from "./lib/preprocessUiState";
+import { createPreviewCache, makePreviewCacheKey } from "./lib/previewCache";
+import {
   DEFAULT_EVAL_PREPROCESS,
   evalPreprocessModeForSource,
   evalPreprocessRequestObject,
@@ -85,7 +96,8 @@ const CLS_WORKFLOW_STEP_DEFS = [
   { id: "cls-evaluation", viewId: "cls-evaluation", label: "評価" },
 ];
 
-const PRESET_STORAGE_KEY = "ocr_preprocess_presets_v1";
+// プリセットはプロジェクト単位保存へ移行済み（lib/preprocessUiState.js。
+// 旧・全プロジェクト共通キー ocr_preprocess_presets_v1 は初回読み込み時にコピー移行）
 // 前処理画面の比較用推論スロット（モデル2/3）。モデル1は既存の単一推論設定を継続使用
 const PREPROCESS_EXTRA_SLOTS_STORAGE_KEY = "ocr_preprocess_extra_slots_by_project_v1";
 
@@ -177,6 +189,9 @@ const DEFAULT_PREPROCESS_PARAMS = {
   manual_mask_threshold: 80,
   threshold_type: "binary",
   threshold_value: 128,
+  // 適応的しきい値のパラメータ（サーバー既定と同値。adaptive選択時のみUI表示）
+  threshold_block_size: 35,
+  threshold_c: 11,
   clahe_clip_limit: 1.0,
   clahe_tile_grid_size: 2,
   sharpen_enabled: true,
@@ -580,6 +595,11 @@ export default function App() {
   const [preprocessPredictEasyOcrLangs, setPreprocessPredictEasyOcrLangs] = useState(["en"]);
   // 小文字を出力に含める（EasyOCR/PaddleOCR）。未設定=ONで既存動作を維持
   const [preprocessPredictIncludeLowercase, setPreprocessPredictIncludeLowercase] = useState(true);
+  // OCR結果確認（プレビュー推論）のTesseract用 PSM / whitelist（プロジェクト別に保存）
+  const [preprocessPredictPsm, setPreprocessPredictPsm] = useState(DEFAULT_PREPROCESS_PREDICT_SETTINGS.psm);
+  const [preprocessPredictWhitelist, setPreprocessPredictWhitelist] = useState("");
+  // 前処理画面のUI状態（折りたたみセクション・基本/詳細モード。プロジェクト別に保存・検索文字列は保存しない）
+  const [preprocessUiState, setPreprocessUiState] = useState({ ...DEFAULT_PREPROCESS_UI_STATE });
   const [inferIncludeLowercase, setInferIncludeLowercase] = useState(true);
   // OCR候補辞書（ラベル編集の近似候補表示用。プロジェクト単位で保存）
   const [candidateDict, setCandidateDict] = useState({ ...DEFAULT_CANDIDATE_DICT });
@@ -704,7 +724,8 @@ export default function App() {
 
   function persistPreprocessPresets(next) {
     setPreprocessPresets(next);
-    localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(next));
+    // プリセットはプロジェクト単位で保存（旧・全プロジェクト共通キーは読み込み時に移行済み）
+    writePreprocessPresets(projectId, next);
   }
 
   async function loadProjects(preferredProjectId = projectId || loadLastProjectId()) {
@@ -1118,20 +1139,24 @@ export default function App() {
     }
   }, [evalModel, evalModelType]);
 
+  // プリセットはプロジェクト単位で保存（未保存プロジェクトは旧・全プロジェクト共通キーから初回コピー移行）。
+  // 前処理画面のUI状態（折りたたみ・基本/詳細モード）とOCR結果確認の推論設定も同時に復元する
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(PRESET_STORAGE_KEY);
-      if (!raw) {
-        return;
-      }
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === "object") {
-        setPreprocessPresets(parsed);
-      }
-    } catch {
-      // ignore invalid local storage payload
+    setPreprocessPresets(projectId ? readPreprocessPresets(projectId) : {});
+    setSelectedPreset("");
+    setPreprocessUiState(projectId ? readPreprocessUiState(projectId) : { ...DEFAULT_PREPROCESS_UI_STATE });
+    if (projectId) {
+      const saved = readPreprocessPredictSettings(projectId);
+      setPreprocessPredictEngine(saved.engine);
+      setPreprocessPredictModel(saved.model);
+      setPreprocessPredictPaddleModel(saved.paddleModel);
+      setPreprocessPredictTesseractModel(saved.tesseractModel);
+      setPreprocessPredictModelType(saved.modelType);
+      setPreprocessPredictEasyOcrLangs(saved.langs);
+      setPreprocessPredictPsm(saved.psm);
+      setPreprocessPredictWhitelist(saved.whitelist);
     }
-  }, []);
+  }, [projectId]);
 
   useEffect(() => {
     if (images.length === 0) {
@@ -1278,6 +1303,44 @@ export default function App() {
     });
   }, [projectId, preprocessPredictIncludeLowercase, inferIncludeLowercase]);
 
+  // OCR結果確認（プレビュー推論）の設定をプロジェクト別へ自動保存（リロードで消えないように）
+  useEffect(() => {
+    if (!projectId) {
+      return;
+    }
+    writePreprocessPredictSettings(projectId, {
+      engine: preprocessPredictEngine,
+      model: preprocessPredictModel,
+      paddleModel: preprocessPredictPaddleModel,
+      tesseractModel: preprocessPredictTesseractModel,
+      modelType: preprocessPredictModelType,
+      langs: preprocessPredictEasyOcrLangs,
+      psm: preprocessPredictPsm,
+      whitelist: preprocessPredictWhitelist,
+    });
+  }, [
+    projectId,
+    preprocessPredictEngine,
+    preprocessPredictModel,
+    preprocessPredictPaddleModel,
+    preprocessPredictTesseractModel,
+    preprocessPredictModelType,
+    preprocessPredictEasyOcrLangs,
+    preprocessPredictPsm,
+    preprocessPredictWhitelist,
+  ]);
+
+  // 前処理画面のUI状態（折りたたみ・基本/詳細モード）の変更を保存
+  function handlePreprocessUiStateChange(next) {
+    setPreprocessUiState(next);
+    writePreprocessUiState(projectId, next);
+  }
+
+  // プレビュー結果キャッシュ（同一画像・同一設定の再取得防止。メイン/比較スロットで共有）と
+  // リクエスト連番（古いレスポンスを破棄）・AbortController（旧リクエストの中断）
+  const preprocessPreviewCacheRef = useRef(createPreviewCache());
+  const preprocessPreviewSeqRef = useRef(0);
+
   useEffect(() => {
     if (activeView !== "preprocess") {
       return undefined;
@@ -1290,6 +1353,8 @@ export default function App() {
 
     setPreprocessLoading(true);
     setPreprocessError("");
+    const seq = ++preprocessPreviewSeqRef.current;
+    const controller = new AbortController();
 
     const timer = setTimeout(async () => {
       const mainFields = {
@@ -1313,10 +1378,46 @@ export default function App() {
         include_lowercase: lowercaseToggleApplicable(preprocessPredictEngine, preprocessPredictEasyOcrLangs)
           ? preprocessPredictIncludeLowercase
           : true,
+        // Tesseract時のみPSM/whitelistを送信（他エンジンは従来動作を維持）
+        ...(preprocessPredictEngine === "tesseract"
+          ? {
+              psm: Number(preprocessPredictPsm) || 7,
+              ...(String(preprocessPredictWhitelist || "").trim()
+                ? { whitelist: String(preprocessPredictWhitelist).trim() }
+                : {}),
+            }
+          : {}),
       };
       const signatureOf = (fields) =>
-        `${fields.engine}|${fields.model}|${fields.easyocr_langs}|lc:${fields.include_lowercase !== false ? "1" : "0"}`;
+        `${fields.engine}|${fields.model}|${fields.easyocr_langs}|lc:${fields.include_lowercase !== false ? "1" : "0"}|psm:${fields.psm ?? ""}|wl:${fields.whitelist ?? ""}`;
       const seenSignatures = new Set([signatureOf(mainFields)]);
+
+      // 同一画像・同一設定（前処理overrides＋推論fields）の結果キャッシュ。
+      // ヒット時はAPIを呼ばない（メイン/比較スロットでキーが同じならキャッシュを共有）
+      const cache = preprocessPreviewCacheRef.current;
+      const fetchPreview = async (fields) => {
+        const payload = buildPreprocessPreviewPayload({ image: preprocessImage, projectId, params: preprocessParams, fields });
+        // 画像の回転（imageVersion）・手動マスク更新（manualMaskVersion）でキャッシュが古くならないようキーへ含める
+        const cacheKey = makePreviewCacheKey({
+          image: `${projectId}::${preprocessImage}::v${imageVersion}::m${manualMaskVersion}`,
+          overrides: payload.overrides,
+          fields,
+        });
+        const cached = cache.get(cacheKey);
+        if (cached) {
+          return { ...cached, __cached: true };
+        }
+        const startedAt = performance.now();
+        const data = await request("/preprocess/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+        const result = { ...data, __elapsed_ms: Math.round(performance.now() - startedAt) };
+        cache.set(cacheKey, result);
+        return result;
+      };
 
       // モデル2/3 は同一APIをスロット分並行呼び（既存APIは無変更）。1つの失敗が他へ波及しないよう個別に捕捉
       const extraPromise = Promise.all(
@@ -1329,13 +1430,7 @@ export default function App() {
           }
           seenSignatures.add(signature);
           try {
-            const d = await request("/preprocess/preview", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(
-                buildPreprocessPreviewPayload({ image: preprocessImage, projectId, params: preprocessParams, fields })
-              ),
-            });
+            const d = await fetchPreview(fields);
             const prediction = String(d?.prediction || "").trim();
             return {
               prediction,
@@ -1345,36 +1440,48 @@ export default function App() {
               error: !prediction && d?.predict_error ? String(d.predict_error) : "",
             };
           } catch (error) {
+            if (error?.name === "AbortError") {
+              return { duplicate: false, engine, modelName: "", error: "" };
+            }
             return { error: String(error?.message || error), engine, modelName: "" };
           }
         })
       );
 
       try {
-        const data = await request("/preprocess/preview", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(
-            buildPreprocessPreviewPayload({ image: preprocessImage, projectId, params: preprocessParams, fields: mainFields })
-          ),
-        });
+        const data = await fetchPreview(mainFields);
+        // 古いレスポンスは破棄（連番ガード。Abortされずに完了した遅延レスポンス対策）
+        if (seq !== preprocessPreviewSeqRef.current) {
+          return;
+        }
         setPreprocessPreview(data);
       } catch (error) {
+        if (error?.name === "AbortError" || seq !== preprocessPreviewSeqRef.current) {
+          return;
+        }
         setPreprocessPreview(null);
         setPreprocessError(error.message);
       } finally {
-        setPreprocessLoading(false);
+        if (seq === preprocessPreviewSeqRef.current) {
+          setPreprocessLoading(false);
+        }
       }
-      setPreprocessExtraPreviews(await extraPromise);
+      const extras = await extraPromise;
+      if (seq === preprocessPreviewSeqRef.current) {
+        setPreprocessExtraPreviews(extras);
+      }
     }, 300);
 
     return () => {
+      // デバウンス中の未発火タイマーを止め、発行済みリクエストも中断する（旧レスポンスの上書き防止）
       clearTimeout(timer);
+      controller.abort();
     };
   }, [
     activeView,
     projectId,
     preprocessImage,
+    imageVersion,
     preprocessParams,
     preprocessPredictEngine,
     preprocessPredictModel,
@@ -1383,6 +1490,8 @@ export default function App() {
     preprocessPredictModelType,
     preprocessPredictEasyOcrLangs,
     preprocessPredictIncludeLowercase,
+    preprocessPredictPsm,
+    preprocessPredictWhitelist,
     preprocessExtraSlots,
     manualMaskVersion,
   ]);
@@ -3320,6 +3429,12 @@ export default function App() {
         setSelectedPreset={setSelectedPreset}
         onSavePreset={savePreprocessPreset}
         onLoadPreset={loadPreprocessPreset}
+        uiState={preprocessUiState}
+        onUiStateChange={handlePreprocessUiStateChange}
+        predictPsm={preprocessPredictPsm}
+        setPredictPsm={setPreprocessPredictPsm}
+        predictWhitelist={preprocessPredictWhitelist}
+        setPredictWhitelist={setPreprocessPredictWhitelist}
       />
     );
   }

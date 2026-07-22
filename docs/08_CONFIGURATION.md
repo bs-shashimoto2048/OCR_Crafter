@@ -93,8 +93,11 @@ localStorage（`try/catch` で不可環境でも動作継続）:
 
 | キー | 用途 | 保存単位 |
 |---|---|---|
-| `ocr_preprocess_presets_v1` | 前処理プリセット | 全体共通 |
-| `ocr_preprocess_params_by_project_v1` | 前処理パラメータ | プロジェクト別 |
+| `ocr_preprocess_presets_v1` | 前処理プリセット（**旧キー**。プロジェクト別キーへの初回コピー移行元として読み取りのみ・変更しない） | 全体共通 |
+| `ocr_preprocess_presets_by_project_v1` | 前処理プリセット（プロジェクト別。未保存プロジェクトは旧キーから初回コピー移行） | プロジェクト別 |
+| `ocr_preprocess_params_by_project_v1` | 前処理パラメータ（`threshold_block_size`/`threshold_c` 追加。旧データはキー無し=既定値補完） | プロジェクト別 |
+| `ocr_preprocess_ui_state_by_project_v1` | 前処理設定画面のUI状態（`{mode: basic/advanced, openSections: []}`。検索文字列は保存しない） | プロジェクト別 |
+| `ocr_preprocess_predict_by_project_v1` | 前処理画面「OCR結果確認」の推論設定（engine/model/paddleModel/tesseractModel/modelType/langs/psm/whitelist） | プロジェクト別 |
 | `ocr_preprocess_extra_slots_by_project_v1` | 推論比較スロット（モデル2/3） | プロジェクト別 |
 | `ocr_model_aliases_by_project_v1` | モデル表示名 | プロジェクト別 |
 | `ocr_model_eval_history_by_project_v1` | モデル評価履歴（`{モデル: {データセットラベル: {percent, at}}}`。データセット選択時はラベル=データセットID・手動指定時は画像フォルダ名。形式は従来から不変・追加キーのみ: `pre.mode`（評価前処理モード）/`pre.hash`（評価前処理ハッシュ）/`pre.source_model_id`/`preprocess_match`（学習時前処理との一致 true/false/null=未記録）/`training_preprocess_hash`。旧エントリはキー無し=未記録表示） | プロジェクト別 |

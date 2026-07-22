@@ -81,7 +81,9 @@ test("App.jsx: preview・run とも共通ライブラリを使用し、旧の画
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf-8");
   assert.ok(source.includes('from "./lib/preprocessRequest"'), "共通ライブラリをimportしていない");
   assert.ok(source.includes("buildPreprocessRunPayload({ projectId, params: preprocessParams })"), "runが共通関数を使っていない");
-  assert.ok(source.split("buildPreprocessPreviewPayload(").length - 1 >= 2, "previewが共通関数を使っていない");
+  assert.ok(source.includes("buildPreprocessPreviewPayload("), "previewが共通関数を使っていない");
+  // メイン・比較スロットとも同一の fetchPreview（共通関数＋キャッシュ）を通る
+  assert.ok(source.includes("fetchPreview(mainFields)") && source.includes("fetchPreview(fields)"), "previewのメイン/スロットが共通経路でない");
   assert.ok(!source.includes("function buildPreprocessOverrides"), "旧のApp.jsx内組み立て関数が残っている");
   assert.ok(source.includes("preprocessRunConfirmText"), "実行前の確認ダイアログがない");
 });

@@ -1284,6 +1284,8 @@ def preprocess_preview_post(req: PreprocessPreviewRequest) -> dict[str, Any]:
             model_type=req.model_type,
             easyocr_langs=req.easyocr_langs,
             include_lowercase=req.include_lowercase,
+            tesseract_psm=req.psm,
+            whitelist=req.whitelist,
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e

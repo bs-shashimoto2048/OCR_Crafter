@@ -79,6 +79,9 @@ class PreprocessPreviewRequest(BaseModel):
         default=True,
         description="小文字を出力に含める（EasyOCR/PaddleOCRのラテン言語時のみ有効。未指定はtrue）",
     )
+    # OCR結果確認用の推論パラメータ（Tesseractのみ）。未指定=従来動作
+    psm: Optional[int] = Field(default=None, ge=0, le=13, description="Tesseract PSM（未指定=既定7）")
+    whitelist: Optional[str] = Field(default=None, description="Tesseract whitelist（未指定=モデル既定charset）")
 
 
 class EvaluateRequest(BaseModel):

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { DEFAULT_PREPROCESS_UI_STATE } from "../lib/preprocessUiState";
 
 import Button from "../components/Button";
 import Card from "../components/Card";
@@ -54,6 +55,12 @@ export default function PreprocessView({
   setSelectedPreset,
   onSavePreset,
   onLoadPreset,
+  uiState = DEFAULT_PREPROCESS_UI_STATE,
+  onUiStateChange,
+  predictPsm = 7,
+  setPredictPsm,
+  predictWhitelist = "",
+  setPredictWhitelist,
 }) {
   const latestAny = String(latestModels?.any || "");
   const latestByType = latestModels?.byType || {};
@@ -361,10 +368,33 @@ export default function PreprocessView({
               : predictTesseractModel
           : "EasyOCR";
 
+  // 前回のOCR結果との差分表示（プレビュー右下）。画像切替時はリセット
+  const prevPredictionRef = useRef({ image: "", prediction: "" });
+  const currentPrediction = String(preview?.prediction || "");
+  useEffect(() => {
+    if (loading) return;
+    const entry = prevPredictionRef.current;
+    if (entry.image !== selectedImage) {
+      prevPredictionRef.current = { image: selectedImage, prediction: currentPrediction, before: "" };
+      return;
+    }
+    if (entry.prediction !== currentPrediction) {
+      prevPredictionRef.current = { image: selectedImage, prediction: currentPrediction, before: entry.prediction };
+    }
+  }, [loading, selectedImage, currentPrediction]);
+  const previousPrediction = prevPredictionRef.current.image === selectedImage ? prevPredictionRef.current.before || "" : "";
+  // 中間画像は最終画像と異なる場合のみ折りたたみで表示（現構成では通常同一のため重複表示しない）
+  const interimDiffers = Boolean(
+    preview?.interim_data_url && preview?.processed_data_url && preview.interim_data_url !== preview.processed_data_url
+  );
+
   return (
-    <div className="grid h-[calc(100vh-238px)] min-h-[440px] grid-cols-[minmax(180px,18fr)_minmax(0,45fr)_minmax(320px,37fr)] gap-3">
+    // レイアウト: 1280px以上=3カラム（一覧|プレビュー|設定・ビューポート内固定）/
+    // 1024〜1279px=一覧|プレビューの2カラム＋設定を下段全幅 / 1024px未満（縦長含む）=縦積み。
+    // プレビュー列は minmax(420px,…) の実用最小幅を確保し、数十pxへ潰れる構成を廃止
+    <div className="grid grid-cols-1 gap-3 min-[1024px]:grid-cols-[minmax(180px,230px)_minmax(420px,1fr)] min-[1280px]:h-[calc(100vh-238px)] min-[1280px]:min-h-[440px] min-[1280px]:grid-cols-[minmax(180px,18fr)_minmax(440px,45fr)_minmax(340px,37fr)]">
       <Card title="画像一覧" subtitle="プレビュー対象を選択" className="flex h-full min-h-0 flex-col">
-        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1 max-h-[40vh] min-[1024px]:max-h-[60vh] min-[1280px]:max-h-none">
           {images.map((item) => {
             const active = item.image === selectedImage;
             const thumbSrc = imageUrl(item.image, projectId, imageVersion);
@@ -417,17 +447,27 @@ export default function PreprocessView({
           onPointClick={analyzeMaskPoint}
         />
         <ImagePreview
-          title="中間画像"
-          subtitle={preview?.type ? `種別: ${preview.type}` : "--"}
-          src={preview?.interim_data_url || ""}
-          loading={loading}
-        />
-        <ImagePreview
-          title="最終画像"
-          subtitle={preview?.ratio !== undefined ? `比率: ${preview.ratio}` : "--"}
+          title="処理後画像"
+          subtitle={[
+            preview?.type ? `種別: ${preview.type}` : "",
+            preview?.ratio !== undefined ? `比率: ${preview.ratio}` : "",
+          ]
+            .filter(Boolean)
+            .join(" / ") || "--"}
           src={preview?.processed_data_url || ""}
           loading={loading}
         />
+        {/* 中間画像は最終画像と異なる場合のみ表示（通常のパイプライン構成では同一のため重複を出さない） */}
+        {interimDiffers ? (
+          <details className="rounded-xl border border-border bg-card/45">
+            <summary className="cursor-pointer select-none px-3 py-1.5 text-xs font-semibold text-text">
+              中間画像を表示
+            </summary>
+            <div className="px-2 pb-2">
+              <ImagePreview title="中間画像" subtitle={preview?.type ? `種別: ${preview.type}` : "--"} src={preview?.interim_data_url || ""} loading={loading} />
+            </div>
+          </details>
+        ) : null}
 
         <ResultBadge
           loading={loading}
@@ -440,7 +480,22 @@ export default function PreprocessView({
           warning={preview?.predict_model_warning || ""}
           comparisons={comparisonResults}
         />
-
+        {/* 処理時間（キャッシュヒット時は表示）と前回のOCR結果との差 */}
+        {!loading && preview ? (
+          <p className="shrink-0 px-1 text-[11px] tabular-nums text-muted">
+            {preview.__cached
+              ? "処理時間: キャッシュ利用（再処理なし）"
+              : Number.isFinite(preview.__elapsed_ms)
+                ? `処理時間: ${preview.__elapsed_ms}ms`
+                : ""}
+            {previousPrediction && previousPrediction !== currentPrediction ? (
+              <span className="ml-2">
+                前回: <span className="text-amber-200">{previousPrediction}</span> → 今回:{" "}
+                <span className="text-text">{currentPrediction || "(空)"}</span>
+              </span>
+            ) : null}
+          </p>
+        ) : null}
       </div>
 
       <PreprocessPanel
@@ -571,7 +626,7 @@ export default function PreprocessView({
                     onChange={() => onParamsChange((prev) => ({ ...prev, manual_mask_timing: "post" }))}
                     disabled={!manualMaskEnabled}
                   />
-                  二値化後
+                  後段マスク（二値化の後に適用）
                 </label>
                 <label className="inline-flex items-center gap-1.5">
                   <input
@@ -581,9 +636,12 @@ export default function PreprocessView({
                     onChange={() => onParamsChange((prev) => ({ ...prev, manual_mask_timing: "pre" }))}
                     disabled={!manualMaskEnabled}
                   />
-                  二値化前
+                  前段マスク（二値化より前に適用）
                 </label>
               </div>
+              <p className="param-hint">
+                前段=二値化より前（周辺背景色で塗る場合に有効）/ 後段=二値化の後（白で塗る場合に有効）。
+              </p>
             </div>
 
             <label className="inline-flex items-center gap-2 text-xs text-text">
@@ -822,9 +880,31 @@ export default function PreprocessView({
                     ))}
                   </select>
                 </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="app-label">PSM</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="13"
+                      value={predictPsm}
+                      onChange={(e) => setPredictPsm?.(Number(e.target.value))}
+                      className="app-input"
+                    />
+                  </div>
+                  <div>
+                    <label className="app-label">Whitelist（空=モデル既定）</label>
+                    <input
+                      value={predictWhitelist}
+                      onChange={(e) => setPredictWhitelist?.(e.target.value)}
+                      className="app-input"
+                      placeholder="例: ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt"
+                    />
+                  </div>
+                </div>
                 <p className="text-xs text-muted">
                   eng.traineddata は Tesseract 標準の英語モデル（学習前ベースライン）です。推論時 whitelist は
-                  実運用で出現する文字に合わせて設定します（既定: A-Z + 0-9 + k,l,t）・単一行想定（--psm 7）。
+                  実運用で出現する文字に合わせて設定します（既定: A-Z + 0-9 + k,l,t）・単一行想定（PSM既定 7）。
                 </p>
                 <p className="text-xs text-muted">
                   推論には Tesseract 本体のインストールが必要です（学習には lstmtraining / combine_tessdata
@@ -981,6 +1061,9 @@ export default function PreprocessView({
         setSelectedPreset={setSelectedPreset}
         onSavePreset={onSavePreset}
         onLoadPreset={onLoadPreset}
+        uiState={uiState}
+        onUiStateChange={onUiStateChange}
+        previewType={preview?.type || ""}
       />
     </div>
   );
