@@ -109,7 +109,8 @@
 | GET `/api/operations/dashboard` | Query: `project_id?` | `{jobs, production, unevaluated_candidates[], latest_benchmark, data_usage, backup}` | 運用ダッシュボード（実行中/待機中/失敗Job・Production＋Gate状態・未評価Candidate・最近のBenchmark・データ使用量・バックアップ状態） |
 | GET `/api/backups` | Query: `project_id?` | `{items[]}` | バックアップ一覧（新しい順・BK-0001形式）。保存先 `data/backups/` |
 | POST `/api/backups` | `BackupCreateRequest`（`mode`=metadata_only/full） | `{item}` | バックアップ作成（metadata_only=設定・記録・モデルメタのみ / full=プロジェクト全体） |
-| POST `/api/backups/{backup_id}/restore` | `BackupRestoreRequest`（`new_project_id?`） | `{backup_id, project_id, mode, source_project_id}` | 復元。**既定で新しいProject IDへ**（`<元ID>_restored_<n>` 自動採番・既存プロジェクトは上書きしない=衝突は400）。監査 `backup_restore`（admin） |
+| GET `/api/backups/{backup_id}/verify` | - | `{valid, mismatches[], manifest_summary}` | **整合性検証のみ**（manifest v2の全ファイルSHA-256照合。旧形式v1はvalid=null=検証不能） |
+| POST `/api/backups/{backup_id}/restore` | `BackupRestoreRequest`（`new_project_id?`） | `{backup_id, project_id, mode, source_project_id, verified_files}` | 復元。**既定で新しいProject IDへ**（`<元ID>_restored_<n>` 自動採番・既存プロジェクトは上書きしない=衝突は400）。**復元前にSHA-256検証（不一致は開始しない=BACKUP_VALIDATION_FAILED）・復元後にも再検証（不一致は復元先削除）**。監査 `backup_restore`/失敗は`restore_failed`（admin） |
 | GET / PUT `/api/retention` | `RetentionConfigRequest`（`job_retention_days?`, `audit_retention_days?`） | `{config}` | データ保持設定。**未設定（null）=無期限保持（従来動作）** |
 | POST `/api/retention/apply` | - | `{removed_jobs, removed_audit_entries, config, applied_at}` | 保持期間を過ぎた終端状態Job・監査ログの削除を適用。**削除は監査ログ `retention_cleanup` へ必ず記録**（admin） |
 

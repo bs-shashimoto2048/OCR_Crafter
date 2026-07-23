@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 import zipfile
@@ -60,18 +61,55 @@ def _save_index(index: dict[str, Any]) -> None:
     atomic_write_json(_backups_root() / "index.json", index)
 
 
+BACKUP_MANIFEST_SCHEMA_VERSION = 2  # v2: File List（SHA-256）・App Version・Components を追加
+
+# Restore時に存在必須のコンポーネント（無ければ整合性エラー）。それ以外はoptional
+_REQUIRED_COMPONENT_PREFIXES = {"annotations/"}
+
+
+def _sha256_of(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _component_of(arcname: str) -> str:
+    """アーカイブ内パス→コンポーネント名（annotations / models / raw / ...）。"""
+    relative = arcname[len("project/"):] if arcname.startswith("project/") else arcname
+    return relative.split("/", 1)[0] if "/" in relative else relative
+
+
+def _collect_backup_files(paths: Any, mode: str) -> list[Path]:
+    files: list[Path] = []
+    if mode == "full":
+        files = [p for p in sorted(paths.root.rglob("*")) if p.is_file()]
+    else:
+        for name in _METADATA_FILES:
+            file_path = paths.root / name
+            if file_path.is_file():
+                files.append(file_path)
+        for rel, extensions in _METADATA_DIRS:
+            base = paths.root / rel
+            if not base.is_dir():
+                continue
+            for file_path in sorted(base.rglob("*")):
+                if not file_path.is_file():
+                    continue
+                if extensions is not None and file_path.suffix.lower() not in extensions:
+                    continue
+                files.append(file_path)
+    return files
+
+
 def create_backup(project_id: Optional[str], mode: str = "metadata_only") -> dict[str, Any]:
-    """プロジェクトのバックアップZIPを作成する（BK-0001形式で採番・index.jsonへ追記）。"""
+    """プロジェクトのバックアップZIPを作成する（BK-0001形式で採番・index.jsonへ追記）。
+
+    manifest.json（v2）へ全ファイルの SHA-256・サイズを記録し、Restore時の整合性検証に使う。
+    """
     if mode not in {"metadata_only", "full"}:
         raise ValueError("mode は metadata_only / full のいずれかを指定してください")
     paths = ensure_project_directories(project_id)
     pid = paths.project_id
 
-    def _add(zf: zipfile.ZipFile, file_path: Path) -> int:
-        arcname = f"project/{file_path.relative_to(paths.root).as_posix()}"
-        zf.write(file_path, arcname)
-        return 1
-
+    from ..version import APP_VERSION
     from .atomic_io import atomic_replace, file_lock
 
     with _LOCK, file_lock(_backups_root() / "index.json"):
@@ -83,35 +121,32 @@ def create_backup(project_id: Optional[str], mode: str = "metadata_only") -> dic
         target = _backups_root() / filename
         # 原子性: 一時ファイルへ生成→完了後にリネーム（途中失敗ZIPを正式成果物として残さない）
         tmp_target = _backups_root() / f".{filename}.tmp"
-        file_count = 0
+        file_entries: list[dict[str, Any]] = []
+        components: set[str] = set()
         with zipfile.ZipFile(tmp_target, "w", zipfile.ZIP_DEFLATED) as zf:
-            if mode == "full":
-                for file_path in sorted(paths.root.rglob("*")):
-                    if file_path.is_file():
-                        file_count += _add(zf, file_path)
-            else:
-                for name in _METADATA_FILES:
-                    file_path = paths.root / name
-                    if file_path.is_file():
-                        file_count += _add(zf, file_path)
-                for rel, extensions in _METADATA_DIRS:
-                    base = paths.root / rel
-                    if not base.is_dir():
-                        continue
-                    for file_path in sorted(base.rglob("*")):
-                        if not file_path.is_file():
-                            continue
-                        if extensions is not None and file_path.suffix.lower() not in extensions:
-                            continue
-                        file_count += _add(zf, file_path)
-            zf.writestr(
-                "backup_manifest.json",
-                json.dumps(
-                    {"backup_id": backup_id, "project_id": pid, "mode": mode, "created_at": datetime.now().isoformat()},
-                    ensure_ascii=False,
-                    indent=2,
-                ),
+            for file_path in _collect_backup_files(paths, mode):
+                arcname = f"project/{file_path.relative_to(paths.root).as_posix()}"
+                data = file_path.read_bytes()
+                zf.writestr(arcname, data)
+                file_entries.append({"path": arcname, "size": len(data), "sha256": _sha256_of(data)})
+                components.add(_component_of(arcname))
+            required = sorted(
+                c for c in components if any(f"{c}/".startswith(prefix) for prefix in _REQUIRED_COMPONENT_PREFIXES)
             )
+            manifest = {
+                "backup_id": backup_id,
+                "created_at": datetime.now().isoformat(),
+                "app_version": APP_VERSION,
+                "schema_version": BACKUP_MANIFEST_SCHEMA_VERSION,
+                "project_id": pid,
+                "mode": mode,
+                "files": file_entries,
+                "file_count": len(file_entries),
+                "total_size_bytes": sum(f["size"] for f in file_entries),
+                "required_components": required,
+                "optional_components": sorted(components - set(required)),
+            }
+            zf.writestr("backup_manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
         atomic_replace(tmp_target, target)  # 完成したZIPだけを正式パスへ
         entry = {
             "backup_id": backup_id,
@@ -120,7 +155,9 @@ def create_backup(project_id: Optional[str], mode: str = "metadata_only") -> dic
             "created_at": datetime.now().isoformat(),
             "file": filename,
             "size_bytes": target.stat().st_size,
-            "file_count": file_count,
+            "file_count": len(file_entries),
+            "app_version": APP_VERSION,
+            "manifest_schema_version": BACKUP_MANIFEST_SCHEMA_VERSION,
         }
         index["items"].append(entry)
         _save_index(index)
@@ -134,10 +171,18 @@ def list_backups(project_id: str = "") -> list[dict[str, Any]]:
     return list(reversed(items))  # 新しい順
 
 
-def restore_backup(backup_id: str, new_project_id: str = "") -> dict[str, Any]:
-    """バックアップを**新しいProject IDへ**復元する（既存プロジェクトを上書きしない）。
+def _read_manifest(zf: zipfile.ZipFile) -> Optional[dict[str, Any]]:
+    try:
+        payload = json.loads(zf.read("backup_manifest.json").decode("utf-8"))
+        return payload if isinstance(payload, dict) else None
+    except (KeyError, ValueError):
+        return None
 
-    new_project_id 未指定は `<元ID>_restored_<連番>` を自動採番。指定IDが既存の場合はエラー。
+
+def verify_backup(backup_id: str) -> dict[str, Any]:
+    """バックアップZIPの整合性検証（manifestの全ファイルのSHA-256・サイズ・欠落・余剰を確認）。
+
+    manifest v1（File Listなしの旧バックアップ）は検証不能として valid=None を返す（推測しない）。
     """
     index = _load_index()
     entry = next((i for i in index["items"] if i.get("backup_id") == backup_id), None)
@@ -146,6 +191,56 @@ def restore_backup(backup_id: str, new_project_id: str = "") -> dict[str, Any]:
     archive = _backups_root() / str(entry.get("file") or "")
     if not archive.is_file():
         raise FileNotFoundError(f"backup file not found: {entry.get('file')}")
+    mismatches: list[str] = []
+    with zipfile.ZipFile(archive, "r") as zf:
+        manifest = _read_manifest(zf)
+        if manifest is None:
+            return {"backup_id": backup_id, "valid": False, "mismatches": ["backup_manifest.json がありません"], "manifest": None}
+        files = manifest.get("files")
+        if not isinstance(files, list):
+            # 旧形式（v1）: File Listがないため検証不能（validはNone=不明。推測しない）
+            return {"backup_id": backup_id, "valid": None, "mismatches": ["manifestが旧形式（v1）のためHash検証できません"], "manifest": manifest}
+        names = {info.filename for info in zf.infolist() if not info.is_dir()}
+        for item in files:
+            path = str(item.get("path") or "")
+            if path not in names:
+                mismatches.append(f"欠落: {path}")
+                continue
+            data = zf.read(path)
+            if len(data) != int(item.get("size") or -1):
+                mismatches.append(f"サイズ不一致: {path}")
+            if _sha256_of(data) != str(item.get("sha256") or ""):
+                mismatches.append(f"SHA-256不一致: {path}")
+        expected = {str(item.get("path")) for item in files} | {"backup_manifest.json"}
+        for name in sorted(names - expected):
+            mismatches.append(f"manifest未記載のファイル: {name}")
+    return {"backup_id": backup_id, "valid": not mismatches, "mismatches": mismatches, "manifest": manifest}
+
+
+def restore_backup(backup_id: str, new_project_id: str = "") -> dict[str, Any]:
+    """バックアップを**新しいProject IDへ**復元する（既存プロジェクトを上書きしない）。
+
+    - 復元前にmanifestの全ファイルのSHA-256を検証し、**不一致があれば復元を開始しない**
+    - 復元後にも書き込んだファイルを再検証する（不一致は復元先を削除してエラー）
+    - new_project_id 未指定は `<元ID>_restored_<連番>` を自動採番。指定IDが既存の場合はエラー
+    """
+    index = _load_index()
+    entry = next((i for i in index["items"] if i.get("backup_id") == backup_id), None)
+    if entry is None:
+        raise FileNotFoundError(f"backup not found: {backup_id}")
+    archive = _backups_root() / str(entry.get("file") or "")
+    if not archive.is_file():
+        raise FileNotFoundError(f"backup file not found: {entry.get('file')}")
+
+    # 復元前の整合性検証（不一致・manifest欠落は復元を開始しない）
+    verification = verify_backup(backup_id)
+    if verification["valid"] is False:
+        raise ValueError(
+            "バックアップの整合性検証に失敗しました（復元を開始しません）: "
+            + " / ".join(verification["mismatches"][:5])
+        )
+    manifest = verification.get("manifest") or {}
+    hash_by_path = {str(f.get("path")): str(f.get("sha256")) for f in (manifest.get("files") or []) if isinstance(f, dict)}
 
     projects_dir = Path(project_paths_module.PROJECTS_DIR)
     source_pid = str(entry.get("project_id") or "project")
@@ -159,20 +254,44 @@ def restore_backup(backup_id: str, new_project_id: str = "") -> dict[str, Any]:
     if target_root.exists():
         raise ValueError(f"復元先プロジェクトが既に存在します: {target_pid}（既存プロジェクトへは復元しません）")
 
-    with zipfile.ZipFile(archive, "r") as zf:
-        for info in zf.infolist():
-            name = info.filename
-            if not name.startswith("project/") or info.is_dir():
-                continue
-            relative = Path(name[len("project/"):])
-            # Zip Slip対策: 展開先がプロジェクト外へ出る相対パスは拒否する
-            destination = (target_root / relative).resolve()
-            if not str(destination).startswith(str(target_root.resolve())):
-                raise ValueError(f"不正なパスを含むバックアップです: {name}")
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_bytes(zf.read(info))
+    restored: list[tuple[str, Path]] = []
+    try:
+        with zipfile.ZipFile(archive, "r") as zf:
+            for info in zf.infolist():
+                name = info.filename
+                if not name.startswith("project/") or info.is_dir():
+                    continue
+                relative = Path(name[len("project/"):])
+                # Zip Slip対策: 展開先がプロジェクト外へ出る相対パスは拒否する
+                destination = (target_root / relative).resolve()
+                if not str(destination).startswith(str(target_root.resolve())):
+                    raise ValueError(f"不正なパスを含むバックアップです: {name}")
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(zf.read(info))
+                restored.append((name, destination))
+        # 復元後の整合性検証（書き込んだファイルのSHA-256をmanifestと再照合）
+        post_mismatches = [
+            name for name, path in restored
+            if name in hash_by_path and _sha256_of(path.read_bytes()) != hash_by_path[name]
+        ]
+        if post_mismatches:
+            raise ValueError(
+                "復元後の整合性検証に失敗しました（復元先を削除しました）: " + " / ".join(post_mismatches[:5])
+            )
+    except Exception:
+        # 部分的に復元されたプロジェクトを残さない（新規作成した復元先のみ削除）
+        import shutil
+
+        shutil.rmtree(target_root, ignore_errors=True)
+        raise
     ensure_project_directories(target_pid)
-    return {"backup_id": backup_id, "project_id": target_pid, "mode": entry.get("mode"), "source_project_id": source_pid}
+    return {
+        "backup_id": backup_id,
+        "project_id": target_pid,
+        "mode": entry.get("mode"),
+        "source_project_id": source_pid,
+        "verified_files": len(hash_by_path),
+    }
 
 
 # ---------- データ保持設定（Retention） ----------

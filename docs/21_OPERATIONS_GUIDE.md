@@ -31,14 +31,24 @@
 - **モード選択**: `metadata_only`（annotations/実験・リリース・Benchmark記録・前処理設定/スナップショットmeta・モデルメタJSONのみ。画像・モデル実体は含めない）/ `full`（プロジェクトディレクトリ全体）
 - 保存先: `data/backups/<BK-0001>_<pid>_<mode>_<日時>.zip` ＋ `index.json`（BK-0001形式で採番）
 - **復元は既定で新しいProject IDへ**（`<元ID>_restored_<n>` を自動採番。明示指定IDも既存と衝突する場合はエラー=**既存プロジェクトを上書きしない**）
-- 復元は監査ログ `backup_restore`（admin権限）へ記録される
+- 復元は監査ログ `backup_restore`（admin権限）へ、失敗は `restore_failed` へ記録される
 - UI: システム状態画面の「バックアップ」カード（作成・一覧・新プロジェクトへ復元）
+
+### manifest.json（v2）と整合性検証
+
+各ZIPへ `backup_manifest.json` を同梱する: Backup ID / Created At / **App Version** / **Schema Version** / Project ID / Backup Mode / **File List（path・size・SHA-256）** / File Count / Total Size / **Required Components**（annotations等・復元に必須） / **Optional Components**。
+
+- **Restore前に全ファイルのSHA-256を検証し、不一致・欠落・manifest未記載ファイルがあれば復元を開始しない**（error_code=BACKUP_VALIDATION_FAILED）
+- **Restore後にも書き込んだファイルを再検証**する（不一致は復元先プロジェクトを削除してエラー=部分復元を残さない）
+- 旧形式（v1・File Listなし）のバックアップは検証不能（valid=null）として扱い、推測で合格にしない
+- GET `/api/backups/{id}/verify` で復元せずに検証だけ実行できる（Release Checklistの事前確認用）
 
 | Method / Path | 概要 |
 |---|---|
 | GET `/api/backups` | 一覧（新しい順・project_id絞り込み可） |
-| POST `/api/backups` | 作成（`{project_id, mode}`） |
-| POST `/api/backups/{backup_id}/restore` | 復元（`{new_project_id?}`・既定=新ID自動採番） |
+| POST `/api/backups` | 作成（`{project_id, mode}`。監査 `backup_create`） |
+| GET `/api/backups/{backup_id}/verify` | 整合性検証のみ（`{valid, mismatches, manifest_summary}`） |
+| POST `/api/backups/{backup_id}/restore` | 復元（`{new_project_id?}`・既定=新ID自動採番・前後Hash検証） |
 
 ## 4. データ保持設定（Retention）
 

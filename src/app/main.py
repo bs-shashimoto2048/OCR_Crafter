@@ -185,7 +185,9 @@ from .services.training_image_builder import (
 )
 from .train import run_training
 
-app = FastAPI(title="OCR Crafter API", version="0.2.0")
+from .version import APP_VERSION
+
+app = FastAPI(title="OCR Crafter API", version=APP_VERSION)
 DEFAULT_PADDLEOCR_REPO_RELATIVE = "external/PaddleOCR"
 IMAGE_BUILDER_ALLOWED_EXTENSIONS = {
     ".jpg",
@@ -1144,6 +1146,31 @@ def api_backup_create(req: BackupCreateRequest, request: Request) -> dict[str, A
         after={"mode": item.get("mode"), "file": item.get("file"), "size_bytes": item.get("size_bytes")},
     )
     return {"project_id": resolved, "item": item}
+
+
+@app.get("/api/backups/{backup_id}/verify")
+def api_backup_verify(backup_id: str) -> dict[str, Any]:
+    """バックアップの整合性検証（manifestの全ファイルのSHA-256照合。復元せず検証のみ）。"""
+    from .services.backup_manager import verify_backup
+
+    try:
+        result = verify_backup(backup_id)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    manifest = result.get("manifest") or {}
+    return {
+        "backup_id": backup_id,
+        "valid": result["valid"],
+        "mismatches": result["mismatches"],
+        "manifest_summary": {
+            "app_version": manifest.get("app_version"),
+            "schema_version": manifest.get("schema_version"),
+            "file_count": manifest.get("file_count"),
+            "total_size_bytes": manifest.get("total_size_bytes"),
+            "required_components": manifest.get("required_components"),
+            "optional_components": manifest.get("optional_components"),
+        },
+    }
 
 
 @app.post("/api/backups/{backup_id}/restore")

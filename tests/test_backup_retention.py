@@ -1,4 +1,4 @@
-"""バックアップ・復元・データ保持設定のテスト。"""
+"""バックアップ・復元・データ保持設定・整合性検証（manifest+SHA-256）のテスト。"""
 
 import json
 import zipfile
@@ -15,6 +15,7 @@ from src.app.services.backup_manager import (
     list_backups,
     restore_backup,
     set_retention,
+    verify_backup,
 )
 
 PID = "p_backup"
@@ -76,6 +77,59 @@ def test_restore_to_new_project_id(temp_projects):
         restore_backup(entry["backup_id"], new_project_id=PID)
     with pytest.raises(FileNotFoundError):
         restore_backup("BK-9999")
+
+
+def test_manifest_contents_and_verify(temp_projects):
+    """§Backup整合性: manifest.json（v2）の必須項目とHash検証。"""
+    _seed_project()
+    entry = create_backup(PID, mode="metadata_only")
+    with zipfile.ZipFile(_backups_root() / entry["file"]) as zf:
+        manifest = json.loads(zf.read("backup_manifest.json").decode("utf-8"))
+    for key in [
+        "backup_id", "created_at", "app_version", "schema_version", "project_id", "mode",
+        "files", "file_count", "total_size_bytes", "required_components", "optional_components",
+    ]:
+        assert key in manifest, f"manifest項目 {key} がない"
+    assert manifest["schema_version"] == 2
+    assert manifest["app_version"]
+    assert all({"path", "size", "sha256"} <= set(f.keys()) for f in manifest["files"])
+    assert "annotations" in manifest["required_components"]
+    # 改ざんなしの検証はvalid=True
+    result = verify_backup(entry["backup_id"])
+    assert result["valid"] is True and result["mismatches"] == []
+
+
+def test_tampered_backup_refuses_restore(temp_projects):
+    """改ざんされたバックアップは復元を開始しない（Hash不一致検出）。"""
+    _seed_project()
+    entry = create_backup(PID, mode="full")
+    archive = _backups_root() / entry["file"]
+    # ZIP内の1ファイルを改ざん（再圧縮で中身を書き換え）
+    tampered = _backups_root() / "tampered.zip"
+    with zipfile.ZipFile(archive) as src, zipfile.ZipFile(tampered, "w") as dst:
+        for info in src.infolist():
+            data = src.read(info.filename)
+            if info.filename == "project/annotations/master.csv":
+                data = b"filename,text\nimg.png,TAMPERED\n"
+            dst.writestr(info.filename, data)
+    tampered.replace(archive)
+    verification = verify_backup(entry["backup_id"])
+    assert verification["valid"] is False
+    assert any("SHA-256不一致" in m for m in verification["mismatches"])
+    with pytest.raises(ValueError, match="整合性検証に失敗しました（復元を開始しません）"):
+        restore_backup(entry["backup_id"])
+    # 復元先プロジェクトが作られていない（部分復元なし）
+    assert not any(p.name.startswith(f"{PID}_restored") for p in temp_projects["projects_dir"].iterdir())
+
+
+def test_restore_verifies_after_extract(temp_projects):
+    """正常なバックアップは復元後検証まで通り、検証済みファイル数を返す。"""
+    _seed_project()
+    entry = create_backup(PID, mode="full")
+    result = restore_backup(entry["backup_id"])
+    assert result["verified_files"] == entry["file_count"]
+    restored_root = temp_projects["projects_dir"] / result["project_id"]
+    assert (restored_root / "annotations" / "master.csv").is_file()
 
 
 def test_retention_config_and_apply(temp_projects):
