@@ -95,4 +95,44 @@ export const HELP_TEXTS = {
     title: "評価前処理モード",
     body: "評価画像へ適用する前処理の選び方です。\n学習時前処理を使用: モデルの学習画像と同じ前処理を再現します（推奨）。\n手動設定: グレースケール・二値化を手動で指定します。\n前処理なし: 元画像のままOCR入力整形のみ行います。\n学習時と異なる前処理で評価すると、CER等は参考値になります。",
   },
+  ocrEngine: {
+    title: "OCRエンジン",
+    body: "文字認識を行うソフトウェアの種類です。\nTesseract: 学習（fine-tune）に対応したオープンソースOCR。\nPaddleOCR: 高精度な深層学習ベースOCR。\nエンジンごとに得意分野・速度・設定項目（PSM/Whitelist等）が異なります。",
+  },
+  benchmark: {
+    title: "Benchmark",
+    body: "同一の評価データ・同一条件で複数のOCRエンジン/モデルを一括実行し、精度（CER・完全一致率）・速度・安定性（失敗数）を公平に比較する機能です。",
+  },
+  profileHash: {
+    title: "Profile Hash",
+    body: "Benchmarkの比較条件（データセット内容・画像数・前処理・エンジン条件など）から計算した指紋です。\nHashが同じ=同一条件のBenchmarkで、結果を直接比較できます。\n異なるHash同士の比較は参考値です（警告が表示されます）。",
+  },
+  coldStart: {
+    title: "Cold Start（初回起動時間）",
+    body: "モデルの読み込み・エンジン初期化にかかった時間です。\n推論時間（平均/P50/P95）とは分けて計測し、ウォームアップ（WU）回数も記録します。\n運用での起動コストの目安になります。",
+  },
+  balanceScore: {
+    title: "バランス最良スコア",
+    body: "精度・速度・安定性を重み付けした総合スコアです。\nscore = 精度重み×文字正解率(1−CER) + 速度重み×(最速平均時間÷自平均時間) + 安定性重み×(1−失敗数÷件数)\n重み（既定 70/20/10）はプロジェクト設定で変更できます。",
+  },
+  peakMemory: {
+    title: "PeakMem（ピークメモリ）",
+    body: "推論中の最大メモリ使用量です。\n本環境ではTesseract（外部プロセス）等の正確な計測ができないため「取得不能」と表示します（推測値は表示しません）。",
+  },
+  p50p95: {
+    title: "P50 / P95（推論時間の分布）",
+    body: "画像1枚あたりの推論時間の中央値（P50）と、遅い方から5%目の値（P95）です。\n平均だけでは見えない「たまに遅いケース」を把握できます。",
+  },
+  releaseIdVersion: {
+    title: "Release IDとVersion",
+    body: "Release ID（REL-0001）: リリース操作そのものの識別子。Rollbackを含め毎回新しく採番されます。\nVersion（1.0.0等）: 配布成果物の版。Rollback時は元のVersionを維持します。",
+  },
+  evaluationHash: {
+    title: "Evaluation Hash",
+    body: "評価条件（データセット・前処理・エンジン・PSM・Whitelist等）から計算した指紋です。\n同じHash=同一条件の評価で、CERを直接比較できます（Comparable Group）。",
+  },
+  jobWorker: {
+    title: "Job Worker",
+    body: "バックグラウンドジョブを順番に実行する常駐処理です。\n停止中でもJob作成時に自動起動します。\nBackend再起動時、実行中だったJobは「中断（再起動）」となり再実行で復旧できます。",
+  },
 };

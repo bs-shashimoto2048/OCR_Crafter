@@ -310,7 +310,7 @@ export default function OperationsView({ projectId, authContext = null, onOpenJo
                 {backups.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="px-3 py-4 text-center text-muted">
-                      バックアップがありません
+                      バックアップがありません。上のモードを選び「バックアップを作成」で最初のバックアップを取得しましょう（週次full＋日次metadata_onlyを推奨）。
                     </td>
                   </tr>
                 ) : null}

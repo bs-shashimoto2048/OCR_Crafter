@@ -1,8 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import Button from "../components/Button";
 import Card from "../components/Card";
+import EmptyState from "../components/EmptyState";
+import InfoTooltip from "../components/InfoTooltip";
 import { API_BASE, request } from "../lib/api";
+import { HELP_TEXTS } from "../lib/helpTexts";
 import {
   CASE_FILTERS,
   PURPOSE_LABELS,
@@ -57,6 +60,16 @@ export default function BenchmarkView({
   const [compareB, setCompareB] = useState("");
   // 重み編集
   const [weightsDraft, setWeightsDraft] = useState(null);
+
+  // Escで詳細（Leaderboard）を閉じる（キーボード操作）
+  useEffect(() => {
+    if (!detail) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") setDetail(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [detail]);
 
   const tessModels = useMemo(
     () => ocrModels.filter((m) => String(m?.name || m).endsWith(".tess.json")).map((m) => String(m?.name || m)),
@@ -127,7 +140,12 @@ export default function BenchmarkView({
     <div className="space-y-4">
       <Card
         title="Benchmark実行"
-        subtitle="同一データ・同一条件で複数エンジンを公平比較します（実行はジョブ管理経由・非同期）"
+        subtitle={
+          <>
+            同一データ・同一条件で複数エンジンを公平比較します（実行はジョブ管理経由・非同期）
+            <InfoTooltip {...HELP_TEXTS.benchmark} align="left" />
+          </>
+        }
         actions={
           <Button size="sm" variant="secondary" onClick={onOpenJobs}>
             ジョブ管理を開く
@@ -205,7 +223,10 @@ export default function BenchmarkView({
             </div>
           </div>
           <div className="space-y-1.5">
-            <p className="text-[12px] font-semibold text-muted">対象エンジン（未導入のエンジンは選択不可）</p>
+            <p className="text-[12px] font-semibold text-muted">
+              対象エンジン（未導入のエンジンは選択不可）
+              <InfoTooltip {...HELP_TEXTS.ocrEngine} align="left" />
+            </p>
             {engines.map((engine) => {
               const selectable = engine.implemented && engine.available;
               return (
@@ -277,21 +298,55 @@ export default function BenchmarkView({
                 <th className="px-2 py-1.5 font-medium">名前</th>
                 <th className="px-2 py-1.5 font-medium">実行日時</th>
                 <th className="px-2 py-1.5 font-medium">エンジン数</th>
-                <th className="px-2 py-1.5 font-medium">1位（CER最小）</th>
-                <th className="px-2 py-1.5 font-medium">Profile</th>
+                <th className="px-2 py-1.5 font-medium">
+                  1位（CER最小）
+                  <InfoTooltip {...HELP_TEXTS.cer} />
+                </th>
+                <th className="px-2 py-1.5 font-medium">
+                  Profile
+                  <InfoTooltip {...HELP_TEXTS.profileHash} />
+                </th>
               </tr>
             </thead>
             <tbody>
               {items.map((item) => {
                 const top = (item.results || [])[0];
                 return (
-                  <tr key={item.benchmark_id} className={`cursor-pointer border-t border-border/60 hover:bg-card/60 ${detail?.benchmark_id === item.benchmark_id ? "bg-accent/10" : ""}`} onClick={() => openDetail(item.benchmark_id)}>
+                  <tr
+                    key={item.benchmark_id}
+                    tabIndex={0}
+                    aria-label={`${item.benchmark_id} のLeaderboardを表示`}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        openDetail(item.benchmark_id);
+                      }
+                    }}
+                    className={`cursor-pointer border-t border-border/60 hover:bg-card/60 focus-visible:bg-card/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/70 ${detail?.benchmark_id === item.benchmark_id ? "bg-accent/10" : ""}`}
+                    onClick={() => openDetail(item.benchmark_id)}
+                  >
                     <td className="px-2 py-1.5" onClick={(e) => e.stopPropagation()}>
                       <label className="mr-1 text-[10px] text-muted">
-                        A<input type="radio" name="bmA" className="ml-0.5" checked={compareA === item.benchmark_id} onChange={() => setCompareA(item.benchmark_id)} />
+                        A
+                        <input
+                          type="radio"
+                          name="bmA"
+                          className="ml-0.5"
+                          aria-label={`${item.benchmark_id} を比較Aに選択`}
+                          checked={compareA === item.benchmark_id}
+                          onChange={() => setCompareA(item.benchmark_id)}
+                        />
                       </label>
                       <label className="text-[10px] text-muted">
-                        B<input type="radio" name="bmB" className="ml-0.5" checked={compareB === item.benchmark_id} onChange={() => setCompareB(item.benchmark_id)} />
+                        B
+                        <input
+                          type="radio"
+                          name="bmB"
+                          className="ml-0.5"
+                          aria-label={`${item.benchmark_id} を比較Bに選択`}
+                          checked={compareB === item.benchmark_id}
+                          onChange={() => setCompareB(item.benchmark_id)}
+                        />
                       </label>
                     </td>
                     <td className="whitespace-nowrap px-2 py-1.5">
@@ -311,8 +366,11 @@ export default function BenchmarkView({
               })}
               {items.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-3 py-6 text-center text-muted">
-                    Benchmark履歴がありません
+                  <td colSpan={7}>
+                    <EmptyState
+                      title="Benchmark履歴がありません"
+                      description="最初のBenchmarkを実行しましょう。上の実行フォームで評価画像フォルダ・正解CSV・対象エンジンを指定し、「Benchmarkを実行（Job作成）」をクリックしてください。"
+                    />
                   </td>
                 </tr>
               ) : null}
@@ -348,16 +406,20 @@ export default function BenchmarkView({
               : "なし"
           }`}
           actions={
-            <div className="flex gap-1.5">
+            <div className="flex items-center gap-1.5">
               {["summary", "cases", "confusions"].map((kind) => (
                 <a
                   key={kind}
-                  className="rounded-lg border border-border bg-card/60 px-2 py-1 text-[11px] text-blue-200 hover:bg-card"
+                  className="inline-flex h-7 items-center rounded-lg border border-slate-500 bg-slate-700/90 px-2.5 text-xs font-medium text-slate-100 transition hover:border-slate-400 hover:bg-slate-600/90"
                   href={`${API_BASE}/api/benchmarks/${encodeURIComponent(detail.benchmark_id)}/export?kind=${kind}&project_id=${encodeURIComponent(projectId)}`}
+                  aria-label={`${kind} CSVをダウンロード（Excel対応）`}
                 >
                   {kind} CSV（Excel対応）
                 </a>
               ))}
+              <Button size="sm" variant="ghost" onClick={() => setDetail(null)} aria-label="Leaderboardを閉じる（Esc）" title="閉じる（Esc）">
+                閉じる
+              </Button>
             </div>
           }
         >
@@ -365,8 +427,26 @@ export default function BenchmarkView({
             <table className="min-w-full text-xs tabular-nums">
               <thead className="bg-card/90 text-left text-muted">
                 <tr>
-                  {["#", "エンジン", "CER", "文字正解率", "完全一致率", "正解", "置換/挿入/脱落", "失敗", "Cold Start", "平均", "P50", "P95", "PeakMem", "Balance"].map((h) => (
-                    <th key={h} className="whitespace-nowrap px-2 py-1.5 font-medium">{h}</th>
+                  {[
+                    ["#", null],
+                    ["エンジン", HELP_TEXTS.ocrEngine],
+                    ["CER", HELP_TEXTS.cer],
+                    ["文字正解率", HELP_TEXTS.charAccuracy],
+                    ["完全一致率", HELP_TEXTS.exactMatch],
+                    ["正解", null],
+                    ["置換/挿入/脱落", HELP_TEXTS.confusionTop],
+                    ["失敗", null],
+                    ["Cold Start", HELP_TEXTS.coldStart],
+                    ["平均", null],
+                    ["P50", HELP_TEXTS.p50p95],
+                    ["P95", HELP_TEXTS.p50p95],
+                    ["PeakMem", HELP_TEXTS.peakMemory],
+                    ["Balance", HELP_TEXTS.balanceScore],
+                  ].map(([label, help]) => (
+                    <th key={label} className="whitespace-nowrap px-2 py-1.5 font-medium">
+                      {label}
+                      {help ? <InfoTooltip {...help} /> : null}
+                    </th>
                   ))}
                 </tr>
               </thead>

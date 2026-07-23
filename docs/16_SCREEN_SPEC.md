@@ -37,6 +37,14 @@ flowchart LR
 
 - 画面遷移はルーティングなし（`App.jsx` の `activeView` state）。サイドバー・ワークフロー工程ナビ・画面内ボタンで切替。
 
+## 共通UIパターン（v1.0.0 UIブラッシュアップで統一）
+
+- **Empty State**（`components/EmptyState.jsx`）: データなし表示は「アイコン＋タイトル＋説明＋次に行う操作（＋遷移ボタン）」の共通形式。適用: ジョブ管理（→Benchmarkを開く）/ Benchmark履歴 / 監査ログ / リリース管理（モデルなし・履歴なし）/ モデル管理 / 実験管理 / バックアップ一覧
+- **用語ヘルプ**（`components/InfoTooltip.jsx`＋`lib/helpTexts.js`）: CER・文字正解率・完全一致率・OCRエンジン・Benchmark・Profile Hash・Cold Start・P50/P95・PeakMem・バランススコア・Release ID/Version・Evaluation Hash・Job Worker等の専門用語へ?アイコンで説明を表示
+- **詳細パネルの閉じ方**: ジョブ管理・Benchmark（Leaderboard）・監査ログの詳細は「閉じる」ボタンまたは**Escキー**で閉じられる
+- **キーボード操作**: クリック可能なテーブル行（ジョブ/Benchmark履歴/監査ログ）はTabでフォーカスでき、**Enter/Spaceで開ける**（focus-visibleリング表示・aria-labelつき）。ボタン・入力欄のfocus-visibleリングはグローバルCSSで統一
+- **ボタン**: `Button.jsx` の variant（primary=主要/secondary=通常/ghost=補助/danger=破壊的）と size（sm=h-7/md=h-8/lg=h-9）を全画面で使用。ボタン風リンク（CSVダウンロード等）もsecondary相当の見た目・高さに統一
+
 ## サイドバー構成（OCR開発フロー順）
 
 サイドバーは機能一覧ではなく**作業工程**を表す（`Sidebar.jsx` の `SIDEBAR_SECTIONS`。上から順に進めるとOCRモデルが完成する構成）。セクションアイコンはHeroicons outlineのSVGインライン（絵文字・追加依存なし）。ヘッダーのホバーで工程説明をツールチップ表示。選択中ページの所属セクションはヘッダー（アイコン・文字色）もアクティブ表示。

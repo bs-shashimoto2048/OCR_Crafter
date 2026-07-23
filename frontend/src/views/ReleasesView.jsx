@@ -2,7 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 
 import Button from "../components/Button";
 import Card from "../components/Card";
+import EmptyState from "../components/EmptyState";
+import InfoTooltip from "../components/InfoTooltip";
 import ModelIdBadge from "../components/ModelIdBadge";
+import { HELP_TEXTS } from "../lib/helpTexts";
 import { API_BASE, request } from "../lib/api";
 import { buildExperimentDiff, normalizeExperiment, resolveAnalysisScope } from "../lib/experimentAnalysis";
 import {
@@ -339,8 +342,11 @@ export default function ReleasesView({
               })}
               {modelNames.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-3 py-6 text-center text-muted">
-                    モデルがありません（学習完了後に表示されます）
+                  <td colSpan={6}>
+                    <EmptyState
+                      title="モデルがありません"
+                      description="最初のモデルを学習しましょう。「OCRモデル > データ作成・学習」でデータセットを作成し、Tesseract学習を実行すると、完了後にここへ表示されます。"
+                    />
                   </td>
                 </tr>
               ) : null}
@@ -655,7 +661,10 @@ export default function ReleasesView({
             <thead className="sticky top-0 z-10 bg-card/90 text-left text-muted backdrop-blur">
               <tr>
                 <th className="px-2 py-1.5 font-medium">比較</th>
-                <th className="px-2 py-1.5 font-medium">Release ID</th>
+                <th className="px-2 py-1.5 font-medium">
+                  Release ID
+                  <InfoTooltip {...HELP_TEXTS.releaseIdVersion} align="left" />
+                </th>
                 <th className="px-2 py-1.5 font-medium">Version</th>
                 <th className="px-2 py-1.5 font-medium">Model</th>
                 <th className="px-2 py-1.5 font-medium">Release Date</th>
@@ -670,11 +679,25 @@ export default function ReleasesView({
                   <td className="px-2 py-1.5">
                     <label className="mr-1 text-[10px] text-muted">
                       A
-                      <input type="radio" name="release-compare-a" className="ml-0.5" checked={compareA === entry.version} onChange={() => setCompareA(entry.version)} />
+                      <input
+                        type="radio"
+                        name="release-compare-a"
+                        className="ml-0.5"
+                        aria-label={`v${entry.version} を比較Aに選択`}
+                        checked={compareA === entry.version}
+                        onChange={() => setCompareA(entry.version)}
+                      />
                     </label>
                     <label className="text-[10px] text-muted">
                       B
-                      <input type="radio" name="release-compare-b" className="ml-0.5" checked={compareB === entry.version} onChange={() => setCompareB(entry.version)} />
+                      <input
+                        type="radio"
+                        name="release-compare-b"
+                        className="ml-0.5"
+                        aria-label={`v${entry.version} を比較Bに選択`}
+                        checked={compareB === entry.version}
+                        onChange={() => setCompareB(entry.version)}
+                      />
                     </label>
                   </td>
                   <td className="whitespace-nowrap px-2 py-1.5">
@@ -726,8 +749,11 @@ export default function ReleasesView({
               ))}
               {history.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-3 py-6 text-center text-muted">
-                    リリース履歴がありません
+                  <td colSpan={8}>
+                    <EmptyState
+                      title="リリース履歴がありません"
+                      description="モデルをProductionへ昇格すると、Release ID・Version・実施者・理由がここに記録されます。上のモデルステータス一覧から「Productionへ昇格」を実行してください。"
+                    />
                   </td>
                 </tr>
               ) : null}

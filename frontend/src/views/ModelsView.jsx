@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import Card from "../components/Card";
 import Button from "../components/Button";
+import EmptyState from "../components/EmptyState";
 import InfoTooltip from "../components/InfoTooltip";
 import ModelIdBadge from "../components/ModelIdBadge";
 import { API_BASE } from "../lib/api";
@@ -1880,7 +1881,15 @@ export default function ModelsView({
               );
             })}
             {filteredModels.length === 0 ? (
-              <p className="px-3 py-6 text-center text-sm text-muted">条件に一致するモデルがありません</p>
+              <EmptyState
+                compact
+                title={models.length === 0 ? "モデルがありません" : "条件に一致するモデルがありません"}
+                description={
+                  models.length === 0
+                    ? "最初のモデルを作成しましょう。「データ作成・学習」でOCRデータセットを作成し、学習を実行すると完了後にここへ表示されます。"
+                    : "検索条件・フィルタを見直してください。"
+                }
+              />
             ) : null}
           </div>
         </div>

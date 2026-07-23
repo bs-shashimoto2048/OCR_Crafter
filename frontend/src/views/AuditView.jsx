@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import Button from "../components/Button";
 import Card from "../components/Card";
+import EmptyState from "../components/EmptyState";
 import { request } from "../lib/api";
 import { AUDIT_ACTION_LABELS, buildAuditDiff } from "../lib/auditDiff";
 
@@ -18,6 +19,16 @@ export default function AuditView({ projects = [], authContext = null }) {
   const [detailId, setDetailId] = useState("");
   const detail = useMemo(() => items.find((i) => i.audit_id === detailId) || null, [items, detailId]);
   const diffRows = useMemo(() => (detail ? buildAuditDiff(detail.before, detail.after) : []), [detail]);
+
+  // Escで詳細パネルを閉じる（キーボード操作）
+  useEffect(() => {
+    if (!detailId) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") setDetailId("");
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [detailId]);
 
   async function load(currentFilters = filters) {
     setLoading(true);
@@ -102,7 +113,15 @@ export default function AuditView({ projects = [], authContext = null }) {
               {items.map((entry) => (
                 <tr
                   key={entry.audit_id}
-                  className={`cursor-pointer border-t border-border/60 hover:bg-card/60 ${detailId === entry.audit_id ? "bg-accent/10" : ""}`}
+                  tabIndex={0}
+                  aria-label={`${entry.audit_id} の差分詳細を表示`}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setDetailId(entry.audit_id);
+                    }
+                  }}
+                  className={`cursor-pointer border-t border-border/60 hover:bg-card/60 focus-visible:bg-card/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/70 ${detailId === entry.audit_id ? "bg-accent/10" : ""}`}
                   onClick={() => setDetailId(entry.audit_id)}
                 >
                   <td className="whitespace-nowrap px-2 py-1.5">
@@ -126,8 +145,11 @@ export default function AuditView({ projects = [], authContext = null }) {
               ))}
               {items.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-3 py-6 text-center text-muted">
-                    監査ログがありません
+                  <td colSpan={8}>
+                    <EmptyState
+                      title="監査ログがありません"
+                      description="プロジェクト作成・学習開始・Production昇格などの重要操作を行うと、ここに操作者・日時・変更内容が自動記録されます。フィルタ条件で絞り込んでいる場合は条件を見直してください。"
+                    />
                   </td>
                 </tr>
               ) : null}
@@ -137,7 +159,15 @@ export default function AuditView({ projects = [], authContext = null }) {
       </Card>
 
       {detail ? (
-        <Card title={`監査詳細: ${detail.audit_id}`} subtitle={`${AUDIT_ACTION_LABELS[detail.action] || detail.action} / ${dateLabel(detail.timestamp)} / ${detail.user || "-"}`}>
+        <Card
+          title={`監査詳細: ${detail.audit_id}`}
+          subtitle={`${AUDIT_ACTION_LABELS[detail.action] || detail.action} / ${dateLabel(detail.timestamp)} / ${detail.user || "-"}`}
+          actions={
+            <Button size="sm" variant="ghost" onClick={() => setDetailId("")} aria-label="詳細を閉じる（Esc）" title="閉じる（Esc）">
+              閉じる
+            </Button>
+          }
+        >
           <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
             <div className="rounded-lg border border-border bg-card/45 px-3 py-2 text-[12px]">
               <p className="mb-1 font-semibold text-muted">Before / After 差分</p>

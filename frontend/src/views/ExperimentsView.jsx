@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 import Button from "../components/Button";
 import Card from "../components/Card";
+import EmptyState from "../components/EmptyState";
 import ModelIdBadge from "../components/ModelIdBadge";
 import {
   DIFF_CATEGORIES,
@@ -478,8 +479,16 @@ export default function ExperimentsView({
               ))}
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={15} className="px-3 py-6 text-center text-muted">
-                    {items.length === 0 ? "実験がありません（Tesseract学習を実行すると自動記録されます）" : "条件に一致する実験がありません"}
+                  <td colSpan={15}>
+                    <EmptyState
+                      compact
+                      title={items.length === 0 ? "実験がありません" : "条件に一致する実験がありません"}
+                      description={
+                        items.length === 0
+                          ? "Tesseract学習を実行すると、学習条件・前処理・評価結果が実験カルテとして自動記録されます。「データ作成・学習」から最初の学習を実行しましょう。"
+                          : "フィルタ・検索条件を見直してください。"
+                      }
+                    />
                   </td>
                 </tr>
               ) : null}

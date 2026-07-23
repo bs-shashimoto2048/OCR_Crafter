@@ -1,8 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import Button from "../components/Button";
 import Card from "../components/Card";
+import EmptyState from "../components/EmptyState";
+import InfoTooltip from "../components/InfoTooltip";
 import { request } from "../lib/api";
+import { HELP_TEXTS } from "../lib/helpTexts";
 
 const SCROLL_AREA = "dark-scroll [overscroll-behavior:contain] [scrollbar-gutter:stable]";
 
@@ -65,6 +68,16 @@ export default function JobsView({
   const [events, setEvents] = useState([]);
   const detail = useMemo(() => jobs.find((j) => j.job_id === detailId) || null, [jobs, detailId]);
 
+  // Escで詳細パネルを閉じる（キーボード操作）
+  useEffect(() => {
+    if (!detailId) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") setDetailId("");
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [detailId]);
+
   async function openDetail(jobId) {
     setDetailId(jobId);
     try {
@@ -83,7 +96,12 @@ export default function JobsView({
     <div className="space-y-4">
       <Card
         title={`ジョブ一覧（${jobs.length}件）`}
-        subtitle={`バックグラウンドジョブの統一管理。Worker: ${workerAlive ? "稼働中" : "停止（Job作成時に自動起動）"}`}
+        subtitle={
+          <>
+            バックグラウンドジョブの統一管理。Worker: {workerAlive ? "稼働中" : "停止（Job作成時に自動起動）"}
+            <InfoTooltip {...HELP_TEXTS.jobWorker} align="left" />
+          </>
+        }
         actions={
           <Button size="sm" variant="secondary" onClick={onRefresh} disabled={loading}>
             {loading ? "更新中..." : "更新"}
@@ -146,7 +164,15 @@ export default function JobsView({
               {jobs.map((job) => (
                 <tr
                   key={job.job_id}
-                  className={`cursor-pointer border-t border-border/60 transition hover:bg-card/60 ${detailId === job.job_id ? "bg-accent/10" : ""}`}
+                  tabIndex={0}
+                  aria-label={`${job.job_id} の詳細を表示`}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      openDetail(job.job_id);
+                    }
+                  }}
+                  className={`cursor-pointer border-t border-border/60 transition hover:bg-card/60 focus-visible:bg-card/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/70 ${detailId === job.job_id ? "bg-accent/10" : ""}`}
                   onClick={() => openDetail(job.job_id)}
                 >
                   <td className="whitespace-nowrap px-2 py-1.5">
@@ -198,8 +224,13 @@ export default function JobsView({
               ))}
               {jobs.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-3 py-6 text-center text-muted">
-                    ジョブがありません（POST /api/jobs または Benchmark実行で作成されます）
+                  <td colSpan={10}>
+                    <EmptyState
+                      title="ジョブがありません"
+                      description="前処理・学習・評価・Benchmarkなどをバックグラウンド実行すると、ここに進捗と履歴が表示されます。まずはBenchmarkを実行してみましょう。"
+                      actionLabel="Benchmarkを開く"
+                      onAction={onOpenBenchmark}
+                    />
                   </td>
                 </tr>
               ) : null}
@@ -233,6 +264,9 @@ export default function JobsView({
                   再実行
                 </Button>
               ) : null}
+              <Button size="sm" variant="ghost" onClick={() => setDetailId("")} aria-label="詳細を閉じる（Esc）" title="閉じる（Esc）">
+                閉じる
+              </Button>
             </div>
           }
         >
