@@ -51,6 +51,8 @@ from .schemas import (
     EvaluateRequest,
     FileSelectRequest,
     ImportImagesRequest,
+    JobCreateRequest,
+    JobRetryRequest,
     LabelUpdateRequest,
     OcrDatasetCreateRequest,
     OcrDatasetSplitPreviewRequest,
@@ -141,6 +143,7 @@ from .services.experiment_tracker import (
     set_analysis_enabled,
     update_experiment,
 )
+from .services.job_manager import ensure_worker_started, get_job_service, get_job_worker
 from .services.release_manager import (
     build_deployment_package,
     build_model_card,
@@ -2540,6 +2543,87 @@ def api_experiment_attach_evaluation(req: ExperimentEvaluationAttachRequest) -> 
     ensure_experiments_for_models(resolved)
     item = attach_evaluation(resolved, req.model, req.evaluation)
     return {"project_id": resolved, "attached": item is not None, "item": item}
+
+
+@app.post("/api/jobs")
+def api_job_create(req: JobCreateRequest) -> dict[str, Any]:
+    """Job作成（queuedで登録→Workerが順次実行）。同時実行制御に該当する重複要求は
+    既存のアクティブJobを `deduplicated: true` で返す（統一仕様。409は返さない）。"""
+    resolved = _resolve_project_id(req.project_id)
+    try:
+        job, deduplicated = get_job_service().create_job(
+            project_id=resolved,
+            job_type=req.job_type,
+            params={"project_id": resolved, **(req.params or {})},
+            requested_by=req.requested_by,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    ensure_worker_started()
+    return {"project_id": resolved, "job": job, "deduplicated": deduplicated}
+
+
+@app.get("/api/jobs")
+def api_jobs(
+    project_id: Optional[str] = Query(default=""),
+    job_type: str = Query(default=""),
+    status: str = Query(default=""),
+    requested_by: str = Query(default=""),
+    date_from: str = Query(default=""),
+    date_to: str = Query(default=""),
+    limit: int = Query(default=200, ge=1, le=1000),
+) -> dict[str, Any]:
+    """Job一覧（新しい順。Project / 種別 / Status / 実行者 / 日付でフィルタ）。"""
+    return {
+        "items": get_job_service().list_jobs(
+            project_id=str(project_id or ""),
+            job_type=job_type,
+            status=status,
+            requested_by=requested_by,
+            date_from=date_from,
+            date_to=date_to,
+            limit=limit,
+        ),
+        "worker_alive": get_job_worker().is_alive(),
+    }
+
+
+@app.get("/api/jobs/{job_id}")
+def api_job_detail(job_id: str) -> dict[str, Any]:
+    job = get_job_service().repository.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"job not found: {job_id}")
+    return {"job": job}
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+def api_job_cancel(job_id: str) -> dict[str, Any]:
+    """キャンセル要求（running→cancel_requested→安全な区間でcancelled。即時cancelledにはしない）。"""
+    try:
+        return {"job": get_job_service().request_cancel(job_id)}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/api/jobs/{job_id}/retry")
+def api_job_retry(job_id: str, req: JobRetryRequest) -> dict[str, Any]:
+    """同一入力条件での再実行（retry_source_job_idを保存）。"""
+    try:
+        job, deduplicated = get_job_service().retry_job(job_id, requested_by=req.requested_by)
+        ensure_worker_started()
+        return {"job": job, "deduplicated": deduplicated}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.get("/api/jobs/{job_id}/events")
+def api_job_events(job_id: str) -> dict[str, Any]:
+    """進捗イベント履歴（現在はポーリング取得。イベント形式は将来SSEでもそのまま使用する）。"""
+    return {"events": get_job_service().repository.read_events(job_id)}
 
 
 @app.get("/api/releases")

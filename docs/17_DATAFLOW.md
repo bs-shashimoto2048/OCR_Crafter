@@ -90,7 +90,10 @@ flowchart LR
     DB[("outputs/app.db<br/>training_jobs (SQLite)")]
     LS[("ブラウザ localStorage<br/>前処理パラメータ・辞書・UI設定")]
     MID[("data/model_ids.json<br/>モデル管理No登録簿（全プロジェクト共通）")]
+    JOBS[("data/jobs/<br/>jobs.json・events/*.jsonl・logs/*.log")]
 ```
+
+- `data/jobs/`（全プロジェクト共通・Job Management）: `jobs.json`=`{"counter": 通算採番数, "items": [Job...], "config": {"benchmark_concurrency": 1}}`。Job IDは JOB-000001形式・システム全体で一意・再利用しない。`events/JOB-xxxxxx.jsonl`=進捗イベント（追記型・1行1イベント。将来SSEでも同一形式）。`logs/JOB-xxxxxx.log`=スタックトレース等の内部ログ（画面へ出さない）。詳細は `docs/18_JOB_MANAGEMENT.md`
 
 - `data/model_ids.json`: モデル管理No（M0001形式）の登録簿。`{"counter": 通算採番数, "models": {"<project_id>/<モデル名>": "M0001"}}`。`/models/info` の一覧取得時に未登録モデルを**作成日時順**で一括採番して追記する（既存モデルの初回移行も同じ経路）。**モデルを削除してもエントリは残し、番号を再利用しない**（OCR Crafter全体で一意）。ファイルが無い・壊れている場合は counter=0 から再構築される
 

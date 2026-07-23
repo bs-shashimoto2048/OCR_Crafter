@@ -13,6 +13,7 @@ import ModelsView from "./views/ModelsView";
 import InferenceView from "./views/InferenceView";
 import ExperimentsView from "./views/ExperimentsView";
 import ReleasesView from "./views/ReleasesView";
+import JobsView from "./views/JobsView";
 import PreprocessView from "./views/PreprocessView";
 import EvaluationView from "./views/EvaluationView";
 import OcrEvaluationView from "./views/OcrEvaluationView";
@@ -61,6 +62,7 @@ const viewMeta = {
   "ocr-models": { title: "モデル", subtitle: "OCR認識モデルの管理" },
   experiments: { title: "実験管理", subtitle: "学習条件・結果・考察の一元管理と実験比較" },
   releases: { title: "リリース管理", subtitle: "モデルのライフサイクル管理・本番適用・配布" },
+  jobs: { title: "ジョブ管理", subtitle: "バックグラウンドジョブの一覧・進捗・キャンセル・再実行" },
   "cls-models": { title: "モデル", subtitle: "実験機能（分割学習）: モデル管理" },
   inference: { title: "推論", subtitle: "画像推論と精度確認" },
   "ocr-inference": { title: "推論", subtitle: "OCR認識モデルで推論" },
@@ -626,6 +628,11 @@ export default function App() {
   // リリース管理（Model Release Management）。状態・履歴はサーバー保存（releases.json）
   const [releases, setReleases] = useState({ production: "", statuses: {}, history: [] });
   const [releasesLoading, setReleasesLoading] = useState(false);
+  // ジョブ管理（Job Management）。一覧・状態はサーバー保存（data/jobs/jobs.json）・JOB-000001形式
+  const [jobs, setJobs] = useState([]);
+  const [jobsLoading, setJobsLoading] = useState(false);
+  const [jobsWorkerAlive, setJobsWorkerAlive] = useState(false);
+  const [jobsFilters, setJobsFilters] = useState({});
   const [presetName, setPresetName] = useState("");
   const [selectedPreset, setSelectedPreset] = useState("");
   const [rapidPreprocessEnabled, setRapidPreprocessEnabled] = useState(true);
@@ -2113,6 +2120,67 @@ export default function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeView, projectId]);
+
+  // ジョブ一覧の取得（ジョブ管理画面。フィルタはサーバー側で適用）
+  async function loadJobs(filters = jobsFilters) {
+    setJobsLoading(true);
+    try {
+      const query = new URLSearchParams();
+      if (filters.project) query.set("project_id", filters.project);
+      if (filters.jobType) query.set("job_type", filters.jobType);
+      if (filters.status) query.set("status", filters.status);
+      if (filters.requestedBy) query.set("requested_by", filters.requestedBy);
+      if (filters.dateFrom) query.set("date_from", filters.dateFrom);
+      if (filters.dateTo) query.set("date_to", filters.dateTo);
+      const data = await request(`/api/jobs?${query.toString()}`);
+      setJobs(Array.isArray(data?.items) ? data.items : []);
+      setJobsWorkerAlive(Boolean(data?.worker_alive));
+    } catch {
+      setJobs([]);
+    } finally {
+      setJobsLoading(false);
+    }
+  }
+
+  // ジョブ管理画面のポーリング（アクティブJobがある間は3秒、それ以外は10秒間隔）
+  useEffect(() => {
+    if (activeView !== "jobs") return undefined;
+    loadJobs(jobsFilters);
+    const hasActive = jobs.some((j) => ["queued", "running", "cancel_requested"].includes(j.status));
+    const timer = window.setInterval(() => loadJobs(jobsFilters), hasActive ? 3000 : 10000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeView, JSON.stringify(jobsFilters), jobs.some((j) => ["queued", "running", "cancel_requested"].includes(j.status))]);
+
+  // ジョブのキャンセル要求（running中は現在工程の安全な区切りで停止する）
+  async function cancelJob(jobId) {
+    try {
+      await request(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" });
+      notify("info", `${jobId} のキャンセルを要求しました`);
+    } catch (error) {
+      notify("error", `キャンセルに失敗しました: ${error.message}`);
+    }
+    loadJobs(jobsFilters);
+  }
+
+  // ジョブの再実行（同一入力条件で新規Job作成。retry_source_job_idが記録される）
+  async function retryJob(jobId) {
+    try {
+      const data = await request(`/api/jobs/${encodeURIComponent(jobId)}/retry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requested_by: "" }),
+      });
+      if (data?.deduplicated) {
+        notify("info", `同条件のアクティブJobが既に存在します: ${data?.job?.job_id}`);
+      } else {
+        notify("success", `再実行Jobを作成しました: ${data?.job?.job_id}`);
+      }
+    } catch (error) {
+      notify("error", `再実行に失敗しました: ${error.message}`);
+    }
+    loadJobs(jobsFilters);
+  }
 
   async function runPreprocess() {
     if (!projectId) {
@@ -3894,6 +3962,30 @@ export default function App() {
         onOpenModel={(name) => {
           setModelDetailRequest({ name, seq: Date.now() });
           setActiveView("ocr-models");
+        }}
+      />
+    );
+  }
+
+  if (activeView === "jobs") {
+    view = (
+      <JobsView
+        projects={projects}
+        jobs={jobs}
+        workerAlive={jobsWorkerAlive}
+        loading={jobsLoading}
+        filters={jobsFilters}
+        onFiltersChange={setJobsFilters}
+        onRefresh={() => loadJobs(jobsFilters)}
+        onCancel={cancelJob}
+        onRetry={retryJob}
+        onOpenModel={(name) => {
+          setModelDetailRequest({ name, seq: Date.now() });
+          setActiveView("ocr-models");
+        }}
+        onOpenExperiment={(experimentId) => {
+          setFocusExperimentId(experimentId);
+          setActiveView("experiments");
         }}
       />
     );

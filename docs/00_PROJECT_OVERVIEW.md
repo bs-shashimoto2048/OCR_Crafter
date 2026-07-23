@@ -34,6 +34,7 @@
 | リリース管理 | モデルのライフサイクル（Draft→Validated→Candidate→Production→Archived・Productionは1つだけ）、Release Note必須の昇格・バージョン採番・Release History・Rollback・本番比較・安全性警告、Model Card自動生成、Deployment Package（ZIP）Export |
 | 推論 | 単一推論・バッチ推論・YOLO検出+OCR複合推論。エンジン: custom / EasyOCR / PaddleOCR / Tesseract |
 | 修正 | OCR修正画面（キーボード中心）、修正ログの保存とデータセット再生成 |
+| ジョブ管理 | バックグラウンドジョブの統一管理（JOB-000001形式・全体一意、状態遷移検証、同時実行制御、進捗0-100%＋イベント履歴、キャンセル・再実行）。詳細は `docs/18_JOB_MANAGEMENT.md` |
 
 ## 画面構成（サイドバー・OCR開発フロー順）
 
@@ -42,6 +43,7 @@
 データ作成       … 画像指定・リサイズ / YOLO検出 / Bounding Box選択 / クロップ出力
                    / 画像 / 前処理設定 / ラベル編集 / 評価データ作成
 OCRモデル        … データ作成・学習 / モデル管理 / 実験管理 / リリース管理 / モデル評価 / 推論 / OCR修正 / バッチ推論
+運用             … ジョブ管理
 実験機能         … 分類学習 / 分類モデル管理 / 分類推論 / 分類評価
 ```
 

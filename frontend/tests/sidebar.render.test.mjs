@@ -31,9 +31,9 @@ function render(active = "dashboard") {
   return renderToString(React.createElement(Sidebar, { active, onChange: noop, onExitApp: noop }));
 }
 
-test("新しいカテゴリ順: プロジェクト→データ作成→OCRモデル→実験機能（実験機能は最下部）", () => {
+test("新しいカテゴリ順: プロジェクト→データ作成→OCRモデル→運用→実験機能（実験機能は最下部）", () => {
   const html = render();
-  const order = ["プロジェクト", "データ作成", "OCRモデル", "実験機能"].map((label) => html.indexOf(label));
+  const order = ["プロジェクト", "データ作成", "OCRモデル", ">運用<", "実験機能"].map((label) => html.indexOf(label));
   assert.ok(order.every((idx) => idx >= 0), "カテゴリ名が見つからない");
   for (let i = 1; i < order.length; i += 1) {
     assert.ok(order[i - 1] < order[i], `カテゴリ順が不正（${i}番目）`);
@@ -87,8 +87,18 @@ test("初期展開状態: プロジェクト/データ作成/OCRモデル=展開
   for (const label of ["ダッシュボード", "画像指定・リサイズ", "モデル管理"]) {
     assert.ok(html.includes(label), `展開済みのはずの「${label}」が表示されていない`);
   }
-  // 実験機能の項目は初期表示されない（折りたたみ）
+  // 実験機能・運用の項目は初期表示されない（折りたたみ）
   assert.ok(!html.includes("分類モデル管理"), "実験機能が初期展開されている");
+  assert.ok(!html.includes("ジョブ管理"), "運用が初期展開されている");
+});
+
+test("運用セクション: OCRモデルと実験機能の間・ジョブ管理を含む", () => {
+  const ids = SIDEBAR_SECTIONS.map((s) => s.id);
+  assert.ok(ids.indexOf("ocr-model") < ids.indexOf("operations"));
+  assert.ok(ids.indexOf("operations") < ids.indexOf("experimental"));
+  const operations = SIDEBAR_SECTIONS.find((s) => s.id === "operations");
+  assert.deepEqual(operations.items.map((i) => i.id), ["jobs"]);
+  assert.equal(operations.defaultOpen, false);
 });
 
 test("選択状態: 選択中ページの項目と所属セクションヘッダーがアクティブ表示", () => {

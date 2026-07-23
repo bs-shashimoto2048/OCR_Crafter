@@ -251,6 +251,19 @@ class ExperimentUpdateRequest(BaseModel):
     experiment_name: Optional[str] = Field(default=None, description="実験名")
 
 
+class JobCreateRequest(BaseModel):
+    """バックグラウンドジョブの作成（既存処理をJobとして実行する）。"""
+
+    project_id: Optional[str] = Field(default="default")
+    job_type: str = Field(..., description="preprocess / dataset_creation / training / evaluation / benchmark / deployment_export")
+    params: dict[str, Any] = Field(default_factory=dict, description="ハンドラへ渡す入力条件（種別ごと）")
+    requested_by: str = Field(default="", description="実行者（operator名）")
+
+
+class JobRetryRequest(BaseModel):
+    requested_by: str = Field(default="", description="再実行者（未指定=元Jobの実行者）")
+
+
 class ReleaseStatusRequest(BaseModel):
     """モデルステータスの手動変更（Draft / Validated / Candidate / Archived）。"""
 

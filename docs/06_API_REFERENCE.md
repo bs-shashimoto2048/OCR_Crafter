@@ -95,6 +95,19 @@
 | PATCH `/api/experiments/{experiment_id}/analysis` | `ExperimentAnalysisToggleRequest`（`enabled`） | `{item}` | **分析対象ON/OFF**（失敗・途中停止・デバッグ実験を推薦・相関から除外）。バックフィル実験は既定で分析対象外（ONへ戻せる） |
 | POST `/api/experiments/attach-evaluation` | `ExperimentEvaluationAttachRequest`（`model`, `evaluation{cer, char_accuracy, accuracy_percent, improved, regressed, evaluated_at, dataset}`） | `{attached, item}` | 評価実行結果の要約をモデル名から該当実験へ保存（同一モデルが複数実験にある場合は最新の実験）。該当なしは `attached: false`（エラーにしない）。モデル評価実行時にフロントが自動送信する |
 
+## ジョブ管理（Job Management）
+
+詳細仕様: `docs/18_JOB_MANAGEMENT.md`。既存の同期API（`/preprocess/run` 等）は維持し、Job APIは同じ処理を非同期実行する追加経路。
+
+| Method / Path | リクエスト | レスポンス主要キー | 概要 |
+|---|---|---|---|
+| POST `/api/jobs` | `JobCreateRequest`（`project_id?`, `job_type`, `params?`, `requested_by?`） | `{project_id, job, deduplicated}` | Job作成（queued登録→Worker自動起動）。job_typeは preprocess / dataset_creation / training / evaluation / benchmark / deployment_export。**同時実行制御に該当する重複要求は既存アクティブJobを `deduplicated: true` で返す**（409は返さない・統一仕様）。不明なjob_typeは400 |
+| GET `/api/jobs` | Query: `project_id?`, `job_type?`, `status?`, `requested_by?`（部分一致）, `date_from?`, `date_to?`（YYYY-MM-DD）, `limit?`（既定200） | `{items[], worker_alive}` | Job一覧（新しい順）。Job IDは **JOB-000001形式・システム全体で一意・再利用しない**。保存先 `data/jobs/jobs.json` |
+| GET `/api/jobs/{job_id}` | - | `{job}` | Job詳細（params / result_summary / error_summary=要約のみ・スタックトレースは内部ログ `data/jobs/logs/` へ）。存在しないIDは404 |
+| POST `/api/jobs/{job_id}/cancel` | - | `{job}` | キャンセル要求。queued=即時cancelled / running=cancel_requestedへ遷移し**ハンドラの安全なキャンセルポイントで停止**。終端状態は400 |
+| POST `/api/jobs/{job_id}/retry` | `JobRetryRequest`（`requested_by?`） | `{job, deduplicated}` | 同一入力条件で新規Job作成（`retry_source_job_id` に元IDを保存）。アクティブJobの再実行は400 |
+| GET `/api/jobs/{job_id}/events` | - | `{events[]}` | 進捗イベント履歴（`ts` + `type: status|progress`）。現在はポーリング取得・**将来SSEでも同一形式を使用** |
+
 ## リリース管理（Model Release Management）
 
 | Method / Path | リクエスト | レスポンス主要キー | 概要 |
