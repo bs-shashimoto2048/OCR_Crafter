@@ -37,6 +37,34 @@ flowchart LR
 
 - 画面遷移はルーティングなし（`App.jsx` の `activeView` state）。サイドバー・ワークフロー工程ナビ・画面内ボタンで切替。
 
+## 初回セットアップウィザード（SetupWizard・モーダル）
+
+**目的**
+初めて使うユーザーが5分以内に利用開始できるよう、必要最低限の設定・環境確認を順番に案内する。
+
+**起動条件**（`lib/setupWizard.js` の `shouldShowWizard`）
+- 初回起動（localStorage `ocr_setup_wizard_v1` に完了記録がない）
+- 保存値が壊れている（JSON解釈不能）
+- 完了済みでも `wizardVersion` が現行（`SETUP_WIZARD_VERSION=1`）より古い（将来のウィザード更新時に再表示）
+- システム状態画面の「**セットアップを再実行**」ボタン
+
+通常起動（現行バージョンで完了済み）では表示しない。
+
+**構成（7ステップ・ステップバー表示）**
+1. **ようこそ**: 「OCR Crafterへようこそ」「数分で完了」「必要な設定だけ」
+2. **保存先**: デフォルト保存先（/health/detailsのprojects_dir）表示・Browseボタン（/dialogs/select-directory）・書き込み確認（/health/ready）・エラー表示・変更方法（settings.yaml paths.data_projects）の案内
+3. **OCRエンジン**: Tesseract / PaddleOCR を「✓ 利用可能 / 未インストール」で表示（/health/details）。未導入でもスキップ可能
+4. **GPU確認**: GPU名・VRAM・CUDA利用可否（/api/system/check）＋「✓ CPUでも実行できます」。GPUなしでも続行可能
+5. **Python環境**: Backend稼働・settings.yaml・必要ライブラリ（PaddleOCR等）の確認。問題は「運用 > システム状態」への誘導つきで表示
+6. **バックアップ**: 保存先 data/backups/ と推奨頻度（**metadata=毎日 / full=毎週**）の説明のみ
+7. **完了**: 「セットアップ完了」＋ショートカット3つ（新規プロジェクト/プロジェクトを開く=ダッシュボードへ、サンプルを見る=最初の工程「画像指定・リサイズ」へ）＋完了ボタン
+
+**保存内容**（localStorage `ocr_setup_wizard_v1`）: `{completed, wizardVersion, projectsDir（Browseで選んだ候補のメモ）, completedAt}`
+
+**操作**
+- 戻る / 次へ / 完了（最終ステップのみ）
+- **Escでは終了しない**（keydown吸収）。終了は右上×のみ・確認ダイアログつき（中断時は完了フラグを立てないため次回起動時に再表示）
+
 ## 共通UIパターン（v1.0.0 UIブラッシュアップで統一）
 
 - **Empty State**（`components/EmptyState.jsx`）: データなし表示は「アイコン＋タイトル＋説明＋次に行う操作（＋遷移ボタン）」の共通形式。適用: ジョブ管理（→Benchmarkを開く）/ Benchmark履歴 / 監査ログ / リリース管理（モデルなし・履歴なし）/ モデル管理 / 実験管理 / バックアップ一覧

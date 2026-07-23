@@ -32,7 +32,7 @@ const CHECK_LABELS = {
   projects_dir: "モデル/プロジェクトDir",
 };
 
-export default function OperationsView({ projectId, authContext = null, onOpenJobs, onOpenBenchmark, onOpenReleases }) {
+export default function OperationsView({ projectId, authContext = null, onOpenJobs, onOpenBenchmark, onOpenReleases, onRerunSetup }) {
   const [dashboard, setDashboard] = useState(null);
   const [health, setHealth] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -164,9 +164,19 @@ export default function OperationsView({ projectId, authContext = null, onOpenJo
         title="運用ダッシュボード"
         subtitle={`プロジェクト: ${projectId || "-"} / 更新: ${String(dashboard?.generated_at || "").slice(0, 19).replace("T", " ") || "-"}`}
         actions={
-          <Button size="sm" variant="secondary" onClick={load} disabled={loading}>
-            {loading ? "更新中..." : "更新"}
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onRerunSetup}
+              title="初回セットアップウィザードを再実行します（保存先・エンジン・GPU・環境の確認）"
+            >
+              セットアップを再実行
+            </Button>
+            <Button size="sm" variant="secondary" onClick={load} disabled={loading}>
+              {loading ? "更新中..." : "更新"}
+            </Button>
+          </div>
         }
       >
         <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7">

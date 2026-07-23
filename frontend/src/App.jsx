@@ -17,6 +17,8 @@ import JobsView from "./views/JobsView";
 import BenchmarkView from "./views/BenchmarkView";
 import AuditView from "./views/AuditView";
 import OperationsView from "./views/OperationsView";
+import SetupWizard from "./components/SetupWizard";
+import { buildCompletedState, readSetupState, shouldShowWizard, writeSetupState } from "./lib/setupWizard";
 import PreprocessView from "./views/PreprocessView";
 import EvaluationView from "./views/EvaluationView";
 import OcrEvaluationView from "./views/OcrEvaluationView";
@@ -645,6 +647,18 @@ export default function App() {
   const [benchmarksLoading, setBenchmarksLoading] = useState(false);
   // ユーザー識別（認証未設定モードの明示用。監査ログ・システム状態画面で表示）
   const [authContext, setAuthContext] = useState(null);
+  // 初回セットアップウィザード（初回起動・設定なし・旧バージョン完了時のみ表示。
+  // ×で中断した場合は完了フラグを立てないため次回起動時に再表示される）
+  const [showSetupWizard, setShowSetupWizard] = useState(() => shouldShowWizard(readSetupState()));
+
+  // ウィザード完了: 保存先メモ・完了フラグ・wizardVersion を保存し、選択したショートカットへ遷移
+  function completeSetupWizard({ projectsDir = "", navigateTo = "" } = {}) {
+    writeSetupState(buildCompletedState(readSetupState(), { projectsDir }));
+    setShowSetupWizard(false);
+    if (navigateTo) {
+      setActiveView(navigateTo);
+    }
+  }
   const [presetName, setPresetName] = useState("");
   const [selectedPreset, setSelectedPreset] = useState("");
   const [rapidPreprocessEnabled, setRapidPreprocessEnabled] = useState(true);
@@ -4123,6 +4137,7 @@ export default function App() {
         onOpenJobs={() => setActiveView("jobs")}
         onOpenBenchmark={() => setActiveView("benchmark")}
         onOpenReleases={() => setActiveView("releases")}
+        onRerunSetup={() => setShowSetupWizard(true)}
       />
     );
   }
@@ -4426,6 +4441,11 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* 初回セットアップウィザード（初回起動・再実行時のみ。Escでは閉じない・×は確認つき） */}
+      {showSetupWizard ? (
+        <SetupWizard onComplete={completeSetupWizard} onCancel={() => setShowSetupWizard(false)} />
+      ) : null}
     </div>
   );
 }
