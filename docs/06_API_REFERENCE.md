@@ -95,6 +95,21 @@
 | PATCH `/api/experiments/{experiment_id}/analysis` | `ExperimentAnalysisToggleRequest`（`enabled`） | `{item}` | **分析対象ON/OFF**（失敗・途中停止・デバッグ実験を推薦・相関から除外）。バックフィル実験は既定で分析対象外（ONへ戻せる） |
 | POST `/api/experiments/attach-evaluation` | `ExperimentEvaluationAttachRequest`（`model`, `evaluation{cer, char_accuracy, accuracy_percent, improved, regressed, evaluated_at, dataset}`） | `{attached, item}` | 評価実行結果の要約をモデル名から該当実験へ保存（同一モデルが複数実験にある場合は最新の実験）。該当なしは `attached: false`（エラーにしない）。モデル評価実行時にフロントが自動送信する |
 
+## 監査・運用（Audit / Operations）
+
+詳細仕様: `docs/21_OPERATIONS_GUIDE.md` / `docs/22_SECURITY_AND_AUDIT.md`。
+
+| Method / Path | リクエスト | レスポンス主要キー | 概要 |
+|---|---|---|---|
+| GET `/health` | - | `{status}` | 死活監視（従来どおり） |
+| GET `/health/ready` | - | `{ready, checks}` | 受付可否（データDir書き込み・設定ファイル） |
+| GET `/health/details` | - | `{status, problems[], checks{}}` | 管理者向け詳細（Backend/データDir/設定/Tesseract/PaddleOCR/GPU/JobWorker/ディスク/プロジェクトDir。取得不能=null） |
+| GET `/api/auth/context` | ヘッダ: `X-Operator?`, `X-Role?` | `{operator, role, auth_configured, auth_mode}` | ユーザー識別。認証未設定環境は **Admin互換＋「認証未設定モード」** を返す |
+| GET `/api/audit` | Query: `project_id?`, `action?`, `user?`, `target_id?`, `date_from?`, `date_to?`, `limit?` | `{items[], actions[]}` | **監査ログ一覧**（新しい順・追記型のため削除/編集APIなし）。対象13操作、**パスワード・トークン・APIキー・画像バイナリは保存されない** |
+| GET `/api/operations/dashboard` | Query: `project_id?` | `{jobs, production, unevaluated_candidates[], latest_benchmark, data_usage, backup}` | 運用ダッシュボード（実行中/待機中/失敗Job・Production＋Gate状態・未評価Candidate・最近のBenchmark・データ使用量・バックアップ状態） |
+
+変更系エンドポイント13種（projects作成/削除・preprocess/run・dataset/create・tesseract学習開始・モデル削除・releases status/promote/rollback/policy・benchmarks実行・jobs cancel/retry）は `X-Role` 明示時にロール階層（viewer<operator<approver<admin）を強制し（不足403）、成功時に監査ログへ記録する。
+
 ## ジョブ管理（Job Management）
 
 詳細仕様: `docs/18_JOB_MANAGEMENT.md`。既存の同期API（`/preprocess/run` 等）は維持し、Job APIは同じ処理を非同期実行する追加経路。

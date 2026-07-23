@@ -950,6 +950,97 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/health/ready")
+def health_ready() -> dict[str, Any]:
+    """受付可否（データDir書き込み・設定ファイル）。"""
+    from .services.operations import check_ready
+
+    return check_ready()
+
+
+@app.get("/health/details")
+def health_details() -> dict[str, Any]:
+    """管理者向けの詳細ヘルスチェック（Backend/データDir/Tesseract/PaddleOCR/GPU/JobWorker/ディスク/設定/モデルDir）。"""
+    from .services.operations import build_health_details
+
+    return build_health_details()
+
+
+# ---------- 監査ログ・ユーザー識別（docs/22_SECURITY_AND_AUDIT.md） ----------
+
+
+def _user_ctx(request: Request):
+    from .services.audit_log import resolve_user_context
+
+    return resolve_user_context(request.headers)
+
+
+def _enforce_role(request: Request, action: str):
+    """操作に必要なロールの検証（X-Role明示時のみ強制。未指定=認証未設定モード=Admin互換）。"""
+    from .services.audit_log import require_role
+
+    ctx = _user_ctx(request)
+    try:
+        require_role(ctx, action)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e
+    return ctx
+
+
+def _record_audit_safe(request: Request, action: str, **kwargs: Any) -> None:
+    """監査記録（記録の失敗で本処理を失敗させない）。"""
+    from .services.audit_log import record_audit
+
+    try:
+        record_audit(
+            action,
+            user=_user_ctx(request),
+            client={
+                "ip": request.client.host if request.client else "",
+                "user_agent": str(request.headers.get("user-agent") or "")[:200],
+            },
+            **kwargs,
+        )
+    except Exception:  # noqa: BLE001
+        logging.getLogger(__name__).exception("監査ログの記録に失敗しました: %s", action)
+
+
+@app.get("/api/auth/context")
+def api_auth_context(request: Request) -> dict[str, Any]:
+    """現在のユーザー識別（X-Operator / X-Role）。認証未設定環境はAdmin互換＋その旨を返す。"""
+    return _user_ctx(request).to_dict()
+
+
+@app.get("/api/audit")
+def api_audit(
+    project_id: str = Query(default=""),
+    action: str = Query(default=""),
+    user: str = Query(default=""),
+    target_id: str = Query(default=""),
+    date_from: str = Query(default=""),
+    date_to: str = Query(default=""),
+    limit: int = Query(default=200, ge=1, le=1000),
+) -> dict[str, Any]:
+    """監査ログ一覧（新しい順・フィルタ）。追記型のため削除・編集APIは提供しない。"""
+    from .services.audit_log import AUDIT_ACTIONS, read_audit
+
+    return {
+        "items": read_audit(
+            project_id=project_id, action=action, user=user, target_id=target_id,
+            date_from=date_from, date_to=date_to, limit=limit,
+        ),
+        "actions": AUDIT_ACTIONS,
+    }
+
+
+@app.get("/api/operations/dashboard")
+def api_operations_dashboard(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+    """運用ダッシュボード（Job状況・Production＋Gate・未評価Candidate・Benchmark・データ使用量・バックアップ）。"""
+    from .services.operations import build_dashboard
+
+    return build_dashboard(_resolve_project_id(project_id))
+
+
 @app.get("/api/system/check")
 def system_check() -> dict[str, Any]:
     return _system_check_snapshot()
@@ -971,15 +1062,18 @@ def projects() -> dict[str, Any]:
 
 
 @app.post("/projects")
-def create_project(req: ProjectCreateRequest) -> dict[str, str]:
+def create_project(req: ProjectCreateRequest, request: Request) -> dict[str, str]:
+    _enforce_role(request, "project_create")
     project_id = _resolve_project_id(req.project_id)
     ensure_project_directories(project_id)
     ensure_master_csv(project_id)
+    _record_audit_safe(request, "project_create", project_id=project_id, target_type="project", target_id=project_id)
     return {"project_id": project_id}
 
 
 @app.delete("/projects/{project_id}")
-def delete_project(project_id: str) -> dict[str, Any]:
+def delete_project(project_id: str, request: Request) -> dict[str, Any]:
+    _enforce_role(request, "project_delete")
     resolved = _resolve_project_id(project_id)
     try:
         deleted_project = delete_project_directory(resolved)
@@ -989,6 +1083,10 @@ def delete_project(project_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     deleted_jobs = delete_training_jobs_by_project(resolved)
+    _record_audit_safe(
+        request, "project_delete", project_id=resolved, target_type="project", target_id=resolved,
+        after={"deleted_jobs": deleted_jobs},
+    )
     return {"project_id": deleted_project, "deleted_jobs": deleted_jobs}
 
 
@@ -1267,9 +1365,16 @@ def image_interim_file(
 
 
 @app.post("/preprocess/run")
-def preprocess(req: PreprocessRequest) -> dict[str, Any]:
+def preprocess(req: PreprocessRequest, request: Request) -> dict[str, Any]:
+    _enforce_role(request, "preprocess_run")
     project_id = _resolve_project_id(req.project_id)
-    return run_preprocess(project_id=project_id, overrides=req.overrides)
+    result = run_preprocess(project_id=project_id, overrides=req.overrides)
+    _record_audit_safe(
+        request, "preprocess_run", project_id=project_id, target_type="preprocess",
+        target_id=str(result.get("preprocess_snapshot_id") or ""),
+        after={"processed_count": result.get("processed_count"), "preprocess_hash": result.get("preprocess_hash")},
+    )
+    return result
 
 
 @app.get("/preprocess/preview")
@@ -2118,13 +2223,14 @@ def _split_ratio_error_detail(train: float, val: float, test: float) -> Optional
 
 
 @app.post("/api/ocr/dataset/create")
-def api_ocr_dataset_create(req: OcrDatasetCreateRequest) -> dict[str, Any]:
+def api_ocr_dataset_create(req: OcrDatasetCreateRequest, request: Request) -> dict[str, Any]:
+    _enforce_role(request, "dataset_create")
     resolved = _resolve_project_id(req.project_id)
     ratio_error = _split_ratio_error_detail(req.train_ratio, req.val_ratio, req.test_ratio)
     if ratio_error is not None:
         raise HTTPException(status_code=400, detail=ratio_error)
     try:
-        return create_ocr_dataset(
+        result = create_ocr_dataset(
             project_id=resolved,
             image_types=req.image_types,
             charset=req.charset,
@@ -2145,6 +2251,12 @@ def api_ocr_dataset_create(req: OcrDatasetCreateRequest) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    _record_audit_safe(
+        request, "dataset_create", project_id=resolved, target_type="dataset",
+        target_id=str(result.get("dataset_root") or ""),
+        after={"counts": result.get("counts"), "charset": req.charset, "use_augmentation": req.use_augmentation},
+    )
+    return result
 
 
 @app.post("/api/ocr/dataset/split-preview")
@@ -2338,7 +2450,8 @@ def api_ocr_train_start(req: OcrTrainStartRequest, background_tasks: BackgroundT
 
 
 @app.post("/api/tesseract/train/start")
-def api_tesseract_train_start(req: TesseractTrainStartRequest) -> dict[str, Any]:
+def api_tesseract_train_start(req: TesseractTrainStartRequest, request: Request) -> dict[str, Any]:
+    _enforce_role(request, "training_start")
     project_id = _resolve_project_id(req.project_id)
     _reject_if_training_active(project_id, "ocr")
     dataset_dir = str(req.dataset_dir or "").strip()
@@ -2404,6 +2517,11 @@ def api_tesseract_train_start(req: TesseractTrainStartRequest) -> dict[str, Any]
             "worker_pid": worker_pid,
             "updated_at": _now_iso(),
         }
+    )
+    _record_audit_safe(
+        request, "training_start", project_id=project_id, target_type="training_job", target_id=job_id,
+        job_id=job_id,
+        after={"engine": "tesseract", "dataset_dir": dataset_dir, "max_iterations": int(req.max_iterations), "charset": charset},
     )
     return {"job_id": job_id, "project_id": project_id, "status": "queued", "training_family": "ocr", "engine": "tesseract"}
 
@@ -2600,27 +2718,38 @@ def api_job_detail(job_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/jobs/{job_id}/cancel")
-def api_job_cancel(job_id: str) -> dict[str, Any]:
+def api_job_cancel(job_id: str, request: Request) -> dict[str, Any]:
     """キャンセル要求（running→cancel_requested→安全な区間でcancelled。即時cancelledにはしない）。"""
+    _enforce_role(request, "job_cancel")
     try:
-        return {"job": get_job_service().request_cancel(job_id)}
+        job = get_job_service().request_cancel(job_id)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    _record_audit_safe(
+        request, "job_cancel", project_id=str(job.get("project_id") or ""), target_type="job", target_id=job_id,
+        job_id=job_id, after={"status": job.get("status")},
+    )
+    return {"job": job}
 
 
 @app.post("/api/jobs/{job_id}/retry")
-def api_job_retry(job_id: str, req: JobRetryRequest) -> dict[str, Any]:
+def api_job_retry(job_id: str, req: JobRetryRequest, request: Request) -> dict[str, Any]:
     """同一入力条件での再実行（retry_source_job_idを保存）。"""
+    _enforce_role(request, "job_retry")
     try:
         job, deduplicated = get_job_service().retry_job(job_id, requested_by=req.requested_by)
         ensure_worker_started()
-        return {"job": job, "deduplicated": deduplicated}
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    _record_audit_safe(
+        request, "job_retry", project_id=str(job.get("project_id") or ""), target_type="job", target_id=job["job_id"],
+        job_id=job["job_id"], before={"retry_source_job_id": job_id}, after={"deduplicated": deduplicated},
+    )
+    return {"job": job, "deduplicated": deduplicated}
 
 
 @app.get("/api/jobs/{job_id}/events")
@@ -2637,39 +2766,52 @@ def api_releases(project_id: Optional[str] = Query(default="default")) -> dict[s
 
 
 @app.post("/api/releases/status")
-def api_release_status(req: ReleaseStatusRequest) -> dict[str, Any]:
+def api_release_status(req: ReleaseStatusRequest, request: Request) -> dict[str, Any]:
     """モデルステータスの手動変更（Draft/Validated/Candidate/Archived。Candidate初回は0.x採番）。"""
+    _enforce_role(request, "release_status_change")
     resolved = _resolve_project_id(req.project_id)
+    before = (list_releases(resolved).get("statuses") or {}).get(Path(str(req.model)).name)
     try:
-        return {"project_id": resolved, "item": set_model_status(resolved, req.model, req.status)}
+        item = set_model_status(resolved, req.model, req.status)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    _record_audit_safe(
+        request, "release_status_change", project_id=resolved, target_type="model", target_id=item["model"],
+        before={"status": (before or {}).get("status"), "version": (before or {}).get("version")},
+        after={"status": item.get("status"), "version": item.get("version")},
+    )
+    return {"project_id": resolved, "item": item}
 
 
 @app.post("/api/releases/promote")
-def api_release_promote(req: ReleasePromoteRequest) -> dict[str, Any]:
+def api_release_promote(req: ReleasePromoteRequest, request: Request) -> dict[str, Any]:
     """Productionへ昇格（Release Note必須）。旧Productionは自動Archived・履歴へ追記。
 
     Release Gate判定がFAILのモデルは例外承認（override_reason + approved_by）なしでは昇格できない。
     """
+    _enforce_role(request, "release_promote")
     resolved = _resolve_project_id(req.project_id)
     try:
-        return {
-            "project_id": resolved,
-            **promote_model(
-                resolved,
-                req.model,
-                req.note,
-                author=req.author,
-                version=req.version,
-                override_reason=req.override_reason,
-                approved_by=req.approved_by,
-            ),
-        }
+        result = promote_model(
+            resolved,
+            req.model,
+            req.note,
+            author=req.author,
+            version=req.version,
+            override_reason=req.override_reason,
+            approved_by=req.approved_by,
+        )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    _record_audit_safe(
+        request, "release_promote", project_id=resolved, target_type="model", target_id=result["model"],
+        before={"production": result.get("previous_production")},
+        after={"production": result["model"], "version": result["version"], "release_id": result["entry"].get("release_id"), "override": result["entry"].get("override")},
+        reason=req.note,
+    )
+    return {"project_id": resolved, **result}
 
 
 @app.get("/api/releases/policy")
@@ -2683,15 +2825,23 @@ def api_release_policy_get(project_id: Optional[str] = Query(default="default"))
 
 
 @app.put("/api/releases/policy")
-def api_release_policy_put(req: ReleasePolicyRequest) -> dict[str, Any]:
+def api_release_policy_put(req: ReleasePolicyRequest, request: Request) -> dict[str, Any]:
     """Release Policyの保存（正規化して releases.json の policy へ保存）。"""
-    from .services.release_manager import set_release_policy
+    from .services.release_gate import normalize_policy
+    from .services.release_manager import get_release_policy, set_release_policy
 
+    _enforce_role(request, "release_policy_update")
     resolved = _resolve_project_id(req.project_id)
+    before = normalize_policy(get_release_policy(resolved))
     try:
-        return {"project_id": resolved, "policy": set_release_policy(resolved, req.policy or {})}
+        policy = set_release_policy(resolved, req.policy or {})
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    _record_audit_safe(
+        request, "release_policy_update", project_id=resolved, target_type="release_policy", target_id=resolved,
+        before=before, after=policy,
+    )
+    return {"project_id": resolved, "policy": policy}
 
 
 @app.get("/api/releases/gate")
@@ -2706,15 +2856,23 @@ def api_release_gate(
 
 
 @app.post("/api/releases/rollback")
-def api_release_rollback(req: ReleaseRollbackRequest) -> dict[str, Any]:
+def api_release_rollback(req: ReleaseRollbackRequest, request: Request) -> dict[str, Any]:
     """Productionを過去のリリースVersionへ戻す（Version維持・新Release ID・rollback=true）。"""
+    _enforce_role(request, "release_rollback")
     resolved = _resolve_project_id(req.project_id)
     try:
-        return {"project_id": resolved, **rollback_release(resolved, req.version, author=req.author, note=req.note)}
+        result = rollback_release(resolved, req.version, author=req.author, note=req.note)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    _record_audit_safe(
+        request, "release_rollback", project_id=resolved, target_type="model", target_id=result["model"],
+        before={"production": result["entry"].get("previous_production")},
+        after={"production": result["model"], "version": result["version"], "release_id": result["entry"].get("release_id")},
+        reason=req.note,
+    )
+    return {"project_id": resolved, **result}
 
 
 @app.get("/api/releases/model_card")
@@ -2763,10 +2921,11 @@ def api_benchmarks(project_id: Optional[str] = Query(default="default")) -> dict
 
 
 @app.post("/api/benchmarks")
-def api_benchmark_create(req: BenchmarkCreateRequest) -> dict[str, Any]:
+def api_benchmark_create(req: BenchmarkCreateRequest, request: Request) -> dict[str, Any]:
     """Benchmark実行（Job Management経由）。条件を検証してから job_type=benchmark のJobを作成する。"""
     from .services.benchmark import normalize_engine_spec
 
+    _enforce_role(request, "benchmark_run")
     resolved = _resolve_project_id(req.project_id)
     try:
         engines = [normalize_engine_spec(spec) for spec in (req.engines or [])]
@@ -2789,6 +2948,11 @@ def api_benchmark_create(req: BenchmarkCreateRequest) -> dict[str, Any]:
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     ensure_worker_started()
+    _record_audit_safe(
+        request, "benchmark_run", project_id=resolved, target_type="benchmark_job", target_id=job["job_id"],
+        job_id=job["job_id"],
+        after={"name": str(req.name or ""), "engines": engines, "deduplicated": deduplicated},
+    )
     return {"project_id": resolved, "job": job, "deduplicated": deduplicated}
 
 
@@ -2935,15 +3099,22 @@ def download_model_endpoint(model_name: str, project_id: Optional[str] = Query(d
 
 
 @app.delete("/models/{model_name}")
-def delete_model_endpoint(model_name: str, project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+def delete_model_endpoint(
+    model_name: str, request: Request, project_id: Optional[str] = Query(default="default")
+) -> dict[str, Any]:
+    _enforce_role(request, "model_delete")
     resolved = _resolve_project_id(project_id)
     try:
         deleted = delete_model(project_id=resolved, model_name=model_name)
-        return {"project_id": resolved, "deleted": deleted}
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    _record_audit_safe(
+        request, "model_delete", project_id=resolved, target_type="model", target_id=model_name,
+        before={"model": model_name}, after={"deleted": deleted},
+    )
+    return {"project_id": resolved, "deleted": deleted}
 
 
 @app.get("/models/latest")

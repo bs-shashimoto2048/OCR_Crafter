@@ -2,10 +2,18 @@
 
 import pytest
 from fastapi import BackgroundTasks, HTTPException
+from starlette.requests import Request as StarletteRequest
 
 import src.app.main as main_module
 from src.app import db as db_module
 from src.app.schemas import OcrTrainStartRequest, TesseractTrainStartRequest
+
+
+def _dummy_request():
+    """監査ログ・ロール検証用のダミーRequest（ヘッダなし=認証未設定モード）。"""
+    return StarletteRequest(
+        {"type": "http", "method": "POST", "path": "/", "headers": [], "query_string": b"", "client": ("127.0.0.1", 0)}
+    )
 
 
 def _running_job(**overrides):
@@ -49,7 +57,7 @@ def test_tesseract_train_start_returns_409(temp_projects, monkeypatch):
     monkeypatch.setattr(main_module, "fetch_active_training_job", lambda pid, fam=None: _running_job())
     req = TesseractTrainStartRequest(project_id="p1", dataset_dir="x")
     with pytest.raises(HTTPException) as exc:
-        main_module.api_tesseract_train_start(req)
+        main_module.api_tesseract_train_start(req, _dummy_request())
     assert exc.value.status_code == 409
 
 

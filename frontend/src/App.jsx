@@ -15,6 +15,8 @@ import ExperimentsView from "./views/ExperimentsView";
 import ReleasesView from "./views/ReleasesView";
 import JobsView from "./views/JobsView";
 import BenchmarkView from "./views/BenchmarkView";
+import AuditView from "./views/AuditView";
+import OperationsView from "./views/OperationsView";
 import PreprocessView from "./views/PreprocessView";
 import EvaluationView from "./views/EvaluationView";
 import OcrEvaluationView from "./views/OcrEvaluationView";
@@ -65,6 +67,8 @@ const viewMeta = {
   releases: { title: "リリース管理", subtitle: "モデルのライフサイクル管理・本番適用・配布" },
   jobs: { title: "ジョブ管理", subtitle: "バックグラウンドジョブの一覧・進捗・キャンセル・再実行" },
   benchmark: { title: "Benchmark", subtitle: "複数OCRエンジンの公平比較（精度・速度・安定性）" },
+  audit: { title: "監査ログ", subtitle: "重要操作の追記型記録（削除不可）とBefore/After差分" },
+  operations: { title: "システム状態", subtitle: "運用ダッシュボードとヘルスチェック" },
   "cls-models": { title: "モデル", subtitle: "実験機能（分割学習）: モデル管理" },
   inference: { title: "推論", subtitle: "画像推論と精度確認" },
   "ocr-inference": { title: "推論", subtitle: "OCR認識モデルで推論" },
@@ -639,6 +643,8 @@ export default function App() {
   const [benchmarks, setBenchmarks] = useState({ items: [], balance_weights: { accuracy: 0.7, speed: 0.2, stability: 0.1 } });
   const [benchmarkEngines, setBenchmarkEngines] = useState([]);
   const [benchmarksLoading, setBenchmarksLoading] = useState(false);
+  // ユーザー識別（認証未設定モードの明示用。監査ログ・システム状態画面で表示）
+  const [authContext, setAuthContext] = useState(null);
   const [presetName, setPresetName] = useState("");
   const [selectedPreset, setSelectedPreset] = useState("");
   const [rapidPreprocessEnabled, setRapidPreprocessEnabled] = useState(true);
@@ -2185,6 +2191,15 @@ export default function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeView, projectId]);
+
+  // ユーザー識別の取得（監査ログ・システム状態画面の認証未設定モードバナー用）
+  useEffect(() => {
+    if (!["audit", "operations"].includes(activeView) || authContext) return;
+    request("/api/auth/context")
+      .then((data) => setAuthContext(data || null))
+      .catch(() => setAuthContext(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeView]);
 
   // Benchmark実行（条件検証→job_type=benchmarkのJob作成。結果はジョブ管理で監視）
   async function runBenchmark(payload) {
@@ -4083,6 +4098,22 @@ export default function App() {
         onRun={runBenchmark}
         onUpdateWeights={updateBenchmarkWeights}
         onOpenJobs={() => setActiveView("jobs")}
+      />
+    );
+  }
+
+  if (activeView === "audit") {
+    view = <AuditView projects={projects} authContext={authContext} />;
+  }
+
+  if (activeView === "operations") {
+    view = (
+      <OperationsView
+        projectId={projectId}
+        authContext={authContext}
+        onOpenJobs={() => setActiveView("jobs")}
+        onOpenBenchmark={() => setActiveView("benchmark")}
+        onOpenReleases={() => setActiveView("releases")}
       />
     );
   }
