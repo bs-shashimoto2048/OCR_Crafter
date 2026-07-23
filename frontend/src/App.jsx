@@ -19,6 +19,8 @@ import AuditView from "./views/AuditView";
 import OperationsView from "./views/OperationsView";
 import SetupWizard from "./components/SetupWizard";
 import { buildCompletedState, readSetupState, shouldShowWizard, writeSetupState } from "./lib/setupWizard";
+import ProjectCreateModal from "./components/ProjectCreateModal";
+import { applyTemplatePreprocess, readTemplateRecords, recordProjectTemplate } from "./config/projectTemplates";
 import PreprocessView from "./views/PreprocessView";
 import EvaluationView from "./views/EvaluationView";
 import OcrEvaluationView from "./views/OcrEvaluationView";
@@ -400,7 +402,6 @@ export default function App() {
   projectIdRef.current = projectId;
   // 現在の images 一覧がどのプロジェクトのものかを記録（切替直後の不整合描画防止）
   const [imageListProjectId, setImageListProjectId] = useState("");
-  const [newProjectId, setNewProjectId] = useState("");
 
   const [sourceDir, setSourceDir] = useState("");
   const [images, setImages] = useState([]);
@@ -650,13 +651,20 @@ export default function App() {
   // 初回セットアップウィザード（初回起動・設定なし・旧バージョン完了時のみ表示。
   // ×で中断した場合は完了フラグを立てないため次回起動時に再表示される）
   const [showSetupWizard, setShowSetupWizard] = useState(() => shouldShowWizard(readSetupState()));
+  // テンプレート選択付き新規プロジェクト作成モーダル
+  const [showProjectCreate, setShowProjectCreate] = useState(false);
+  const [creatingProject, setCreatingProject] = useState(false);
 
   // ウィザード完了: 保存先メモ・完了フラグ・wizardVersion を保存し、選択したショートカットへ遷移
-  function completeSetupWizard({ projectsDir = "", navigateTo = "" } = {}) {
+  // openCreate=true（「新規プロジェクト」ショートカット）はテンプレート選択付き作成モーダルを開く
+  function completeSetupWizard({ projectsDir = "", navigateTo = "", openCreate = false } = {}) {
     writeSetupState(buildCompletedState(readSetupState(), { projectsDir }));
     setShowSetupWizard(false);
     if (navigateTo) {
       setActiveView(navigateTo);
+    }
+    if (openCreate) {
+      setShowProjectCreate(true);
     }
   }
   const [presetName, setPresetName] = useState("");
@@ -1879,23 +1887,49 @@ export default function App() {
     });
   }, [activeView, images.length, savedLabeledCount, workflowState.preprocessed, jobStatus, jobFamily, evalResult]);
 
-  async function createProject() {
-    const value = newProjectId.trim();
+  // テンプレート選択付きの新規プロジェクト作成（テンプレート未選択=standard=従来と同じ標準設定）。
+  // テンプレートは初期値の設定のみで、作成後はすべて通常どおり変更できる
+  async function createProjectFromTemplate(name, template) {
+    const value = String(name || "").trim();
     if (!value) {
       return;
     }
+    setCreatingProject(true);
     try {
       const data = await request("/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ project_id: value }),
       });
-      setNewProjectId("");
+      // 作成元テンプレートの記録（templateId/templateVersion。既存プロジェクトへは影響しない）
+      recordProjectTemplate(data.project_id, template);
+      // 前処理初期値の適用（standardはoverridesが空=従来の標準設定のまま）
+      if (Object.keys(template?.preprocessOverrides || {}).length > 0) {
+        preprocessParamsByProjectRef.current = {
+          ...preprocessParamsByProjectRef.current,
+          [data.project_id]: applyTemplatePreprocess(DEFAULT_PREPROCESS_PARAMS, template),
+        };
+        try {
+          localStorage.setItem(
+            PREPROCESS_PARAMS_BY_PROJECT_STORAGE_KEY,
+            JSON.stringify(preprocessParamsByProjectRef.current)
+          );
+        } catch {
+          // 保存失敗は無視（既定値で開始されるだけ）
+        }
+      }
+      setShowProjectCreate(false);
       await loadProjects(data.project_id);
       setProjectId(data.project_id);
-      notify("success", `プロジェクトを作成しました: ${data.project_id}`);
+      notify("success", `プロジェクトを作成しました: ${data.project_id}（テンプレート: ${template?.name || "標準"}）`);
+      // OCR＋YOLOテンプレートは最初の工程（画像指定・リサイズ）へ誘導
+      if (template?.yoloEnabled) {
+        setActiveView("image-builder-step1");
+      }
     } catch (error) {
       notify("error", error.message);
+    } finally {
+      setCreatingProject(false);
     }
   }
 
@@ -3634,10 +3668,9 @@ export default function App() {
           projectId={projectId}
           projects={projects}
           projectSummaries={projectSummaries}
-          newProjectId={newProjectId}
-          onNewProjectIdChange={setNewProjectId}
           onSelectProject={setProjectId}
-        onCreateProject={createProject}
+        onOpenCreate={() => setShowProjectCreate(true)}
+        templateRecord={readTemplateRecords()[projectId]}
         onDeleteProject={deleteProject}
         onNavigate={setActiveView}
         onOpenImageInPreprocess={(name) => {
@@ -4445,6 +4478,15 @@ export default function App() {
       {/* 初回セットアップウィザード（初回起動・再実行時のみ。Escでは閉じない・×は確認つき） */}
       {showSetupWizard ? (
         <SetupWizard onComplete={completeSetupWizard} onCancel={() => setShowSetupWizard(false)} />
+      ) : null}
+
+      {/* テンプレート選択付き新規プロジェクト作成（テンプレート選択→基本情報→確認→作成） */}
+      {showProjectCreate && !showSetupWizard ? (
+        <ProjectCreateModal
+          creating={creatingProject}
+          onCreate={createProjectFromTemplate}
+          onClose={() => setShowProjectCreate(false)}
+        />
       ) : null}
     </div>
   );

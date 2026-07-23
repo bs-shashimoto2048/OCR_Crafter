@@ -2,7 +2,9 @@ import { useMemo, useState } from "react";
 
 import Card from "../components/Card";
 import Button from "../components/Button";
+import EmptyState from "../components/EmptyState";
 import { imageUrl, interimImageUrl, processedImageUrl } from "../lib/api";
+import { templateOriginLabel } from "../config/projectTemplates";
 
 // 「続きから作業」の遷移先（既存の view id をそのまま使用）。stepId はワークフロー進捗との対応
 const QUICK_ACTIONS = [
@@ -98,10 +100,9 @@ export default function DashboardView({
   projectId,
   projects,
   projectSummaries,
-  newProjectId,
-  onNewProjectIdChange,
   onSelectProject,
-  onCreateProject,
+  onOpenCreate,
+  templateRecord = null,
   onDeleteProject,
   onNavigate,
   onOpenImageInPreprocess,
@@ -184,6 +185,12 @@ export default function DashboardView({
               使用中
             </span>
           </div>
+          {projectId ? (
+            <p className="mt-0.5 text-[11px] text-muted">
+              作成元テンプレート: {templateOriginLabel(templateRecord).origin}
+              {templateOriginLabel(templateRecord).version ? `（テンプレートバージョン: ${templateOriginLabel(templateRecord).version}）` : ""}
+            </p>
+          ) : null}
 
           {imagesCount > 0 ? (
             <>
@@ -287,31 +294,24 @@ export default function DashboardView({
             placeholder="検索（プロジェクト名）"
           />
           <div className="ml-auto flex items-center gap-2">
-            <input
-              value={newProjectId}
-              onChange={(event) => onNewProjectIdChange(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  onCreateProject();
-                }
-              }}
-              className="app-input h-8 w-44 text-xs"
-              placeholder="新規プロジェクト名"
-            />
-            <Button size="sm" variant="secondary" onClick={onCreateProject}>
-              作成
+            <Button size="sm" onClick={onOpenCreate} title="テンプレートを選んで新規プロジェクトを作成します">
+              新規プロジェクト
             </Button>
           </div>
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-border/60 bg-card/40">
           {filteredProjects.length === 0 ? (
-            <p className="px-3 py-8 text-center text-sm text-muted">
-              {projects.length === 0
-                ? "プロジェクトがありません。右上の入力欄から作成してください。"
-                : "検索条件に一致するプロジェクトがありません。"}
-            </p>
+            projects.length === 0 ? (
+              <EmptyState
+                title="プロジェクトがありません"
+                description="最初のプロジェクトを作成しましょう。用途別テンプレート（英数字OCR・日本語OCR・銘板OCRなど）から初期設定を選べます。"
+                actionLabel="新規プロジェクトを作成"
+                onAction={onOpenCreate}
+              />
+            ) : (
+              <p className="px-3 py-8 text-center text-sm text-muted">検索条件に一致するプロジェクトがありません。</p>
+            )
           ) : (
             <table className="w-full min-w-[900px] text-sm">
               <thead className="sticky top-0 z-10 bg-[#2f3841]/95 backdrop-blur">

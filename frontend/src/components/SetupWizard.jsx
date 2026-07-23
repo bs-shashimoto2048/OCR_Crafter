@@ -255,7 +255,9 @@ export default function SetupWizard({ onComplete, onCancel, initialStep = 0 }) {
               <p className="text-lg font-semibold text-success">セットアップ完了</p>
               <p className="mt-1 text-[12px] text-muted">OCR Crafterを使い始めましょう。</p>
               <div className="mx-auto mt-4 flex max-w-sm flex-col gap-2">
-                <Button onClick={() => onComplete?.({ projectsDir: browsedDir, navigateTo: "dashboard" })}>新規プロジェクト</Button>
+                <Button onClick={() => onComplete?.({ projectsDir: browsedDir, navigateTo: "dashboard", openCreate: true })}>
+                  新規プロジェクト
+                </Button>
                 <Button variant="secondary" onClick={() => onComplete?.({ projectsDir: browsedDir, navigateTo: "dashboard" })}>
                   プロジェクトを開く
                 </Button>
