@@ -302,11 +302,27 @@ class ReleasePromoteRequest(BaseModel):
     model: str = Field(..., description="昇格するモデル")
     note: str = Field(..., description="Release Note（変更点・理由。必須）")
     author: str = Field(default="", description="リリース実施者")
+    # 例外承認（Release Gate判定FAILのモデルを昇格する場合は両方必須）
+    override_reason: str = Field(default="", description="Override理由（Gate FAIL時の例外承認）")
+    approved_by: str = Field(default="", description="承認者（Gate FAIL時の例外承認）")
     version: Optional[str] = Field(default=None, description="バージョン（未指定=直近Productionのマイナー加算。初回1.0.0）")
 
 
+class ReleasePolicyRequest(BaseModel):
+    """Release Policy（プロジェクト毎のGateルール設定）の保存。"""
+
+    project_id: Optional[str] = Field(default="default")
+    policy: dict[str, Any] = Field(
+        default_factory=dict,
+        description="max_cer / min_char_accuracy / min_exact_match / min_eval_images / max_failed / "
+        "no_cer_regression / require_same_evaluation_hash / min_comparison_quality / "
+        "required_chars{chars, min_accuracy} / critical_confusions[{from, to, severity, max_count}] / "
+        "max_benchmark_rank / allowed_engines[]（未設定キー=ルール無効）",
+    )
+
+
 class ReleaseRollbackRequest(BaseModel):
-    """過去のリリースVersionへのロールバック（新しい履歴エントリ・rollback=true）。"""
+    """過去のリリースVersionへのロールバック（Version維持・新Release ID・rollback=true）。"""
 
     project_id: Optional[str] = Field(default="default")
     version: str = Field(..., description="戻す対象のリリースVersion")

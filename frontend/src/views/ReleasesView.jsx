@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import Button from "../components/Button";
 import Card from "../components/Card";
@@ -12,6 +12,14 @@ import {
   promoteWarnings,
   releaseJudgement,
 } from "../lib/releaseLogic";
+import {
+  RULE_RESULT_LABELS,
+  VERDICT_LABELS,
+  canSubmitPromote,
+  formToPolicy,
+  overrideRequired,
+  policyToForm,
+} from "../lib/releaseGate";
 
 const SCROLL_AREA = "dark-scroll [overscroll-behavior:contain] [scrollbar-gutter:stable]";
 
@@ -51,6 +59,66 @@ export default function ReleasesView({
   const [releaseNote, setReleaseNote] = useState("");
   const [author, setAuthor] = useState("");
   const [versionInput, setVersionInput] = useState("");
+  // Release Gate（サーバー判定）＋例外承認（FAIL時のみ必須）
+  const [gate, setGate] = useState(null);
+  const [overrideReason, setOverrideReason] = useState("");
+  const [approvedBy, setApprovedBy] = useState("");
+  useEffect(() => {
+    setGate(null);
+    setOverrideReason("");
+    setApprovedBy("");
+    if (!promoteTarget) return;
+    let cancelled = false;
+    request(`/api/releases/gate?project_id=${encodeURIComponent(projectId)}&model=${encodeURIComponent(promoteTarget)}`)
+      .then((data) => {
+        if (!cancelled) setGate(data);
+      })
+      .catch(() => {
+        if (!cancelled) setGate(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [promoteTarget, projectId]);
+
+  // Release Policy編集（プロジェクト毎のGateルール設定）
+  const [policyForm, setPolicyForm] = useState(null);
+  const [policyError, setPolicyError] = useState("");
+  const [policyOpen, setPolicyOpen] = useState(false);
+  async function loadPolicy() {
+    try {
+      const data = await request(`/api/releases/policy?project_id=${encodeURIComponent(projectId)}`);
+      setPolicyForm(policyToForm(data?.policy));
+      setPolicyError("");
+    } catch (error) {
+      setPolicyError(`Policyの取得に失敗しました: ${error.message}`);
+    }
+  }
+  async function savePolicy() {
+    const { policy, error } = formToPolicy(policyForm);
+    if (error) {
+      setPolicyError(error);
+      return;
+    }
+    try {
+      const data = await request("/api/releases/policy", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_id: projectId, policy }),
+      });
+      setPolicyForm(policyToForm(data?.policy));
+      setPolicyError("");
+      if (promoteTarget) {
+        const gateData = await request(
+          `/api/releases/gate?project_id=${encodeURIComponent(projectId)}&model=${encodeURIComponent(promoteTarget)}`
+        );
+        setGate(gateData);
+      }
+    } catch (error) {
+      setPolicyError(`Policyの保存に失敗しました: ${error.message}`);
+    }
+  }
   const candidateExp = useMemo(() => experimentByModel(items, promoteTarget), [items, promoteTarget]);
   const judgement = useMemo(() => releaseJudgement(candidateExp), [candidateExp]);
   const candidateScope = useMemo(
@@ -101,10 +169,18 @@ export default function ReleasesView({
 
   function submitPromote() {
     if (!promoteTarget) return;
-    onPromote?.(promoteTarget, { note: releaseNote, author, version: versionInput.trim() || null });
+    onPromote?.(promoteTarget, {
+      note: releaseNote,
+      author,
+      version: versionInput.trim() || null,
+      override_reason: overrideReason.trim(),
+      approved_by: approvedBy.trim(),
+    });
     setPromoteTarget("");
     setReleaseNote("");
     setVersionInput("");
+    setOverrideReason("");
+    setApprovedBy("");
   }
 
   const modelIdOf = (name) => modelInfos?.[name]?.model_id || "";
@@ -287,6 +363,96 @@ export default function ReleasesView({
                 ))}
               </div>
             ) : null}
+            {/* Release Gate判定（サーバー判定。FAILは例外承認なしで昇格不可） */}
+            {gate ? (
+              <div className="mt-2 rounded-lg border border-border/70 bg-card/50 px-3 py-2">
+                <p className="text-[12px] font-semibold text-muted">
+                  Release Gate判定:{" "}
+                  <span
+                    className={
+                      VERDICT_LABELS[gate.verdict]?.tone === "success"
+                        ? "text-success"
+                        : VERDICT_LABELS[gate.verdict]?.tone === "danger"
+                          ? "text-danger"
+                          : VERDICT_LABELS[gate.verdict]?.tone === "warning"
+                            ? "text-amber-200"
+                            : "text-muted"
+                    }
+                  >
+                    {VERDICT_LABELS[gate.verdict]?.label || gate.verdict}
+                  </span>
+                  {!gate.policy_configured ? <span className="ml-2 text-[11px] text-muted">（Release Policy未設定=ルールなし）</span> : null}
+                </p>
+                {(gate.rules || []).length > 0 ? (
+                  <div className={`mt-1 max-h-48 overflow-auto ${SCROLL_AREA}`}>
+                    <table className="min-w-full text-[11px] tabular-nums">
+                      <thead className="text-left text-muted">
+                        <tr>
+                          <th className="px-1.5 py-1 font-medium">Rule</th>
+                          <th className="px-1.5 py-1 font-medium">Expected</th>
+                          <th className="px-1.5 py-1 font-medium">Actual</th>
+                          <th className="px-1.5 py-1 font-medium">Result</th>
+                          <th className="px-1.5 py-1 font-medium">Message</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {gate.rules.map((rule) => (
+                          <tr key={rule.rule} className="border-t border-border/40">
+                            <td className="whitespace-nowrap px-1.5 py-1 text-text">{rule.rule}</td>
+                            <td className="max-w-[14rem] truncate px-1.5 py-1 text-muted" title={String(rule.expected)}>
+                              {String(rule.expected)}
+                            </td>
+                            <td className="max-w-[14rem] truncate px-1.5 py-1 text-text" title={String(rule.actual)}>
+                              {String(rule.actual)}
+                            </td>
+                            <td className="whitespace-nowrap px-1.5 py-1">
+                              <span
+                                className={
+                                  rule.result === "pass"
+                                    ? "text-success"
+                                    : rule.result === "fail"
+                                      ? "text-danger"
+                                      : rule.result === "warning"
+                                        ? "text-amber-200"
+                                        : "text-muted"
+                                }
+                              >
+                                {RULE_RESULT_LABELS[rule.result] || rule.result}
+                              </span>
+                            </td>
+                            <td className="min-w-0 max-w-[20rem] truncate px-1.5 py-1 text-muted" title={rule.message}>
+                              {rule.message}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
+                {overrideRequired(gate.verdict) ? (
+                  <div className="mt-2 rounded-lg border border-danger/40 bg-danger/5 px-3 py-2">
+                    <p className="text-[12px] font-semibold text-danger">
+                      FAIL判定のため、昇格には例外承認（Override理由と承認者の両方）が必要です
+                    </p>
+                    <div className="mt-1 grid grid-cols-1 gap-2 md:grid-cols-[1fr_180px]">
+                      <input
+                        className="app-input h-8 text-xs"
+                        placeholder="Override理由（必須。例: 顧客要望による暫定リリース）"
+                        value={overrideReason}
+                        onChange={(e) => setOverrideReason(e.target.value)}
+                      />
+                      <input
+                        className="app-input h-8 text-xs"
+                        placeholder="承認者（必須）"
+                        value={approvedBy}
+                        onChange={(e) => setApprovedBy(e.target.value)}
+                      />
+                    </div>
+                    <p className="mt-1 text-[10px] text-muted">承認時、不合格ルールのスナップショットがRelease Historyへ記録されます</p>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             {/* 本番比較（§8） */}
             {comparisonRows.length > 0 ? (
               <div className="mt-2 rounded-lg border border-border/70 bg-card/50 px-3 py-2">
@@ -322,7 +488,25 @@ export default function ReleasesView({
               />
             </div>
             <div className="mt-2 flex gap-2">
-              <Button size="sm" onClick={submitPromote} disabled={!releaseNote.trim()} title={!releaseNote.trim() ? "Release Noteは必須です" : ""}>
+              <Button
+                size="sm"
+                onClick={submitPromote}
+                disabled={
+                  !canSubmitPromote({
+                    verdict: gate?.verdict || "PASS",
+                    note: releaseNote,
+                    overrideReason,
+                    approvedBy,
+                  })
+                }
+                title={
+                  !releaseNote.trim()
+                    ? "Release Noteは必須です"
+                    : overrideRequired(gate?.verdict) && (!overrideReason.trim() || !approvedBy.trim())
+                      ? "FAIL判定のためOverride理由と承認者が必要です"
+                      : ""
+                }
+              >
                 昇格を実行
               </Button>
               <Button size="sm" variant="ghost" onClick={() => setPromoteTarget("")}>
@@ -333,13 +517,134 @@ export default function ReleasesView({
         ) : null}
       </Card>
 
-      {/* ③ Release History（Version比較・Rollback） */}
-      <Card title="Release History" subtitle="Productionリリースの履歴（新しい順）。過去Versionへのロールバックが可能です">
+      {/* ③ Release Policy（プロジェクト毎のGateルール設定） */}
+      <Card
+        title="Release Policy（Gateルール）"
+        subtitle="Productionへ昇格するモデルが満たすべき基準。未設定の項目はルール無効（従来どおり制限なし）"
+        actions={
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => {
+              const next = !policyOpen;
+              setPolicyOpen(next);
+              if (next && !policyForm) loadPolicy();
+            }}
+          >
+            {policyOpen ? "閉じる" : "Policyを編集"}
+          </Button>
+        }
+      >
+        {policyOpen && policyForm ? (
+          <div className="space-y-2 text-xs">
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7">
+              {[
+                ["maxCerPct", "Max CER（%）"],
+                ["minCharAccuracyPct", "Min 文字正解率（%）"],
+                ["minExactMatchPct", "Min 完全一致率（%）"],
+                ["minEvalImages", "Min 評価画像数"],
+                ["maxFailed", "Max Failed（BM）"],
+                ["maxBenchmarkRank", "Max BM順位"],
+                ["minComparisonQuality", "Min 比較品質（1-5）"],
+              ].map(([key, label]) => (
+                <label key={key} className="text-[11px] text-muted">
+                  {label}
+                  <input
+                    type="number"
+                    className="app-input mt-0.5 h-8 w-full text-xs"
+                    value={key === "maxBenchmarkRank" ? policyForm.maxBenchmarkRank ?? "" : policyForm[key] ?? ""}
+                    placeholder="未設定"
+                    onChange={(e) =>
+                      setPolicyForm({ ...policyForm, [key === "maxBenchmarkRank" ? "maxBenchmarkRank" : key]: e.target.value })
+                    }
+                  />
+                </label>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-4">
+              <label className="flex items-center gap-1.5 text-[12px] text-text">
+                <input
+                  type="checkbox"
+                  checked={policyForm.noCerRegression}
+                  onChange={(e) => setPolicyForm({ ...policyForm, noCerRegression: e.target.checked })}
+                />
+                Production比CER悪化なし
+              </label>
+              <label className="flex items-center gap-1.5 text-[12px] text-text">
+                <input
+                  type="checkbox"
+                  checked={policyForm.requireSameEvaluationHash}
+                  onChange={(e) => setPolicyForm({ ...policyForm, requireSameEvaluationHash: e.target.checked })}
+                />
+                ProductionとEvaluation Hash同一
+              </label>
+              {["tesseract", "paddleocr"].map((engine) => (
+                <label key={engine} className="flex items-center gap-1.5 text-[12px] text-text">
+                  <input
+                    type="checkbox"
+                    checked={policyForm.allowedEngines.includes(engine)}
+                    onChange={(e) =>
+                      setPolicyForm({
+                        ...policyForm,
+                        allowedEngines: e.target.checked
+                          ? [...policyForm.allowedEngines, engine]
+                          : policyForm.allowedEngines.filter((item) => item !== engine),
+                      })
+                    }
+                  />
+                  許可エンジン: {engine}
+                </label>
+              ))}
+            </div>
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+              <label className="text-[11px] text-muted">
+                必須文字（空=ルール無効）
+                <input
+                  className="app-input mt-0.5 h-8 w-full text-xs"
+                  placeholder="例: 0O1Il5S"
+                  value={policyForm.requiredChars}
+                  onChange={(e) => setPolicyForm({ ...policyForm, requiredChars: e.target.value })}
+                />
+              </label>
+              <label className="text-[11px] text-muted">
+                必須文字の最低正解率（%）
+                <input
+                  type="number"
+                  className="app-input mt-0.5 h-8 w-full text-xs"
+                  value={policyForm.requiredCharsMinAccuracyPct}
+                  onChange={(e) => setPolicyForm({ ...policyForm, requiredCharsMinAccuracyPct: e.target.value })}
+                />
+              </label>
+              <label className="text-[11px] text-muted" title="1行1ルール。0→O:fail（1件でもFAIL） / 1→I:warning:2（3件以上で警告）">
+                Critical Confusions（1行1ルール・warning/fail選択）
+                <textarea
+                  className="app-input mt-0.5 min-h-[52px] w-full text-xs"
+                  placeholder={"0→O:fail\n1→I:warning"}
+                  value={policyForm.criticalConfusionsText}
+                  onChange={(e) => setPolicyForm({ ...policyForm, criticalConfusionsText: e.target.value })}
+                />
+              </label>
+            </div>
+            {policyError ? <p className="rounded border border-danger/40 bg-danger/10 px-2 py-1 text-danger">{policyError}</p> : null}
+            <Button size="sm" onClick={savePolicy}>
+              Policyを保存
+            </Button>
+          </div>
+        ) : (
+          <p className="text-[12px] text-muted">
+            「Policyを編集」で基準（Max CER・必須文字・Critical Confusions等）を設定できます。FAIL判定のモデルは例外承認なしで昇格できません。
+          </p>
+        )}
+      </Card>
+
+      {/* ④ Release History（Version比較・Rollback） */}
+      <Card title="Release History" subtitle="Productionリリースの履歴（新しい順）。RollbackはVersionを維持し新しいRelease IDで記録されます">
         <div className={`max-h-[40vh] overflow-auto rounded-lg border border-border ${SCROLL_AREA}`}>
           <table className="min-w-full text-xs tabular-nums">
             <thead className="sticky top-0 z-10 bg-card/90 text-left text-muted backdrop-blur">
               <tr>
                 <th className="px-2 py-1.5 font-medium">比較</th>
+                <th className="px-2 py-1.5 font-medium">Release ID</th>
                 <th className="px-2 py-1.5 font-medium">Version</th>
                 <th className="px-2 py-1.5 font-medium">Model</th>
                 <th className="px-2 py-1.5 font-medium">Release Date</th>
@@ -362,10 +667,21 @@ export default function ReleasesView({
                     </label>
                   </td>
                   <td className="whitespace-nowrap px-2 py-1.5">
+                    <span className="model-id-font model-id-text--sm text-muted">{entry.release_id || "-"}</span>
+                  </td>
+                  <td className="whitespace-nowrap px-2 py-1.5">
                     <span className="model-id-font model-id-text--sm text-blue-200">v{entry.version}</span>
                     {entry.rollback ? (
                       <span className="ml-1 rounded-full border border-amber-400/40 bg-amber-400/10 px-1 py-0.5 text-[9px] text-amber-200">
                         Rollback
+                      </span>
+                    ) : null}
+                    {entry.override ? (
+                      <span
+                        className="ml-1 rounded-full border border-danger/40 bg-danger/10 px-1 py-0.5 text-[9px] text-danger"
+                        title={`Override: ${entry.override.reason}（承認: ${entry.override.approved_by} / ${String(entry.override.approved_at || "").slice(0, 16).replace("T", " ")}）`}
+                      >
+                        Override
                       </span>
                     ) : null}
                   </td>
@@ -399,7 +715,7 @@ export default function ReleasesView({
               ))}
               {history.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-3 py-6 text-center text-muted">
+                  <td colSpan={8} className="px-3 py-6 text-center text-muted">
                     リリース履歴がありません
                   </td>
                 </tr>

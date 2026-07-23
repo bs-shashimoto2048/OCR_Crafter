@@ -93,6 +93,8 @@ flowchart LR
     JOBS[("data/jobs/<br/>jobs.json・events/*.jsonl・logs/*.log")]
 ```
 
+- `data/projects/<id>/releases.json`（リリース管理）: `schema_version=2`（Migration Version）。`models{}`・`history[]`（各エントリへ `release_id`=REL-0001形式。旧データは初回参照時のMigrationで古い順にバックフィル）・`candidate_counter`・`release_counter`・`policy`（Release Gateルール）。詳細は `docs/20_RELEASE_POLICY.md`
+
 - `data/projects/<id>/benchmarks.json`（Benchmark Suite）: `{"counter": 採番数, "items": [Benchmark...], "config": {"balance_weights": {...}}}`。Benchmark IDは BM-0001形式・プロジェクト内一意。各itemへProfile（common+engines+hash）・エンジン別結果・画像単位casesを保存。詳細は `docs/19_BENCHMARK_SPEC.md`
 
 - `data/jobs/`（全プロジェクト共通・Job Management）: `jobs.json`=`{"counter": 通算採番数, "items": [Job...], "config": {"benchmark_concurrency": 1}}`。Job IDは JOB-000001形式・システム全体で一意・再利用しない。`events/JOB-xxxxxx.jsonl`=進捗イベント（追記型・1行1イベント。将来SSEでも同一形式）。`logs/JOB-xxxxxx.log`=スタックトレース等の内部ログ（画面へ出さない）。詳細は `docs/18_JOB_MANAGEMENT.md`

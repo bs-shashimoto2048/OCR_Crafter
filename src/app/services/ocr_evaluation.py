@@ -370,6 +370,9 @@ def evaluate_ocr(
         rec["ref_total"] = 0
         # 混同集計（Levenshteinアラインメント由来の置換/脱落/挿入）
         rec["confusions"] = Counter()
+        # 文字別統計（必須文字ルール用: 正解文字ごとの出現数とエラー数=置換+脱落）
+        rec["char_total"] = Counter()
+        rec["char_errors"] = Counter()
 
     # 前処理はグループ単位で1回だけ行い、同一グループの全対象へ共通入力を与える
     # （通常モードは全モデル1グループ=公平比較。training_individualのみモデル別グループ）。
@@ -428,8 +431,12 @@ def evaluate_ocr(
                 distance, ops = levenshtein_ops(expected_cmp, pred_cmp)
                 rec["dist_total"] += distance
                 rec["ref_total"] += len(expected_cmp)
+                for ch in expected_cmp:
+                    rec["char_total"][ch] += 1
                 for op in ops:
                     rec["confusions"][op] += 1
+                    if op[0] in {"sub", "del"} and op[1]:
+                        rec["char_errors"][op[1]] += 1
                 rec["total"] += 1
                 if match:
                     rec["correct"] += 1
@@ -493,6 +500,16 @@ def evaluate_ocr(
                     {"kind": kind, "from": src, "to": dst, "count": int(count)}
                     for (kind, src, dst), count in rec["confusions"].most_common(10)
                 ],
+                # 混同の全件（Release GateのCritical Confusion判定用。TOP10と同形式）
+                "confusions_full": [
+                    {"kind": kind, "from": src, "to": dst, "count": int(count)}
+                    for (kind, src, dst), count in rec["confusions"].most_common()
+                ],
+                # 文字別統計（必須文字ルール用。評価データに現れない文字はキーなし=未検証）
+                "char_stats": {
+                    ch: {"total": int(total), "errors": int(rec["char_errors"].get(ch, 0))}
+                    for ch, total in sorted(rec["char_total"].items())
+                },
                 # 学習時前処理との一致判定（true / false / None=未記録・ベースモデル）
                 "training_preprocess_hash": rec.get("training_preprocess_hash"),
                 "preprocess_match": plan["matches"][rec_index],

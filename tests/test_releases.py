@@ -106,7 +106,9 @@ def test_rollback(temp_projects):
     assert latest["rollback_from"] == "1.0.0"
     assert "Rollback to v1.0.0" in latest["note"]
     assert latest["author"] == "hashimoto"
-    assert latest["version"] == "1.2.0"  # 新しい履歴エントリとして採番
+    # Version規則（Phase 3で変更）: RollbackはVersion維持・新Release IDのみ採番
+    assert latest["version"] == "1.0.0"
+    assert latest["release_id"] and latest["release_id"] != releases["history"][-1]["release_id"]
     # 現Productionへのロールバックは拒否 / 存在しないVersionは404相当
     with pytest.raises(ValueError):
         rollback_release(pid, latest["version"])

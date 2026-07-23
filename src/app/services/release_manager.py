@@ -31,6 +31,10 @@ from ..project_paths import ensure_project_directories
 RELEASES_FILENAME = "releases.json"
 _RELEASES_LOCK = Lock()
 
+# releases.json のスキーマバージョン（Migration Version）。
+# v2: Release ID（REL-0001形式）の導入・release_counter追加・既存履歴へのバックフィル
+RELEASES_SCHEMA_VERSION = 2
+
 MODEL_STATUSES = ["Draft", "Validated", "Candidate", "Production", "Archived"]
 # 手動設定できるステータス（ProductionはpromoteのみでArchived化も自動）
 SETTABLE_STATUSES = ["Draft", "Validated", "Candidate", "Archived"]
@@ -40,18 +44,51 @@ def _releases_path(project_root: Path) -> Path:
     return Path(project_root) / RELEASES_FILENAME
 
 
+def migrate_releases_registry(registry: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    """releases.json の明示的Migration。戻り値=(registry, 変更あり)。
+
+    v1→v2: 既存の履歴エントリへ Release ID（REL-0001形式・古い順）を安全にバックフィルし、
+    release_counter と schema_version を付与する。既存フィールドは変更しない。
+    """
+    changed = False
+    version = int(registry.get("schema_version") or 1)
+    if version < 2:
+        counter = 0
+        for entry in registry["history"]:  # 追記順=古い順
+            counter += 1
+            if not entry.get("release_id"):
+                entry["release_id"] = f"REL-{counter:04d}"
+                changed = True
+        registry["release_counter"] = max(int(registry.get("release_counter") or 0), counter)
+        registry["schema_version"] = RELEASES_SCHEMA_VERSION
+        changed = True
+    return registry, changed
+
+
 def _load(project_root: Path) -> dict[str, Any]:
     try:
         payload = json.loads(_releases_path(project_root).read_text(encoding="utf-8"))
         if isinstance(payload, dict):
-            return {
+            registry = {
+                "schema_version": int(payload.get("schema_version") or 1),
                 "models": payload.get("models") if isinstance(payload.get("models"), dict) else {},
                 "history": payload.get("history") if isinstance(payload.get("history"), list) else [],
                 "candidate_counter": int(payload.get("candidate_counter") or 0),
+                "release_counter": int(payload.get("release_counter") or 0),
+                "policy": payload.get("policy") if isinstance(payload.get("policy"), dict) else {},
             }
+            registry, _ = migrate_releases_registry(registry)
+            return registry
     except (OSError, ValueError):
         pass
-    return {"models": {}, "history": [], "candidate_counter": 0}
+    return {
+        "schema_version": RELEASES_SCHEMA_VERSION,
+        "models": {},
+        "history": [],
+        "candidate_counter": 0,
+        "release_counter": 0,
+        "policy": {},
+    }
 
 
 def _save(project_root: Path, registry: dict[str, Any]) -> None:
@@ -118,8 +155,17 @@ def list_releases(project_id: Optional[str]) -> dict[str, Any]:
                 "updated_at": str(record.get("updated_at") or ""),
                 "missing": True,
             }
+    # 起動後最初の参照でMigration結果（Release IDバックフィル等）を永続化する
+    with _RELEASES_LOCK:
+        raw = None
+        try:
+            raw = json.loads(_releases_path(paths.root).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            raw = None
+        if isinstance(raw, dict) and int(raw.get("schema_version") or 1) < RELEASES_SCHEMA_VERSION:
+            _save(paths.root, registry)
     return {
-        "production": _production_model(registry),
+        "production": _production_model(registry),  # Productionは0件（空文字）または1件
         "statuses": statuses,
         "history": list(reversed(registry["history"])),  # 新しい順
     }
@@ -141,7 +187,9 @@ def set_model_status(project_id: Optional[str], model: str, status: str) -> dict
         if record.get("status") == "Production":
             raise ValueError("Productionモデルのステータスは直接変更できません（新しいProductionへの昇格で自動Archivedになります）")
         record["status"] = status
-        if status == "Candidate" and not str(record.get("version") or "").startswith("0."):
+        # Version規則: 初回Candidateで 0.x を採番。既にVersionを持つ場合は維持する
+        # （Candidate解除→再設定でVersionを変えない。§Version規則の明文化）
+        if status == "Candidate" and not str(record.get("version") or ""):
             registry["candidate_counter"] = int(registry["candidate_counter"]) + 1
             record["version"] = f"0.{registry['candidate_counter']}"
         record["updated_at"] = datetime.now().isoformat()
@@ -157,10 +205,16 @@ def promote_model(
     version: Optional[str] = None,
     rollback: bool = False,
     rollback_from: str = "",
+    override_reason: str = "",
+    approved_by: str = "",
 ) -> dict[str, Any]:
     """Productionへ昇格する。Release Note必須・旧Productionは自動Archived・履歴へ追記。
 
-    versionは未指定なら直近Productionバージョンのマイナー加算（初回 1.0.0）。
+    - versionは未指定なら直近Productionバージョンのマイナー加算（初回 1.0.0=正式版）
+    - Release Gate判定がFAILのモデルは、例外承認（override_reason + approved_by）なしでは
+      昇格できない。承認時はFailed Rulesのスナップショットを履歴へ保存する
+    - 履歴エントリへは Release ID（REL-0001形式）を採番する（Versionとは別概念:
+      Versionは配布成果物の版・Release IDはリリース行為の識別子）
     """
     note_text = str(note or "").strip()
     if not note_text:
@@ -169,6 +223,31 @@ def promote_model(
     model_name = Path(str(model)).name
     if not (paths.models / model_name).is_file():
         raise FileNotFoundError(f"model not found: {model_name}")
+
+    # Release Gate判定（FAILは承認なしで昇格不可。Rollbackは過去に承認済みリリースのため対象外）
+    override: Optional[dict[str, Any]] = None
+    if not rollback:
+        from .release_gate import evaluate_release_gate
+
+        gate = evaluate_release_gate(paths.project_id, model_name)
+        if gate["verdict"] == "FAIL":
+            reason_text = str(override_reason or "").strip()
+            approver = str(approved_by or "").strip()
+            if not reason_text or not approver:
+                failed_rules = [r["rule"] for r in gate["rules"] if r.get("result") == "fail"]
+                raise ValueError(
+                    "Release Gate判定がFAILのため昇格できません（不合格ルール: "
+                    + ", ".join(failed_rules)
+                    + "）。昇格するには例外承認（Override Reason と Approved By）が必要です。"
+                )
+            override = {
+                "reason": reason_text,
+                "approved_by": approver,
+                "approved_at": datetime.now().isoformat(),
+                # 承認時点の不合格ルールのスナップショット（後から検証条件が変わっても追跡できる）
+                "failed_rules": [r for r in gate["rules"] if r.get("result") == "fail"],
+            }
+
     with _RELEASES_LOCK:
         registry = _load(paths.root)
         previous = _production_model(registry)
@@ -180,7 +259,9 @@ def promote_model(
         record["status"] = "Production"
         record["version"] = resolved_version
         record["updated_at"] = datetime.now().isoformat()
+        registry["release_counter"] = int(registry.get("release_counter") or 0) + 1
         entry = {
+            "release_id": f"REL-{registry['release_counter']:04d}",
             "version": resolved_version,
             "model": model_name,
             "released_at": datetime.now().isoformat(),
@@ -189,6 +270,7 @@ def promote_model(
             "rollback": bool(rollback),
             "rollback_from": str(rollback_from or ""),
             "previous_production": previous,
+            "override": override,
         }
         registry["history"].append(entry)
         _save(paths.root, registry)
@@ -196,7 +278,11 @@ def promote_model(
 
 
 def rollback_release(project_id: Optional[str], version: str, author: str = "", note: str = "") -> dict[str, Any]:
-    """過去のリリースVersionのモデルを再びProductionへ戻す（新しい履歴エントリ・rollback=true）。"""
+    """過去のリリースVersionのモデルを再びProductionへ戻す。
+
+    Version規則: Rollbackは**対象VersionをそのままVersionとして維持**し、
+    新しい履歴エントリ（新Release ID・rollback=true・rollback_from）を追加する。
+    """
     paths = ensure_project_directories(project_id)
     registry = _load(paths.root)
     target = None
@@ -216,9 +302,47 @@ def rollback_release(project_id: Optional[str], version: str, author: str = "", 
         model_name,
         note=reason,
         author=author,
+        version=str(version),  # Rollbackは対象Versionを維持（新Version採番しない）
         rollback=True,
         rollback_from=str(version),
     )
+
+
+def mark_validated_if_draft(project_id: Optional[str], model: str) -> bool:
+    """評価完了時のValidated自動遷移（Draft→Validatedのみ。Candidate以降は自動変更しない）。
+
+    呼び出し条件は attach_evaluation 側で保証する（CER計算成功＋Evaluation Profile保存成功＋
+    Evaluation Hash生成成功）。戻り値=遷移したか。
+    """
+    paths = ensure_project_directories(project_id)
+    model_name = Path(str(model)).name
+    with _RELEASES_LOCK:
+        registry = _load(paths.root)
+        record = _model_record(registry, model_name)
+        if str(record.get("status") or "Draft") != "Draft":
+            return False
+        record["status"] = "Validated"
+        record["updated_at"] = datetime.now().isoformat()
+        _save(paths.root, registry)
+        return True
+
+
+def get_release_policy(project_id: Optional[str]) -> dict[str, Any]:
+    """Release Policy（プロジェクト毎のGateルール設定。未設定キー=ルール無効）。"""
+    paths = ensure_project_directories(project_id)
+    return dict(_load(paths.root)["policy"])
+
+
+def set_release_policy(project_id: Optional[str], policy: dict[str, Any]) -> dict[str, Any]:
+    from .release_gate import normalize_policy
+
+    paths = ensure_project_directories(project_id)
+    normalized = normalize_policy(policy)
+    with _RELEASES_LOCK:
+        registry = _load(paths.root)
+        registry["policy"] = normalized
+        _save(paths.root, registry)
+    return normalized
 
 
 # ---------- Model Card ----------

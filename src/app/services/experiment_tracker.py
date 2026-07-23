@@ -480,6 +480,10 @@ def attach_evaluation(project_id: Optional[str], model: str, evaluation: dict[st
         "regressed": evaluation.get("regressed"),
         "evaluated_at": str(evaluation.get("evaluated_at") or datetime.now().isoformat()),
         "dataset": str(evaluation.get("dataset") or ""),
+        # Release Gate用: 混同集計（Critical Confusion判定）と文字別統計（必須文字ルール）。
+        # 旧クライアントからの送信では欠損=None（未検証として扱う。推測で補完しない）
+        "confusions": evaluation.get("confusions") if isinstance(evaluation.get("confusions"), list) else None,
+        "char_stats": evaluation.get("char_stats") if isinstance(evaluation.get("char_stats"), dict) else None,
     }
     # Evaluation Profile（比較可能性の判定条件）も同時に保存する
     profile = normalize_evaluation_profile(evaluation)
@@ -494,4 +498,13 @@ def attach_evaluation(project_id: Optional[str], model: str, evaluation: dict[st
         target["evaluation"] = normalized
         target["evaluation_profile"] = profile
         _save_registry(paths.root, registry)
-        return target
+    # Validated自動遷移: CER計算成功＋Profile保存成功＋Evaluation Hash生成成功が揃った場合のみ
+    # Draft→Validated へ進める（Candidate以降は自動変更しない。失敗しても評価保存は成功扱い）
+    if isinstance(normalized.get("cer"), (int, float)) and compute_evaluation_hash(profile):
+        try:
+            from .release_manager import mark_validated_if_draft
+
+            mark_validated_if_draft(paths.project_id, model_name)
+        except Exception:  # noqa: BLE001
+            pass
+    return target

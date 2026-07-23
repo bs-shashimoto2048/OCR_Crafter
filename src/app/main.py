@@ -57,6 +57,7 @@ from .schemas import (
     JobRetryRequest,
     LabelUpdateRequest,
     OcrDatasetCreateRequest,
+    ReleasePolicyRequest,
     OcrDatasetSplitPreviewRequest,
     OcrAugmentationPreviewRequest,
     OcrDatasetFromLogsRequest,
@@ -2647,19 +2648,66 @@ def api_release_status(req: ReleaseStatusRequest) -> dict[str, Any]:
 
 @app.post("/api/releases/promote")
 def api_release_promote(req: ReleasePromoteRequest) -> dict[str, Any]:
-    """Productionへ昇格（Release Note必須）。旧Productionは自動Archived・履歴へ追記。"""
+    """Productionへ昇格（Release Note必須）。旧Productionは自動Archived・履歴へ追記。
+
+    Release Gate判定がFAILのモデルは例外承認（override_reason + approved_by）なしでは昇格できない。
+    """
     resolved = _resolve_project_id(req.project_id)
     try:
-        return {"project_id": resolved, **promote_model(resolved, req.model, req.note, author=req.author, version=req.version)}
+        return {
+            "project_id": resolved,
+            **promote_model(
+                resolved,
+                req.model,
+                req.note,
+                author=req.author,
+                version=req.version,
+                override_reason=req.override_reason,
+                approved_by=req.approved_by,
+            ),
+        }
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
+@app.get("/api/releases/policy")
+def api_release_policy_get(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+    """Release Policy（プロジェクト毎のGateルール設定。未設定キー=ルール無効）。"""
+    from .services.release_gate import normalize_policy
+    from .services.release_manager import get_release_policy
+
+    resolved = _resolve_project_id(project_id)
+    return {"project_id": resolved, "policy": normalize_policy(get_release_policy(resolved))}
+
+
+@app.put("/api/releases/policy")
+def api_release_policy_put(req: ReleasePolicyRequest) -> dict[str, Any]:
+    """Release Policyの保存（正規化して releases.json の policy へ保存）。"""
+    from .services.release_manager import set_release_policy
+
+    resolved = _resolve_project_id(req.project_id)
+    try:
+        return {"project_id": resolved, "policy": set_release_policy(resolved, req.policy or {})}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.get("/api/releases/gate")
+def api_release_gate(
+    model: str = Query(...), project_id: Optional[str] = Query(default="default")
+) -> dict[str, Any]:
+    """Release Gate判定（PASS / CONDITIONAL_PASS / FAIL / NOT_EVALUATED＋ルール毎の判定行）。"""
+    from .services.release_gate import evaluate_release_gate
+
+    resolved = _resolve_project_id(project_id)
+    return {"project_id": resolved, **evaluate_release_gate(resolved, str(model))}
+
+
 @app.post("/api/releases/rollback")
 def api_release_rollback(req: ReleaseRollbackRequest) -> dict[str, Any]:
-    """Productionを過去のリリースVersionへ戻す（新しい履歴エントリ・rollback=true）。"""
+    """Productionを過去のリリースVersionへ戻す（Version維持・新Release ID・rollback=true）。"""
     resolved = _resolve_project_id(req.project_id)
     try:
         return {"project_id": resolved, **rollback_release(resolved, req.version, author=req.author, note=req.note)}

@@ -3317,6 +3317,9 @@ export default function App() {
                     regressed: data?.comparison?.regressed ?? null,
                     evaluated_at: evaluatedAtIso,
                     dataset: ocrEvalDatasetId || "",
+                    // Release Gate用: 混同全件（Critical Confusion判定）と文字別統計（必須文字ルール）
+                    confusions: target.confusions_full ?? target.confusions ?? null,
+                    char_stats: target.char_stats ?? null,
                     // Evaluation Profile（Evaluation Hash生成用の評価条件）
                     dataset_id: ocrEvalDatasetId || String(ocrEvalImageDir || ""),
                     image_count: data?.count ?? null,
@@ -4000,12 +4003,20 @@ export default function App() {
             notify("error", `ステータス変更に失敗しました: ${error.message}`);
           }
         }}
-        onPromote={async (model, { note, author, version }) => {
+        onPromote={async (model, { note, author, version, override_reason, approved_by }) => {
           try {
             const data = await request("/api/releases/promote", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ project_id: projectId, model, note, author, version }),
+              body: JSON.stringify({
+                project_id: projectId,
+                model,
+                note,
+                author,
+                version,
+                override_reason: override_reason || "",
+                approved_by: approved_by || "",
+              }),
             });
             notify("success", `Productionへ昇格しました: ${model} (v${data?.version})`);
             await loadReleases(projectId);
