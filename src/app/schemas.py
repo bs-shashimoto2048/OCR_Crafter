@@ -280,6 +280,26 @@ class BenchmarkCreateRequest(BaseModel):
     requested_by: str = Field(default="", description="実行者（operator名）")
 
 
+class BackupCreateRequest(BaseModel):
+    """プロジェクトバックアップの作成（metadata_only / full）。"""
+
+    project_id: Optional[str] = Field(default="default")
+    mode: str = Field(default="metadata_only", description="metadata_only=設定・記録のみ / full=プロジェクト全体")
+
+
+class BackupRestoreRequest(BaseModel):
+    """バックアップの復元（既定で新しいProject IDへ。既存プロジェクトは上書きしない）。"""
+
+    new_project_id: str = Field(default="", description="復元先Project ID（未指定=<元ID>_restored_<n> を自動採番）")
+
+
+class RetentionConfigRequest(BaseModel):
+    """データ保持設定（未設定=無期限保持=従来動作）。"""
+
+    job_retention_days: Optional[int] = Field(default=None, description="終端状態Jobの保持日数（null=無期限）")
+    audit_retention_days: Optional[int] = Field(default=None, description="監査ログの保持日数（null=無期限）")
+
+
 class BenchmarkConfigRequest(BaseModel):
     """バランス最良スコアの重み設定（プロジェクト毎）。"""
 

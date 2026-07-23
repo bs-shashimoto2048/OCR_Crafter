@@ -26,7 +26,33 @@
 
 `/health/details` の確認項目: Backend / データDir書き込み / 設定ファイル（settings.yaml） / Tesseract（実行ファイル解決） / PaddleOCR（import可否） / GPU（paddle判定・判定不能はnull） / Job Worker（スレッド稼働） / ディスク空き（1GB未満で警告） / プロジェクトDir。**取得不能な値はnull（推測しない）**。
 
-## 3. 運用の目安
+## 3. バックアップ・復元（`services/backup_manager.py`）
+
+- **モード選択**: `metadata_only`（annotations/実験・リリース・Benchmark記録・前処理設定/スナップショットmeta・モデルメタJSONのみ。画像・モデル実体は含めない）/ `full`（プロジェクトディレクトリ全体）
+- 保存先: `data/backups/<BK-0001>_<pid>_<mode>_<日時>.zip` ＋ `index.json`（BK-0001形式で採番）
+- **復元は既定で新しいProject IDへ**（`<元ID>_restored_<n>` を自動採番。明示指定IDも既存と衝突する場合はエラー=**既存プロジェクトを上書きしない**）
+- 復元は監査ログ `backup_restore`（admin権限）へ記録される
+- UI: システム状態画面の「バックアップ」カード（作成・一覧・新プロジェクトへ復元）
+
+| Method / Path | 概要 |
+|---|---|
+| GET `/api/backups` | 一覧（新しい順・project_id絞り込み可） |
+| POST `/api/backups` | 作成（`{project_id, mode}`） |
+| POST `/api/backups/{backup_id}/restore` | 復元（`{new_project_id?}`・既定=新ID自動採番） |
+
+## 4. データ保持設定（Retention）
+
+- 設定: `data/retention.json`（`job_retention_days` / `audit_retention_days`）。**未設定（null）=無期限保持（従来動作）**
+- 適用（POST `/api/retention/apply`・admin権限）: 保持期間を過ぎた**終端状態（succeeded/failed/cancelled）のJob**（events/logsファイル含む）と古い監査ログ行を削除する。アクティブJobは削除しない
+- **削除の事実は監査ログ `retention_cleanup` へ必ず記録**（削除0件でも適用実行を記録）
+- UI: システム状態画面の「データ保持設定」カード（保存・今すぐ適用=確認ダイアログあり）
+
+| Method / Path | 概要 |
+|---|---|
+| GET / PUT `/api/retention` | 保持設定の取得・保存 |
+| POST `/api/retention/apply` | 適用（削除は監査記録） |
+
+## 5. 運用の目安
 
 - 失敗Jobが増えた → ジョブ管理画面でエラー要約を確認 → 詳細は `data/jobs/logs/JOB-xxxxxx.log`
 - Gate判定がFAILのままProduction運用 → Override履歴（監査ログ・Release History）を確認

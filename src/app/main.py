@@ -49,6 +49,8 @@ from .schemas import (
     ManualMasksUpdateRequest,
     DirectorySelectRequest,
     EvaluateRequest,
+    BackupCreateRequest,
+    BackupRestoreRequest,
     BenchmarkConfigRequest,
     BenchmarkCreateRequest,
     FileSelectRequest,
@@ -58,6 +60,7 @@ from .schemas import (
     LabelUpdateRequest,
     OcrDatasetCreateRequest,
     ReleasePolicyRequest,
+    RetentionConfigRequest,
     OcrDatasetSplitPreviewRequest,
     OcrAugmentationPreviewRequest,
     OcrDatasetFromLogsRequest,
@@ -1039,6 +1042,82 @@ def api_operations_dashboard(project_id: Optional[str] = Query(default="default"
     from .services.operations import build_dashboard
 
     return build_dashboard(_resolve_project_id(project_id))
+
+
+# ---------- バックアップ・データ保持（docs/21_OPERATIONS_GUIDE.md） ----------
+
+
+@app.get("/api/backups")
+def api_backups(project_id: str = Query(default="")) -> dict[str, Any]:
+    """バックアップ一覧（新しい順。project_id指定で絞り込み）。"""
+    from .services.backup_manager import list_backups
+
+    return {"items": list_backups(project_id)}
+
+
+@app.post("/api/backups")
+def api_backup_create(req: BackupCreateRequest) -> dict[str, Any]:
+    """バックアップ作成（metadata_only / full）。data/backups/ へZIP保存。"""
+    from .services.backup_manager import create_backup
+
+    resolved = _resolve_project_id(req.project_id)
+    try:
+        return {"project_id": resolved, "item": create_backup(resolved, mode=req.mode)}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/api/backups/{backup_id}/restore")
+def api_backup_restore(backup_id: str, req: BackupRestoreRequest, request: Request) -> dict[str, Any]:
+    """バックアップの復元。**既定で新しいProject IDへ復元**（既存プロジェクトは上書きしない）。"""
+    from .services.backup_manager import restore_backup
+
+    _enforce_role(request, "backup_restore")
+    try:
+        result = restore_backup(backup_id, new_project_id=req.new_project_id)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    _record_audit_safe(
+        request, "backup_restore", project_id=result["project_id"], target_type="backup", target_id=backup_id,
+        before={"source_project_id": result.get("source_project_id")},
+        after={"restored_project_id": result["project_id"], "mode": result.get("mode")},
+    )
+    return result
+
+
+@app.get("/api/retention")
+def api_retention_get() -> dict[str, Any]:
+    """データ保持設定（未設定=無期限保持=従来動作）。"""
+    from .services.backup_manager import get_retention
+
+    return {"config": get_retention()}
+
+
+@app.put("/api/retention")
+def api_retention_put(req: RetentionConfigRequest) -> dict[str, Any]:
+    from .services.backup_manager import set_retention
+
+    try:
+        return {"config": set_retention(req.model_dump())}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/api/retention/apply")
+def api_retention_apply(request: Request) -> dict[str, Any]:
+    """保持期間を過ぎたJob・監査ログの削除を適用する（削除は監査ログ retention_cleanup へ記録）。"""
+    from .services.backup_manager import apply_retention
+
+    _enforce_role(request, "retention_cleanup")
+    return apply_retention(
+        user=_user_ctx(request),
+        client={
+            "ip": request.client.host if request.client else "",
+            "user_agent": str(request.headers.get("user-agent") or "")[:200],
+        },
+    )
 
 
 @app.get("/api/system/check")

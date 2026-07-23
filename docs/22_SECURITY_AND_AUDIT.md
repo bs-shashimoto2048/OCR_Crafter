@@ -18,9 +18,9 @@ Audit ID / Timestamp / User（operator名）/ Role / Action / Project / TargetTy
 - **画像バイナリ**（bytes系は `[バイナリは保存しません]` へ置換）
 - 巨大値は2000文字で切り詰め
 
-### 対象操作（13種）
+### 対象操作（基本13種＋Phase 5の2種=15種）
 
-project_create / project_delete / preprocess_run / dataset_create / training_start / model_delete / release_status_change / release_promote / release_rollback / release_policy_update / benchmark_run / job_cancel / job_retry
+project_create / project_delete / preprocess_run / dataset_create / training_start / model_delete / release_status_change / release_promote / release_rollback / release_policy_update / benchmark_run / job_cancel / job_retry / **backup_restore**（バックアップ復元） / **retention_cleanup**（保持期間による削除）
 
 Before/Afterの例: release_status_change（変更前後のStatus/Version）、release_policy_update（変更前後のPolicy全体）、release_promote（旧/新Production・Release ID・Override内容）。
 
@@ -39,7 +39,7 @@ Before/Afterの例: release_status_change（変更前後のStatus/Version）、r
 | 参照系すべて | viewer |
 | preprocess_run / dataset_create / training_start / benchmark_run / release_status_change / job_cancel / job_retry / project_create | operator |
 | release_promote / release_rollback | approver |
-| project_delete / model_delete / release_policy_update | admin |
+| project_delete / model_delete / release_policy_update / backup_restore / retention_cleanup | admin |
 
 ### 認証未設定モード
 

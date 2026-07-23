@@ -194,7 +194,7 @@ export default function ReleasesView({
       {/* ① 現在のProduction */}
       <Card
         title="Production（現在使用中）"
-        subtitle="1プロジェクトにつきProductionは1モデルだけです"
+        subtitle="Productionは1プロジェクトにつき0件（未昇格）または1件です"
         actions={
           <div className="flex gap-2">
             {production ? (

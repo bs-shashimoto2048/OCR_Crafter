@@ -36,16 +36,29 @@ export default function OperationsView({ projectId, authContext = null, onOpenJo
   const [dashboard, setDashboard] = useState(null);
   const [health, setHealth] = useState(null);
   const [loading, setLoading] = useState(false);
+  // バックアップ・データ保持設定
+  const [backups, setBackups] = useState([]);
+  const [backupMode, setBackupMode] = useState("metadata_only");
+  const [restoreTarget, setRestoreTarget] = useState("");
+  const [retention, setRetention] = useState({ job_retention_days: "", audit_retention_days: "" });
+  const [message, setMessage] = useState(null);
 
   async function load() {
     setLoading(true);
     try {
-      const [dashboardData, healthData] = await Promise.all([
+      const [dashboardData, healthData, backupsData, retentionData] = await Promise.all([
         request(`/api/operations/dashboard?project_id=${encodeURIComponent(projectId)}`),
         request("/health/details"),
+        request(`/api/backups?project_id=${encodeURIComponent(projectId)}`),
+        request("/api/retention"),
       ]);
       setDashboard(dashboardData);
       setHealth(healthData);
+      setBackups(Array.isArray(backupsData?.items) ? backupsData.items : []);
+      setRetention({
+        job_retention_days: retentionData?.config?.job_retention_days ?? "",
+        audit_retention_days: retentionData?.config?.audit_retention_days ?? "",
+      });
     } catch {
       setDashboard(null);
       setHealth(null);
@@ -58,6 +71,75 @@ export default function OperationsView({ projectId, authContext = null, onOpenJo
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  function notifyLocal(tone, text) {
+    setMessage({ tone, text });
+    window.setTimeout(() => setMessage(null), 6000);
+  }
+
+  async function createBackup() {
+    try {
+      const data = await request("/api/backups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_id: projectId, mode: backupMode }),
+      });
+      notifyLocal("success", `バックアップを作成しました: ${data?.item?.backup_id}（${backupMode}）`);
+      load();
+    } catch (error) {
+      notifyLocal("danger", `バックアップ作成に失敗しました: ${error.message}`);
+    }
+  }
+
+  async function restoreBackup(backupId) {
+    if (!window.confirm(`${backupId} を新しいプロジェクトへ復元します（既存プロジェクトは上書きされません）。よろしいですか？`)) {
+      return;
+    }
+    try {
+      const data = await request(`/api/backups/${encodeURIComponent(backupId)}/restore`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ new_project_id: restoreTarget.trim() }),
+      });
+      notifyLocal("success", `復元しました: 新プロジェクト「${data?.project_id}」（画面更新後に選択できます）`);
+      setRestoreTarget("");
+    } catch (error) {
+      notifyLocal("danger", `復元に失敗しました: ${error.message}`);
+    }
+  }
+
+  async function saveRetention() {
+    try {
+      const data = await request("/api/retention", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          job_retention_days: retention.job_retention_days === "" ? null : Number(retention.job_retention_days),
+          audit_retention_days: retention.audit_retention_days === "" ? null : Number(retention.audit_retention_days),
+        }),
+      });
+      setRetention({
+        job_retention_days: data?.config?.job_retention_days ?? "",
+        audit_retention_days: data?.config?.audit_retention_days ?? "",
+      });
+      notifyLocal("success", "データ保持設定を保存しました（空欄=無期限保持）");
+    } catch (error) {
+      notifyLocal("danger", `保存に失敗しました: ${error.message}`);
+    }
+  }
+
+  async function applyRetention() {
+    if (!window.confirm("保持期間を過ぎた終端状態のJobと監査ログを削除します（削除は監査記録されます）。よろしいですか？")) {
+      return;
+    }
+    try {
+      const data = await request("/api/retention/apply", { method: "POST" });
+      notifyLocal("success", `適用しました: Job ${data?.removed_jobs}件 / 監査 ${data?.removed_audit_entries}件を削除`);
+      load();
+    } catch (error) {
+      notifyLocal("danger", `適用に失敗しました: ${error.message}`);
+    }
+  }
 
   const jobs = dashboard?.jobs || {};
   const production = dashboard?.production || {};
@@ -163,6 +245,109 @@ export default function OperationsView({ projectId, authContext = null, onOpenJo
           </div>
         </div>
       </Card>
+
+      {message ? (
+        <div
+          className={`rounded-lg border px-3 py-2 text-[12px] ${
+            message.tone === "success" ? "border-success/40 bg-success/10 text-success" : "border-danger/40 bg-danger/10 text-danger"
+          }`}
+        >
+          {message.text}
+        </div>
+      ) : null}
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <Card title="バックアップ" subtitle="metadata_only=設定・記録のみ / full=プロジェクト全体。復元は既定で新しいProject IDへ（上書きしない）">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <select className="app-select h-8 text-xs" value={backupMode} onChange={(e) => setBackupMode(e.target.value)}>
+              <option value="metadata_only">metadata_only（設定・記録のみ）</option>
+              <option value="full">full（プロジェクト全体）</option>
+            </select>
+            <Button size="sm" onClick={createBackup}>
+              バックアップを作成
+            </Button>
+            <input
+              className="app-input h-8 flex-1 text-xs"
+              placeholder="復元先Project ID（空=自動採番: <元ID>_restored_n）"
+              value={restoreTarget}
+              onChange={(e) => setRestoreTarget(e.target.value)}
+            />
+          </div>
+          <div className="max-h-48 overflow-auto rounded-lg border border-border dark-scroll [overscroll-behavior:contain]">
+            <table className="min-w-full text-xs tabular-nums">
+              <thead className="sticky top-0 bg-card/90 text-left text-muted">
+                <tr>
+                  <th className="px-2 py-1.5 font-medium">Backup ID</th>
+                  <th className="px-2 py-1.5 font-medium">モード</th>
+                  <th className="px-2 py-1.5 font-medium">作成日時</th>
+                  <th className="px-2 py-1.5 font-medium">サイズ</th>
+                  <th className="px-2 py-1.5 font-medium">復元</th>
+                </tr>
+              </thead>
+              <tbody>
+                {backups.map((entry) => (
+                  <tr key={entry.backup_id} className="border-t border-border/60">
+                    <td className="whitespace-nowrap px-2 py-1.5">
+                      <span className="model-id-font model-id-text--sm text-blue-200">{entry.backup_id}</span>
+                    </td>
+                    <td className="whitespace-nowrap px-2 py-1.5 text-muted">{entry.mode}</td>
+                    <td className="whitespace-nowrap px-2 py-1.5 text-muted">{String(entry.created_at || "").slice(0, 16).replace("T", " ")}</td>
+                    <td className="whitespace-nowrap px-2 py-1.5 text-muted">{(Number(entry.size_bytes || 0) / 1024).toFixed(1)}KB</td>
+                    <td className="px-2 py-1.5">
+                      <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px]" onClick={() => restoreBackup(entry.backup_id)}>
+                        新プロジェクトへ復元
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+                {backups.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-3 py-4 text-center text-muted">
+                      バックアップがありません
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+
+        <Card title="データ保持設定" subtitle="空欄=無期限保持（従来動作）。適用による削除は監査ログへ記録されます">
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="text-[11px] text-muted">
+              Job保持日数（終端状態のみ削除）
+              <input
+                type="number"
+                min="1"
+                className="app-input mt-0.5 h-8 w-32 text-xs"
+                placeholder="無期限"
+                value={retention.job_retention_days}
+                onChange={(e) => setRetention({ ...retention, job_retention_days: e.target.value })}
+              />
+            </label>
+            <label className="text-[11px] text-muted">
+              監査ログ保持日数
+              <input
+                type="number"
+                min="1"
+                className="app-input mt-0.5 h-8 w-32 text-xs"
+                placeholder="無期限"
+                value={retention.audit_retention_days}
+                onChange={(e) => setRetention({ ...retention, audit_retention_days: e.target.value })}
+              />
+            </label>
+            <Button size="sm" variant="secondary" onClick={saveRetention}>
+              保存
+            </Button>
+            <Button size="sm" variant="danger" onClick={applyRetention}>
+              今すぐ適用
+            </Button>
+          </div>
+          <p className="mt-2 text-[11px] text-muted">
+            適用時、保持期間を過ぎた終端状態（成功/失敗/キャンセル済）のJobと監査ログを削除します。実行中・待機中のJobは削除されません。
+          </p>
+        </Card>
+      </div>
 
       <Card
         title="ヘルスチェック（/health/details）"

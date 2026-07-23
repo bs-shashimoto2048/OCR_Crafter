@@ -33,7 +33,7 @@ export function buildAuditDiff(before, after) {
   });
 }
 
-// 監査アクションの日本語ラベル（13種）
+// 監査アクションの日本語ラベル（基本13種＋バックアップ復元・保持期間削除）
 export const AUDIT_ACTION_LABELS = {
   project_create: "プロジェクト作成",
   project_delete: "プロジェクト削除",
@@ -48,4 +48,6 @@ export const AUDIT_ACTION_LABELS = {
   benchmark_run: "Benchmark実行",
   job_cancel: "Jobキャンセル",
   job_retry: "Job再実行",
+  backup_restore: "バックアップ復元",
+  retention_cleanup: "保持期間による削除",
 };

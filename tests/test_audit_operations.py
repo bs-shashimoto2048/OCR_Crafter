@@ -18,8 +18,10 @@ from src.app.services.audit_log import (
 from src.app.services.operations import build_dashboard, build_health_details, check_ready
 
 
-def test_audit_actions_are_13(temp_projects):
-    assert len(AUDIT_ACTIONS) == 13
+def test_audit_actions_defined(temp_projects):
+    # 基本13種＋Phase 5（backup_restore / retention_cleanup）=15種
+    assert len(AUDIT_ACTIONS) == 15
+    assert "backup_restore" in AUDIT_ACTIONS and "retention_cleanup" in AUDIT_ACTIONS
     assert set(ACTION_MIN_ROLE) == set(AUDIT_ACTIONS)
 
 

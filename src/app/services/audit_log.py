@@ -24,7 +24,7 @@ from .. import project_paths as project_paths_module
 
 _LOCK = threading.RLock()
 
-# 監査対象の操作（13種）
+# 監査対象の操作（基本13種＋Phase 5のバックアップ復元・保持期間削除の2種）
 AUDIT_ACTIONS = [
     "project_create",
     "project_delete",
@@ -39,6 +39,8 @@ AUDIT_ACTIONS = [
     "benchmark_run",
     "job_cancel",
     "job_retry",
+    "backup_restore",
+    "retention_cleanup",
 ]
 
 # 権限ロール（弱い順）と操作に必要な最低ロール
@@ -57,6 +59,8 @@ ACTION_MIN_ROLE = {
     "benchmark_run": "operator",
     "job_cancel": "operator",
     "job_retry": "operator",
+    "backup_restore": "admin",
+    "retention_cleanup": "admin",
 }
 
 # 保存禁止キー（部分一致・小文字比較）: パスワード・トークン・APIキー等の機密情報

@@ -107,8 +107,13 @@
 | GET `/api/auth/context` | ヘッダ: `X-Operator?`, `X-Role?` | `{operator, role, auth_configured, auth_mode}` | ユーザー識別。認証未設定環境は **Admin互換＋「認証未設定モード」** を返す |
 | GET `/api/audit` | Query: `project_id?`, `action?`, `user?`, `target_id?`, `date_from?`, `date_to?`, `limit?` | `{items[], actions[]}` | **監査ログ一覧**（新しい順・追記型のため削除/編集APIなし）。対象13操作、**パスワード・トークン・APIキー・画像バイナリは保存されない** |
 | GET `/api/operations/dashboard` | Query: `project_id?` | `{jobs, production, unevaluated_candidates[], latest_benchmark, data_usage, backup}` | 運用ダッシュボード（実行中/待機中/失敗Job・Production＋Gate状態・未評価Candidate・最近のBenchmark・データ使用量・バックアップ状態） |
+| GET `/api/backups` | Query: `project_id?` | `{items[]}` | バックアップ一覧（新しい順・BK-0001形式）。保存先 `data/backups/` |
+| POST `/api/backups` | `BackupCreateRequest`（`mode`=metadata_only/full） | `{item}` | バックアップ作成（metadata_only=設定・記録・モデルメタのみ / full=プロジェクト全体） |
+| POST `/api/backups/{backup_id}/restore` | `BackupRestoreRequest`（`new_project_id?`） | `{backup_id, project_id, mode, source_project_id}` | 復元。**既定で新しいProject IDへ**（`<元ID>_restored_<n>` 自動採番・既存プロジェクトは上書きしない=衝突は400）。監査 `backup_restore`（admin） |
+| GET / PUT `/api/retention` | `RetentionConfigRequest`（`job_retention_days?`, `audit_retention_days?`） | `{config}` | データ保持設定。**未設定（null）=無期限保持（従来動作）** |
+| POST `/api/retention/apply` | - | `{removed_jobs, removed_audit_entries, config, applied_at}` | 保持期間を過ぎた終端状態Job・監査ログの削除を適用。**削除は監査ログ `retention_cleanup` へ必ず記録**（admin） |
 
-変更系エンドポイント13種（projects作成/削除・preprocess/run・dataset/create・tesseract学習開始・モデル削除・releases status/promote/rollback/policy・benchmarks実行・jobs cancel/retry）は `X-Role` 明示時にロール階層（viewer<operator<approver<admin）を強制し（不足403）、成功時に監査ログへ記録する。
+変更系エンドポイント（projects作成/削除・preprocess/run・dataset/create・tesseract学習開始・モデル削除・releases status/promote/rollback/policy・benchmarks実行・jobs cancel/retry・backups restore・retention apply）は `X-Role` 明示時にロール階層（viewer<operator<approver<admin）を強制し（不足403）、成功時に監査ログへ記録する。
 
 ## ジョブ管理（Job Management）
 
