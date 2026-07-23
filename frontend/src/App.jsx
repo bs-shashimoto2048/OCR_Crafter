@@ -2546,7 +2546,9 @@ export default function App() {
   }
 
   // 学習前のオーグメンテーションプレビュー（元画像/適用後のペアを表示）
-  async function previewOcrAugmentation() {
+  // sampleCount: 表示するサンプル枚数（API仕様の1〜5へクランプ。未指定=3で従来動作）
+  async function previewOcrAugmentation(sampleCount = 3) {
+    const count = Math.min(5, Math.max(1, Number(sampleCount) || 3));
     if (!projectId) {
       notify("error", "プロジェクトを作成または選択してください");
       return;
@@ -2570,7 +2572,7 @@ export default function App() {
           max_text_length: isTesseract ? 64 : Number(ocrMaxTextLength),
           image_shape: parseOcrImageShape(ocrImageShape),
           augmentation: payload,
-          sample_count: 3,
+          sample_count: count,
         }),
       });
       setOcrAugPreview(data);

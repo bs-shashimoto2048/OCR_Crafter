@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Card from "../components/Card";
 import Button from "../components/Button";
 import { PADDLEOCR_OFFICIAL_MODELS_TOOLTIP } from "../lib/paddleocrOfficialTooltip";
 import { autoTestRatio, normalizeRatioInput, summarizeRatios } from "../lib/ratio";
-import { AUG_PRESET_LABELS, applyAugmentationPreset } from "../lib/augmentation";
+import AugmentationSettingsPanel from "../components/AugmentationSettingsPanel";
+import { augCategorySummaryLabel } from "../lib/augmentationSettings";
 import {
   UI_TRAINING_STATE_LABELS,
   classifyLogLine,
@@ -19,6 +21,16 @@ import {
 const OCR_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 // Tesseract学習対象文字セット（A-Z / 0-9 / 小文字筆記体 k,l,t）
 const TESSERACT_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt";
+
+// 次回学習の設定モーダルのタブ（4カテゴリ。設定値・保存処理は従来のstateを共有する）
+const NEXT_SETTINGS_TABS = [
+  { id: "split", label: "データ分割" },
+  { id: "augmentation", label: "オーグメンテーション" },
+  { id: "params", label: "学習パラメータ" },
+  { id: "engine", label: "エンジン設定" },
+];
+// 最後に開いた設定カテゴリの保存キー（初期表示の維持用。UI状態のみで設定値は含まない）
+const NEXT_SETTINGS_TAB_STORAGE_KEY = "ocr_training_settings_tab_v1";
 
 // ラベル横の ⓘ ヘルプ（title属性によるツールチップ表示）
 function InfoHint({ text }) {
@@ -161,6 +173,28 @@ export default function TrainingView({
   // 「次回学習の設定」の開閉。ユーザー操作後はポーリング・状態変化でも開閉を維持する（null=未操作）
   const [settingsToggled, setSettingsToggled] = useState(null);
   const nextSettingsOpen = settingsToggled ?? (uiTrainingState === "idle" && !jobInfo);
+  // 次回学習の設定モーダル（null=閉 / タブID=開）。最後に開いたカテゴリを保存し初期表示を維持する
+  const [settingsTab, setSettingsTab] = useState(null);
+  function openSettingsTab(tabId) {
+    setSettingsTab(tabId);
+    try {
+      window.localStorage?.setItem(NEXT_SETTINGS_TAB_STORAGE_KEY, tabId);
+    } catch {
+      // 保存失敗（容量等）は無視（表示状態はメモリ側で維持される）
+    }
+  }
+  function closeSettingsModal() {
+    setSettingsTab(null);
+  }
+  // Escでモーダルを閉じる
+  useEffect(() => {
+    if (!settingsTab) return undefined;
+    const onKey = (event) => {
+      if (event.key === "Escape") setSettingsTab(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [settingsTab]);
   // 実行時設定（ジョブスナップショット）の開閉。低い画面でも次回学習設定の高さを確保するため初期は閉じる
   const [runtimeSettingsOpen, setRuntimeSettingsOpen] = useState(false);
   // 詳細ログの開閉。開時は右ペインの高さを重要イベントと分割する（右カード全体の高さは変えない）
@@ -317,6 +351,14 @@ export default function TrainingView({
 
   const ocrHasInitModel = ocrInitSourceType === "scratch" || String(ocrInitSourceValue || "").trim() !== "";
   const ocrDatasetReady = String(ocrDatasetDir || "").trim() !== "";
+  // 次回学習の設定のカテゴリサマリー表示用ラベル
+  const engineDisplayLabel = ocrEngine === "paddleocr" ? "PaddleOCR" : ocrEngine === "tesseract" ? "Tesseract" : "EasyOCR";
+  const engineSummaryLabel =
+    ocrEngine === "tesseract"
+      ? "eng.traineddata / PSM 7"
+      : ocrEngine === "easyocr"
+        ? "学習対象外（推論専用）"
+        : `初期化: ${ocrInitSourceType === "scratch" ? "scratch" : "既存OCRモデル"} / Batch ${batchSize || "-"}`;
   const ocrNextAction = ocrDatasetReady ? "train" : "dataset";
   const osFamily = String(systemCheck?.os_family || "").trim().toLowerCase();
   const recommendedProfile = String(systemCheck?.recommended_profile || "").trim();
@@ -727,7 +769,7 @@ export default function TrainingView({
                 <section
                   className={`min-w-0 rounded-xl border border-border/80 bg-card/45 ${
                     nextSettingsOpen
-                      ? `flex min-h-0 flex-col ${fitViewport ? "xl:min-h-[160px] xl:flex-1 xl:overflow-hidden" : ""}`
+                      ? `flex min-h-0 flex-col ${fitViewport ? "xl:min-h-[120px] xl:flex-1 xl:overflow-hidden" : ""}`
                       : "shrink-0"
                   }`}
                 >
@@ -744,775 +786,797 @@ export default function TrainingView({
                     </span>
                     次回学習の設定
                     <span className="ml-auto text-[11px] font-normal text-muted">
-                      {settingsLocked ? "学習実行中は変更できません" : "学習設定・プロジェクト設定・データ準備・エンジン設定"}
+                      {settingsLocked ? "学習実行中は変更できません" : "データ分割・オーグメンテーション・学習パラメータ・エンジン設定"}
                     </span>
                   </button>
+                  {/* 本文はカテゴリサマリーのみ（狭い左カラムで全設定を直接編集しない）。詳細編集はモーダルのタブで行う */}
                   <div
                     className={
                       nextSettingsOpen
-                        ? "next-training-settings-body scroll-stable dark-scroll min-h-0 min-w-0 flex-1 space-y-2.5 overflow-y-auto overflow-x-hidden px-2.5 pb-2.5"
+                        ? "next-training-settings-body scroll-stable dark-scroll min-h-0 min-w-0 flex-1 space-y-2 overflow-y-auto overflow-x-hidden px-2.5 pb-2.5"
                         : "hidden"
                     }
                   >
-                {/* preparing/training/stopping 中は設定変更を禁止（fieldsetで配下の入力を一括無効化） */}
-                <fieldset
-                  disabled={settingsLocked}
-                  className={`contents ${settingsLocked ? "opacity-70" : ""}`}
-                  title={settingsLocked ? "学習実行中は設定を変更できません。" : undefined}
-                >
-                {/* 学習設定: OCRタイプの選択が後続設定（最大イテレーションの意味・初期値等）へ影響するため最初に配置し、
-                    変更後に画面上部へ戻らなくてよい導線にする */}
-                <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">学習設定</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="app-label">OCRタイプ</label>
-                      <select value={ocrEngine} onChange={(e) => setOcrEngine(e.target.value)} className="app-select">
-                        <option value="paddleocr">PaddleOCR（学習可）</option>
-                        <option value="tesseract">Tesseract（学習可 / A-Z・0-9・筆記体klt）</option>
-                        <option value="easyocr">EasyOCR（推論専用）</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="app-label">学習データ作成方法</label>
-                      <select value={ocrDatasetCreateMode} onChange={(e) => setOcrDatasetCreateMode(e.target.value)} className="app-select">
-                        <option value="new">新規作成（ラベルデータから）</option>
-                        <option value="from_logs">再学習作成（OCRログから）</option>
-                      </select>
-                    </div>
-                    <div className="col-span-2">
-                      <label className="app-label">
-                        演算デバイス
-                        <InfoHint text="学習に使用する演算デバイスです。auto はGPUが利用可能な場合にGPUを使用します。TesseractはCPUのみ対応しています。" />
-                      </label>
-                      <div className="grid h-8 grid-cols-3 gap-1.5">
-                        {[
-                          {
-                            value: "auto",
-                            label: "Auto",
-                            // 選択可能なボタンは色付きで発光させる（Auto=青）。未選択でも背景をカードより明るくし操作可能と分かるようにする
-                            glow: "border-accent/80 bg-slate-700/70 text-blue-200 shadow-[0_0_10px_rgba(88,166,255,0.55)] hover:bg-accent/20",
-                            selectedClass: "border-accent bg-accent text-white shadow-[0_0_14px_rgba(88,166,255,0.75)]",
-                            selectable: !isTesseractEngine && ocrEngine !== "easyocr",
-                            hint: "GPUが利用可能ならGPUを使用します",
-                          },
-                          {
-                            value: "cpu",
-                            label: "CPU",
-                            glow: "border-cyan-400/80 bg-slate-700/70 text-cyan-100 shadow-[0_0_10px_rgba(34,211,238,0.55)] hover:bg-cyan-400/15",
-                            selectedClass: "border-cyan-300 bg-cyan-500/80 text-white shadow-[0_0_14px_rgba(34,211,238,0.75)]",
-                            selectable: ocrEngine !== "easyocr",
-                            hint: "CPUで学習します",
-                          },
-                          {
-                            value: "gpu",
-                            label: "GPU",
-                            glow: "border-emerald-400/80 bg-slate-700/70 text-emerald-100 shadow-[0_0_10px_rgba(52,211,153,0.6)] hover:bg-emerald-400/15",
-                            selectedClass: "border-emerald-300 bg-emerald-500/80 text-white shadow-[0_0_14px_rgba(52,211,153,0.8)]",
-                            // GPUハードが検出されていれば選択可能として点灯する
-                            // （torch/paddleのCUDA対応状況は実行時に解決されるためUIではブロックしない）
-                            selectable:
-                              !isTesseractEngine &&
-                              ocrEngine !== "easyocr" &&
-                              Boolean(systemCheck?.gpu_available || systemCheck?.gpu_name),
-                            hint: systemCheck?.gpu_name
-                              ? `GPUで学習します（${systemCheck.gpu_name}）`
-                              : systemCheck?.gpu_available
-                                ? "GPUで学習します"
-                                : "GPUが検出されていません",
-                          },
-                        ].map((opt) => {
-                          // Tesseract は CPU 固定（CPUのみ点灯・選択表示、クリック不可）
-                          const fixedCpu = isTesseractEngine && opt.value === "cpu";
-                          const selected = isTesseractEngine ? opt.value === "cpu" : ocrTrainDevice === opt.value;
-                          const clickable = opt.selectable && !isTesseractEngine;
-                          const lit = opt.selectable || fixedCpu;
-                          return (
-                            <button
-                              key={opt.value}
-                              type="button"
-                              title={isTesseractEngine && opt.value !== "cpu" ? "TesseractはCPUのみ対応しています" : opt.hint}
-                              disabled={!clickable}
-                              onClick={() => clickable && setOcrTrainDevice(opt.value)}
-                              className={`rounded-lg border text-xs font-semibold transition ${
-                                selected
-                                  ? opt.selectedClass
-                                  : lit
-                                    ? opt.glow
-                                    : // 無効: 暗い背景+低コントラスト+発光なし（未選択の発光ボタンと明確に区別）
-                                      "cursor-not-allowed border-slate-600 bg-slate-800/80 text-slate-500"
-                              } ${!clickable && lit ? "cursor-default" : ""}`}
-                            >
-                              {opt.label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      {isTesseractEngine ? (
-                        <p className="mt-1 text-[11px] text-muted">TesseractはCPUのみ対応しています。</p>
-                      ) : null}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">プロジェクト設定</p>
-                  {/* 左3:右2。左のデータ分割は3入力横並びのため、サイドバー表示時にも潰れない幅を確保する */}
-                  <div className="grid grid-cols-[minmax(0,3fr)_minmax(0,2fr)] gap-2">
-                    <div>
-                      <label className="app-label">
-                        プロジェクト
-                        <InfoHint text="学習対象のプロジェクトです。プロジェクト画面で切り替えできます。" />
-                      </label>
-                      <input className="app-input" value={projectId || ""} readOnly placeholder="未選択" />
-                    </div>
-                    <div>
-                      <label className="app-label">
-                        学習データ
-                        <InfoHint text="学習に使用するデータセットのディレクトリです。データ作成後に自動設定されます。" />
-                      </label>
-                      <input className="app-input" value={ocrDatasetDir} readOnly placeholder="データ作成後に自動設定されます" />
-                    </div>
-                    <div className="min-w-0">
-                      <label className="app-label">
-                        データ分割
-                        <InfoHint text="Train / Validation / Test の分割比率（合計1.00）。0.05単位で変更でき、TestはTrain・Validationから自動計算されます（Test = 1.0 − Train − Val）。枚数は最大剰余法で算出され合計が必ず有効画像数と一致します。Tesseractでは Train→train.list / Validation→eval.list / Test→評価用 として使われます。" />
-                      </label>
-                      {/* 0.05単位入力。Testは自動計算（方式A）で合計エラーを構造的に防ぐ。
-                          minmax(0,1fr)×3 + min-w-0 でサイドバー表示時も入力欄が潰れない */}
-                      <div className="grid grid-cols-3 gap-1">
-                        <input
-                          type="number"
-                          min="0"
-                          max="1"
-                          step="0.05"
-                          value={trainRatio}
-                          onChange={(e) => {
-                            const next = normalizeRatioInput(e.target.value);
-                            setTrainRatio(next);
-                            setTestRatio(autoTestRatio(next, valRatio));
-                          }}
-                          className="app-input min-w-0 px-2"
-                          title="Train 比率"
-                        />
-                        <input
-                          type="number"
-                          min="0"
-                          max="1"
-                          step="0.05"
-                          value={valRatio}
-                          onChange={(e) => {
-                            const next = normalizeRatioInput(e.target.value);
-                            setValRatio(next);
-                            setTestRatio(autoTestRatio(trainRatio, next));
-                          }}
-                          className="app-input min-w-0 px-2"
-                          title="Validation 比率"
-                        />
-                        <input
-                          type="number"
-                          value={testRatio}
-                          readOnly
-                          className="app-input min-w-0 px-2 opacity-80"
-                          title="Test 比率（自動計算: 1.0 − Train − Val）"
-                        />
-                      </div>
-                      <p className={`mt-1 text-[11px] ${ratioSummary.valid ? "text-muted" : "text-amber-100"}`}>
-                        Train/Val/Test 合計: {ratioSummary.total}
-                        {ratioSummary.valid ? "（Testは自動計算）" : "（1.00 になるよう調整してください）"}
-                      </p>
-                      {ratioError ? <p className="mt-1 text-[11px] text-red-300">{ratioError}</p> : null}
-                      <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2">
-                        <div>
-                          <label className="app-label">
-                            Split Seed
-                            <InfoHint text="データ分割（シャッフル）に使う乱数の種です。同じ画像集合・同じ比率・同じSeedなら分割結果が完全に再現されます。モデルメタへ保存され学習条件比較で確認できます。" />
-                          </label>
-                          <input
-                            type="number"
-                            className="app-input"
-                            value={ocrSplitSeed ?? 42}
-                            onChange={(e) => setOcrSplitSeed?.(e.target.value)}
-                          />
+                    <p className="rounded-lg border border-accent/25 bg-accent/10 px-2.5 py-1.5 text-[11px] leading-5 text-blue-100">
+                      ここで変更した設定は、次回の学習から適用されます。完了済みの学習結果には影響しません。
+                    </p>
+                    {[
+                      {
+                        id: "split",
+                        label: "データ分割",
+                        summary: `${trainRatio} / ${valRatio} / ${testRatio}`,
+                        sub: `Split Seed: ${ocrSplitSeed ?? 42}`,
+                      },
+                      {
+                        id: "augmentation",
+                        label: "オーグメンテーション",
+                        summary: augCategorySummaryLabel(ocrAugmentation),
+                        sub: "",
+                      },
+                      {
+                        id: "params",
+                        label: "学習パラメータ",
+                        summary: `${engineDisplayLabel} / ${isTesseractEngine ? "Iteration" : "Epoch"} ${epochs}`,
+                        sub: `演算デバイス: ${isTesseractEngine ? "CPU" : ocrTrainDevice}`,
+                      },
+                      { id: "engine", label: "エンジン設定", summary: engineSummaryLabel, sub: "" },
+                    ].map((row) => (
+                      <div key={row.id} className="flex items-center gap-2 rounded-lg border border-border/70 bg-card/50 px-2.5 py-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[12px] font-semibold text-text">{row.label}</p>
+                          <p className="truncate text-[11px] text-muted" title={row.summary}>
+                            {row.summary}
+                          </p>
+                          {row.sub ? <p className="truncate text-[11px] text-muted">{row.sub}</p> : null}
                         </div>
                         <Button
                           size="sm"
                           variant="secondary"
-                          className="h-9 whitespace-nowrap px-2.5 text-[12px]"
-                          disabled={Boolean(ocrSplitPreviewLoading)}
-                          onClick={() => onPreviewSplit?.()}
-                          title="現在の条件（charset・比率）での入力/有効画像数と分割予定枚数を確認します"
+                          className="shrink-0"
+                          onClick={() => openSettingsTab(row.id)}
+                          aria-haspopup="dialog"
+                          title={`${row.label}の設定を開きます`}
                         >
-                          {ocrSplitPreviewLoading ? "確認中..." : "分割枚数を確認"}
+                          編集
                         </Button>
                       </div>
-                      {ocrSplitPreview ? (
-                        <div className="mt-2 rounded-lg border border-border/70 bg-card/55 px-2.5 py-2 text-[12px] tabular-nums">
-                          <p className="text-text">
-                            入力画像数 {ocrSplitPreview.input_count}枚 / 有効画像数 {ocrSplitPreview.valid_count}枚
-                            {ocrSplitPreview.input_count - ocrSplitPreview.valid_count > 0
-                              ? ` / 除外 ${ocrSplitPreview.input_count - ocrSplitPreview.valid_count}枚`
-                              : ""}
-                          </p>
-                          {ocrSplitPreview.input_count - ocrSplitPreview.valid_count > 0 ? (
-                            <p className="text-muted">
-                              除外内訳: 対象外タイプ {ocrSplitPreview.skipped?.type ?? 0} / ラベル不正（charset外・空）{" "}
-                              {ocrSplitPreview.skipped?.invalid_label ?? 0} / 元画像なし {ocrSplitPreview.skipped?.missing_source ?? 0}
-                            </p>
-                          ) : null}
-                          <p className="mt-0.5 text-text">
-                            予定: Train {ocrSplitPreview.counts?.train}枚（
-                            {((ocrSplitPreview.counts?.train / Math.max(1, ocrSplitPreview.valid_count)) * 100).toFixed(2)}%）/ Val{" "}
-                            {ocrSplitPreview.counts?.val}枚 / Test {ocrSplitPreview.counts?.test}枚 = 合計{" "}
-                            {(ocrSplitPreview.counts?.train ?? 0) + (ocrSplitPreview.counts?.val ?? 0) + (ocrSplitPreview.counts?.test ?? 0)}枚
-                          </p>
-                          <p className="text-muted">分割方式: 画像単位（設定比率と実枚数比率は端数処理でわずかに異なる場合があります）</p>
-                        </div>
-                      ) : null}
-                    </div>
-                    <div className="min-w-0">
-                      <label className="app-label">
-                        学習オーグメンテーション
-                        <InfoHint text="学習データ（Trainのみ）へ回転・明るさ・コントラスト・ぼかし・ノイズをランダム適用した追加画像を生成します。Validation・Test・評価データには適用しません。元画像は必ずTrainへ残り、正解ラベルは変更されません。設定はモデルメタへ保存され学習条件比較で確認できます。" />
-                      </label>
-                      <div className="grid grid-cols-2 gap-1">
-                        <select
-                          className="app-select min-w-0"
-                          value={ocrAugmentation?.preset || "none"}
-                          onChange={(e) => setOcrAugmentation?.(applyAugmentationPreset(ocrAugmentation, e.target.value))}
-                          title="プリセット（なし=無効 / 弱い=OCR文字を壊しにくい推奨値 / カスタム=個別編集）"
-                        >
-                          {Object.entries(AUG_PRESET_LABELS).map(([key, label]) => (
-                            <option key={key} value={key}>
-                              {label}
-                            </option>
-                          ))}
-                        </select>
-                        <select
-                          className="app-select min-w-0"
-                          value={String(ocrAugmentation?.multiplier ?? 1.5)}
-                          disabled={(ocrAugmentation?.preset || "none") === "none"}
-                          onChange={(e) => setOcrAugmentation?.({ ...ocrAugmentation, multiplier: Number(e.target.value) })}
-                          title="生成倍率（Train枚数に対する増加後の倍率。元画像は必ず残り、追加分だけ生成されます）"
-                        >
-                          <option value="1.5">生成倍率 1.5倍</option>
-                          <option value="2">生成倍率 2.0倍</option>
-                          <option value="3">生成倍率 3.0倍</option>
-                        </select>
-                      </div>
-                      {(ocrAugmentation?.preset || "none") !== "none" ? (
-                        <div className="mt-1 space-y-1">
-                          {[
-                            { key: "rotation", label: "回転", valueKey: "max_degrees", valueLabel: "±度", min: 0, max: 10, step: 0.5 },
-                            { key: "brightness", label: "明るさ", valueKey: "range", valueLabel: "±%", min: 0, max: 0.5, step: 0.05, percent: true },
-                            { key: "contrast", label: "コントラスト", valueKey: "range", valueLabel: "±%", min: 0, max: 0.5, step: 0.05, percent: true },
-                            { key: "blur", label: "ぼかし", valueKey: null },
-                            { key: "noise", label: "ノイズ", valueKey: null },
-                          ].map((def) => {
-                            const entry = ocrAugmentation?.[def.key] || {};
-                            const update = (patch) =>
-                              setOcrAugmentation?.({
-                                ...ocrAugmentation,
-                                preset: "custom",
-                                [def.key]: { ...entry, ...patch },
-                              });
-                            return (
-                              <div key={def.key} className="grid grid-cols-[minmax(0,7rem)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-1 text-[12px]">
-                                <label className="inline-flex min-w-0 items-center gap-1.5 text-text">
-                                  <input
-                                    type="checkbox"
-                                    checked={Boolean(entry.enabled)}
-                                    onChange={(e) => update({ enabled: e.target.checked })}
-                                  />
-                                  <span className="truncate">{def.label}</span>
-                                </label>
-                                {def.valueKey ? (
-                                  <input
-                                    type="number"
-                                    min={def.min}
-                                    max={def.max}
-                                    step={def.step}
-                                    className="app-input min-w-0 px-2 py-1 text-[12px]"
-                                    value={def.percent ? Math.round((entry[def.valueKey] ?? 0.1) * 100) : entry[def.valueKey] ?? 2}
-                                    disabled={!entry.enabled}
-                                    onChange={(e) =>
-                                      update({ [def.valueKey]: def.percent ? Number(e.target.value) / 100 : Number(e.target.value) })
-                                    }
-                                    title={def.percent ? "変化範囲（±%）" : "最大角度（±度）"}
-                                  />
-                                ) : (
-                                  <select
-                                    className="app-select min-w-0 px-2 py-1 text-[12px]"
-                                    value={entry.strength || "weak"}
-                                    disabled={!entry.enabled}
-                                    onChange={(e) => update({ strength: e.target.value })}
-                                    title="強度"
-                                  >
-                                    <option value="weak">弱</option>
-                                    <option value="medium">中</option>
-                                  </select>
-                                )}
-                                <input
-                                  type="number"
-                                  min="0"
-                                  max="100"
-                                  step="5"
-                                  className="app-input min-w-0 px-2 py-1 text-[12px]"
-                                  value={Math.round((entry.probability ?? 0.3) * 100)}
-                                  disabled={!entry.enabled}
-                                  onChange={(e) => update({ probability: Number(e.target.value) / 100 })}
-                                  title="適用確率（%）"
-                                />
-                              </div>
-                            );
-                          })}
-                          <p className="text-[11px] text-muted">各行: 有効 / 値（±度・±%・強度）/ 適用確率%。Trainのみへ適用されます</p>
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            className="h-7 px-2.5 text-[12px]"
-                            disabled={Boolean(ocrAugPreviewLoading)}
-                            onClick={() => onPreviewAugmentation?.()}
-                            title="ランダムなサンプル画像へ現在の設定を適用し、文字が読めなくなるほど強い設定を事前に確認します"
-                          >
-                            {ocrAugPreviewLoading ? "生成中..." : "オーグメンテーションをプレビュー"}
-                          </Button>
-                          {ocrAugPreview?.items?.length ? (
-                            <div className="space-y-1 rounded-lg border border-border/70 bg-card/55 px-2 py-1.5">
-                              {ocrAugPreview.items.map((item) => (
-                                <div key={item.image_name} className="min-w-0">
-                                  <p className="truncate text-[11px] text-muted" title={item.image_name}>
-                                    {item.image_name}（{item.label}）
-                                  </p>
-                                  <div className="grid grid-cols-2 gap-1">
-                                    <img src={item.original} alt="元画像" className="h-10 w-full rounded border border-border/60 object-contain" />
-                                    <img src={item.augmented} alt="適用後" className="h-10 w-full rounded border border-border/60 object-contain" />
-                                  </div>
-                                </div>
-                              ))}
-                              <p className="text-[10px] text-muted">左=元画像 / 右=適用後（実行のたびにランダム）</p>
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </div>
-                    <div>
-                      <label className="app-label">
-                        {isTesseractEngine ? "最大イテレーション" : "学習回数"}
-                        <InfoHint text="学習の繰り返し回数です。PaddleOCR / EasyOCR では Epoch 数、Tesseract では Iteration 数として使用します。Tesseractでは一般的に500〜3000程度で学習します。" />
-                      </label>
-                      <input
-                        type="number"
-                        className="app-input"
-                        value={epochs}
-                        onChange={(e) => setEpochs(e.target.value)}
-                        disabled={ocrEngine === "easyocr"}
-                      />
-                      <p className="mt-1 text-[11px] text-muted">
-                        {isTesseractEngine
-                          ? "TesseractではEpochではなくIterationとして処理されます。1500はFine-tuning向けの初期値です。学習データ量と評価結果に応じて調整してください。"
-                          : "Epochとして処理されます"}
-                      </p>
-                    </div>
-                    <div>
-                      <label className="app-label">
-                        出力先
-                        <InfoHint text="学習済みモデルの保存先です（変更不可）。" />
-                      </label>
-                      <input className="app-input" value={`data/projects/${projectId || "<project>"}/models/`} readOnly />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">データ準備</p>
-                  {ocrDatasetCreateMode === "from_logs" ? (
-                    <div className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-card/40 p-3 text-xs text-muted">
-                      <label className="inline-flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(ocrFromLogsOnlyInvalid)}
-                          onChange={(e) => setOcrFromLogsOnlyInvalid(e.target.checked)}
-                        />
-                        invalidのみ対象
-                      </label>
-                      <label className="inline-flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(ocrFromLogsIncludeCorrected)}
-                          onChange={(e) => setOcrFromLogsIncludeCorrected(e.target.checked)}
-                        />
-                        correctedを優先
-                      </label>
-                    </div>
-                  ) : (
-                    <p className="text-xs text-muted">
-                      ラベル付け済みデータから学習データを新規作成します（作成は下の「実行操作」から実行）。
-                    </p>
-                  )}
-                </div>
-
-                <details open className="rounded-xl border border-border/80 bg-card/45 p-3">
-                  <summary className="cursor-pointer select-none text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">
-                    エンジン固有設定（{ocrEngine === "paddleocr" ? "PaddleOCR" : isTesseractEngine ? "Tesseract" : "EasyOCR"}）
-                  </summary>
-                  <div className="mt-2 space-y-2">
-                    {ocrEngine === "easyocr" ? (
-                      <div className="rounded-lg border border-amber-300/40 bg-amber-300/10 p-3 text-sm text-amber-100">
-                        EasyOCR はこのUIでは学習対象外です。推論画面でのみ利用できます。
-                      </div>
-                    ) : isTesseractEngine ? (
-                      <>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <label className="app-label">
-                              Base Model
-                              <InfoHint text="fine-tune のベースとなる公式学習済みモデルです（固定）。" />
-                            </label>
-                            <input className="app-input" value="eng.traineddata" readOnly />
-                          </div>
-                          <div>
-                            <label className="app-label">
-                              PSM
-                              <InfoHint text="Tesseractのページセグメンテーションモードです。1行テキスト向けの 7 に固定されています。" />
-                            </label>
-                            <input className="app-input" value="7" readOnly />
-                          </div>
-                        </div>
-                        <div>
-                          <label className="app-label">
-                            学習対象文字セット（Charset）
-                            <InfoHint text="学習対象の文字セットです。charset外の文字を含むラベルは学習から除外されます（文字削除はしません）。" />
-                          </label>
-                          <input
-                            className="app-input"
-                            value={ocrCharset}
-                            onChange={(e) =>
-                              // Tesseractは大文字と小文字筆記体(k/l/t)を区別するため大小変換しない
-                              setOcrCharset(e.target.value)
-                            }
-                            placeholder={TESSERACT_CHARSET_DEFAULT}
-                          />
-                          <p className="mt-1 text-xs text-muted">
-                            既定: A-Z / 0-9 / 小文字筆記体 k,l,t。charset外の文字を含むラベルは学習から除外されます（文字削除はしません）。
-                          </p>
-                        </div>
-                        <div>
-                          <label className="app-label">
-                            Whitelist
-                            <InfoHint text="推論時に許可する文字の一覧（既定値）です。学習内容には影響しません。" />
-                          </label>
-                          <input className="app-input" value={TESSERACT_CHARSET_DEFAULT} readOnly />
-                          <p className="mt-1 text-xs text-muted">推論時whitelist（既定）</p>
-                        </div>
-                        {/* 実験情報（モデルメタへ保存し、モデル比較の学習条件比較で表示。未入力=未記録） */}
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <label className="app-label">
-                              実験名
-                              <InfoHint text="この学習の目的が分かる名前です（例: Iteration 15000）。モデルメタへ保存され、モデル比較の学習条件比較で表示されます。" />
-                            </label>
-                            <input
-                              className="app-input"
-                              value={experimentName ?? ""}
-                              onChange={(e) => setExperimentName?.(e.target.value)}
-                              placeholder="例: Iteration検証"
-                            />
-                          </div>
-                          <div>
-                            <label className="app-label">
-                              親モデル（管理No）
-                              <InfoHint text="このモデルの学習開始時に参照した直前のモデルの管理Noです。派生関係の追跡用で、学習内容には影響しません（ベース直学習は空欄）。" />
-                            </label>
-                            <input
-                              className="app-input"
-                              value={parentModelId ?? ""}
-                              onChange={(e) => setParentModelId?.(e.target.value)}
-                              placeholder="例: M0003（任意）"
-                            />
-                          </div>
-                        </div>
-                        <div>
-                          <label className="app-label">
-                            学習メモ
-                            <InfoHint text="前回から変更した内容などの自由記述です。モデルメタへ保存され、学習条件比較で表示されます。" />
-                          </label>
-                          <textarea
-                            className="app-input min-h-[64px] py-1.5"
-                            value={trainingNote ?? ""}
-                            onChange={(e) => setTrainingNote?.(e.target.value)}
-                            placeholder="例: Iterationのみ変更（他条件は前回と同一）"
-                          />
-                        </div>
-                        <div className="rounded-lg border border-accent/30 bg-accent/10 px-3 py-2 text-xs text-blue-100">
-                          公式 <span className="font-semibold">eng.traineddata</span> をベースに LSTM を fine-tune します。
-                          学習対象文字: A-Z / 0-9 / 小文字筆記体 k,l,t
-                        </div>
-                        <p className="text-xs text-muted">
-                          学習には外部ツール（tesseract / lstmtraining / combine_tessdata）と eng.traineddata が必要です。
-                          未導入の場合は学習開始時に導入手順つきでエラーになります。
-                        </p>
-                      </>
-                    ) : (
-                      <>
-                    <div className="space-y-2 rounded-lg border border-border/70 bg-card/50 p-3">
-                      <p className="text-xs font-semibold text-slate-100">初期重み</p>
-                      <div>
-                        <label className="app-label">初期化方式</label>
-                        <select value={ocrInitSourceType} onChange={(e) => setOcrInitSourceType(e.target.value)} className="app-select">
-                          <option value="scratch">scratch</option>
-                          <option value="ocr_model">既存OCRモデル（Fine-tune）</option>
-                        </select>
-                      </div>
-                      {ocrInitSourceType === "ocr_model" ? (
-                        <div>
-                          <div className="flex items-center justify-between gap-3">
-                            <label className="app-label">初期モデル</label>
-                            <button
-                              type="button"
-                              className="text-xs font-medium text-accent underline underline-offset-2 transition hover:opacity-80"
-                              onClick={() => setShowOcrOfficialModelHelp((current) => !current)}
-                              aria-expanded={showOcrOfficialModelHelp}
-                            >
-                              {showOcrOfficialModelHelp ? "説明を隠す" : "公式モデルの説明を表示"}
-                            </button>
-                          </div>
-                          <select value={ocrInitSourceValue} onChange={(e) => setOcrInitSourceValue(e.target.value)} className="app-select">
-                            <option value="">選択してください</option>
-                            {Array.isArray(ocrInitModelOptions) && ocrInitModelOptions.length > 0 ? (
-                              <>
-                                <option value="latest">latest（作成済み最新）</option>
-                                {ocrInitModelOptions.map((name) => (
-                                  <option key={name} value={name}>
-                                    {name}（作成済み）
-                                  </option>
-                                ))}
-                              </>
-                            ) : null}
-                            {(ocrOfficialInitModelOptions || []).map((name) => (
-                              <option key={`official-${name}`} value={name}>
-                                {name}（公式）
-                              </option>
-                            ))}
-                          </select>
-                          {showOcrOfficialModelHelp ? (
-                            <div className="mt-2 whitespace-pre-line rounded-lg border border-border/80 bg-card/55 px-3 py-2 text-xs leading-6 text-muted">
-                              {PADDLEOCR_OFFICIAL_MODELS_TOOLTIP}
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </div>
-
-                    <div className="space-y-2 rounded-lg border border-border/70 bg-card/50 p-3">
-                      <p className="text-xs font-semibold text-slate-100">学習パラメータ</p>
-                      <div className="space-y-2 rounded-lg border border-border/80 bg-card/55 p-3">
-                        <p className="text-xs font-semibold text-slate-100">実行プロファイル</p>
-                        <div className="grid grid-cols-2 gap-2">
-                          <Button
-                            variant={selectedRuntimePresetKey === "mac_safe" ? "primary" : "secondary"}
-                            className="w-full"
-                            onClick={() => onApplyOcrTrainingPreset("mac_safe")}
-                          >
-                            Mac Safe
-                          </Button>
-                          <Button
-                            variant={selectedRuntimePresetKey === "rtx_train" ? "primary" : "secondary"}
-                            className="w-full"
-                            onClick={() => onApplyOcrTrainingPreset("rtx_train")}
-                          >
-                            RTX Train
-                          </Button>
-                        </div>
-                        {recommendedProfile ? (
-                          <p className="text-xs text-muted">
-                            推奨: <span className="font-semibold text-text">{recommendedProfile}</span>
-                            {" / "}GPU利用可否: {gpuAvailable ? "利用可能" : "利用不可"}
-                          </p>
-                        ) : null}
-                        {!paddlePathValid ? (
-                          <p className="text-xs text-red-200">
-                            PaddleOCR パスを確認してください（`PADDLEOCR_PATH` または settings.yaml）。
-                          </p>
-                        ) : null}
-                      </div>
-                      {/* ラベルは日本語＋折り返し禁止（whitespace-nowrap）で3項目の高さを揃える。
-                          内部キー（save_epoch_step / train・eval num_workers）は変更せずInfoHintで示す */}
-                      <div className="grid grid-cols-3 gap-2">
-                        <div className="min-w-0">
-                          <label className="app-label whitespace-nowrap">
-                            エポック数
-                            <InfoHint text="チェックポイントを保存するエポック間隔です（内部キー: save_epoch_step）。学習回数そのものはプロジェクト設定の「学習回数」で指定します。" />
-                          </label>
-                          <input
-                            type="number"
-                            min="1"
-                            className="app-input"
-                            value={ocrSaveEpochStep}
-                            onChange={(e) => setOcrSaveEpochStep(e.target.value)}
-                          />
-                        </div>
-                        <div className="min-w-0">
-                          <label className="app-label whitespace-nowrap">
-                            学習ワーカー数
-                            <InfoHint text="学習データ読み込みの並列プロセス数です（内部キー: train num_workers）。Mac環境では0〜1推奨です。" />
-                          </label>
-                          <input
-                            type="number"
-                            min="0"
-                            className="app-input"
-                            value={ocrTrainNumWorkers}
-                            onChange={(e) => setOcrTrainNumWorkers(e.target.value)}
-                          />
-                        </div>
-                        <div className="min-w-0">
-                          <label className="app-label whitespace-nowrap">
-                            評価ワーカー数
-                            <InfoHint text="評価データ読み込みの並列プロセス数です（内部キー: eval num_workers）。Mac環境では0〜1推奨です。" />
-                          </label>
-                          <input
-                            type="number"
-                            min="0"
-                            className="app-input"
-                            value={ocrEvalNumWorkers}
-                            onChange={(e) => setOcrEvalNumWorkers(e.target.value)}
-                          />
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <label className="inline-flex items-center gap-2 rounded-lg border border-border/70 bg-card/55 px-3 py-2 text-sm text-text">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(ocrAutoBatchSize)}
-                            onChange={(e) => setOcrAutoBatchSize(e.target.checked)}
-                            disabled={ocrTrainDevice === "cpu"}
-                          />
-                          Batch自動最適化（VRAM基準）
-                        </label>
-                        <label className="inline-flex items-center gap-2 rounded-lg border border-border/70 bg-card/55 px-3 py-2 text-sm text-text">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(ocrUseAmp)}
-                            onChange={(e) => setOcrUseAmp(e.target.checked)}
-                            disabled={ocrTrainDevice === "cpu"}
-                          />
-                          AMP（混合精度）
-                        </label>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <label className="inline-flex items-center gap-2 rounded-lg border border-border/70 bg-card/55 px-3 py-2 text-sm text-text">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(ocrPinMemory)}
-                            onChange={(e) => setOcrPinMemory(e.target.checked)}
-                            disabled={ocrTrainDevice === "cpu"}
-                          />
-                          pin_memory
-                        </label>
-                        <label className="inline-flex items-center gap-2 rounded-lg border border-border/70 bg-card/55 px-3 py-2 text-sm text-text">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(ocrPersistentWorkers)}
-                            onChange={(e) => setOcrPersistentWorkers(e.target.checked)}
-                            disabled={ocrTrainDevice === "cpu" || trainWorkersNum <= 0}
-                          />
-                          persistent_workers
-                        </label>
-                      </div>
-                      <div className="rounded-lg border border-border/80 bg-card/55 px-3 py-3 text-sm leading-6 text-slate-100">
-                        <p>
-                          GPU: {gpuAvailable ? (gpuName || "CUDA GPU") : "利用不可"}
-                          {gpuAvailable && vramLabel ? ` (${vramLabel})` : ""}
-                        </p>
-                        <p>Batch: {batchNum > 0 ? `${batchNum}（${batchModeLabel}）` : "-"}</p>
-                        <p>
-                          Workers: train {trainWorkersNum} / eval {evalWorkersNum}
-                        </p>
-                        <p>AMP: {ampEnabled ? "ON" : "OFF"}</p>
-                      </div>
-                      {showMacWorkerWarning ? (
-                        <p className="text-xs text-amber-100">
-                          Mac環境では num_workers を 0〜1 推奨です。高すぎるとメモリ不足の原因になります。
-                        </p>
-                      ) : null}
-                      {showMemoryRiskWarning ? (
-                        <p className="text-xs text-amber-100">
-                          現在設定はメモリ不足の可能性があります。Mac Safe プリセットへの切替を推奨します。
-                        </p>
-                      ) : null}
-                      <div>
-                        <label className="app-label">
-                          文字セット（charset）
-                          <InfoHint text="学習対象の文字セットです。PaddleOCRでは大文字に正規化されます。" />
-                        </label>
-                        <input
-                          className="app-input"
-                          value={ocrCharset}
-                          onChange={(e) => setOcrCharset(e.target.value.toUpperCase())}
-                          placeholder={OCR_CHARSET_DEFAULT}
-                        />
-                      </div>
-                      <div>
-                        <label className="app-label">画像形状</label>
-                        <div className="grid grid-cols-3 gap-2">
-                          <div>
-                            <label className="app-label">Channel</label>
-                            <select className="app-select" value={ocrChannel} onChange={(e) => updateOcrImageShape({ c: e.target.value })}>
-                              <option value="1">1 (Gray)</option>
-                              <option value="3">3 (RGB)</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label className="app-label">Height [px]</label>
-                            <input
-                              type="number"
-                              className="app-input"
-                              value={ocrHeight}
-                              onChange={(e) => updateOcrImageShape({ h: e.target.value })}
-                              placeholder="48"
-                            />
-                          </div>
-                          <div>
-                            <label className="app-label">Width [px]</label>
-                            <input
-                              type="number"
-                              className="app-input"
-                              value={ocrWidth}
-                              onChange={(e) => updateOcrImageShape({ w: e.target.value })}
-                              placeholder="320"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="app-label">
-                            バッチサイズ
-                            <InfoHint text="1ステップで処理する画像枚数です。Batch自動最適化がONの場合はVRAM基準で調整されます。" />
-                          </label>
-                          <input type="number" className="app-input" value={batchSize} onChange={(e) => setBatchSize(e.target.value)} />
-                        </div>
-                        <div>
-                          <label className="app-label">
-                            最大文字数
-                            <InfoHint text="1ラベルあたりの最大文字数（max_text_length）です。" />
-                          </label>
-                          <input
-                            type="number"
-                            className="app-input"
-                            value={ocrMaxTextLength}
-                            onChange={(e) => setOcrMaxTextLength(e.target.value)}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                      </>
-                    )}
-                  </div>
-                </details>
-                </fieldset>
+                    ))}
                   </div>
                 </section>
+
+                {/* 次回学習の設定モーダル（4カテゴリのタブ切替。設定値・保存処理は従来のstateをそのまま共有し、View ID・ルートは変更しない）。
+                    祖先のbackdrop-filter等でposition:fixedの基準がずれないよう、document.bodyへポータル描画する */}
+                {settingsTab && typeof document !== "undefined" ? (
+                  createPortal(
+                  <div
+                    className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="次回学習の設定"
+                    onMouseDown={(e) => {
+                      if (e.target === e.currentTarget) closeSettingsModal();
+                    }}
+                  >
+                    <div className="flex max-h-[92vh] w-full min-w-0 max-w-6xl flex-col overflow-hidden rounded-2xl border border-border bg-[#262c34] shadow-2xl">
+                      <div className="flex items-start justify-between gap-3 border-b border-border/70 px-4 py-3">
+                        <div className="min-w-0">
+                          <p className="text-[15px] font-semibold text-text">次回学習の設定</p>
+                          <p className="text-[11px] text-muted">
+                            ここで変更した設定は、次回の学習から適用されます。完了済みの学習結果には影響しません。
+                            {settingsLocked ? "（学習実行中のため変更できません）" : ""}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={closeSettingsModal}
+                          aria-label="閉じる"
+                          title="閉じる（Esc）"
+                          className="rounded-lg px-2 py-1 text-lg leading-none text-muted transition hover:bg-card/70 hover:text-text"
+                        >
+                          ×
+                        </button>
+                      </div>
+                      <div role="tablist" aria-label="設定カテゴリ" className="flex flex-wrap gap-1 border-b border-border/70 px-4 pt-2">
+                        {NEXT_SETTINGS_TABS.map((tab) => (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            role="tab"
+                            id={`settings-tab-${tab.id}`}
+                            aria-selected={settingsTab === tab.id}
+                            aria-controls={`settings-panel-${tab.id}`}
+                            onClick={() => openSettingsTab(tab.id)}
+                            className={`rounded-t-lg border-b-2 px-3 py-2 text-[13px] font-semibold transition ${
+                              settingsTab === tab.id
+                                ? "border-accent bg-card/50 text-text"
+                                : "border-transparent text-muted hover:bg-card/40 hover:text-text"
+                            }`}
+                          >
+                            {tab.label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="dark-scroll min-h-0 flex-1 overflow-y-auto p-4">
+                        <fieldset
+                          disabled={settingsLocked}
+                          className={settingsLocked ? "opacity-70" : ""}
+                          title={settingsLocked ? "学習実行中は設定を変更できません。" : undefined}
+                        >
+                          {settingsTab === "split" ? (
+                            <div role="tabpanel" id="settings-panel-split" aria-labelledby="settings-tab-split" className="space-y-3">
+                              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                                <div>
+                                  <label className="app-label">
+                                    プロジェクト
+                                    <InfoHint text="学習対象のプロジェクトです。プロジェクト画面で切り替えできます。" />
+                                  </label>
+                                  <input className="app-input" value={projectId || ""} readOnly placeholder="未選択" />
+                                </div>
+                                <div>
+                                  <label className="app-label">
+                                    学習データ
+                                    <InfoHint text="学習に使用するデータセットのディレクトリです。データ作成後に自動設定されます。" />
+                                  </label>
+                                  <input className="app-input" value={ocrDatasetDir} readOnly placeholder="データ作成後に自動設定されます" />
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                                <div>
+                                  <label className="app-label">学習データ作成方法</label>
+                                  <select
+                                    value={ocrDatasetCreateMode}
+                                    onChange={(e) => setOcrDatasetCreateMode(e.target.value)}
+                                    className="app-select"
+                                  >
+                                    <option value="new">新規作成（ラベルデータから）</option>
+                                    <option value="from_logs">再学習作成（OCRログから）</option>
+                                  </select>
+                                </div>
+                                {ocrDatasetCreateMode === "from_logs" ? (
+                                  <div className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-card/40 p-3 text-xs text-muted">
+                                    <label className="inline-flex items-center gap-2">
+                                      <input
+                                        type="checkbox"
+                                        checked={Boolean(ocrFromLogsOnlyInvalid)}
+                                        onChange={(e) => setOcrFromLogsOnlyInvalid(e.target.checked)}
+                                      />
+                                      invalidのみ対象
+                                    </label>
+                                    <label className="inline-flex items-center gap-2">
+                                      <input
+                                        type="checkbox"
+                                        checked={Boolean(ocrFromLogsIncludeCorrected)}
+                                        onChange={(e) => setOcrFromLogsIncludeCorrected(e.target.checked)}
+                                      />
+                                      correctedを優先
+                                    </label>
+                                  </div>
+                                ) : (
+                                  <p className="self-end pb-2 text-xs text-muted">
+                                    ラベル付け済みデータから学習データを新規作成します（作成は「実行操作」から実行）。
+                                  </p>
+                                )}
+                              </div>
+                              <div className="min-w-0 md:max-w-xl">
+                                <label className="app-label">
+                                  データ分割
+                                  <InfoHint text="Train / Validation / Test の分割比率（合計1.00）。0.05単位で変更でき、TestはTrain・Validationから自動計算されます（Test = 1.0 − Train − Val）。枚数は最大剰余法で算出され合計が必ず有効画像数と一致します。Tesseractでは Train→train.list / Validation→eval.list / Test→評価用 として使われます。" />
+                                </label>
+                                {/* 0.05単位入力。Testは自動計算（方式A）で合計エラーを構造的に防ぐ */}
+                                <div className="grid grid-cols-3 gap-1">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max="1"
+                                    step="0.05"
+                                    value={trainRatio}
+                                    onChange={(e) => {
+                                      const next = normalizeRatioInput(e.target.value);
+                                      setTrainRatio(next);
+                                      setTestRatio(autoTestRatio(next, valRatio));
+                                    }}
+                                    className="app-input min-w-0 px-2"
+                                    title="Train 比率"
+                                  />
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max="1"
+                                    step="0.05"
+                                    value={valRatio}
+                                    onChange={(e) => {
+                                      const next = normalizeRatioInput(e.target.value);
+                                      setValRatio(next);
+                                      setTestRatio(autoTestRatio(trainRatio, next));
+                                    }}
+                                    className="app-input min-w-0 px-2"
+                                    title="Validation 比率"
+                                  />
+                                  <input
+                                    type="number"
+                                    value={testRatio}
+                                    readOnly
+                                    className="app-input min-w-0 px-2 opacity-80"
+                                    title="Test 比率（自動計算: 1.0 − Train − Val）"
+                                  />
+                                </div>
+                                <p className={`mt-1 text-[11px] ${ratioSummary.valid ? "text-muted" : "text-amber-100"}`}>
+                                  Train/Val/Test 合計: {ratioSummary.total}
+                                  {ratioSummary.valid ? "（Testは自動計算）" : "（1.00 になるよう調整してください）"}
+                                </p>
+                                {ratioError ? (
+                                  <p role="alert" className="mt-1 text-[11px] text-red-300">
+                                    {ratioError}
+                                  </p>
+                                ) : null}
+                                <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2">
+                                  <div>
+                                    <label className="app-label">
+                                      Split Seed
+                                      <InfoHint text="データ分割（シャッフル）に使う乱数の種です。同じ画像集合・同じ比率・同じSeedなら分割結果が完全に再現されます。モデルメタへ保存され学習条件比較で確認できます。" />
+                                    </label>
+                                    <input
+                                      type="number"
+                                      className="app-input"
+                                      value={ocrSplitSeed ?? 42}
+                                      onChange={(e) => setOcrSplitSeed?.(e.target.value)}
+                                    />
+                                  </div>
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    className="h-9 whitespace-nowrap px-2.5 text-[12px]"
+                                    disabled={Boolean(ocrSplitPreviewLoading)}
+                                    onClick={() => onPreviewSplit?.()}
+                                    title="現在の条件（charset・比率）での入力/有効画像数と分割予定枚数を確認します"
+                                  >
+                                    {ocrSplitPreviewLoading ? "確認中..." : "分割枚数を確認"}
+                                  </Button>
+                                </div>
+                                {ocrSplitPreview ? (
+                                  <div
+                                    aria-live="polite"
+                                    className="mt-2 rounded-lg border border-border/70 bg-card/55 px-2.5 py-2 text-[12px] tabular-nums"
+                                  >
+                                    <p className="text-text">
+                                      入力画像数 {ocrSplitPreview.input_count}枚 / 有効画像数 {ocrSplitPreview.valid_count}枚
+                                      {ocrSplitPreview.input_count - ocrSplitPreview.valid_count > 0
+                                        ? ` / 除外 ${ocrSplitPreview.input_count - ocrSplitPreview.valid_count}枚`
+                                        : ""}
+                                    </p>
+                                    {ocrSplitPreview.input_count - ocrSplitPreview.valid_count > 0 ? (
+                                      <p className="text-muted">
+                                        除外内訳: 対象外タイプ {ocrSplitPreview.skipped?.type ?? 0} / ラベル不正（charset外・空）{" "}
+                                        {ocrSplitPreview.skipped?.invalid_label ?? 0} / 元画像なし{" "}
+                                        {ocrSplitPreview.skipped?.missing_source ?? 0}
+                                      </p>
+                                    ) : null}
+                                    <p className="mt-0.5 text-text">
+                                      予定: Train {ocrSplitPreview.counts?.train}枚（
+                                      {((ocrSplitPreview.counts?.train / Math.max(1, ocrSplitPreview.valid_count)) * 100).toFixed(2)}
+                                      %）/ Val {ocrSplitPreview.counts?.val}枚 / Test {ocrSplitPreview.counts?.test}枚 = 合計{" "}
+                                      {(ocrSplitPreview.counts?.train ?? 0) +
+                                        (ocrSplitPreview.counts?.val ?? 0) +
+                                        (ocrSplitPreview.counts?.test ?? 0)}
+                                      枚
+                                    </p>
+                                    <p className="text-muted">
+                                      分割方式: 画像単位（設定比率と実枚数比率は端数処理でわずかに異なる場合があります）
+                                    </p>
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+                          ) : null}
+
+                          {settingsTab === "augmentation" ? (
+                            <div role="tabpanel" id="settings-panel-augmentation" aria-labelledby="settings-tab-augmentation">
+                              <AugmentationSettingsPanel
+                                augmentation={ocrAugmentation}
+                                onChange={setOcrAugmentation}
+                                disabled={settingsLocked}
+                                preview={ocrAugPreview}
+                                previewLoading={ocrAugPreviewLoading}
+                                onRegeneratePreview={(count) => onPreviewAugmentation?.(count)}
+                                trainCount={ocrSplitPreview?.counts?.train ?? null}
+                              />
+                            </div>
+                          ) : null}
+
+                          {settingsTab === "params" ? (
+                            <div role="tabpanel" id="settings-panel-params" aria-labelledby="settings-tab-params" className="space-y-3">
+                              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                                <div>
+                                  <label className="app-label">OCRタイプ</label>
+                                  <select value={ocrEngine} onChange={(e) => setOcrEngine(e.target.value)} className="app-select">
+                                    <option value="paddleocr">PaddleOCR（学習可）</option>
+                                    <option value="tesseract">Tesseract（学習可 / A-Z・0-9・筆記体klt）</option>
+                                    <option value="easyocr">EasyOCR（推論専用）</option>
+                                  </select>
+                                </div>
+                                <div>
+                                  <label className="app-label">
+                                    {isTesseractEngine ? "最大イテレーション" : "学習回数"}
+                                    <InfoHint text="学習の繰り返し回数です。PaddleOCR / EasyOCR では Epoch 数、Tesseract では Iteration 数として使用します。Tesseractでは一般的に500〜3000程度で学習します。" />
+                                  </label>
+                                  <input
+                                    type="number"
+                                    className="app-input"
+                                    value={epochs}
+                                    onChange={(e) => setEpochs(e.target.value)}
+                                    disabled={ocrEngine === "easyocr"}
+                                  />
+                                  <p className="mt-1 text-[11px] text-muted">
+                                    {isTesseractEngine
+                                      ? "TesseractではEpochではなくIterationとして処理されます。1500はFine-tuning向けの初期値です。"
+                                      : "Epochとして処理されます"}
+                                  </p>
+                                </div>
+                              </div>
+                              <div>
+                                <label className="app-label">
+                                  演算デバイス
+                                  <InfoHint text="学習に使用する演算デバイスです。auto はGPUが利用可能な場合にGPUを使用します。TesseractはCPUのみ対応しています。" />
+                                </label>
+                                <div className="grid h-8 max-w-md grid-cols-3 gap-1.5">
+                                  {[
+                                    {
+                                      value: "auto",
+                                      label: "Auto",
+                                      // 選択可能なボタンは色付きで発光させる（Auto=青）。未選択でも背景をカードより明るくし操作可能と分かるようにする
+                                      glow: "border-accent/80 bg-slate-700/70 text-blue-200 shadow-[0_0_10px_rgba(88,166,255,0.55)] hover:bg-accent/20",
+                                      selectedClass: "border-accent bg-accent text-white shadow-[0_0_14px_rgba(88,166,255,0.75)]",
+                                      selectable: !isTesseractEngine && ocrEngine !== "easyocr",
+                                      hint: "GPUが利用可能ならGPUを使用します",
+                                    },
+                                    {
+                                      value: "cpu",
+                                      label: "CPU",
+                                      glow: "border-cyan-400/80 bg-slate-700/70 text-cyan-100 shadow-[0_0_10px_rgba(34,211,238,0.55)] hover:bg-cyan-400/15",
+                                      selectedClass: "border-cyan-300 bg-cyan-500/80 text-white shadow-[0_0_14px_rgba(34,211,238,0.75)]",
+                                      selectable: ocrEngine !== "easyocr",
+                                      hint: "CPUで学習します",
+                                    },
+                                    {
+                                      value: "gpu",
+                                      label: "GPU",
+                                      glow: "border-emerald-400/80 bg-slate-700/70 text-emerald-100 shadow-[0_0_10px_rgba(52,211,153,0.6)] hover:bg-emerald-400/15",
+                                      selectedClass: "border-emerald-300 bg-emerald-500/80 text-white shadow-[0_0_14px_rgba(52,211,153,0.8)]",
+                                      // GPUハードが検出されていれば選択可能として点灯する
+                                      // （torch/paddleのCUDA対応状況は実行時に解決されるためUIではブロックしない）
+                                      selectable:
+                                        !isTesseractEngine &&
+                                        ocrEngine !== "easyocr" &&
+                                        Boolean(systemCheck?.gpu_available || systemCheck?.gpu_name),
+                                      hint: systemCheck?.gpu_name
+                                        ? `GPUで学習します（${systemCheck.gpu_name}）`
+                                        : systemCheck?.gpu_available
+                                          ? "GPUで学習します"
+                                          : "GPUが検出されていません",
+                                    },
+                                  ].map((opt) => {
+                                    // Tesseract は CPU 固定（CPUのみ点灯・選択表示、クリック不可）
+                                    const fixedCpu = isTesseractEngine && opt.value === "cpu";
+                                    const selected = isTesseractEngine ? opt.value === "cpu" : ocrTrainDevice === opt.value;
+                                    const clickable = opt.selectable && !isTesseractEngine;
+                                    const lit = opt.selectable || fixedCpu;
+                                    return (
+                                      <button
+                                        key={opt.value}
+                                        type="button"
+                                        title={isTesseractEngine && opt.value !== "cpu" ? "TesseractはCPUのみ対応しています" : opt.hint}
+                                        disabled={!clickable}
+                                        onClick={() => clickable && setOcrTrainDevice(opt.value)}
+                                        className={`rounded-lg border text-xs font-semibold transition ${
+                                          selected
+                                            ? opt.selectedClass
+                                            : lit
+                                              ? opt.glow
+                                              : // 無効: 暗い背景+低コントラスト+発光なし（未選択の発光ボタンと明確に区別）
+                                                "cursor-not-allowed border-slate-600 bg-slate-800/80 text-slate-500"
+                                        } ${!clickable && lit ? "cursor-default" : ""}`}
+                                      >
+                                        {opt.label}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                                {isTesseractEngine ? (
+                                  <p className="mt-1 text-[11px] text-muted">TesseractはCPUのみ対応しています。</p>
+                                ) : null}
+                              </div>
+                              <div className="md:max-w-md">
+                                <label className="app-label">
+                                  出力先
+                                  <InfoHint text="学習済みモデルの保存先です（変更不可）。" />
+                                </label>
+                                <input className="app-input" value={`data/projects/${projectId || "<project>"}/models/`} readOnly />
+                              </div>
+                            </div>
+                          ) : null}
+
+                          {settingsTab === "engine" ? (
+                            <div role="tabpanel" id="settings-panel-engine" aria-labelledby="settings-tab-engine" className="space-y-2">
+                              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">
+                                エンジン固有設定（{ocrEngine === "paddleocr" ? "PaddleOCR" : isTesseractEngine ? "Tesseract" : "EasyOCR"}）
+                              </p>
+                              {ocrEngine === "easyocr" ? (
+                                <div className="rounded-lg border border-amber-300/40 bg-amber-300/10 p-3 text-sm text-amber-100">
+                                  EasyOCR はこのUIでは学習対象外です。推論画面でのみ利用できます。
+                                </div>
+                              ) : isTesseractEngine ? (
+                                <>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                      <label className="app-label">
+                                        Base Model
+                                        <InfoHint text="fine-tune のベースとなる公式学習済みモデルです（固定）。" />
+                                      </label>
+                                      <input className="app-input" value="eng.traineddata" readOnly />
+                                    </div>
+                                    <div>
+                                      <label className="app-label">
+                                        PSM
+                                        <InfoHint text="Tesseractのページセグメンテーションモードです。1行テキスト向けの 7 に固定されています。" />
+                                      </label>
+                                      <input className="app-input" value="7" readOnly />
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <label className="app-label">
+                                      学習対象文字セット（Charset）
+                                      <InfoHint text="学習対象の文字セットです。charset外の文字を含むラベルは学習から除外されます（文字削除はしません）。" />
+                                    </label>
+                                    <input
+                                      className="app-input"
+                                      value={ocrCharset}
+                                      onChange={(e) =>
+                                        // Tesseractは大文字と小文字筆記体(k/l/t)を区別するため大小変換しない
+                                        setOcrCharset(e.target.value)
+                                      }
+                                      placeholder={TESSERACT_CHARSET_DEFAULT}
+                                    />
+                                    <p className="mt-1 text-xs text-muted">
+                                      既定: A-Z / 0-9 / 小文字筆記体 k,l,t。charset外の文字を含むラベルは学習から除外されます（文字削除はしません）。
+                                    </p>
+                                  </div>
+                                  <div>
+                                    <label className="app-label">
+                                      Whitelist
+                                      <InfoHint text="推論時に許可する文字の一覧（既定値）です。学習内容には影響しません。" />
+                                    </label>
+                                    <input className="app-input" value={TESSERACT_CHARSET_DEFAULT} readOnly />
+                                    <p className="mt-1 text-xs text-muted">推論時whitelist（既定）</p>
+                                  </div>
+                                  {/* 実験情報（モデルメタへ保存し、モデル比較の学習条件比較で表示。未入力=未記録） */}
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                      <label className="app-label">
+                                        実験名
+                                        <InfoHint text="この学習の目的が分かる名前です（例: Iteration 15000）。モデルメタへ保存され、モデル比較の学習条件比較で表示されます。" />
+                                      </label>
+                                      <input
+                                        className="app-input"
+                                        value={experimentName ?? ""}
+                                        onChange={(e) => setExperimentName?.(e.target.value)}
+                                        placeholder="例: Iteration検証"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="app-label">
+                                        親モデル（管理No）
+                                        <InfoHint text="このモデルの学習開始時に参照した直前のモデルの管理Noです。派生関係の追跡用で、学習内容には影響しません（ベース直学習は空欄）。" />
+                                      </label>
+                                      <input
+                                        className="app-input"
+                                        value={parentModelId ?? ""}
+                                        onChange={(e) => setParentModelId?.(e.target.value)}
+                                        placeholder="例: M0003（任意）"
+                                      />
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <label className="app-label">
+                                      学習メモ
+                                      <InfoHint text="前回から変更した内容などの自由記述です。モデルメタへ保存され、学習条件比較で表示されます。" />
+                                    </label>
+                                    <textarea
+                                      className="app-input min-h-[64px] py-1.5"
+                                      value={trainingNote ?? ""}
+                                      onChange={(e) => setTrainingNote?.(e.target.value)}
+                                      placeholder="例: Iterationのみ変更（他条件は前回と同一）"
+                                    />
+                                  </div>
+                                  <div className="rounded-lg border border-accent/30 bg-accent/10 px-3 py-2 text-xs text-blue-100">
+                                    公式 <span className="font-semibold">eng.traineddata</span> をベースに LSTM を fine-tune します。
+                                    学習対象文字: A-Z / 0-9 / 小文字筆記体 k,l,t
+                                  </div>
+                                  <p className="text-xs text-muted">
+                                    学習には外部ツール（tesseract / lstmtraining / combine_tessdata）と eng.traineddata が必要です。
+                                    未導入の場合は学習開始時に導入手順つきでエラーになります。
+                                  </p>
+                                </>
+                              ) : (
+                                <>
+                                  <div className="space-y-2 rounded-lg border border-border/70 bg-card/50 p-3">
+                                    <p className="text-xs font-semibold text-slate-100">初期重み</p>
+                                    <div>
+                                      <label className="app-label">初期化方式</label>
+                                      <select
+                                        value={ocrInitSourceType}
+                                        onChange={(e) => setOcrInitSourceType(e.target.value)}
+                                        className="app-select"
+                                      >
+                                        <option value="scratch">scratch</option>
+                                        <option value="ocr_model">既存OCRモデル（Fine-tune）</option>
+                                      </select>
+                                    </div>
+                                    {ocrInitSourceType === "ocr_model" ? (
+                                      <div>
+                                        <div className="flex items-center justify-between gap-3">
+                                          <label className="app-label">初期モデル</label>
+                                          <button
+                                            type="button"
+                                            className="text-xs font-medium text-accent underline underline-offset-2 transition hover:opacity-80"
+                                            onClick={() => setShowOcrOfficialModelHelp((current) => !current)}
+                                            aria-expanded={showOcrOfficialModelHelp}
+                                          >
+                                            {showOcrOfficialModelHelp ? "説明を隠す" : "公式モデルの説明を表示"}
+                                          </button>
+                                        </div>
+                                        <select
+                                          value={ocrInitSourceValue}
+                                          onChange={(e) => setOcrInitSourceValue(e.target.value)}
+                                          className="app-select"
+                                        >
+                                          <option value="">選択してください</option>
+                                          {Array.isArray(ocrInitModelOptions) && ocrInitModelOptions.length > 0 ? (
+                                            <>
+                                              <option value="latest">latest（作成済み最新）</option>
+                                              {ocrInitModelOptions.map((name) => (
+                                                <option key={name} value={name}>
+                                                  {name}（作成済み）
+                                                </option>
+                                              ))}
+                                            </>
+                                          ) : null}
+                                          {(ocrOfficialInitModelOptions || []).map((name) => (
+                                            <option key={`official-${name}`} value={name}>
+                                              {name}（公式）
+                                            </option>
+                                          ))}
+                                        </select>
+                                        {showOcrOfficialModelHelp ? (
+                                          <div className="mt-2 whitespace-pre-line rounded-lg border border-border/80 bg-card/55 px-3 py-2 text-xs leading-6 text-muted">
+                                            {PADDLEOCR_OFFICIAL_MODELS_TOOLTIP}
+                                          </div>
+                                        ) : null}
+                                      </div>
+                                    ) : null}
+                                  </div>
+
+                                  <div className="space-y-2 rounded-lg border border-border/70 bg-card/50 p-3">
+                                    <p className="text-xs font-semibold text-slate-100">学習パラメータ</p>
+                                    <div className="space-y-2 rounded-lg border border-border/80 bg-card/55 p-3">
+                                      <p className="text-xs font-semibold text-slate-100">実行プロファイル</p>
+                                      <div className="grid grid-cols-2 gap-2">
+                                        <Button
+                                          variant={selectedRuntimePresetKey === "mac_safe" ? "primary" : "secondary"}
+                                          className="w-full"
+                                          onClick={() => onApplyOcrTrainingPreset("mac_safe")}
+                                        >
+                                          Mac Safe
+                                        </Button>
+                                        <Button
+                                          variant={selectedRuntimePresetKey === "rtx_train" ? "primary" : "secondary"}
+                                          className="w-full"
+                                          onClick={() => onApplyOcrTrainingPreset("rtx_train")}
+                                        >
+                                          RTX Train
+                                        </Button>
+                                      </div>
+                                      {recommendedProfile ? (
+                                        <p className="text-xs text-muted">
+                                          推奨: <span className="font-semibold text-text">{recommendedProfile}</span>
+                                          {" / "}GPU利用可否: {gpuAvailable ? "利用可能" : "利用不可"}
+                                        </p>
+                                      ) : null}
+                                      {!paddlePathValid ? (
+                                        <p className="text-xs text-red-200">
+                                          PaddleOCR パスを確認してください（`PADDLEOCR_PATH` または settings.yaml）。
+                                        </p>
+                                      ) : null}
+                                    </div>
+                                    {/* ラベルは日本語＋折り返し禁止（whitespace-nowrap）で3項目の高さを揃える。
+                                        内部キー（save_epoch_step / train・eval num_workers）は変更せずInfoHintで示す */}
+                                    <div className="grid grid-cols-3 gap-2">
+                                      <div className="min-w-0">
+                                        <label className="app-label whitespace-nowrap">
+                                          エポック数
+                                          <InfoHint text="チェックポイントを保存するエポック間隔です（内部キー: save_epoch_step）。学習回数そのものはプロジェクト設定の「学習回数」で指定します。" />
+                                        </label>
+                                        <input
+                                          type="number"
+                                          min="1"
+                                          className="app-input"
+                                          value={ocrSaveEpochStep}
+                                          onChange={(e) => setOcrSaveEpochStep(e.target.value)}
+                                        />
+                                      </div>
+                                      <div className="min-w-0">
+                                        <label className="app-label whitespace-nowrap">
+                                          学習ワーカー数
+                                          <InfoHint text="学習データ読み込みの並列プロセス数です（内部キー: train num_workers）。Mac環境では0〜1推奨です。" />
+                                        </label>
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          className="app-input"
+                                          value={ocrTrainNumWorkers}
+                                          onChange={(e) => setOcrTrainNumWorkers(e.target.value)}
+                                        />
+                                      </div>
+                                      <div className="min-w-0">
+                                        <label className="app-label whitespace-nowrap">
+                                          評価ワーカー数
+                                          <InfoHint text="評価データ読み込みの並列プロセス数です（内部キー: eval num_workers）。Mac環境では0〜1推奨です。" />
+                                        </label>
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          className="app-input"
+                                          value={ocrEvalNumWorkers}
+                                          onChange={(e) => setOcrEvalNumWorkers(e.target.value)}
+                                        />
+                                      </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <label className="inline-flex items-center gap-2 rounded-lg border border-border/70 bg-card/55 px-3 py-2 text-sm text-text">
+                                        <input
+                                          type="checkbox"
+                                          checked={Boolean(ocrAutoBatchSize)}
+                                          onChange={(e) => setOcrAutoBatchSize(e.target.checked)}
+                                          disabled={ocrTrainDevice === "cpu"}
+                                        />
+                                        Batch自動最適化（VRAM基準）
+                                      </label>
+                                      <label className="inline-flex items-center gap-2 rounded-lg border border-border/70 bg-card/55 px-3 py-2 text-sm text-text">
+                                        <input
+                                          type="checkbox"
+                                          checked={Boolean(ocrUseAmp)}
+                                          onChange={(e) => setOcrUseAmp(e.target.checked)}
+                                          disabled={ocrTrainDevice === "cpu"}
+                                        />
+                                        AMP（混合精度）
+                                      </label>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <label className="inline-flex items-center gap-2 rounded-lg border border-border/70 bg-card/55 px-3 py-2 text-sm text-text">
+                                        <input
+                                          type="checkbox"
+                                          checked={Boolean(ocrPinMemory)}
+                                          onChange={(e) => setOcrPinMemory(e.target.checked)}
+                                          disabled={ocrTrainDevice === "cpu"}
+                                        />
+                                        pin_memory
+                                      </label>
+                                      <label className="inline-flex items-center gap-2 rounded-lg border border-border/70 bg-card/55 px-3 py-2 text-sm text-text">
+                                        <input
+                                          type="checkbox"
+                                          checked={Boolean(ocrPersistentWorkers)}
+                                          onChange={(e) => setOcrPersistentWorkers(e.target.checked)}
+                                          disabled={ocrTrainDevice === "cpu" || trainWorkersNum <= 0}
+                                        />
+                                        persistent_workers
+                                      </label>
+                                    </div>
+                                    <div className="rounded-lg border border-border/80 bg-card/55 px-3 py-3 text-sm leading-6 text-slate-100">
+                                      <p>
+                                        GPU: {gpuAvailable ? (gpuName || "CUDA GPU") : "利用不可"}
+                                        {gpuAvailable && vramLabel ? ` (${vramLabel})` : ""}
+                                      </p>
+                                      <p>Batch: {batchNum > 0 ? `${batchNum}（${batchModeLabel}）` : "-"}</p>
+                                      <p>
+                                        Workers: train {trainWorkersNum} / eval {evalWorkersNum}
+                                      </p>
+                                      <p>AMP: {ampEnabled ? "ON" : "OFF"}</p>
+                                    </div>
+                                    {showMacWorkerWarning ? (
+                                      <p className="text-xs text-amber-100">
+                                        Mac環境では num_workers を 0〜1 推奨です。高すぎるとメモリ不足の原因になります。
+                                      </p>
+                                    ) : null}
+                                    {showMemoryRiskWarning ? (
+                                      <p className="text-xs text-amber-100">
+                                        現在設定はメモリ不足の可能性があります。Mac Safe プリセットへの切替を推奨します。
+                                      </p>
+                                    ) : null}
+                                    <div>
+                                      <label className="app-label">
+                                        文字セット（charset）
+                                        <InfoHint text="学習対象の文字セットです。PaddleOCRでは大文字に正規化されます。" />
+                                      </label>
+                                      <input
+                                        className="app-input"
+                                        value={ocrCharset}
+                                        onChange={(e) => setOcrCharset(e.target.value.toUpperCase())}
+                                        placeholder={OCR_CHARSET_DEFAULT}
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="app-label">画像形状</label>
+                                      <div className="grid grid-cols-3 gap-2">
+                                        <div>
+                                          <label className="app-label">Channel</label>
+                                          <select
+                                            className="app-select"
+                                            value={ocrChannel}
+                                            onChange={(e) => updateOcrImageShape({ c: e.target.value })}
+                                          >
+                                            <option value="1">1 (Gray)</option>
+                                            <option value="3">3 (RGB)</option>
+                                          </select>
+                                        </div>
+                                        <div>
+                                          <label className="app-label">Height [px]</label>
+                                          <input
+                                            type="number"
+                                            className="app-input"
+                                            value={ocrHeight}
+                                            onChange={(e) => updateOcrImageShape({ h: e.target.value })}
+                                            placeholder="48"
+                                          />
+                                        </div>
+                                        <div>
+                                          <label className="app-label">Width [px]</label>
+                                          <input
+                                            type="number"
+                                            className="app-input"
+                                            value={ocrWidth}
+                                            onChange={(e) => updateOcrImageShape({ w: e.target.value })}
+                                            placeholder="320"
+                                          />
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <div>
+                                        <label className="app-label">
+                                          バッチサイズ
+                                          <InfoHint text="1ステップで処理する画像枚数です。Batch自動最適化がONの場合はVRAM基準で調整されます。" />
+                                        </label>
+                                        <input
+                                          type="number"
+                                          className="app-input"
+                                          value={batchSize}
+                                          onChange={(e) => setBatchSize(e.target.value)}
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="app-label">
+                                          最大文字数
+                                          <InfoHint text="1ラベルあたりの最大文字数（max_text_length）です。" />
+                                        </label>
+                                        <input
+                                          type="number"
+                                          className="app-input"
+                                          value={ocrMaxTextLength}
+                                          onChange={(e) => setOcrMaxTextLength(e.target.value)}
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          ) : null}
+                        </fieldset>
+                      </div>
+                    </div>
+                  </div>,
+                  document.body
+                  )
+                ) : null}
 
                 {ocrEngine !== "easyocr" ? (
                   <>
