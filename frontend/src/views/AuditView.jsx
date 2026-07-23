@@ -51,6 +51,11 @@ export default function AuditView({ projects = [], authContext = null }) {
           X-Roleヘッダで操作者・ロールを指定できます。
         </div>
       ) : null}
+      {authContext?.strict && !authContext?.operator ? (
+        <div className="rounded-lg border border-danger/50 bg-danger/10 px-3 py-2 text-[12px] text-danger">
+          認証設定不足: 本番認証モードですが操作者情報（X-Operatorヘッダ）が付与されていません（変更系操作は401になります）。
+        </div>
+      ) : null}
       <Card
         title={`監査ログ（${items.length}件）`}
         subtitle="重要操作の追記型記録。削除・編集はできません（パスワード・トークン・APIキー・画像バイナリは保存されません）"

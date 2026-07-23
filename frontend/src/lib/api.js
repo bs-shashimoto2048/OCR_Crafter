@@ -7,8 +7,11 @@ async function parseErrorDetail(response) {
     if (!text) return fallback;
     try {
       const payload = JSON.parse(text);
+      // 統一エラー形式 {error_code, message, details, related_id}（旧形式 detail 文字列も互換）
+      if (typeof payload?.message === "string" && payload.message.trim()) return payload.message;
       const detail = payload?.detail;
       if (typeof detail === "string" && detail.trim()) return detail;
+      if (detail && typeof detail === "object" && typeof detail.message === "string") return detail.message;
       if (Array.isArray(detail)) return detail.map((v) => String(v?.msg ?? v)).join(", ");
     } catch {
       // not json

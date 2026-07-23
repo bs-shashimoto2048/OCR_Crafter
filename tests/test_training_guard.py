@@ -49,7 +49,7 @@ def test_ocr_train_start_returns_409(temp_projects, monkeypatch):
     monkeypatch.setattr(main_module, "fetch_active_training_job", lambda pid, fam=None: _running_job())
     req = OcrTrainStartRequest(project_id="p1", engine="paddleocr", dataset_dir="x")
     with pytest.raises(HTTPException) as exc:
-        main_module.api_ocr_train_start(req, BackgroundTasks())
+        main_module.api_ocr_train_start(req, BackgroundTasks(), _dummy_request())
     assert exc.value.status_code == 409
 
 

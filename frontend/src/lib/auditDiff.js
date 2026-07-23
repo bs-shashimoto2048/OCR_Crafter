@@ -50,4 +50,11 @@ export const AUDIT_ACTION_LABELS = {
   job_retry: "Job再実行",
   backup_restore: "バックアップ復元",
   retention_cleanup: "保持期間による削除",
+  job_finished: "Job完了",
+  evaluation_run: "モデル評価実行",
+  experiment_update: "Experiment変更",
+  analysis_toggle: "分析対象ON/OFF",
+  backup_create: "バックアップ作成",
+  deployment_export: "Deployment Export",
+  restore_failed: "復元失敗",
 };

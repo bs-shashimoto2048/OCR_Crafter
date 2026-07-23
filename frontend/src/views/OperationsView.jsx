@@ -149,7 +149,14 @@ export default function OperationsView({ projectId, authContext = null, onOpenJo
     <div className="space-y-4">
       {authContext && !authContext.auth_configured ? (
         <div className="rounded-lg border border-amber-400/50 bg-amber-400/10 px-3 py-2 text-[12px] text-amber-200">
-          認証未設定モード: 認証基盤（SSO等）が未導入のため、全ユーザーがAdmin互換で動作しています（Viewer/Operator/Approver/Adminの権限はX-Roleヘッダ明示時のみ強制）。
+          認証未設定モード: 認証基盤（SSO等）が未導入のため、全ユーザーがAdmin互換で動作しています（Viewer/Operator/Approver/Adminの権限はX-Roleヘッダ明示時のみ強制）。本番配備では
+          allow_unauthenticated_admin=false を設定してください。
+        </div>
+      ) : null}
+      {authContext?.strict && !authContext?.operator ? (
+        <div className="rounded-lg border border-danger/50 bg-danger/10 px-3 py-2 text-[12px] text-danger">
+          認証設定不足:
+          本番認証モード（Admin互換無効）ですが、操作者情報（X-Operatorヘッダ）が付与されていません。リバースプロキシまたはSSOでX-Operator/X-Roleヘッダを付与してください（変更系操作は401になります）。
         </div>
       ) : null}
 

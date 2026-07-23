@@ -41,6 +41,14 @@ AUDIT_ACTIONS = [
     "job_retry",
     "backup_restore",
     "retention_cleanup",
+    # 監査補完（最終検証フェーズ③）
+    "job_finished",  # Job完了（succeeded/failed/cancelled。Service層=Worker実行でも記録）
+    "evaluation_run",  # モデル評価の実行
+    "experiment_update",  # Experimentタグ・メモ・実験名等の変更
+    "analysis_toggle",  # 分析対象ON/OFF
+    "backup_create",  # バックアップ作成
+    "deployment_export",  # Deployment Package Export
+    "restore_failed",  # バックアップ復元の失敗（整合性エラー等）
 ]
 
 # 権限ロール（弱い順）と操作に必要な最低ロール
@@ -61,6 +69,13 @@ ACTION_MIN_ROLE = {
     "job_retry": "operator",
     "backup_restore": "admin",
     "retention_cleanup": "admin",
+    "job_finished": "operator",  # システム（Worker）記録用。API経由の強制対象ではない
+    "evaluation_run": "operator",
+    "experiment_update": "operator",
+    "analysis_toggle": "operator",
+    "backup_create": "operator",
+    "deployment_export": "operator",
+    "restore_failed": "admin",
 }
 
 # 保存禁止キー（部分一致・小文字比較）: パスワード・トークン・APIキー等の機密情報
@@ -95,22 +110,64 @@ def _sanitize(value: Any, depth: int = 0) -> Any:
     return value
 
 
-class UserContext:
-    """リクエストのユーザー識別（operator名・ロール・認証設定有無）。"""
+class AuthenticationError(Exception):
+    """認証情報の不足（401相当）。本番モード（Admin互換無効）でのみ発生する。"""
 
-    def __init__(self, operator: str = "", role: str = "", auth_configured: bool = False) -> None:
+
+def allow_unauthenticated_admin() -> bool:
+    """認証未設定モード（Admin互換）の許可判定。
+
+    優先順位: 環境変数 OCRC_ALLOW_UNAUTHENTICATED_ADMIN（"false"/"0"/"no"で無効） →
+    settings.yaml の security.allow_unauthenticated_admin → 既定 true（開発・移行用）。
+    本番配備では false を指定し、X-Operator必須（401）・不正Role拒否（403）にする。
+    """
+    import os
+
+    env_value = str(os.environ.get("OCRC_ALLOW_UNAUTHENTICATED_ADMIN") or "").strip().lower()
+    if env_value:
+        return env_value not in {"false", "0", "no"}
+    try:
+        from ..config import get_settings
+
+        configured = (get_settings().get("security") or {}).get("allow_unauthenticated_admin")
+        if configured is not None:
+            return bool(configured)
+    except Exception:  # noqa: BLE001
+        pass
+    return True
+
+
+class UserContext:
+    """リクエストのユーザー識別（operator名・ロール・認証モード）。"""
+
+    def __init__(self, operator: str = "", role: str = "", strict: Optional[bool] = None) -> None:
         self.operator = operator or ""
-        # 認証未設定モード: ロール未指定はAdmin互換（既存運用を壊さない）。UIへ明示する
-        self.role = role if role in ROLES else "admin"
+        self.strict = bool(strict) if strict is not None else not allow_unauthenticated_admin()
+        self.raw_role = role
+        self.invalid_role = bool(role) and role not in ROLES
+        if role in ROLES:
+            self.role = role
+        elif self.strict:
+            # 本番モード: ロール未指定は最小権限（viewer）。Admin互換にしない
+            self.role = "viewer"
+        else:
+            # 認証未設定モード: ロール未指定はAdmin互換（既存運用を壊さない）。UIへ明示する
+            self.role = "admin"
         self.role_explicit = role in ROLES
-        self.auth_configured = auth_configured
+
+    @property
+    def auth_configured(self) -> bool:
+        return self.strict
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "operator": self.operator,
             "role": self.role,
-            "auth_configured": self.auth_configured,
-            "auth_mode": "configured" if self.auth_configured else "認証未設定モード（Admin互換）",
+            "auth_configured": self.strict,
+            "strict": self.strict,
+            "auth_mode": (
+                "本番認証モード（Admin互換無効・X-Operator必須）" if self.strict else "認証未設定モード（Admin互換）"
+            ),
         }
 
 
@@ -121,15 +178,23 @@ def resolve_user_context(headers: Any) -> UserContext:
         role = str(headers.get("x-role") or "").strip().lower()
     except Exception:  # noqa: BLE001
         operator, role = "", ""
-    return UserContext(operator=operator, role=role, auth_configured=False)
+    return UserContext(operator=operator, role=role)
 
 
 def require_role(ctx: UserContext, action: str) -> None:
-    """操作に必要な最低ロールを検証する（不足時PermissionError→403）。
+    """操作に必要な最低ロールを検証する。
 
-    認証未設定モード（ロール未指定）はAdmin互換のため常に許可。
-    X-Roleを明示した場合のみロール階層を強制する。
+    - 本番モード（allow_unauthenticated_admin=false）: X-Operatorなし・空のOperator名は
+      AuthenticationError（401）。不正なRole文字列はPermissionError（403）
+    - 認証未設定モード: ロール未指定はAdmin互換のため常に許可。
+      X-Roleを明示した場合のみロール階層を強制する
     """
+    if ctx.strict and not ctx.operator:
+        raise AuthenticationError(
+            "認証が必要です（X-Operatorヘッダで操作者名を指定してください。空のOperator名は使用できません）"
+        )
+    if ctx.invalid_role:
+        raise PermissionError(f"不正なロールです: {ctx.raw_role}（{ROLES} のいずれかを指定してください）")
     minimum = ACTION_MIN_ROLE.get(action, "operator")
     if ROLES.index(ctx.role) < ROLES.index(minimum):
         raise PermissionError(

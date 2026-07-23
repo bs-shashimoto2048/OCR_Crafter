@@ -190,3 +190,9 @@ tesseract:
   default_max_iterations: 1000
   # 単一行認識用の Page Segmentation Mode
   default_psm: 7
+
+security:
+  # 認証未設定モード（Admin互換）の許可。開発・移行用は true（既定）。
+  # 本番配備では false にする: X-Operatorなし=401 / 不正なRole=403 / ロール未指定=viewer扱い。
+  # 環境変数 OCRC_ALLOW_UNAUTHENTICATED_ADMIN が優先される
+  allow_unauthenticated_admin: true

@@ -19,9 +19,12 @@ from src.app.services.operations import build_dashboard, build_health_details, c
 
 
 def test_audit_actions_defined(temp_projects):
-    # 基本13種＋Phase 5（backup_restore / retention_cleanup）=15種
-    assert len(AUDIT_ACTIONS) == 15
+    # 基本13種＋バックアップ2種＋監査補完7種（job_finished/evaluation_run/experiment_update/
+    # analysis_toggle/backup_create/deployment_export/restore_failed）=22種
+    assert len(AUDIT_ACTIONS) == 22
     assert "backup_restore" in AUDIT_ACTIONS and "retention_cleanup" in AUDIT_ACTIONS
+    for action in ["job_finished", "evaluation_run", "experiment_update", "analysis_toggle", "backup_create", "deployment_export", "restore_failed"]:
+        assert action in AUDIT_ACTIONS, f"補完対象 {action} がない"
     assert set(ACTION_MIN_ROLE) == set(AUDIT_ACTIONS)
 
 

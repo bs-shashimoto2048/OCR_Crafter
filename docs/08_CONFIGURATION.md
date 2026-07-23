@@ -19,6 +19,8 @@
 | `TESSDATA_PREFIX` | tessdata探索先 | `settings.yaml tesseract.tessdata_dir` が優先 | `services/tesseract_pipeline.py` |
 | `YOLO_CONFIG_DIR` | ultralytics設定ディレクトリ | コードが setdefault | `services/training_image_builder.py` |
 | `HOME` / `USERPROFILE` / `XDG_CACHE_HOME` / `PADDLE_HOME` / `DATA_HOME` | Paddleのキャッシュをワークスペース内（`.runtime_home/`, `.cache/`）へ隔離するため上書き | コードが設定 | `services/ocr_pipeline.py` |
+| `OCRC_ALLOW_UNAUTHENTICATED_ADMIN` | 認証未設定モード（Admin互換）の許可。`false`/`0`/`no`で本番モード（X-Operatorなし=401・不正Role=403）。settings.yaml `security.allow_unauthenticated_admin` より優先 | 未設定=settings.yaml→true | `services/audit_log.py`（docs/22参照） |
+| `OCRC_DISABLE_WORKER_AUTOSTART` | app startup時のJob Worker自動起動・再起動復旧の無効化（テスト用） | 未設定=起動する | `src/app/main.py` |
 
 ### フロントエンド
 

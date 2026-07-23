@@ -467,6 +467,31 @@ class JobService:
         self.repository.update(job_id, {"progress": clamped, "current_step": str(step), "message": str(message)})
         self.repository.append_event(job_id, {"type": "progress", "progress": clamped, "step": str(step), "message": str(message)})
 
+    def _audit_job_finished(self, job: dict[str, Any]) -> None:
+        """Job完了（succeeded/failed/cancelled）の監査記録。
+
+        Service層で記録するため、API経由・Worker実行・CLI実行のいずれでも同じ経路で
+        1回だけ記録される（APIとCLIの二重記録なし）。記録失敗は本処理へ影響させない。
+        """
+        try:
+            from .audit_log import record_audit
+
+            record_audit(
+                "job_finished",
+                user=str(job.get("requested_by") or "system:worker"),
+                project_id=str(job.get("project_id") or ""),
+                target_type="job",
+                target_id=str(job.get("job_id") or ""),
+                job_id=str(job.get("job_id") or ""),
+                after={
+                    "job_type": job.get("job_type"),
+                    "status": job.get("status"),
+                    "error_summary": job.get("error_summary") or "",
+                },
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
     # -- 実行（Workerから呼ばれる。テストでは直接呼び出し可能） --
     def execute_job(self, job_id: str) -> dict[str, Any]:
         job = self.repository.get(job_id)
@@ -489,16 +514,19 @@ class JobService:
             for key in ("related_model_id", "related_experiment_id", "related_benchmark_id"):
                 if isinstance(result, dict) and result.get(key):
                     related_patch[key] = str(result[key])
-            return self.transition(job_id, "succeeded", {"result_summary": result, **related_patch})
+            finished = self.transition(job_id, "succeeded", {"result_summary": result, **related_patch})
         except JobCancelled:
-            return self.transition(job_id, "cancelled", {"message": "キャンセルされました"})
+            finished = self.transition(job_id, "cancelled", {"message": "キャンセルされました"})
         except Exception as e:  # noqa: BLE001
             # スタックトレースは内部ログのみ（画面へは要約だけ）
             self.repository.write_internal_log(job_id, traceback.format_exc())
             current = self.repository.get(job_id)
             if current and current.get("status") == "cancel_requested":
-                return self.transition(job_id, "cancelled", {"message": "キャンセルされました"})
-            return self.transition(job_id, "failed", {"error_summary": str(e)[:500]})
+                finished = self.transition(job_id, "cancelled", {"message": "キャンセルされました"})
+            else:
+                finished = self.transition(job_id, "failed", {"error_summary": str(e)[:500]})
+        self._audit_job_finished(finished)
+        return finished
 
     # -- 一覧（フィルタ） --
     def list_jobs(

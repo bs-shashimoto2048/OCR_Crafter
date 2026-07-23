@@ -12,6 +12,7 @@ import io
 import json
 import math
 import base64
+import re
 import shutil
 import zipfile
 from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
@@ -212,6 +213,57 @@ def _cors_allowed_origins() -> list[str]:
     return ["http://localhost:5173", "http://127.0.0.1:5173"]
 
 
+# ---------- 統一エラー形式（docs/22参照。スタックトレース・内部パスは画面へ出さない） ----------
+
+_ERROR_CODE_BY_STATUS = {
+    400: "VALIDATION_ERROR",
+    401: "AUTH_REQUIRED",
+    403: "PERMISSION_DENIED",
+    404: "NOT_FOUND",
+    409: "CONFLICT",
+    422: "VALIDATION_ERROR",
+    500: "INTERNAL_ERROR",
+}
+# メッセージ内容による error_code の特化（HTTPステータスより優先）
+_ERROR_CODE_OVERRIDES = [
+    ("Release Gate判定がFAIL", "RELEASE_GATE_FAILED"),
+    ("整合性", "BACKUP_VALIDATION_FAILED"),
+    ("実行中です", "JOB_CONFLICT"),
+    ("Release Note", "VALIDATION_ERROR"),
+]
+_RELATED_ID_PATTERN = re.compile(r"\b(JOB-\d{6}|BM-\d{4}|REL-\d{4}|EXP-\d{4}|AUD-\d{6}|BK-\d{4}|CG-\d{4}|M\d{4})\b")
+
+
+def _unified_error_body(status_code: int, message: str, details: Optional[dict[str, Any]] = None, error_code: str = "") -> dict[str, Any]:
+    """ユーザー向け統一エラー形式（error_code / message / details / related_id）。"""
+    code = error_code
+    if not code:
+        for needle, override in _ERROR_CODE_OVERRIDES:
+            if needle in message:
+                code = override
+                break
+    if not code:
+        code = _ERROR_CODE_BY_STATUS.get(status_code, "ERROR")
+    matched = _RELATED_ID_PATTERN.search(message)
+    return {
+        "error_code": code,
+        "message": message,
+        "details": details or {},
+        "related_id": matched.group(1) if matched else "",
+    }
+
+
+@app.exception_handler(HTTPException)
+async def _http_exception_unified(request: Request, exc: HTTPException) -> JSONResponse:
+    """全HTTPExceptionを統一エラー形式へ正規化する（既存のdetail文字列も message へ変換）。"""
+    if isinstance(exc.detail, dict) and "error_code" in exc.detail:
+        body = exc.detail
+    else:
+        body = _unified_error_body(exc.status_code, str(exc.detail))
+    # 後方互換: detail へ message 文字列も残す（旧クライアント・テストの文字列参照用）
+    return JSONResponse(status_code=exc.status_code, content={"detail": body["message"], **body})
+
+
 # CORSMiddleware より内側で未処理例外を捕捉する。
 # これが無いと未処理例外の500はCORSヘッダーなしで返り、ブラウザではCORSエラーとして表示される
 @app.middleware("http")
@@ -220,7 +272,9 @@ async def _unhandled_exception_as_json(request, call_next):
         return await call_next(request)
     except Exception as e:  # noqa: BLE001
         logging.getLogger("uvicorn.error").exception("unhandled exception: %s %s", request.method, request.url.path)
-        return JSONResponse(status_code=500, content={"detail": f"{type(e).__name__}: {e}"})
+        # スタックトレース・内部パスは返さない（詳細はサーバーログのみ）
+        body = _unified_error_body(500, f"サーバー内部エラーが発生しました（{type(e).__name__}）。詳細はサーバーログを確認してください。")
+        return JSONResponse(status_code=500, content={"detail": body["message"], **body})
 
 
 app.add_middleware(
@@ -948,6 +1002,8 @@ def on_startup() -> None:
     init_db()
     # 再起動復旧: 前回プロセスでrunningのまま残ったJobをinterruptedへ回収し、
     # queuedのJobを再開するためWorkerを起動する（docs/18_JOB_MANAGEMENT.md）
+    if os.environ.get("OCRC_DISABLE_WORKER_AUTOSTART"):
+        return  # テスト実行時（conftest）に実データへのWorker起動・復旧を行わない
     try:
         from .services.job_manager import recover_interrupted_jobs
 
@@ -990,12 +1046,19 @@ def _user_ctx(request: Request):
 
 
 def _enforce_role(request: Request, action: str):
-    """操作に必要なロールの検証（X-Role明示時のみ強制。未指定=認証未設定モード=Admin互換）。"""
-    from .services.audit_log import require_role
+    """操作に必要なロールの検証。
+
+    - 認証未設定モード（既定）: X-Role明示時のみロール階層を強制（Admin互換）
+    - 本番モード（allow_unauthenticated_admin=false）: X-Operatorなし=401 /
+      不正Role・ロール不足=403
+    """
+    from .services.audit_log import AuthenticationError, require_role
 
     ctx = _user_ctx(request)
     try:
         require_role(ctx, action)
+    except AuthenticationError as e:
+        raise HTTPException(status_code=401, detail=str(e)) from e
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e)) from e
     return ctx
@@ -1067,15 +1130,20 @@ def api_backups(project_id: str = Query(default="")) -> dict[str, Any]:
 
 
 @app.post("/api/backups")
-def api_backup_create(req: BackupCreateRequest) -> dict[str, Any]:
+def api_backup_create(req: BackupCreateRequest, request: Request) -> dict[str, Any]:
     """バックアップ作成（metadata_only / full）。data/backups/ へZIP保存。"""
     from .services.backup_manager import create_backup
 
     resolved = _resolve_project_id(req.project_id)
     try:
-        return {"project_id": resolved, "item": create_backup(resolved, mode=req.mode)}
+        item = create_backup(resolved, mode=req.mode)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    _record_audit_safe(
+        request, "backup_create", project_id=resolved, target_type="backup", target_id=item["backup_id"],
+        after={"mode": item.get("mode"), "file": item.get("file"), "size_bytes": item.get("size_bytes")},
+    )
+    return {"project_id": resolved, "item": item}
 
 
 @app.post("/api/backups/{backup_id}/restore")
@@ -1087,8 +1155,15 @@ def api_backup_restore(backup_id: str, req: BackupRestoreRequest, request: Reque
     try:
         result = restore_backup(backup_id, new_project_id=req.new_project_id)
     except FileNotFoundError as e:
+        _record_audit_safe(
+            request, "restore_failed", target_type="backup", target_id=backup_id, reason=str(e)[:500],
+        )
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
+        # 復元失敗（整合性エラー・復元先衝突等）も監査記録する
+        _record_audit_safe(
+            request, "restore_failed", target_type="backup", target_id=backup_id, reason=str(e)[:500],
+        )
         raise HTTPException(status_code=400, detail=str(e)) from e
     _record_audit_safe(
         request, "backup_restore", project_id=result["project_id"], target_type="backup", target_id=backup_id,
@@ -2412,7 +2487,8 @@ def api_ocr_dataset_from_logs(req: OcrDatasetFromLogsRequest) -> dict[str, Any]:
 
 
 @app.post("/api/ocr/train/start")
-def api_ocr_train_start(req: OcrTrainStartRequest, background_tasks: BackgroundTasks) -> dict[str, Any]:
+def api_ocr_train_start(req: OcrTrainStartRequest, background_tasks: BackgroundTasks, request: Request) -> dict[str, Any]:
+    _enforce_role(request, "training_start")
     project_id = _resolve_project_id(req.project_id)
     _reject_if_training_active(project_id, "ocr")
     engine = str(req.engine or "").strip().lower()
@@ -2535,6 +2611,10 @@ def api_ocr_train_start(req: OcrTrainStartRequest, background_tasks: BackgroundT
             "worker_pid": worker_pid,
             "updated_at": _now_iso(),
         }
+    )
+    _record_audit_safe(
+        request, "training_start", project_id=project_id, target_type="training_job", target_id=job_id,
+        job_id=job_id, after={"engine": "paddleocr", "dataset_dir": str(req.dataset_dir or ""), "epochs": req.epochs},
     )
     return {"job_id": job_id, "project_id": project_id, "status": "queued", "training_family": "ocr", "engine": "paddleocr"}
 
@@ -2715,35 +2795,40 @@ def api_experiment_recommendation(project_id: Optional[str] = Query(default="def
 
 
 @app.patch("/api/experiments/{experiment_id}/analysis")
-def api_experiment_analysis_toggle(experiment_id: str, req: ExperimentAnalysisToggleRequest) -> dict[str, Any]:
+def api_experiment_analysis_toggle(experiment_id: str, req: ExperimentAnalysisToggleRequest, request: Request) -> dict[str, Any]:
     """実験の分析対象ON/OFF（失敗・途中停止・デバッグ実験を推薦・相関から除外する）。"""
     resolved = _resolve_project_id(req.project_id)
     try:
         item = set_analysis_enabled(resolved, experiment_id, bool(req.enabled))
-        return {"project_id": resolved, "item": item}
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+    _record_audit_safe(
+        request, "analysis_toggle", project_id=resolved, target_type="experiment", target_id=experiment_id,
+        after={"analysis_enabled": bool(req.enabled)},
+    )
+    return {"project_id": resolved, "item": item}
 
 
 @app.patch("/api/experiments/{experiment_id}")
-def api_experiment_update(experiment_id: str, req: ExperimentUpdateRequest) -> dict[str, Any]:
+def api_experiment_update(experiment_id: str, req: ExperimentUpdateRequest, request: Request) -> dict[str, Any]:
     """実験カルテの更新（タグ・お気に入り・メモ・学習者・実験名のみ。学習条件は不変）。"""
     resolved = _resolve_project_id(req.project_id)
+    patch = {
+        "tags": req.tags,
+        "favorite": req.favorite,
+        "note": req.note,
+        "operator": req.operator,
+        "experiment_name": req.experiment_name,
+    }
     try:
-        item = update_experiment(
-            resolved,
-            experiment_id,
-            {
-                "tags": req.tags,
-                "favorite": req.favorite,
-                "note": req.note,
-                "operator": req.operator,
-                "experiment_name": req.experiment_name,
-            },
-        )
-        return {"project_id": resolved, "item": item}
+        item = update_experiment(resolved, experiment_id, patch)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+    _record_audit_safe(
+        request, "experiment_update", project_id=resolved, target_type="experiment", target_id=experiment_id,
+        after={key: value for key, value in patch.items() if value is not None},
+    )
+    return {"project_id": resolved, "item": item}
 
 
 @app.post("/api/experiments/attach-evaluation")
@@ -2979,13 +3064,18 @@ def api_release_model_card(
 
 
 @app.get("/api/releases/deployment_package")
-def api_release_deployment_package(project_id: Optional[str] = Query(default="default")) -> Response:
+def api_release_deployment_package(request: Request, project_id: Optional[str] = Query(default="default")) -> Response:
     """Productionモデルの配布パッケージ（ZIP: traineddata/設定JSON/前処理Snapshot/Release Note/Model Card）。"""
+    _enforce_role(request, "deployment_export")
     resolved = _resolve_project_id(project_id)
     try:
         filename, payload = build_deployment_package(resolved)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+    _record_audit_safe(
+        request, "deployment_export", project_id=resolved, target_type="deployment", target_id=filename,
+        after={"file": filename, "size_bytes": len(payload)},
+    )
     return Response(
         content=payload,
         media_type="application/zip",
@@ -3931,10 +4021,10 @@ def evaluate(req: EvaluateRequest) -> dict[str, Any]:
 
 
 @app.post("/api/ocr/evaluate")
-def api_ocr_evaluate(req: OcrEvaluateRequest) -> dict[str, Any]:
+def api_ocr_evaluate(req: OcrEvaluateRequest, request: Request) -> dict[str, Any]:
     project_id = _resolve_project_id(req.project_id)
     try:
-        return evaluate_ocr(
+        result = evaluate_ocr(
             project_id=project_id,
             image_dir=req.image_dir,
             gt_csv=req.gt_csv,
@@ -3951,6 +4041,18 @@ def api_ocr_evaluate(req: OcrEvaluateRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    _record_audit_safe(
+        request, "evaluation_run", project_id=project_id, target_type="evaluation",
+        target_id=",".join(str(t.get("model") or "") for t in (result.get("targets") or []) if not t.get("is_base"))[:200],
+        after={
+            "count": result.get("count"),
+            "targets": [
+                {"model": t.get("model"), "cer": t.get("cer"), "accuracy_percent": t.get("accuracy_percent")}
+                for t in (result.get("targets") or [])
+            ],
+        },
+    )
+    return result
 
 
 @app.post("/api/ocr/training-preprocess/preview")
