@@ -1,9 +1,9 @@
 # 06. API リファレンス
 
 すべてのルートは `src/app/main.py` に定義されている（`APIRouter` / `include_router` は不使用）。
-リクエストスキーマは `src/app/schemas.py` を参照。**全71エンドポイント**。
+リクエストスキーマは `src/app/schemas.py` を参照。**全118エンドポイント**（GET 58 / POST 49 / PUT 4 / PATCH 3 / DELETE 4）。
 
-- アプリ定義: `FastAPI(title="OCR Crafter API", version="0.2.0")`
+- アプリ定義: `FastAPI(title="OCR Crafter API", version=APP_VERSION)`（`src/app/version.py`。現行 1.0.0）
 - ベースURL（開発時）: `http://127.0.0.1:8000`
 
 ## システム

@@ -20,7 +20,7 @@
 
 ### docs整理
 
-- 旧「a-z whitelist / 英小文字のみ」記述: usage.md に残存なし（新charset仕様反映済み）
+- 旧「a-z whitelist / 英小文字のみ」記述: USER_GUIDE.md（旧usage.md）に残存なし（新charset仕様反映済み）
 - usage.md: download APIの .tess.json 対応、モデル管理/バッチ推論のTesseract対応、削除安全ガードを追記
 - 消失していた `11_TESSERACT_CHECKLIST.md` / `12_TESSERACT_CHARSET_SPEC.md` を新仕様＋実践知見（box/LF/tsvの過去バグ再発チェック込み）で再作成
 

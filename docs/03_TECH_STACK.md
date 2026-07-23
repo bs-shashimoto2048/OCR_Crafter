@@ -7,7 +7,7 @@
 | 項目 | 内容 | 根拠 |
 |---|---|---|
 | バックエンド言語 | Python | `src/app/` 全体 |
-| Pythonバージョン | Pipfile は 3.9 指定 / docs/usage.md は 3.11以上を記載（記述間の不一致あり。CI相当の固定はなし） | `Pipfile`, `docs/usage.md` |
+| Pythonバージョン | Pipfile は 3.9 指定 / docs/INSTALLATION_GUIDE.md は 3.11以上を推奨（記述間の不一致あり。CI相当の固定はなし） | `Pipfile`, `docs/INSTALLATION_GUIDE.md` |
 | フロントエンド言語 | JavaScript（JSX）。TypeScript 不使用 | `frontend/src/` |
 | Node.js | バージョン固定なし（`engines` 指定なし） | `frontend/package.json` |
 

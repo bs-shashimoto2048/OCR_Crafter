@@ -35,11 +35,11 @@
 2. NAS等から `data/backups/` を新サーバーの `data/backups/` へ配置（`index.json` 含む）
 3. Backend起動 → プロジェクトごとに §3 の復元手順を実施
 4. `data/jobs/` `data/audit/` はバックアップ対象外（システム全体データ）。監査ログの長期保管が必要な場合は `data/audit/audit.jsonl` をファイルコピーで別途保全しておくこと
-5. Release Checklist（docs/27）で復旧後の健全性を確認
+5. Release Checklist（`docs/RELEASE_CHECKLIST.md`）で復旧後の健全性を確認
 
 ## 5. リストア試験（月次推奨）
 
 1. 最新のfullバックアップで `verify` → `restore`（新Project ID）
 2. 復元プロジェクトの モデル評価を1回実行し、既知のCERと一致することを確認
 3. 試験用の復元プロジェクトを削除（監査記録される）
-4. 結果を docs/27 のチェックリストへ記録
+4. 結果を `docs/RELEASE_CHECKLIST.md` のチェックリストへ記録

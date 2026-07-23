@@ -18,11 +18,13 @@ Audit ID / Timestamp / User（operator名）/ Role / Action / Project / TargetTy
 - **画像バイナリ**（bytes系は `[バイナリは保存しません]` へ置換）
 - 巨大値は2000文字で切り詰め
 
-### 対象操作（22種）
+### 対象操作（24種）
 
 基本13種: project_create / project_delete / preprocess_run / dataset_create / training_start（Tesseract・**PaddleOCR両方**） / model_delete / release_status_change / release_promote / release_rollback / release_policy_update / benchmark_run / job_cancel / job_retry
 
 バックアップ・保持2種: **backup_restore** / **retention_cleanup**
+
+レポート2種: **report_generate**（レポート生成Job作成） / **report_delete**（レポート削除）
 
 監査補完7種（最終検証フェーズ③）: **job_finished**（Job完了 succeeded/failed/cancelled。**Service層＝JobService.execute_jobで記録**するためAPI・Worker・CLIのどの経路でも同じ場所で1回だけ記録され二重記録しない） / **evaluation_run**（モデル評価実行） / **experiment_update**（タグ・メモ・実験名変更） / **analysis_toggle**（分析対象ON/OFF） / **backup_create** / **deployment_export**（Deployment Package Export） / **restore_failed**（復元失敗・整合性エラー含む）
 
@@ -43,7 +45,7 @@ Before/Afterの例: release_status_change（変更前後のStatus/Version）、r
 | 操作 | 最低ロール |
 |---|---|
 | 参照系すべて | viewer |
-| preprocess_run / dataset_create / training_start / benchmark_run / release_status_change / job_cancel / job_retry / project_create | operator |
+| preprocess_run / dataset_create / training_start / benchmark_run / release_status_change / job_cancel / job_retry / project_create / evaluation_run / experiment_update / analysis_toggle / backup_create / deployment_export / report_generate / report_delete | operator |
 | release_promote / release_rollback | approver |
 | project_delete / model_delete / release_policy_update / backup_restore / retention_cleanup | admin |
 
@@ -79,7 +81,7 @@ Before/Afterの例: release_status_change（変更前後のStatus/Version）、r
 
 ## 4. 監査ログ画面
 
-- フィルタ: Project / 操作（13種の日本語ラベル） / User（部分一致） / Target ID / 日付From・To
+- フィルタ: Project / 操作（24種の日本語ラベル） / User（部分一致） / Target ID / 日付From・To
 - 行クリックで詳細: **Before/After差分**（変更キーを強調表示・`lib/auditDiff.js`）・記録情報（Target/Client/Reason）
 - 削除ボタンは存在しない（追記型の明示）
 

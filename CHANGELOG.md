@@ -54,5 +54,5 @@
 - **GitHub Actions CI追加**: backend import / pytest / frontend build
 - **.gitignore整備**: data・models・outputs・.venv・node_modules・復旧退避物などを
   管理対象外に（`yolo11n.pt` は追跡解除）
-- リリース前チェックリスト（`docs/14_RELEASE_CHECKLIST.md`）、
+- リリース前チェックリスト（`docs/RELEASE_CHECKLIST.md`）、
   QAステータス・既知課題一覧（`docs/13_QA_STATUS.md`）を追加

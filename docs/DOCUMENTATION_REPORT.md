@@ -22,7 +22,7 @@
 | `CLAUDE.md`（リポジトリ直下） | Claude Code専用ガイド + **「絶対に変更してはいけない仕様」章** |
 | `docs/DOCUMENTATION_REPORT.md` | 本レポート |
 
-- 既存の `docs/11〜14` と `docs/usage.md` は変更していない（番号衝突なし）。
+- 既存の `docs/11〜14` と `docs/usage.md`（現 `USER_GUIDE.md`）は当時変更していない（番号衝突なし）。
 - `CLAUDE.md` は指示上 docs/ 配下だが、Claude Code が自動読込する仕様に合わせ**リポジトリ直下**へ配置した。
 
 ## 強化タスクでの更新内容（2026-07-14）
@@ -45,7 +45,7 @@
 | テスト | `tests/` 11ファイル（conftest.py含む）、`frontend/tests/` 2ファイル |
 | 設定 | `config/settings.yaml`、`frontend/vite.config.js`、`frontend/tailwind.config.js`、`frontend/postcss.config.js`、`frontend/package.json`、`.gitignore` |
 | 依存定義 | `requirements.txt`（UTF-16）、`requirements-ci.txt`、`requirements-dev.txt`、`requirements-ocr-tuning.txt`、`Pipfile` |
-| ドキュメント | `readme.md`、`CHANGELOG.md`、`docs/usage.md`、`docs/11_TESSERACT_CHECKLIST.md`、`docs/12_TESSERACT_CHARSET_SPEC.md`、`docs/13_QA_STATUS.md`、`docs/14_RELEASE_CHECKLIST.md` |
+| ドキュメント | `readme.md`、`CHANGELOG.md`、`docs/USER_GUIDE.md`（旧usage.md）、`docs/11_TESSERACT_CHECKLIST.md`、`docs/12_TESSERACT_CHARSET_SPEC.md`、`docs/13_QA_STATUS.md`、`docs/RELEASE_CHECKLIST.md`（旧14） |
 | その他 | `.github/`（空であることを確認）、git log（コミット形式の確認） |
 
 ## 情報不足だった項目
@@ -54,7 +54,7 @@
 |---|---|
 | CI/CD | `.github/` が空。`requirements-ci.txt` は存在するが、参照するワークフロー定義が存在しない |
 | Docker | Dockerfile / docker-compose が存在しない |
-| Pythonバージョン | Pipfile=3.9 / docs/usage.md=3.11+ で記述が不一致（正は不明のため両論併記） |
+| Pythonバージョン | Pipfile=3.9 / 利用ガイド=3.11+ で記述が不一致（正は不明のため両論併記） |
 | Lint / フォーマッタ | 設定ファイルなし（`.gitignore` に `.ruff_cache/` の記載のみ） |
 | ライセンス | LICENSE ファイルが存在しない（GitHub公開時に要追加） |
 | `main.py` の一部 | 約2460行のうち学習ジョブ実装後半は関数シグネチャ・呼び出し関係までの確認（エンドポイント自体は全数確認済み） |
@@ -75,5 +75,5 @@
 | CONTRIBUTING.md | コミット形式・検証手順は確立しているため文書化コストが低い |
 | GitHub Actions ワークフロー + そのドキュメント | `requirements-ci.txt` が既に用意されている（pytest実行のCI化） |
 | 前処理パイプライン仕様書 | `_op_*` 各工程のパラメータと効果の一覧（settings.yaml と preprocess.py に分散） |
-| 学習運用ガイドの更新 | `docs/usage.md` が旧macOS環境前提のため、Windows環境の現行手順への更新 |
+| 学習運用ガイドの更新 | 利用ガイドが旧macOS環境前提のため、Windows環境の現行手順への更新（→ `USER_GUIDE.md` で対応済み） |
 | データ移行・バックアップ手順 | `data/projects/` の資産保護（QA既知課題にデータ消失の記録あり） |

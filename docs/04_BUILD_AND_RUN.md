@@ -1,6 +1,6 @@
 # 04. ビルドと実行
 
-リポジトリ内（README / package.json / docs/usage.md）で確認できたコマンドのみを記載する。
+リポジトリ内（README / package.json / docs/USER_GUIDE.md）で確認できたコマンドのみを記載する。
 
 ## セットアップ
 
