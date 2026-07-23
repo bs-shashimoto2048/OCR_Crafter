@@ -264,6 +264,29 @@ class JobRetryRequest(BaseModel):
     requested_by: str = Field(default="", description="再実行者（未指定=元Jobの実行者）")
 
 
+class BenchmarkCreateRequest(BaseModel):
+    """OCR Benchmark実行（Job Management経由でjob_type=benchmarkを作成）。"""
+
+    project_id: Optional[str] = Field(default="default")
+    name: str = Field(default="", description="Benchmark表示名（Profile Hashへは含めない）")
+    image_dir: str = Field(..., description="評価画像フォルダ")
+    gt_csv: str = Field(..., description="正解CSV（画像名,正解文字列）")
+    dataset_id: str = Field(default="", description="評価データセットID（任意）")
+    engines: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="対象エンジン一覧 [{engine: tesseract_model/tesseract_base/paddleocr_official, model?, psm?, whitelist?}]",
+    )
+    warmup_runs: Optional[int] = Field(default=1, description="ウォームアップ実行回数（統計へ含めず回数のみ記録）")
+    requested_by: str = Field(default="", description="実行者（operator名）")
+
+
+class BenchmarkConfigRequest(BaseModel):
+    """バランス最良スコアの重み設定（プロジェクト毎）。"""
+
+    project_id: Optional[str] = Field(default="default")
+    balance_weights: dict[str, Any] = Field(..., description="{accuracy, speed, stability}（合計1へ正規化）")
+
+
 class ReleaseStatusRequest(BaseModel):
     """モデルステータスの手動変更（Draft / Validated / Candidate / Archived）。"""
 

@@ -49,6 +49,8 @@ from .schemas import (
     ManualMasksUpdateRequest,
     DirectorySelectRequest,
     EvaluateRequest,
+    BenchmarkConfigRequest,
+    BenchmarkCreateRequest,
     FileSelectRequest,
     ImportImagesRequest,
     JobCreateRequest,
@@ -2691,6 +2693,103 @@ def api_release_deployment_package(project_id: Optional[str] = Query(default="de
     return Response(
         content=payload,
         media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/api/benchmarks/engines")
+def api_benchmark_engines() -> dict[str, Any]:
+    """Benchmark対応エンジンカタログ＋実行環境での利用可否（未実装は「未導入・利用不可」明示）。"""
+    from .services.benchmark import engine_catalog_with_availability
+
+    return {"items": engine_catalog_with_availability()}
+
+
+@app.get("/api/benchmarks")
+def api_benchmarks(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+    """Benchmark一覧（新しい順・Leaderboard/用途別ベスト付き・casesは含めない）＋バランス重み設定。"""
+    from .services.benchmark import list_benchmarks
+
+    resolved = _resolve_project_id(project_id)
+    return {"project_id": resolved, **list_benchmarks(resolved)}
+
+
+@app.post("/api/benchmarks")
+def api_benchmark_create(req: BenchmarkCreateRequest) -> dict[str, Any]:
+    """Benchmark実行（Job Management経由）。条件を検証してから job_type=benchmark のJobを作成する。"""
+    from .services.benchmark import normalize_engine_spec
+
+    resolved = _resolve_project_id(req.project_id)
+    try:
+        engines = [normalize_engine_spec(spec) for spec in (req.engines or [])]
+        if not engines:
+            raise ValueError("Benchmark対象エンジンを1つ以上選択してください")
+        job, deduplicated = get_job_service().create_job(
+            project_id=resolved,
+            job_type="benchmark",
+            params={
+                "project_id": resolved,
+                "name": str(req.name or ""),
+                "image_dir": str(req.image_dir or ""),
+                "gt_csv": str(req.gt_csv or ""),
+                "dataset_id": str(req.dataset_id or ""),
+                "engines": engines,
+                "warmup_runs": int(req.warmup_runs if req.warmup_runs is not None else 1),
+            },
+            requested_by=str(req.requested_by or ""),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    ensure_worker_started()
+    return {"project_id": resolved, "job": job, "deduplicated": deduplicated}
+
+
+@app.patch("/api/benchmarks/config")
+def api_benchmark_config(req: BenchmarkConfigRequest) -> dict[str, Any]:
+    """バランス最良スコアの重み設定（プロジェクト毎。合計1へ正規化して使用）。"""
+    from .services.benchmark import set_balance_weights
+
+    resolved = _resolve_project_id(req.project_id)
+    try:
+        weights = set_balance_weights(resolved, req.balance_weights or {})
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"project_id": resolved, "balance_weights": weights}
+
+
+@app.get("/api/benchmarks/{benchmark_id}")
+def api_benchmark_detail(
+    benchmark_id: str, project_id: Optional[str] = Query(default="default")
+) -> dict[str, Any]:
+    """Benchmark詳細（Leaderboard・用途別ベスト・画像単位ケース含む）。"""
+    from .services.benchmark import get_benchmark
+
+    resolved = _resolve_project_id(project_id)
+    try:
+        return {"project_id": resolved, "item": get_benchmark(resolved, benchmark_id)}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+
+@app.get("/api/benchmarks/{benchmark_id}/export")
+def api_benchmark_export(
+    benchmark_id: str,
+    kind: str = Query(default="summary"),
+    project_id: Optional[str] = Query(default="default"),
+) -> Response:
+    """CSV（Excel対応）Export 3種: summary / cases / confusions（BOM付きUTF-8）。"""
+    from .services.benchmark import export_benchmark_csv
+
+    resolved = _resolve_project_id(project_id)
+    try:
+        filename, payload = export_benchmark_csv(resolved, benchmark_id, kind)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return Response(
+        content=payload,
+        media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 

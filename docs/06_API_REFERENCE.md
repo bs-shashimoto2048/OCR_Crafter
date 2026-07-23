@@ -108,6 +108,19 @@
 | POST `/api/jobs/{job_id}/retry` | `JobRetryRequest`（`requested_by?`） | `{job, deduplicated}` | 同一入力条件で新規Job作成（`retry_source_job_id` に元IDを保存）。アクティブJobの再実行は400 |
 | GET `/api/jobs/{job_id}/events` | - | `{events[]}` | 進捗イベント履歴（`ts` + `type: status|progress`）。現在はポーリング取得・**将来SSEでも同一形式を使用** |
 
+## Benchmark（OCR Benchmark Suite）
+
+詳細仕様: `docs/19_BENCHMARK_SPEC.md`。実行はJob Management経由（`job_type=benchmark`）。
+
+| Method / Path | リクエスト | レスポンス主要キー | 概要 |
+|---|---|---|---|
+| GET `/api/benchmarks/engines` | - | `{items:[{key, label, implemented, available, availability_note, description}]}` | 対応エンジンカタログ＋実行環境での利用可否。対応= tesseract_model / tesseract_base / paddleocr_official のみ。**EasyOCR等の未実装は「未導入・利用不可」明示・実行対象外**。クラウドOCRは対象外（掲載しない） |
+| GET `/api/benchmarks` | Query: `project_id?` | `{items[], balance_weights}` | Benchmark一覧（新しい順・Leaderboard/用途別ベスト付き・casesは含めない）。Benchmark IDは **BM-0001形式・プロジェクト内一意**。保存先 `data/projects/<id>/benchmarks.json` |
+| POST `/api/benchmarks` | `BenchmarkCreateRequest`（`name?`, `image_dir`, `gt_csv`, `dataset_id?`, `engines[]`, `warmup_runs?`, `requested_by?`） | `{job, deduplicated}` | Benchmark実行。エンジン条件を検証（未実装エンジンは400）してから **job_type=benchmark のJobを作成**（結果はジョブ管理で監視・完了後にBM IDが付与される） |
+| PATCH `/api/benchmarks/config` | `BenchmarkConfigRequest`（`balance_weights{accuracy, speed, stability}`） | `{balance_weights}` | バランス最良スコアの重み設定（プロジェクト毎・合計1へ正規化。既定 70/20/10） |
+| GET `/api/benchmarks/{benchmark_id}` | Query: `project_id?` | `{item}` | 詳細（Leaderboard=CER昇順・同率はExactMatch降順→Failed昇順→MeanTime昇順 / 用途別ベスト＋バランス計算式 / 画像単位cases / Profile Hash）。存在しないIDは404 |
+| GET `/api/benchmarks/{benchmark_id}/export` | Query: `kind`=summary/cases/confusions, `project_id?` | CSV（BOM付きUTF-8） | **CSV（Excel対応）3種**: benchmark_summary / benchmark_cases / benchmark_confusions |
+
 ## リリース管理（Model Release Management）
 
 | Method / Path | リクエスト | レスポンス主要キー | 概要 |

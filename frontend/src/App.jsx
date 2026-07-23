@@ -14,6 +14,7 @@ import InferenceView from "./views/InferenceView";
 import ExperimentsView from "./views/ExperimentsView";
 import ReleasesView from "./views/ReleasesView";
 import JobsView from "./views/JobsView";
+import BenchmarkView from "./views/BenchmarkView";
 import PreprocessView from "./views/PreprocessView";
 import EvaluationView from "./views/EvaluationView";
 import OcrEvaluationView from "./views/OcrEvaluationView";
@@ -63,6 +64,7 @@ const viewMeta = {
   experiments: { title: "実験管理", subtitle: "学習条件・結果・考察の一元管理と実験比較" },
   releases: { title: "リリース管理", subtitle: "モデルのライフサイクル管理・本番適用・配布" },
   jobs: { title: "ジョブ管理", subtitle: "バックグラウンドジョブの一覧・進捗・キャンセル・再実行" },
+  benchmark: { title: "Benchmark", subtitle: "複数OCRエンジンの公平比較（精度・速度・安定性）" },
   "cls-models": { title: "モデル", subtitle: "実験機能（分割学習）: モデル管理" },
   inference: { title: "推論", subtitle: "画像推論と精度確認" },
   "ocr-inference": { title: "推論", subtitle: "OCR認識モデルで推論" },
@@ -633,6 +635,10 @@ export default function App() {
   const [jobsLoading, setJobsLoading] = useState(false);
   const [jobsWorkerAlive, setJobsWorkerAlive] = useState(false);
   const [jobsFilters, setJobsFilters] = useState({});
+  // Benchmark Suite。履歴・重み設定はサーバー保存（benchmarks.json）・BM-0001形式
+  const [benchmarks, setBenchmarks] = useState({ items: [], balance_weights: { accuracy: 0.7, speed: 0.2, stability: 0.1 } });
+  const [benchmarkEngines, setBenchmarkEngines] = useState([]);
+  const [benchmarksLoading, setBenchmarksLoading] = useState(false);
   const [presetName, setPresetName] = useState("");
   const [selectedPreset, setSelectedPreset] = useState("");
   const [rapidPreprocessEnabled, setRapidPreprocessEnabled] = useState(true);
@@ -2151,6 +2157,67 @@ export default function App() {
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeView, JSON.stringify(jobsFilters), jobs.some((j) => ["queued", "running", "cancel_requested"].includes(j.status))]);
+
+  // Benchmark一覧＋対応エンジンカタログの取得（Benchmark画面表示時）
+  async function loadBenchmarks(pid = projectId) {
+    if (!pid) return;
+    setBenchmarksLoading(true);
+    try {
+      const [data, enginesData] = await Promise.all([
+        request(`/api/benchmarks?project_id=${encodeURIComponent(pid)}`),
+        request("/api/benchmarks/engines"),
+      ]);
+      setBenchmarks({
+        items: Array.isArray(data?.items) ? data.items : [],
+        balance_weights: data?.balance_weights || { accuracy: 0.7, speed: 0.2, stability: 0.1 },
+      });
+      setBenchmarkEngines(Array.isArray(enginesData?.items) ? enginesData.items : []);
+    } catch {
+      setBenchmarks({ items: [], balance_weights: { accuracy: 0.7, speed: 0.2, stability: 0.1 } });
+    } finally {
+      setBenchmarksLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (activeView === "benchmark") {
+      loadBenchmarks(projectId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeView, projectId]);
+
+  // Benchmark実行（条件検証→job_type=benchmarkのJob作成。結果はジョブ管理で監視）
+  async function runBenchmark(payload) {
+    try {
+      const data = await request("/api/benchmarks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_id: projectId, ...payload }),
+      });
+      if (data?.deduplicated) {
+        notify("info", `同条件のアクティブJobが既に存在します: ${data?.job?.job_id}`);
+      } else {
+        notify("success", `BenchmarkのJobを作成しました: ${data?.job?.job_id}（ジョブ管理で進捗を確認できます）`);
+      }
+    } catch (error) {
+      notify("error", `Benchmark実行に失敗しました: ${error.message}`);
+    }
+  }
+
+  // バランス最良スコアの重み更新（プロジェクト設定）
+  async function updateBenchmarkWeights(weights) {
+    try {
+      const data = await request("/api/benchmarks/config", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_id: projectId, balance_weights: weights }),
+      });
+      setBenchmarks((prev) => ({ ...prev, balance_weights: data?.balance_weights || prev.balance_weights }));
+      notify("success", "バランス重みを保存しました");
+    } catch (error) {
+      notify("error", `重みの保存に失敗しました: ${error.message}`);
+    }
+  }
 
   // ジョブのキャンセル要求（running中は現在工程の安全な区切りで停止する）
   async function cancelJob(jobId) {
@@ -3987,6 +4054,24 @@ export default function App() {
           setFocusExperimentId(experimentId);
           setActiveView("experiments");
         }}
+        onOpenBenchmark={() => setActiveView("benchmark")}
+      />
+    );
+  }
+
+  if (activeView === "benchmark") {
+    view = (
+      <BenchmarkView
+        projectId={projectId}
+        items={benchmarks.items}
+        balanceWeights={benchmarks.balance_weights}
+        engines={benchmarkEngines}
+        ocrModels={ocrModels}
+        loading={benchmarksLoading}
+        onRefresh={() => loadBenchmarks(projectId)}
+        onRun={runBenchmark}
+        onUpdateWeights={updateBenchmarkWeights}
+        onOpenJobs={() => setActiveView("jobs")}
       />
     );
   }

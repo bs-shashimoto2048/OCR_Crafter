@@ -89,7 +89,10 @@ export const SIDEBAR_SECTIONS = [
     icon: "cog",
     description: "ジョブ・監査・システム状態などの運用管理を行います。",
     defaultOpen: false,
-    items: [{ id: "jobs", label: "ジョブ管理" }],
+    items: [
+      { id: "jobs", label: "ジョブ管理" },
+      { id: "benchmark", label: "Benchmark" },
+    ],
   },
   {
     id: "experimental",
