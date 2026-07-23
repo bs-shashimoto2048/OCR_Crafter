@@ -651,4 +651,10 @@ def get_job_worker() -> JobWorker:
 
 
 def ensure_worker_started() -> None:
+    import os
+
+    if os.environ.get("OCRC_DISABLE_WORKER_AUTOSTART"):
+        # テスト実行時: シングルトンWorkerがテスト間で残留し、他テストのqueued Jobを
+        # 勝手に実行してしまうのを防ぐ（テストは process_next で同期実行する）
+        return
     get_job_worker().start()

@@ -1,0 +1,20 @@
+# 本番配備用 settings.yaml の差分例（docs/24_DEPLOYMENT_GUIDE.md 参照）。
+# 既存の config/settings.yaml をベースに、以下のキーを本番値へ変更する。
+# （このファイルはそのまま読み込まれない。settings.yaml へ反映して使う）
+
+cors:
+  # 本番はフロント配信元のみに絞る（環境変数 CORS_ALLOWED_ORIGINS が優先）
+  allowed_origins:
+    - "http://ocr-crafter.example.local"
+
+security:
+  # 本番必須: 認証未設定モード（Admin互換）を無効化する
+  # X-Operator/X-Role ヘッダはリバースプロキシ（SSO連携）で付与する（docs/22参照）
+  allow_unauthenticated_admin: false
+
+tesseract:
+  # 配備先の実パスへ変更する
+  tesseract_cmd: "C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
+  lstmtraining_cmd: "C:\\Program Files\\Tesseract-OCR\\lstmtraining.exe"
+  combine_tessdata_cmd: "C:\\Program Files\\Tesseract-OCR\\combine_tessdata.exe"
+  tessdata_dir: "C:/ocr-crafter/models/tessdata_best"

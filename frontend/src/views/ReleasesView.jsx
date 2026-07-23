@@ -169,6 +169,17 @@ export default function ReleasesView({
 
   function submitPromote() {
     if (!promoteTarget) return;
+    // 破壊的操作の確認（影響対象=旧Productionの自動Archived・Override有無を明示）
+    const lines = [
+      `「${promoteTarget}」をProductionへ昇格します。`,
+      production ? `現在のProduction「${production}」は自動でArchivedになります。` : "初回のProductionリリースです。",
+      versionInput.trim() ? `Version: v${versionInput.trim()}（指定）` : "Version: 自動採番",
+    ];
+    if (overrideRequired(gate?.verdict)) {
+      lines.push(`⚠ Release Gate FAILの例外承認つき昇格です（承認者: ${approvedBy.trim() || "-"}）。`);
+    }
+    lines.push("続行しますか？");
+    if (!window.confirm(lines.join("\n"))) return;
     onPromote?.(promoteTarget, {
       note: releaseNote,
       author,

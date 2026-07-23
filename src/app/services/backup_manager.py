@@ -207,7 +207,8 @@ def verify_backup(backup_id: str) -> dict[str, Any]:
                 mismatches.append(f"欠落: {path}")
                 continue
             data = zf.read(path)
-            if len(data) != int(item.get("size") or -1):
+            expected_size = item.get("size")
+            if not isinstance(expected_size, int) or len(data) != expected_size:  # 0バイトファイルも正しく比較
                 mismatches.append(f"サイズ不一致: {path}")
             if _sha256_of(data) != str(item.get("sha256") or ""):
                 mismatches.append(f"SHA-256不一致: {path}")

@@ -2576,6 +2576,15 @@ export default function App() {
   }
 
   async function createSelectedOcrDataset() {
+    // 実行前確認（影響対象の明示。既存データセットは変更せず新しいディレクトリへ作成される）
+    const source = ocrDatasetCreateMode === "from_logs" ? "OCR修正ログ" : "ラベル済み画像";
+    if (
+      !window.confirm(
+        `${source}から新しいOCRデータセットを作成します（プロジェクト: ${projectId}）。\n既存のデータセットは変更されません。続行しますか？`
+      )
+    ) {
+      return;
+    }
     if (ocrDatasetCreateMode === "from_logs") {
       await createOcrDatasetFromLogs();
       return;
