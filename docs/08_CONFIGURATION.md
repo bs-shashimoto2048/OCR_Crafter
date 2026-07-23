@@ -111,6 +111,7 @@ localStorage（`try/catch` で不可環境でも動作継続）:
 | `ocr_eval_preprocess_settings_by_project_v1` | Step5専用OCR前処理（`{grayscale, binarize, binarizeMethod: otsu/fixed, threshold}`。OCR候補生成時のみ適用・評価用画像/作成データには反映しない。プロジェクト共通OCR前処理・YOLO検出前処理とは独立） | プロジェクト別 |
 | `ocr_detection_preprocess_by_project_v1` | YOLO検出用前処理 | プロジェクト別 |
 | `ocr_sidebar_collapsed_v1` | サイドバー折り畳み | 全体共通 |
+| `ocr_sidebar_groups_v1` | データ準備配下サブグループ（OCR画像作成/学習データ/評価データ）の展開状態（`{"ocr-image": bool, "training-data": bool, "eval-data": bool}`。未保存のグループは既定=展開） | 全体共通 |
 | `ocr_image_builder_last_state_v1` | データ作成（Step1〜4）の最終状態（`modelSource`=選択モデルの取得元 project/common/builtin を追加。旧データは一覧ロード後に自動補完） | 全体共通 |
 | `ocr_eval_label_text_align_by_project_v1` | Step5（評価用データ作成）のラベル文字配置（left/center/right）。既存ラベル編集の `ocr_label_text_align_by_project_v1` とはキーを分離 | プロジェクト別 |
 

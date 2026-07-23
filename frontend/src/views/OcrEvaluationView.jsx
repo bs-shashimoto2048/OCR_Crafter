@@ -267,7 +267,7 @@ export default function OcrEvaluationView({
               ) : (
                 <p className="mt-1 text-xs text-muted">
                   {datasets.length === 0
-                    ? "評価データセットがありません（データ作成 > 評価データ作成 で作成できます）"
+                    ? "評価データセットがありません（データ準備 > 評価データ > 評価データセット作成 で作成できます）"
                     : "データセットを選択すると画像フォルダとCSVが自動設定されます"}
                 </p>
               )}

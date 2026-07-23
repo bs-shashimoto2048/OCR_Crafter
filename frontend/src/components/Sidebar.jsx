@@ -36,8 +36,13 @@ function SectionIcon({ name, className = "h-4 w-4" }) {
 }
 
 // OCRモデル開発フロー順のサイドバー構成。
-// 機能一覧ではなく作業工程（プロジェクト確認→データ作成→OCRモデル→実験機能）を表す。
-// 新機能はカテゴリ名を変えずに各セクションの items へ追加する（例: Data Augmentation→データ作成）。
+// 機能一覧ではなく作業工程（プロジェクト確認→データ準備→OCRモデル→実験機能）を表す。
+// 新機能はカテゴリ名を変えずに各セクションの items（またはグループの items）へ追加する。
+//
+// groups: セクション内の折りたたみサブグループ（目的別の工程まとまり）。
+// 新しい画面はグループの items へ1行追加するだけで並ぶ（将来拡張:
+// OCR画像作成→AI補正・自動トリミング・画像品質評価 / 学習データ→自動ラベル補正・
+// ラベル品質チェック / 評価データ→評価データ分割・評価データ検証 等）。
 export const SIDEBAR_SECTIONS = [
   {
     id: "project",
@@ -49,20 +54,40 @@ export const SIDEBAR_SECTIONS = [
   },
   {
     id: "data-creation",
-    label: "データ作成",
+    label: "データ準備",
     icon: "photo",
     description: "OCR学習に必要な画像・ラベル・評価データを準備します。",
     defaultOpen: true,
-    items: [
-      // 開発フロー順（画像取得→YOLO検出→BBox選択→クロップ→画像確認→前処理→ラベル→評価データ）。並び順を変えないこと
-      { id: "image-builder-step1", label: "画像指定・リサイズ" },
-      { id: "image-builder-step2", label: "YOLO検出" },
-      { id: "image-builder-step3", label: "Bounding Box選択" },
-      { id: "image-builder-step4", label: "クロップ出力" },
-      { id: "images", label: "画像" },
-      { id: "preprocess", label: "前処理設定" },
-      { id: "labeling", label: "ラベル編集" },
-      { id: "image-builder-step5", label: "評価データ作成" },
+    // 目的の異なる3工程を折りたたみグループで区分（view idは不変=遷移・状態は互換）
+    groups: [
+      {
+        id: "ocr-image",
+        label: "OCR画像作成",
+        description: "撮影した元画像からOCR対象画像を生成する工程。",
+        items: [
+          // 開発フロー順（画像取得→YOLO検出→BBox選択→クロップ）。並び順を変えないこと
+          { id: "image-builder-step1", label: "画像指定・リサイズ" },
+          { id: "image-builder-step2", label: "YOLO検出" },
+          { id: "image-builder-step3", label: "Bounding Box選択" },
+          { id: "image-builder-step4", label: "クロップ出力" },
+        ],
+      },
+      {
+        id: "training-data",
+        label: "学習データ",
+        description: "切り出したOCR画像に対して、学習に必要な編集を行う工程。",
+        items: [
+          { id: "images", label: "画像" },
+          { id: "preprocess", label: "前処理設定" },
+          { id: "labeling", label: "ラベル編集" },
+        ],
+      },
+      {
+        id: "eval-data",
+        label: "評価データ",
+        description: "学習データとは独立した評価データセットを作成・編集する工程。",
+        items: [{ id: "image-builder-step5", label: "評価データセット作成" }],
+      },
     ],
   },
   {
@@ -111,17 +136,62 @@ export const SIDEBAR_SECTIONS = [
   },
 ];
 
+// セクションの全項目（グループを持つセクションはグループ内itemsを平坦化して返す）
+export function sectionItems(section) {
+  if (Array.isArray(section.groups)) {
+    return section.groups.flatMap((group) => group.items);
+  }
+  return section.items || [];
+}
+
+// サブグループの展開状態のlocalStorage保存（初回=すべて展開。SSR・保存失敗時も既定値で動作）
+const SIDEBAR_GROUPS_STORAGE_KEY = "ocr_sidebar_groups_v1";
+
+function readGroupOpenStates() {
+  const defaults = Object.fromEntries(
+    SIDEBAR_SECTIONS.flatMap((section) => (section.groups || []).map((group) => [group.id, true]))
+  );
+  if (typeof window === "undefined" || !window.localStorage) {
+    return defaults;
+  }
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(SIDEBAR_GROUPS_STORAGE_KEY) || "{}");
+    return { ...defaults, ...(saved && typeof saved === "object" ? saved : {}) };
+  } catch {
+    return defaults;
+  }
+}
+
+function writeGroupOpenStates(states) {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  try {
+    window.localStorage.setItem(SIDEBAR_GROUPS_STORAGE_KEY, JSON.stringify(states));
+  } catch {
+    // 保存失敗（容量等）は無視（表示状態はメモリ側で維持される）
+  }
+}
+
 export default function Sidebar({ active, onChange, onExitApp, collapsed = false, onToggleCollapse }) {
-  // 展開状態（初期: プロジェクト/データ作成/OCRモデル=展開・実験機能=折りたたみ）
+  // 展開状態（初期: プロジェクト/データ準備/OCRモデル=展開・運用/実験機能=折りたたみ）
   const [openSections, setOpenSections] = useState(() =>
     Object.fromEntries(SIDEBAR_SECTIONS.map((section) => [section.id, section.defaultOpen]))
   );
+  // サブグループ（OCR画像作成/学習データ/評価データ）の展開状態はlocalStorageへ保存
+  const [openGroups, setOpenGroups] = useState(readGroupOpenStates);
 
   const activeLabel =
-    SIDEBAR_SECTIONS.flatMap((section) => section.items).find((item) => item.id === active)?.label || "";
+    SIDEBAR_SECTIONS.flatMap(sectionItems).find((item) => item.id === active)?.label || "";
 
   function toggleSection(sectionId) {
     setOpenSections((prev) => ({ ...prev, [sectionId]: !prev[sectionId] }));
+  }
+
+  function toggleGroup(groupId) {
+    setOpenGroups((prev) => {
+      const next = { ...prev, [groupId]: !prev[groupId] };
+      writeGroupOpenStates(next);
+      return next;
+    });
   }
 
   if (collapsed) {
@@ -173,7 +243,40 @@ export default function Sidebar({ active, onChange, onExitApp, collapsed = false
         {SIDEBAR_SECTIONS.map((section) => {
           const isOpen = Boolean(openSections[section.id]);
           // 選択中ページの所属セクションはヘッダー（アイコン・文字色）もアクティブ表示
-          const sectionActive = section.items.some((item) => item.id === active);
+          const sectionActive = sectionItems(section).some((item) => item.id === active);
+
+          const renderItem = (item) => {
+            const isActive = active === item.id;
+            const isDisabled = Boolean(item.disabled);
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => {
+                  if (!isDisabled) {
+                    onChange(item.id);
+                  }
+                }}
+                disabled={isDisabled}
+                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
+                  isDisabled
+                    ? "cursor-not-allowed text-muted/55"
+                    : isActive
+                      ? "border border-border/90 bg-[#3c444f]/88 text-text shadow-[0_7px_20px_rgba(16,22,30,0.36)]"
+                      : "text-muted hover:bg-[#37404a]/72 hover:text-text"
+                }`}
+              >
+                <span
+                  className={`h-2 w-2 shrink-0 rounded-full ${
+                    isDisabled ? "bg-muted/25" : isActive ? "bg-accent" : "bg-muted/40"
+                  }`}
+                  aria-hidden="true"
+                />
+                <span className={isActive ? "sidebar-active-wave" : ""}>{item.label}</span>
+              </button>
+            );
+          };
+
           return (
             <div key={section.id} className="border-b border-border/40 pb-2 last:border-b-0">
               <button
@@ -194,40 +297,39 @@ export default function Sidebar({ active, onChange, onExitApp, collapsed = false
                 </span>
               </button>
 
-              {isOpen ? (
-                <div className="mt-1 space-y-0.5 pl-2">
-                  {section.items.map((item) => {
-                    const isActive = active === item.id;
-                    const isDisabled = Boolean(item.disabled);
+              {isOpen && Array.isArray(section.groups) ? (
+                // 折りたたみサブグループ（目的別の工程まとまり。展開状態はlocalStorage保存）
+                <div className="mt-1 space-y-1 pl-2">
+                  {section.groups.map((group) => {
+                    const groupOpen = Boolean(openGroups[group.id]);
+                    const groupActive = group.items.some((item) => item.id === active);
                     return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => {
-                          if (!isDisabled) {
-                            onChange(item.id);
-                          }
-                        }}
-                        disabled={isDisabled}
-                        className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
-                          isDisabled
-                            ? "cursor-not-allowed text-muted/55"
-                            : isActive
-                              ? "border border-border/90 bg-[#3c444f]/88 text-text shadow-[0_7px_20px_rgba(16,22,30,0.36)]"
-                              : "text-muted hover:bg-[#37404a]/72 hover:text-text"
-                        }`}
-                      >
-                        <span
-                          className={`h-2 w-2 shrink-0 rounded-full ${
-                            isDisabled ? "bg-muted/25" : isActive ? "bg-accent" : "bg-muted/40"
+                      <div key={group.id}>
+                        <button
+                          type="button"
+                          onClick={() => toggleGroup(group.id)}
+                          title={group.description}
+                          aria-expanded={groupOpen}
+                          data-group={group.id}
+                          data-active={groupActive ? "true" : "false"}
+                          className={`flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-[13px] font-semibold transition hover:bg-[#37404a]/50 ${
+                            groupActive ? "text-accent" : "text-slate-300"
                           }`}
-                          aria-hidden="true"
-                        />
-                        <span className={isActive ? "sidebar-active-wave" : ""}>{item.label}</span>
-                      </button>
+                        >
+                          <span className="flex-1">{group.label}</span>
+                          <span className="text-base font-semibold leading-none text-muted" aria-hidden="true">
+                            {groupOpen ? "▾" : "▸"}
+                          </span>
+                        </button>
+                        {groupOpen ? <div className="mt-0.5 space-y-0.5 pl-2">{group.items.map(renderItem)}</div> : null}
+                      </div>
                     );
                   })}
                 </div>
+              ) : null}
+
+              {isOpen && !Array.isArray(section.groups) ? (
+                <div className="mt-1 space-y-0.5 pl-2">{section.items.map(renderItem)}</div>
               ) : null}
             </div>
           );

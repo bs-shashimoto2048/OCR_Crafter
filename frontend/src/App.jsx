@@ -78,11 +78,11 @@ const viewMeta = {
   "rapid-ocr": { title: "OCR修正", subtitle: "キーボード中心でOCR結果を素早く修正" },
   "ocr-batch": { title: "バッチ推論", subtitle: "OCR認識モデルで複数画像を一括推論" },
   "ocr-eval": { title: "モデル評価", subtitle: "学習前後のOCRモデルを同一データで比較評価" },
-  "image-builder-step1": { title: "データ作成", subtitle: "Step1: 画像指定とリサイズ" },
-  "image-builder-step2": { title: "データ作成", subtitle: "Step2: YOLO検出" },
-  "image-builder-step3": { title: "データ作成", subtitle: "Step3: Bounding Box選択" },
-  "image-builder-step4": { title: "データ作成", subtitle: "Step4: クロップ出力" },
-  "image-builder-step5": { title: "データ作成", subtitle: "Step5: 評価用データ作成" },
+  "image-builder-step1": { title: "データ準備", subtitle: "Step1: 画像指定とリサイズ" },
+  "image-builder-step2": { title: "データ準備", subtitle: "Step2: YOLO検出" },
+  "image-builder-step3": { title: "データ準備", subtitle: "Step3: Bounding Box選択" },
+  "image-builder-step4": { title: "データ準備", subtitle: "Step4: クロップ出力" },
+  "image-builder-step5": { title: "データ準備", subtitle: "Step5: 評価データセット作成" },
 };
 
 // 実験機能配下の view id。今後 TrOCR / PARSeq 等を追加する場合はここに足すだけで
