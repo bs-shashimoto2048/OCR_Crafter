@@ -124,7 +124,9 @@ test("ラベル定義: 全6種別・全6状態が揃っている", () => {
     "failed",
     "cancel_requested",
     "cancelled",
+    "interrupted",
   ]);
+  assert.equal(JOB_STATUS_LABELS.interrupted, "中断（再起動）");
 });
 
 test("jobDuration: 終了済みは開始〜終了の秒/分表示・未開始はハイフン", () => {

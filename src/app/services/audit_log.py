@@ -152,16 +152,18 @@ def record_audit(
     """監査エントリを追記する（AUD-000001形式・全体一意）。失敗させない設計は呼び出し側で行う。"""
     if action not in AUDIT_ACTIONS:
         raise ValueError(f"unknown audit action: {action}（{AUDIT_ACTIONS}）")
+    from .atomic_io import atomic_write_json, file_lock
+
     operator = user.operator if isinstance(user, UserContext) else str(user or "")
     role = user.role if isinstance(user, UserContext) else ""
-    with _LOCK:
-        counter_path = _audit_root() / "counter.json"
+    counter_path = _audit_root() / "counter.json"
+    with _LOCK, file_lock(counter_path):
         try:
             counter = int(json.loads(counter_path.read_text(encoding="utf-8")).get("counter") or 0)
         except (OSError, ValueError):
             counter = 0
         counter += 1
-        counter_path.write_text(json.dumps({"counter": counter}), encoding="utf-8")
+        atomic_write_json(counter_path, {"counter": counter})
         entry = {
             "audit_id": f"AUD-{counter:06d}",
             "timestamp": datetime.now().isoformat(),

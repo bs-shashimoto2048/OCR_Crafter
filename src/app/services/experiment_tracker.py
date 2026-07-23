@@ -102,9 +102,10 @@ def _load_registry(project_root: Path) -> dict[str, Any]:
 
 
 def _save_registry(project_root: Path, registry: dict[str, Any]) -> None:
-    _experiments_path(project_root).write_text(
-        json.dumps(registry, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    from .atomic_io import atomic_write_json
+
+    # 原子的リネーム書き込み（途中失敗で experiments.json が破損しない）
+    atomic_write_json(_experiments_path(project_root), registry)
 
 
 def _normalize_tags(raw: Any) -> list[str]:
@@ -201,8 +202,10 @@ def _experiment_from_model_meta(model_file: str, meta: dict[str, Any]) -> dict[s
 
 def record_experiment(project_id: Optional[str], payload: dict[str, Any]) -> dict[str, Any]:
     """学習完了時の実験記録。EXP-0001形式でプロジェクト内一意に採番して保存する。"""
+    from .atomic_io import file_lock
+
     paths = ensure_project_directories(project_id)
-    with _EXPERIMENTS_LOCK:
+    with _EXPERIMENTS_LOCK, file_lock(_experiments_path(paths.root)):
         registry = _load_registry(paths.root)
         registry["counter"] = int(registry["counter"]) + 1
         experiment = {
@@ -225,8 +228,10 @@ def record_experiment(project_id: Optional[str], payload: dict[str, Any]) -> dic
 
 def ensure_experiments_for_models(project_id: Optional[str]) -> int:
     """実験記録を持たない既存モデル（.tess.json）から実験をバックフィルする。戻り値=追加件数。"""
+    from .atomic_io import file_lock
+
     paths = ensure_project_directories(project_id)
-    with _EXPERIMENTS_LOCK:
+    with _EXPERIMENTS_LOCK, file_lock(_experiments_path(paths.root)):
         registry = _load_registry(paths.root)
         known_models: set[str] = set()
         for item in registry["items"]:

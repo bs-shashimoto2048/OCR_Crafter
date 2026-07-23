@@ -26,13 +26,29 @@
 ```text
 queued ──→ running ──→ succeeded
    │          │    └──→ failed
-   │          └──→ cancel_requested ──→ cancelled（安全な区間で停止）
+   │          ├──→ cancel_requested ──→ cancelled（安全な区間で停止）
+   │          └──→ interrupted（Backend再起動時の回収）
    └──→ cancel_requested → cancelled（未開始は即時取消）
 ```
 
 - 許可遷移は `ALLOWED_TRANSITIONS` 辞書で定義し、**不正遷移（例: succeeded→running）は ValueError で拒否**する
-- `succeeded` / `failed` / `cancelled` は終端状態（以後変更不可）
+- `succeeded` / `failed` / `cancelled` / `interrupted` は終端状態（以後変更不可）
 - `cancel_requested` 中に処理が完走した場合は `succeeded`、例外で終わった場合は `cancelled` として完結する
+
+### 再起動復旧（interrupted）
+
+Workerはプロセス内スレッドのため、Backend再起動でrunning中のJobは実行実体を失う。起動時（app startup / Worker start）に `recover_interrupted_jobs` が **running / cancel_requested のまま残ったJobを `interrupted` へ回収**する（永続的にrunning表示のまま残らない）。
+
+- queued のJobはWorker再起動でそのまま実行再開される（回収対象外）
+- 完了直後（succeeded/failed/cancelled）のJobは影響を受けない
+- `interrupted` のJobはUIの「再実行」（同一入力条件・retry_source_job_id保存）で復旧できる
+- 回収は冪等（2回目以降の起動では対象なし）
+
+## 3b. 原子性・排他制御
+
+- `jobs.json` の保存は**原子的リネーム**（`atomic_io.atomic_write_json`: 一時ファイル→os.replace）。クラッシュ時にレジストリが破損しない
+- read-modify-write は プロセス内RLock＋**プロセス間ファイルロック**（`atomic_io.file_lock`、`jobs.json.lock`）で排他。Job作成は重複判定と登録を同一ロック内で行い、**連続クリック・同時要求でも新規Jobは1件だけ**作成される
+- 成果物の原子性: 配布ZIP・バックアップZIP=一時ファイル→リネーム / processed画像=1枚ずつ原子的リネーム / データセット=meta.json（完了マーカー）を最後に原子的書き込み / モデル=.tess.jsonメタ（登録の正）を成功時のみ原子的書き込み
 
 ## 4. 保存項目
 

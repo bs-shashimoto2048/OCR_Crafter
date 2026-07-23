@@ -36,16 +36,19 @@ from typing import Any, Callable, Optional
 from .. import project_paths as project_paths_module
 
 JOB_TYPES = ["preprocess", "dataset_creation", "training", "evaluation", "benchmark", "deployment_export"]
-JOB_STATUSES = ["queued", "running", "succeeded", "failed", "cancel_requested", "cancelled"]
+# interrupted: Backend再起動でrunning/cancel_requestedのまま残ったJobの回収先
+# （終端扱い・再実行可能。永続的にrunning表示のまま残さないための状態）
+JOB_STATUSES = ["queued", "running", "succeeded", "failed", "cancel_requested", "cancelled", "interrupted"]
 
 # 許可される状態遷移（これ以外は拒否）
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     "queued": {"running", "cancel_requested", "cancelled"},
-    "running": {"succeeded", "failed", "cancel_requested"},
-    "cancel_requested": {"cancelled", "succeeded", "failed"},
+    "running": {"succeeded", "failed", "cancel_requested", "interrupted"},
+    "cancel_requested": {"cancelled", "succeeded", "failed", "interrupted"},
     "succeeded": set(),
     "failed": set(),
     "cancelled": set(),
+    "interrupted": set(),
 }
 
 ACTIVE_STATUSES = {"queued", "running", "cancel_requested"}
@@ -63,7 +66,11 @@ def _jobs_root() -> Path:
 
 
 class JobRepository:
-    """Jobの永続化層（JSONファイル）。将来SQLiteへ差し替える場合はこのクラスのみ置換する。"""
+    """Jobの永続化層（JSONファイル）。将来SQLiteへ差し替える場合はこのクラスのみ置換する。
+
+    read-modify-write は threading.RLock（プロセス内）＋ file_lock（プロセス間）で排他し、
+    保存は原子的リネーム（atomic_write_json）で行う（クラッシュ時の破損・二重採番防止）。
+    """
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
@@ -85,10 +92,14 @@ class JobRepository:
         return {"counter": 0, "items": [], "config": {}}
 
     def _save(self, registry: dict[str, Any]) -> None:
-        self._path().write_text(json.dumps(registry, ensure_ascii=False, indent=2), encoding="utf-8")
+        from .atomic_io import atomic_write_json
+
+        atomic_write_json(self._path(), registry)
 
     def next_id(self) -> str:
-        with self._lock:
+        from .atomic_io import file_lock
+
+        with self._lock, file_lock(self._path()):
             registry = self._load()
             registry["counter"] = int(registry["counter"]) + 1
             job_id = f"JOB-{registry['counter']:06d}"
@@ -96,13 +107,17 @@ class JobRepository:
             return job_id
 
     def insert(self, job: dict[str, Any]) -> None:
-        with self._lock:
+        from .atomic_io import file_lock
+
+        with self._lock, file_lock(self._path()):
             registry = self._load()
             registry["items"].append(job)
             self._save(registry)
 
     def update(self, job_id: str, patch: dict[str, Any]) -> dict[str, Any]:
-        with self._lock:
+        from .atomic_io import file_lock
+
+        with self._lock, file_lock(self._path()):
             registry = self._load()
             for item in registry["items"]:
                 if item.get("job_id") == job_id:
@@ -124,7 +139,9 @@ class JobRepository:
         return self._load()["config"].get(key, default)
 
     def set_config(self, key: str, value: Any) -> None:
-        with self._lock:
+        from .atomic_io import file_lock
+
+        with self._lock, file_lock(self._path()):
             registry = self._load()
             registry["config"][key] = value
             self._save(registry)
@@ -272,7 +289,10 @@ def _handle_deployment_export(params: dict[str, Any], ctx: JobContext) -> dict[s
     export_dir = paths.outputs / "deployments"
     export_dir.mkdir(parents=True, exist_ok=True)
     target = export_dir / filename
-    target.write_bytes(payload)
+    # 原子性: 一時ファイル→リネーム（途中失敗ZIPを正式成果物として残さない）
+    from .atomic_io import atomic_write_bytes
+
+    atomic_write_bytes(target, payload)
     ctx.update(95, "保存")
     return {"file": str(target), "size_bytes": len(payload)}
 
@@ -361,9 +381,27 @@ class JobService:
         retry_source_job_id: str = "",
         related: Optional[dict[str, str]] = None,
     ) -> tuple[dict[str, Any], bool]:
-        """Job作成。戻り値=(job, deduplicated)。重複時は既存アクティブJobを返す。"""
+        """Job作成。戻り値=(job, deduplicated)。重複時は既存アクティブJobを返す。
+
+        重複判定（check）と登録（act）を同一ロック内で行い、連続クリック・同時要求でも
+        新規Jobが1件だけ作成されることを保証する（§二重実行・競合試験）。
+        """
+        from .atomic_io import file_lock
+
         if job_type not in JOB_TYPES:
             raise ValueError(f"unknown job_type: {job_type}（{JOB_TYPES}）")
+        with self.repository._lock, file_lock(self.repository._path()):  # noqa: SLF001
+            return self._create_job_locked(project_id, job_type, params, requested_by, retry_source_job_id, related)
+
+    def _create_job_locked(
+        self,
+        project_id: str,
+        job_type: str,
+        params: dict[str, Any],
+        requested_by: str = "",
+        retry_source_job_id: str = "",
+        related: Optional[dict[str, str]] = None,
+    ) -> tuple[dict[str, Any], bool]:
         duplicate = self._find_duplicate(job_type, project_id, params)
         if duplicate is not None:
             return duplicate, True
@@ -511,6 +549,12 @@ class JobWorker:
     def start(self) -> None:
         if self.is_alive():
             return
+        # Worker起動前に、前回プロセスでrunningのまま残ったJobをinterruptedへ回収する
+        # （実行実体のないJobを二重実行・永続running表示にしない）
+        try:
+            recover_interrupted_jobs(self.service)
+        except Exception:  # noqa: BLE001
+            pass
         self._stop.clear()
         self._thread = threading.Thread(target=self._loop, name="ocr-crafter-job-worker", daemon=True)
         self._thread.start()
@@ -534,6 +578,29 @@ class JobWorker:
                 executed = None
             if executed is None:
                 self._stop.wait(self.poll_interval)
+
+
+def recover_interrupted_jobs(service: Optional["JobService"] = None) -> list[str]:
+    """Backend再起動でrunning/cancel_requestedのまま残ったJobをinterruptedへ回収する。
+
+    - Workerスレッドはプロセスと共に消えるため、再起動後にrunningのJobは実行実体がない
+    - queuedのJobはWorker再起動でそのまま実行再開されるため対象外
+    - interrupted へ移行したJobはUIから再実行（同一入力条件）で復旧できる
+    起動時（app startup / Worker start）に呼ぶ。戻り値=回収したJob ID一覧。
+    """
+    svc = service or get_job_service()
+    recovered: list[str] = []
+    for job in svc.repository.list():
+        if job.get("status") in {"running", "cancel_requested"}:
+            job_id = str(job.get("job_id"))
+            svc.transition(
+                job_id,
+                "interrupted",
+                {"message": "Backend再起動により中断されました（再実行で復旧できます）"},
+            )
+            svc.repository.write_internal_log(job_id, "recover_interrupted_jobs: 再起動時にrunningのまま検出されたためinterruptedへ移行")
+            recovered.append(job_id)
+    return recovered
 
 
 # アプリ全体で共有するシングルトン（main.pyから使用）

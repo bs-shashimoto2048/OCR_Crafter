@@ -92,7 +92,10 @@ def _load(project_root: Path) -> dict[str, Any]:
 
 
 def _save(project_root: Path, registry: dict[str, Any]) -> None:
-    _releases_path(project_root).write_text(json.dumps(registry, ensure_ascii=False, indent=2), encoding="utf-8")
+    from .atomic_io import atomic_write_json
+
+    # 原子的リネーム書き込み（途中失敗で releases.json が破損しない）
+    atomic_write_json(_releases_path(project_root), registry)
 
 
 def _model_record(registry: dict[str, Any], model: str) -> dict[str, Any]:
@@ -179,9 +182,11 @@ def set_model_status(project_id: Optional[str], model: str, status: str) -> dict
     """
     if status not in SETTABLE_STATUSES:
         raise ValueError(f"status must be one of {SETTABLE_STATUSES} (Production is set via promote)")
+    from .atomic_io import file_lock
+
     paths = ensure_project_directories(project_id)
     model_name = Path(str(model)).name
-    with _RELEASES_LOCK:
+    with _RELEASES_LOCK, file_lock(_releases_path(paths.root)):
         registry = _load(paths.root)
         record = _model_record(registry, model_name)
         if record.get("status") == "Production":
@@ -248,7 +253,9 @@ def promote_model(
                 "failed_rules": [r for r in gate["rules"] if r.get("result") == "fail"],
             }
 
-    with _RELEASES_LOCK:
+    from .atomic_io import file_lock
+
+    with _RELEASES_LOCK, file_lock(_releases_path(paths.root)):
         registry = _load(paths.root)
         previous = _production_model(registry)
         if previous and previous != model_name:

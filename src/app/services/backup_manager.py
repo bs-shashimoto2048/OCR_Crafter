@@ -55,7 +55,9 @@ def _load_index() -> dict[str, Any]:
 
 
 def _save_index(index: dict[str, Any]) -> None:
-    (_backups_root() / "index.json").write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
+    from .atomic_io import atomic_write_json
+
+    atomic_write_json(_backups_root() / "index.json", index)
 
 
 def create_backup(project_id: Optional[str], mode: str = "metadata_only") -> dict[str, Any]:
@@ -70,15 +72,19 @@ def create_backup(project_id: Optional[str], mode: str = "metadata_only") -> dic
         zf.write(file_path, arcname)
         return 1
 
-    with _LOCK:
+    from .atomic_io import atomic_replace, file_lock
+
+    with _LOCK, file_lock(_backups_root() / "index.json"):
         index = _load_index()
         index["counter"] = int(index["counter"]) + 1
         backup_id = f"BK-{index['counter']:04d}"
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{backup_id}_{pid}_{mode}_{stamp}.zip"
         target = _backups_root() / filename
+        # 原子性: 一時ファイルへ生成→完了後にリネーム（途中失敗ZIPを正式成果物として残さない）
+        tmp_target = _backups_root() / f".{filename}.tmp"
         file_count = 0
-        with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as zf:
+        with zipfile.ZipFile(tmp_target, "w", zipfile.ZIP_DEFLATED) as zf:
             if mode == "full":
                 for file_path in sorted(paths.root.rglob("*")):
                     if file_path.is_file():
@@ -106,6 +112,7 @@ def create_backup(project_id: Optional[str], mode: str = "metadata_only") -> dic
                     indent=2,
                 ),
             )
+        atomic_replace(tmp_target, target)  # 完成したZIPだけを正式パスへ
         entry = {
             "backup_id": backup_id,
             "project_id": pid,
@@ -200,7 +207,9 @@ def set_retention(config: dict[str, Any]) -> dict[str, Any]:
         if days < 1:
             raise ValueError(f"{key} は1以上の日数か未設定（無期限）を指定してください")
         cleaned[key] = days
-    _retention_path().write_text(json.dumps(cleaned, ensure_ascii=False, indent=2), encoding="utf-8")
+    from .atomic_io import atomic_write_json
+
+    atomic_write_json(_retention_path(), cleaned)
     return cleaned
 
 

@@ -934,8 +934,17 @@ def _process_one(file_path: Path, paths: Any, cfg: dict[str, Any]) -> dict[str, 
 
     interim_path = paths.interim / f"{file_path.stem}.png"
     processed_path = processed_dir / f"{file_path.stem}.png"
-    Image.fromarray(interim_arr, mode="L").save(interim_path)
-    Image.fromarray(processed_arr, mode="L").save(processed_path)
+    # 原子性: 一時ファイル→リネームで保存（途中失敗で半端な画像ファイルを残さない。
+    # 途中失敗時の新旧混在は再実行=冪等で復旧する）
+    from .atomic_io import _tmp_path, atomic_replace
+
+    for arr, path in ((interim_arr, interim_path), (processed_arr, processed_path)):
+        tmp = _tmp_path(path)
+        try:
+            Image.fromarray(arr, mode="L").save(tmp, format="PNG")
+            atomic_replace(tmp, path)
+        finally:
+            tmp.unlink(missing_ok=True)
 
     # If image type changed compared to past runs, remove stale processed output
     # from the opposite type to avoid confusing UI/serving paths.

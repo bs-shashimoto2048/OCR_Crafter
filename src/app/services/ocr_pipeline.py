@@ -815,7 +815,11 @@ def create_ocr_dataset_from_logs(
         "created_at": datetime.now().isoformat(),
     }
     meta_path = dataset_root / "meta.json"
-    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    # meta.json=データセットの完了マーカー。原子的に書き込む（途中失敗のデータセットは
+    # meta.jsonが無く、モデル登録・学習時前処理参照の対象にならない）
+    from .atomic_io import atomic_write_json
+
+    atomic_write_json(meta_path, meta)
     return {**meta, "meta_path": str(meta_path)}
 
 
@@ -1115,7 +1119,11 @@ def create_ocr_dataset(
         "created_at": datetime.now().isoformat(),
     }
     meta_path = dataset_root / "meta.json"
-    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    # meta.json=データセットの完了マーカー。原子的に書き込む（途中失敗のデータセットは
+    # meta.jsonが無く、モデル登録・学習時前処理参照の対象にならない）
+    from .atomic_io import atomic_write_json
+
+    atomic_write_json(meta_path, meta)
     return {
         **meta,
         "train_file": str(train_file),

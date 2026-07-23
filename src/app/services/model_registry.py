@@ -151,8 +151,10 @@ def assign_model_ids(project_id: str, items: list[dict]) -> None:
       （既存モデルの初回移行も同じ経路で作成順に振られる）
     - 採番はプロセス内Lock＋ファイル永続化。保存失敗時も表示は継続する
     """
+    from .atomic_io import atomic_write_json, file_lock
+
     pid = str(project_id or "default")
-    with _MODEL_ID_LOCK:
+    with _MODEL_ID_LOCK, file_lock(_model_id_file()):
         registry = _load_model_id_registry()
         models = registry["models"]
         missing = [item for item in items if f"{pid}/{item.get('name')}" not in models]
@@ -164,9 +166,7 @@ def assign_model_ids(project_id: str, items: list[dict]) -> None:
             changed = True
         if changed:
             try:
-                path = _model_id_file()
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(json.dumps(registry, ensure_ascii=False, indent=2), encoding="utf-8")
+                atomic_write_json(_model_id_file(), registry)
             except OSError:
                 logger.warning("model id registry save failed: %s", _model_id_file())
         for item in items:

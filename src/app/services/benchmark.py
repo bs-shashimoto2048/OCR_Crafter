@@ -97,9 +97,10 @@ def _load_registry(project_id: Optional[str]) -> dict[str, Any]:
 
 
 def _save_registry(project_id: Optional[str], registry: dict[str, Any]) -> None:
-    _benchmarks_path(project_id).write_text(
-        json.dumps(registry, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    from .atomic_io import atomic_write_json
+
+    # 原子的リネーム書き込み（途中失敗で benchmarks.json が破損しない）
+    atomic_write_json(_benchmarks_path(project_id), registry)
 
 
 def get_balance_weights(project_id: Optional[str]) -> dict[str, float]:
@@ -464,7 +465,9 @@ def run_benchmark_job(params: dict[str, Any], ctx: Any) -> dict[str, Any]:
         )
 
     ctx.update(97, "保存")
-    with _LOCK:
+    from .atomic_io import file_lock
+
+    with _LOCK, file_lock(_benchmarks_path(project_id)):
         registry = _load_registry(project_id)
         registry["counter"] = int(registry["counter"]) + 1
         benchmark_id = f"BM-{registry['counter']:04d}"

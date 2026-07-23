@@ -22,13 +22,14 @@ export const JOB_STATUS_LABELS = {
   failed: "失敗",
   cancel_requested: "キャンセル要求中",
   cancelled: "キャンセル済",
+  interrupted: "中断（再起動）",
 };
 
 function statusChipClass(status) {
   if (status === "running") return "border-accent/50 bg-accent/15 text-blue-200";
   if (status === "succeeded") return "border-success/40 bg-success/10 text-success";
   if (status === "failed") return "border-danger/40 bg-danger/10 text-danger";
-  if (status === "cancel_requested") return "border-amber-400/50 bg-amber-400/10 text-amber-200";
+  if (status === "cancel_requested" || status === "interrupted") return "border-amber-400/50 bg-amber-400/10 text-amber-200";
   return "border-border/60 bg-card/40 text-muted";
 }
 
@@ -227,7 +228,7 @@ export default function JobsView({
                   キャンセル
                 </Button>
               ) : null}
-              {["succeeded", "failed", "cancelled"].includes(detail.status) ? (
+              {["succeeded", "failed", "cancelled", "interrupted"].includes(detail.status) ? (
                 <Button size="sm" variant="secondary" onClick={() => onRetry?.(detail.job_id)} title="同じ入力条件で再実行します">
                   再実行
                 </Button>

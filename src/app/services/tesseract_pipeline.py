@@ -438,7 +438,11 @@ def register_tesseract_model(
         "dataset_source_image_state": str(dataset_meta.get("source_image_state") or ""),
     }
     meta_path = paths.models / f"{lang}{TESSERACT_MODEL_SUFFIX}"
-    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    # モデルメタ（=正式登録の完了マーカー）は原子的に書き込む。学習途中で失敗した場合
+    # このメタが存在しないため、不完全なtraineddataが登録モデルとして扱われることはない
+    from .atomic_io import atomic_write_json
+
+    atomic_write_json(meta_path, meta)
 
     # 実験カルテを記録（EXP-0001形式・モデルIDとは独立）。記録失敗は学習成功へ影響させない
     try:

@@ -946,6 +946,17 @@ def _parse_preprocess_overrides_json(raw: str) -> Optional[dict[str, Any]]:
 def on_startup() -> None:
     ensure_directories()
     init_db()
+    # 再起動復旧: 前回プロセスでrunningのまま残ったJobをinterruptedへ回収し、
+    # queuedのJobを再開するためWorkerを起動する（docs/18_JOB_MANAGEMENT.md）
+    try:
+        from .services.job_manager import recover_interrupted_jobs
+
+        recovered = recover_interrupted_jobs()
+        if recovered:
+            logging.getLogger(__name__).warning("再起動復旧: %d件のJobをinterruptedへ移行しました: %s", len(recovered), recovered)
+        ensure_worker_started()
+    except Exception:  # noqa: BLE001
+        logging.getLogger(__name__).exception("Job再起動復旧に失敗しました")
 
 
 @app.get("/health")
