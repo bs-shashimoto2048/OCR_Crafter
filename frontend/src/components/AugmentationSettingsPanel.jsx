@@ -124,7 +124,7 @@ export default function AugmentationSettingsPanel({
       </div>
 
       {/* 設定一覧(70%) + プレビュー(30%)。横幅不足時は1カラム */}
-      <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-[minmax(0,7fr)_minmax(0,3fr)]">
+      <div className="grid grid-cols-1 items-start gap-3 min-[1600px]:grid-cols-[minmax(0,7fr)_minmax(0,3fr)]">
         {/* 設定一覧（カテゴリ別） */}
         <div className="min-w-0 space-y-3">
           {AUG_CATEGORIES.map((category) => (
@@ -139,7 +139,7 @@ export default function AugmentationSettingsPanel({
                   return (
                     <div
                       key={def.key}
-                      className={`grid grid-cols-1 gap-1.5 rounded-lg border py-2 pl-2.5 pr-2 transition xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center ${
+                      className={`grid grid-cols-1 gap-1.5 rounded-lg border py-2 pl-2.5 pr-2 transition min-[1600px]:grid-cols-[minmax(0,1fr)_auto] min-[1600px]:items-center ${
                         enabled
                           ? "border-accent/50 border-l-4 border-l-accent bg-accent/5"
                           : "border-border/60 border-l-4 border-l-transparent bg-card/40"
@@ -163,7 +163,7 @@ export default function AugmentationSettingsPanel({
                         </p>
                       </div>
                       {/* 入力欄（単位・意味を明示。無効時はdisabledで値は保持） */}
-                      <div className={`flex flex-wrap items-center gap-2 pl-6 text-[12px] xl:pl-0 ${enabled ? "" : "opacity-60"}`}>
+                      <div className={`flex flex-wrap items-center gap-2 pl-6 text-[12px] min-[1600px]:pl-0 ${enabled ? "" : "opacity-60"}`}>
                         <label className="inline-flex items-center gap-1 whitespace-nowrap text-muted">
                           確率 (%)
                           <input
@@ -250,7 +250,7 @@ export default function AugmentationSettingsPanel({
         {/* プレビュー（右カラム。設定一覧のスクロール中も見えるようsticky） */}
         <aside
           aria-label="オーグメンテーションプレビュー"
-          className="min-w-0 space-y-2 rounded-xl border border-border/80 bg-card/45 p-3 lg:sticky lg:top-0"
+          className="min-w-0 space-y-2 rounded-xl border border-border/80 bg-card/45 p-3 min-[1600px]:sticky min-[1600px]:top-0"
         >
           <p className="text-sm font-semibold text-text">プレビュー</p>
           <div className="flex items-end gap-2">

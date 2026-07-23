@@ -3922,6 +3922,7 @@ export default function App() {
         onOpenInference={() => setActiveView(trainingMode === "classification" ? "cls-inference" : "ocr-inference")}
         logs={logs}
         workflowState={workflowState}
+        notify={notify}
       />
     );
   }

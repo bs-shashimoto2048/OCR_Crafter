@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import Card from "../components/Card";
 import Button from "../components/Button";
 import { PADDLEOCR_OFFICIAL_MODELS_TOOLTIP } from "../lib/paddleocrOfficialTooltip";
 import { autoTestRatio, normalizeRatioInput, summarizeRatios } from "../lib/ratio";
 import AugmentationSettingsPanel from "../components/AugmentationSettingsPanel";
-import { augCategorySummaryLabel } from "../lib/augmentationSettings";
+import { augCategorySummaryLabel, averageAugProbabilityPercent, isAugmentationOff } from "../lib/augmentationSettings";
+import { collectSettingsSnapshot, isSettingsDirty } from "../lib/trainingSettingsDraft";
 import {
   UI_TRAINING_STATE_LABELS,
   classifyLogLine,
@@ -22,7 +22,7 @@ const OCR_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 // Tesseract学習対象文字セット（A-Z / 0-9 / 小文字筆記体 k,l,t）
 const TESSERACT_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt";
 
-// 次回学習の設定モーダルのタブ（4カテゴリ。設定値・保存処理は従来のstateを共有する）
+// 次回学習の設定（インライン編集）のタブ（4カテゴリ。設定値・保存処理は従来のstateを共有する）
 const NEXT_SETTINGS_TABS = [
   { id: "split", label: "データ分割" },
   { id: "augmentation", label: "オーグメンテーション" },
@@ -146,6 +146,9 @@ export default function TrainingView({
   onOpenInference,
   logs,
   workflowState,
+  notify,
+  // レンダリングテスト用: 初期表示する設定カテゴリ（通常はカードクリックで開始）
+  initialSettingsTab = null,
 }) {
   const [paramsCollapsed, setParamsCollapsed] = useState(false);
   const [showOcrOfficialModelHelp, setShowOcrOfficialModelHelp] = useState(false);
@@ -173,9 +176,47 @@ export default function TrainingView({
   // 「次回学習の設定」の開閉。ユーザー操作後はポーリング・状態変化でも開閉を維持する（null=未操作）
   const [settingsToggled, setSettingsToggled] = useState(null);
   const nextSettingsOpen = settingsToggled ?? (uiTrainingState === "idle" && !jobInfo);
-  // 次回学習の設定モーダル（null=閉 / タブID=開）。最後に開いたカテゴリを保存し初期表示を維持する
-  const [settingsTab, setSettingsTab] = useState(null);
+  // 次回学習の設定のインライン編集（null=サマリー表示 / タブID=左パネルを編集表示へ切替。モーダルは使用しない）。
+  // 最後に開いたカテゴリをlocalStorageへ保存し初期表示を維持する。initialSettingsTabはレンダリングテスト用
+  const [settingsTab, setSettingsTab] = useState(initialSettingsTab);
+  // 編集開始時のスナップショット（「変更を破棄」時の復元用。変更自体は既存stateへ直接反映される）
+  const settingsSnapshotRef = useRef(null);
+  function currentSettingsValues() {
+    return collectSettingsSnapshot({
+      trainRatio,
+      valRatio,
+      testRatio,
+      ocrSplitSeed,
+      ocrDatasetCreateMode,
+      ocrFromLogsOnlyInvalid,
+      ocrFromLogsIncludeCorrected,
+      ocrAugmentation,
+      ocrEngine,
+      epochs,
+      ocrTrainDevice,
+      ocrCharset,
+      experimentName,
+      parentModelId,
+      trainingNote,
+      ocrInitSourceType,
+      ocrInitSourceValue,
+      ocrSaveEpochStep,
+      ocrTrainNumWorkers,
+      ocrEvalNumWorkers,
+      ocrAutoBatchSize,
+      ocrUseAmp,
+      ocrPinMemory,
+      ocrPersistentWorkers,
+      batchSize,
+      ocrMaxTextLength,
+      ocrImageShape,
+    });
+  }
   function openSettingsTab(tabId) {
+    if (!settingsTab) {
+      // 編集開始: 破棄時の復元用に現在値を採取（タブ切替では採取し直さない=編集内容を失わない）
+      settingsSnapshotRef.current = currentSettingsValues();
+    }
     setSettingsTab(tabId);
     try {
       window.localStorage?.setItem(NEXT_SETTINGS_TAB_STORAGE_KEY, tabId);
@@ -183,14 +224,61 @@ export default function TrainingView({
       // 保存失敗（容量等）は無視（表示状態はメモリ側で維持される）
     }
   }
-  function closeSettingsModal() {
+  // 未適用の変更があるか（編集開始時スナップショットとの差分）
+  const settingsDirty = settingsTab ? isSettingsDirty(settingsSnapshotRef.current, currentSettingsValues()) : false;
+  function restoreSettingsSnapshot() {
+    const snap = settingsSnapshotRef.current;
+    if (!snap) return;
+    setTrainRatio(snap.trainRatio);
+    setValRatio(snap.valRatio);
+    setTestRatio(snap.testRatio);
+    setOcrSplitSeed?.(snap.ocrSplitSeed);
+    setOcrDatasetCreateMode(snap.ocrDatasetCreateMode);
+    setOcrFromLogsOnlyInvalid(snap.ocrFromLogsOnlyInvalid);
+    setOcrFromLogsIncludeCorrected(snap.ocrFromLogsIncludeCorrected);
+    setOcrAugmentation?.(snap.ocrAugmentation);
+    setOcrEngine(snap.ocrEngine);
+    setEpochs(snap.epochs);
+    setOcrTrainDevice(snap.ocrTrainDevice);
+    setOcrCharset(snap.ocrCharset);
+    setExperimentName?.(snap.experimentName);
+    setParentModelId?.(snap.parentModelId);
+    setTrainingNote?.(snap.trainingNote);
+    setOcrInitSourceType(snap.ocrInitSourceType);
+    setOcrInitSourceValue(snap.ocrInitSourceValue);
+    setOcrSaveEpochStep(snap.ocrSaveEpochStep);
+    setOcrTrainNumWorkers(snap.ocrTrainNumWorkers);
+    setOcrEvalNumWorkers(snap.ocrEvalNumWorkers);
+    setOcrAutoBatchSize(snap.ocrAutoBatchSize);
+    setOcrUseAmp(snap.ocrUseAmp);
+    setOcrPinMemory(snap.ocrPinMemory);
+    setOcrPersistentWorkers(snap.ocrPersistentWorkers);
+    setBatchSize(snap.batchSize);
+    setOcrMaxTextLength(snap.ocrMaxTextLength);
+    setOcrImageShape(snap.ocrImageShape);
+  }
+  // 「次回学習に適用」: 変更は既存stateへ反映済みのため確定してサマリーへ戻る
+  function applySettings() {
+    settingsSnapshotRef.current = null;
+    setSettingsTab(null);
+    notify?.("success", "設定を次回学習へ適用しました");
+  }
+  // 「変更を破棄」/ ← / Esc: 変更がある場合のみ確認し、編集開始前の値へ戻す（未変更なら確認なし）
+  function attemptCloseSettings() {
+    if (settingsDirty) {
+      if (!window.confirm("未適用の変更を破棄しますか？")) return;
+      restoreSettingsSnapshot();
+    }
+    settingsSnapshotRef.current = null;
     setSettingsTab(null);
   }
-  // Escでモーダルを閉じる
+  // Escで編集を終了（破棄フロー）。最新のdirty判定を参照するためrefで間接呼び出し
+  const attemptCloseSettingsRef = useRef(attemptCloseSettings);
+  attemptCloseSettingsRef.current = attemptCloseSettings;
   useEffect(() => {
     if (!settingsTab) return undefined;
     const onKey = (event) => {
-      if (event.key === "Escape") setSettingsTab(null);
+      if (event.key === "Escape") attemptCloseSettingsRef.current();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -444,8 +532,12 @@ export default function TrainingView({
       } ${
         paramsCollapsed
           ? "grid-cols-1"
-          : "grid-cols-1 xl:grid-cols-[minmax(420px,35fr)_minmax(0,65fr)]"
-      }`}
+          : settingsTab
+            ? // 設定編集中: 左パネルを拡張（1366=50/50・1600以上=48/52）。右側の学習状況は表示を維持する
+              "grid-cols-1 xl:grid-cols-[minmax(420px,50fr)_minmax(0,50fr)] min-[1600px]:grid-cols-[minmax(440px,48fr)_minmax(0,52fr)]"
+            : // 通常時: サマリー表示（1366=35/65・1600以上=32/68）
+              "grid-cols-1 xl:grid-cols-[minmax(420px,35fr)_minmax(0,65fr)] min-[1600px]:grid-cols-[minmax(420px,32fr)_minmax(0,68fr)]"
+      } transition-[grid-template-columns] duration-200 motion-reduce:transition-none`}
     >
       {!paramsCollapsed ? (
         <Card
@@ -461,421 +553,28 @@ export default function TrainingView({
         >
           {/* 左ペイン: 実行概要/実行時設定/学習方式/実行操作=固定、次回学習の設定=残り高さで内部スクロール */}
           <div className="flex min-h-0 flex-1 flex-col space-y-2.5">
-            {/* 実行概要（2列グリッド・日本語統一） */}
-            <div className="shrink-0 rounded-xl border border-border/80 bg-card/55 p-3">
-              <p className="text-[15px] font-semibold text-text">実行概要</p>
-              <div className="mt-2 grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-1 text-sm">
-                <span className="text-muted">方式</span>
-                <span className="font-semibold text-text">{trainingFamilyLabel}</span>
-                <span className="text-muted">状態</span>
-                <span>
-                  <span className={`rounded-full border px-2 py-0.5 text-sm font-semibold ${statusToneClass}`}>{statusLabel}</span>
-                </span>
-                <span className="text-muted">学習時間</span>
-                <span className="font-semibold text-text">{formatDuration(displayDurationSeconds)}</span>
-              </div>
-            </div>
-
-            {/* 実行時設定（ジョブ開始時のスナップショット・読み取り専用）。
-                低い画面でも次回学習設定の高さを確保するため折り畳み可能（初期は閉・1行サマリー表示。情報は開けば全て見える） */}
-            {jobInfo ? (
-              <div className="shrink-0 rounded-xl border border-border/80 bg-card/55">
-                <button
-                  type="button"
-                  onClick={() => setRuntimeSettingsOpen((prev) => !prev)}
-                  className="flex w-full cursor-pointer select-none items-center gap-1.5 rounded-xl px-3 py-2 text-left text-[15px] font-semibold text-text transition hover:bg-card/70"
-                >
-                  <span
-                    className={`text-xs text-muted transition-transform ${runtimeSettingsOpen ? "rotate-90" : ""}`}
-                    aria-hidden="true"
-                  >
-                    ▶
-                  </span>
-                  実行時設定
-                  <span className="ml-auto min-w-0 truncate text-[11px] font-normal text-muted">
-                    {runtimeSettingsOpen
-                      ? "このジョブ開始時の値（読み取り専用）"
-                      : `${
-                          String(jobInfo.engine || "") === "tesseract"
-                            ? "Tesseract"
-                            : String(jobInfo.engine || "") === "paddleocr"
-                              ? "PaddleOCR"
-                              : jobInfo.engine || "--"
-                        }・${String(jobInfo.dataset_dir || "--").split(/[\\/]/).slice(-1)[0] || "--"}`}
-                  </span>
-                </button>
-                <div className={runtimeSettingsOpen ? "grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 px-3 pb-3 text-sm" : "hidden"}>
-                  <span className="text-muted">OCRタイプ</span>
-                  <span className="font-semibold text-text">
-                    {String(jobInfo.engine || "") === "tesseract" ? "Tesseract" : String(jobInfo.engine || "") === "paddleocr" ? "PaddleOCR" : jobInfo.engine || "--"}
-                  </span>
-                  <span className="text-muted">Base Model</span>
-                  <span className="min-w-0 truncate text-text" title={String(jobInfo.init_source_value || "")}>
-                    {jobInfo.init_source_value || "--"}
-                  </span>
-                  {String(jobInfo.engine || "") === "tesseract" ? (
-                    <>
-                      <span className="text-muted">PSM</span>
-                      <span className="text-text">{jobInfo.max_text_length ?? "--"}</span>
-                      <span className="text-muted">最大iteration</span>
-                      <span className="text-text">{Number(jobInfo.epochs || 0).toLocaleString() || "--"}</span>
-                    </>
-                  ) : (
-                    <>
-                      <span className="text-muted">最大文字数</span>
-                      <span className="text-text">{jobInfo.max_text_length ?? "--"}</span>
-                      <span className="text-muted">エポック数</span>
-                      <span className="text-text">{Number(jobInfo.epochs || 0).toLocaleString() || "--"}</span>
-                    </>
-                  )}
-                  <span className="text-muted">Charset</span>
-                  <span className="min-w-0 break-all font-mono text-[12px] text-text">{jobInfo.charset || "--"}</span>
-                  <span className="text-muted">データセット</span>
-                  <span className="min-w-0 truncate font-mono text-[12px] text-text" title={String(jobInfo.dataset_dir || "")}>
-                    {String(jobInfo.dataset_dir || "--").split(/[\\/]/).slice(-1)[0] || "--"}
-                  </span>
-                </div>
-              </div>
-            ) : null}
-
-            {/* 学習方式の固定表示は実行概要の「方式」行と重複するため、切替が必要なallモードのみ表示
-                （低い画面で次回学習設定の高さを確保するための統合。タスク仕様） */}
-            {trainingMode === "all" ? (
-              <div className="shrink-0 rounded-xl border border-border/80 bg-card/50 p-3">
-                <label className="app-label">学習方式</label>
-                <select value={trainingFamily} onChange={(e) => setTrainingFamily(e.target.value)} className="app-select">
-                  <option value="classification">分類モデル（classification）</option>
-                  <option value="ocr">OCR認識モデル（ocr）</option>
-                </select>
-              </div>
-            ) : null}
-
-            {trainingFamily === "classification" ? (
-              <>
-                <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">データ準備</p>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div>
-                      <label className="app-label">学習比率</label>
-                      <input
-                        type="number"
-                        min="0"
-                        max="1"
-                        step="0.01"
-                        value={trainRatio}
-                        onChange={(e) => setTrainRatio(e.target.value)}
-                        className="app-input"
-                      />
-                    </div>
-                    <div>
-                      <label className="app-label">検証比率</label>
-                      <input
-                        type="number"
-                        min="0"
-                        max="1"
-                        step="0.01"
-                        value={valRatio}
-                        onChange={(e) => setValRatio(e.target.value)}
-                        className="app-input"
-                      />
-                    </div>
-                    <div>
-                      <label className="app-label">テスト比率</label>
-                      <input
-                        type="number"
-                        min="0"
-                        max="1"
-                        step="0.01"
-                        value={testRatio}
-                        onChange={(e) => setTestRatio(e.target.value)}
-                        className="app-input"
-                      />
-                    </div>
-                  </div>
-                  <div
-                    className={`rounded-lg border px-3 py-2 text-xs ${
-                      ratioSummary.valid
-                        ? "border-success/45 bg-success/10 text-emerald-100"
-                        : "border-amber-300/40 bg-amber-300/10 text-amber-100"
-                    }`}
-                  >
-                    比率合計: {ratioSummary.total} {ratioSummary.valid ? "(OK)" : "(1.00 になるよう調整してください)"}
-                  </div>
-                  <div className="rounded-lg border border-border bg-card/40 px-3 py-2 text-xs text-muted">
-                    <p>
-                      状態: 前処理 {preprocessed ? "完了" : "未実行"} / データセット {datasetBuilt ? "完了" : "未作成"} / 保存済みラベル{" "}
-                      {Number(savedLabeledCount || 0)}件
-                    </p>
-                  </div>
-                </div>
-
-                <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">初期重み</p>
-                  <div>
-                    <label className="app-label">初期化方式</label>
-                    <select value={clsInitSourceType} onChange={(e) => setClsInitSourceType(e.target.value)} className="app-select">
-                      <option value="scratch">scratch</option>
-                      <option value="imagenet">imagenet（推奨）</option>
-                      <option value="classification_model">既存モデル</option>
-                    </select>
-                  </div>
-                  {clsInitSourceType === "classification_model" ? (
-                    <div>
-                      <label className="app-label">初期モデル</label>
-                      <select
-                        value={clsInitSourceValue}
-                        onChange={(e) => setClsInitSourceValue(e.target.value)}
-                        className="app-select"
-                      >
-                        <option value="">選択してください</option>
-                        <option value="latest">latest（最新）</option>
-                        {(classificationInitModelOptions || []).map((name) => (
-                          <option key={name} value={name}>
-                            {name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  ) : null}
-                  <div className="rounded-lg border border-success/35 bg-success/10 px-3 py-2 text-xs text-emerald-100">
-                    推奨: init=imagenet / freeze=1 / backbone_lr_scale=0.1
-                  </div>
-                  {showFreezeWarning ? (
-                    <div className="rounded-lg border border-amber-300/40 bg-amber-300/10 px-3 py-2 text-xs text-amber-100">
-                      freeze=0 は上級設定です。初期重みの破壊リスクが上がります。
-                    </div>
-                  ) : null}
-                  {showScratchSmallDataWarning ? (
-                    <div className="rounded-lg border border-amber-300/40 bg-amber-300/10 px-3 py-2 text-xs text-amber-100">
-                      少量データでは scratch より imagenet / 既存モデルの Fine-tune を推奨します。
-                    </div>
-                  ) : null}
-                </div>
-
-                <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">学習パラメータ</p>
-                  <div>
-                    <label className="app-label">モデル種別</label>
-                    <select value={modelType} onChange={(e) => setModelType(e.target.value)} className="app-select">
-                      {modelTypes.length === 0 ? (
-                        <option value={modelType}>{modelType || "既定"}</option>
-                      ) : (
-                        modelTypes.map((item) => (
-                          <option key={item} value={item}>
-                            {item}
-                          </option>
-                        ))
-                      )}
-                    </select>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div>
-                      <label className="app-label">エポック数</label>
-                      <input type="number" value={epochs} onChange={(e) => setEpochs(e.target.value)} className="app-input" />
-                    </div>
-                    <div>
-                      <label className="app-label">バッチサイズ</label>
-                      <input type="number" value={batchSize} onChange={(e) => setBatchSize(e.target.value)} className="app-input" />
-                    </div>
-                    <div>
-                      <label className="app-label">学習率</label>
-                      <input
-                        type="number"
-                        step="0.0001"
-                        value={learningRate}
-                        onChange={(e) => setLearningRate(e.target.value)}
-                        className="app-input"
-                      />
-                    </div>
-                  </div>
-                  {clsTrainingMode === "finetune" ? (
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="app-label">凍結エポック</label>
-                        <select
-                          value={freezeBackboneEpochs}
-                          onChange={(e) => setFreezeBackboneEpochs(e.target.value)}
-                          className="app-select"
-                        >
-                          <option value="0">0（上級）</option>
-                          <option value="1">1（推奨）</option>
-                          <option value="3">3（安全）</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="app-label">Backbone LR倍率</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0.01"
-                          max="1"
-                          value={backboneLrScale}
-                          onChange={(e) => setBackboneLrScale(e.target.value)}
-                          className="app-input"
-                        />
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-
-                <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">実行</p>
-                  <Button
-                    variant={clsNextAction === "train" ? trainingVariant : "secondary"}
-                    className={`${clsNextAction === "train" ? trainingClassName : ""} w-full`}
-                    onClick={clsNextAction === "preprocess" ? onPreprocess : clsNextAction === "dataset" ? onBuildDataset : onStartTraining}
-                    disabled={isRunning || (clsNextAction === "train" ? !canTrain || !clsHasInitModel : false)}
-                    title={isRunning ? "学習実行中は開始できません" : undefined}
-                  >
-                    {clsNextAction === "preprocess"
-                      ? "次アクション: 前処理を実行"
-                      : clsNextAction === "dataset"
-                        ? "次アクション: データセット作成"
-                        : "次アクション: 学習開始"}
-                  </Button>
-                  {!clsHasInitModel ? (
-                    <p className="text-xs text-amber-100">既存モデルFine-tuneを選択中です。初期モデルを指定してください。</p>
-                  ) : null}
-                  <div className="space-y-2">
-                    {isRunning ? (
-                      <div className="grid grid-cols-2 gap-2">
-                        <Button variant="danger" className="w-full" onClick={onStopTraining}>
-                          学習停止
-                        </Button>
-                        <Button variant="danger" className="w-full" onClick={onStopTrainingAndDelete}>
-                          停止して削除
-                        </Button>
-                      </div>
-                    ) : null}
-                    {clsNextAction !== "preprocess" ? (
-                      <Button variant="secondary" className="w-full" onClick={onPreprocess}>
-                        前処理のみ実行
-                      </Button>
-                    ) : null}
-                    {clsNextAction !== "dataset" ? (
-                      <Button variant="secondary" className="w-full" onClick={onBuildDataset}>
-                        データセット作成のみ実行
-                      </Button>
-                    ) : null}
-                  </div>
-                </div>
-              </>
-            ) : (
-              <>
-                {/* 次回学習に使う編集設定。実行時設定（スナップショット）と区別するため折り畳みに分離。
-                    detailsはFlex子として本文へ高さが伝わらない（Chromiumの内部スロット構造）ため、
-                    button+Flex本文のstate制御アコーディオンで実装する。
-                    開時は左ペインの残り高さ(flex-1)を本文が受け取り、この本文だけ内部スクロールする（閉時は他領域が詰まる） */}
-                <section
-                  className={`min-w-0 rounded-xl border border-border/80 bg-card/45 ${
-                    nextSettingsOpen
-                      ? `flex min-h-0 flex-col ${fitViewport ? "xl:min-h-[120px] xl:flex-1 xl:overflow-hidden" : ""}`
-                      : "shrink-0"
-                  }`}
-                >
-                  <button
-                    type="button"
-                    onClick={() => setSettingsToggled(!nextSettingsOpen)}
-                    className="flex w-full shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-xl px-3 py-2 text-left text-[15px] font-semibold text-text transition hover:bg-card/70"
-                  >
-                    <span
-                      className={`text-xs text-muted transition-transform ${nextSettingsOpen ? "rotate-90" : ""}`}
-                      aria-hidden="true"
+            {/* インライン編集: 左パネルそのものを設定編集表示へ切り替える（モーダル・オーバーレイ・背景暗転は使用しない）。
+                ヘッダー・タブ・下部操作はsticky（fitViewport時はflex固定）、設定フォーム部分のみ縦スクロール */}
+            {settingsTab ? (
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/80 bg-card/30">
+                <div className="sticky top-0 z-10 shrink-0 border-b border-border/70 bg-[#2b3138] px-3 py-2.5">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={attemptCloseSettings}
+                      aria-label="設定編集を閉じてサマリーへ戻る"
+                      title="サマリーへ戻る（Esc）"
+                      className="rounded-lg px-2 py-1 text-base leading-none text-muted transition hover:bg-card/70 hover:text-text"
                     >
-                      ▶
-                    </span>
-                    次回学習の設定
-                    <span className="ml-auto text-[11px] font-normal text-muted">
-                      {settingsLocked ? "学習実行中は変更できません" : "データ分割・オーグメンテーション・学習パラメータ・エンジン設定"}
-                    </span>
-                  </button>
-                  {/* 本文はカテゴリサマリーのみ（狭い左カラムで全設定を直接編集しない）。詳細編集はモーダルのタブで行う */}
-                  <div
-                    className={
-                      nextSettingsOpen
-                        ? "next-training-settings-body scroll-stable dark-scroll min-h-0 min-w-0 flex-1 space-y-2 overflow-y-auto overflow-x-hidden px-2.5 pb-2.5"
-                        : "hidden"
-                    }
-                  >
-                    <p className="rounded-lg border border-accent/25 bg-accent/10 px-2.5 py-1.5 text-[11px] leading-5 text-blue-100">
-                      ここで変更した設定は、次回の学習から適用されます。完了済みの学習結果には影響しません。
-                    </p>
-                    {[
-                      {
-                        id: "split",
-                        label: "データ分割",
-                        summary: `${trainRatio} / ${valRatio} / ${testRatio}`,
-                        sub: `Split Seed: ${ocrSplitSeed ?? 42}`,
-                      },
-                      {
-                        id: "augmentation",
-                        label: "オーグメンテーション",
-                        summary: augCategorySummaryLabel(ocrAugmentation),
-                        sub: "",
-                      },
-                      {
-                        id: "params",
-                        label: "学習パラメータ",
-                        summary: `${engineDisplayLabel} / ${isTesseractEngine ? "Iteration" : "Epoch"} ${epochs}`,
-                        sub: `演算デバイス: ${isTesseractEngine ? "CPU" : ocrTrainDevice}`,
-                      },
-                      { id: "engine", label: "エンジン設定", summary: engineSummaryLabel, sub: "" },
-                    ].map((row) => (
-                      <div key={row.id} className="flex items-center gap-2 rounded-lg border border-border/70 bg-card/50 px-2.5 py-2">
-                        <div className="min-w-0 flex-1">
-                          <p className="text-[12px] font-semibold text-text">{row.label}</p>
-                          <p className="truncate text-[11px] text-muted" title={row.summary}>
-                            {row.summary}
-                          </p>
-                          {row.sub ? <p className="truncate text-[11px] text-muted">{row.sub}</p> : null}
-                        </div>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          className="shrink-0"
-                          onClick={() => openSettingsTab(row.id)}
-                          aria-haspopup="dialog"
-                          title={`${row.label}の設定を開きます`}
-                        >
-                          編集
-                        </Button>
-                      </div>
-                    ))}
+                      ←
+                    </button>
+                    <p className="text-[15px] font-semibold text-text">次回学習の設定</p>
                   </div>
-                </section>
-
-                {/* 次回学習の設定モーダル（4カテゴリのタブ切替。設定値・保存処理は従来のstateをそのまま共有し、View ID・ルートは変更しない）。
-                    祖先のbackdrop-filter等でposition:fixedの基準がずれないよう、document.bodyへポータル描画する */}
-                {settingsTab && typeof document !== "undefined" ? (
-                  createPortal(
-                  <div
-                    className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
-                    role="dialog"
-                    aria-modal="true"
-                    aria-label="次回学習の設定"
-                    onMouseDown={(e) => {
-                      if (e.target === e.currentTarget) closeSettingsModal();
-                    }}
-                  >
-                    <div className="flex max-h-[92vh] w-full min-w-0 max-w-6xl flex-col overflow-hidden rounded-2xl border border-border bg-[#262c34] shadow-2xl">
-                      <div className="flex items-start justify-between gap-3 border-b border-border/70 px-4 py-3">
-                        <div className="min-w-0">
-                          <p className="text-[15px] font-semibold text-text">次回学習の設定</p>
-                          <p className="text-[11px] text-muted">
-                            ここで変更した設定は、次回の学習から適用されます。完了済みの学習結果には影響しません。
-                            {settingsLocked ? "（学習実行中のため変更できません）" : ""}
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={closeSettingsModal}
-                          aria-label="閉じる"
-                          title="閉じる（Esc）"
-                          className="rounded-lg px-2 py-1 text-lg leading-none text-muted transition hover:bg-card/70 hover:text-text"
-                        >
-                          ×
-                        </button>
-                      </div>
+                  <p className="mt-1 text-[11px] leading-5 text-muted">
+                    ここで変更した設定は次回の学習から適用されます。完了済みの学習結果には影響しません。
+                    {settingsLocked ? "（学習実行中のため変更できません）" : ""}
+                  </p>
+                </div>
                       <div role="tablist" aria-label="設定カテゴリ" className="flex flex-wrap gap-1 border-b border-border/70 px-4 pt-2">
                         {NEXT_SETTINGS_TABS.map((tab) => (
                           <button
@@ -1572,11 +1271,409 @@ export default function TrainingView({
                           ) : null}
                         </fieldset>
                       </div>
+                {/* 下部操作（sticky）。全設定は画面内state保持のため再読み込みで初期値へ戻る旨を明示 */}
+                <div className="sticky bottom-0 z-10 shrink-0 border-t border-border/70 bg-[#2b3138] px-3 py-2.5">
+                  <p className="mb-2 text-[10px] leading-4 text-muted">
+                    この設定は現在の画面内で保持されます。ページを再読み込みすると初期値に戻ります。
+                  </p>
+                  <div className="flex justify-end gap-2">
+                    <Button variant="secondary" onClick={attemptCloseSettings}>
+                      変更を破棄
+                    </Button>
+                    <Button disabled={settingsLocked} onClick={applySettings} title="変更を確定してサマリーへ戻ります">
+                      次回学習に適用
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
+            {/* 実行概要（2列グリッド・日本語統一） */}
+            <div className="shrink-0 rounded-xl border border-border/80 bg-card/55 p-3">
+              <p className="text-[15px] font-semibold text-text">実行概要</p>
+              <div className="mt-2 grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-1 text-sm">
+                <span className="text-muted">方式</span>
+                <span className="font-semibold text-text">{trainingFamilyLabel}</span>
+                <span className="text-muted">状態</span>
+                <span>
+                  <span className={`rounded-full border px-2 py-0.5 text-sm font-semibold ${statusToneClass}`}>{statusLabel}</span>
+                </span>
+                <span className="text-muted">学習時間</span>
+                <span className="font-semibold text-text">{formatDuration(displayDurationSeconds)}</span>
+              </div>
+            </div>
+
+            {/* 実行時設定（ジョブ開始時のスナップショット・読み取り専用）。
+                低い画面でも次回学習設定の高さを確保するため折り畳み可能（初期は閉・1行サマリー表示。情報は開けば全て見える） */}
+            {jobInfo ? (
+              <div className="shrink-0 rounded-xl border border-border/80 bg-card/55">
+                <button
+                  type="button"
+                  onClick={() => setRuntimeSettingsOpen((prev) => !prev)}
+                  className="flex w-full cursor-pointer select-none items-center gap-1.5 rounded-xl px-3 py-2 text-left text-[15px] font-semibold text-text transition hover:bg-card/70"
+                >
+                  <span
+                    className={`text-xs text-muted transition-transform ${runtimeSettingsOpen ? "rotate-90" : ""}`}
+                    aria-hidden="true"
+                  >
+                    ▶
+                  </span>
+                  実行時設定
+                  <span className="ml-auto min-w-0 truncate text-[11px] font-normal text-muted">
+                    {runtimeSettingsOpen
+                      ? "このジョブ開始時の値（読み取り専用）"
+                      : `${
+                          String(jobInfo.engine || "") === "tesseract"
+                            ? "Tesseract"
+                            : String(jobInfo.engine || "") === "paddleocr"
+                              ? "PaddleOCR"
+                              : jobInfo.engine || "--"
+                        }・${String(jobInfo.dataset_dir || "--").split(/[\\/]/).slice(-1)[0] || "--"}`}
+                  </span>
+                </button>
+                <div className={runtimeSettingsOpen ? "grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 px-3 pb-3 text-sm" : "hidden"}>
+                  <span className="text-muted">OCRタイプ</span>
+                  <span className="font-semibold text-text">
+                    {String(jobInfo.engine || "") === "tesseract" ? "Tesseract" : String(jobInfo.engine || "") === "paddleocr" ? "PaddleOCR" : jobInfo.engine || "--"}
+                  </span>
+                  <span className="text-muted">Base Model</span>
+                  <span className="min-w-0 truncate text-text" title={String(jobInfo.init_source_value || "")}>
+                    {jobInfo.init_source_value || "--"}
+                  </span>
+                  {String(jobInfo.engine || "") === "tesseract" ? (
+                    <>
+                      <span className="text-muted">PSM</span>
+                      <span className="text-text">{jobInfo.max_text_length ?? "--"}</span>
+                      <span className="text-muted">最大iteration</span>
+                      <span className="text-text">{Number(jobInfo.epochs || 0).toLocaleString() || "--"}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-muted">最大文字数</span>
+                      <span className="text-text">{jobInfo.max_text_length ?? "--"}</span>
+                      <span className="text-muted">エポック数</span>
+                      <span className="text-text">{Number(jobInfo.epochs || 0).toLocaleString() || "--"}</span>
+                    </>
+                  )}
+                  <span className="text-muted">Charset</span>
+                  <span className="min-w-0 break-all font-mono text-[12px] text-text">{jobInfo.charset || "--"}</span>
+                  <span className="text-muted">データセット</span>
+                  <span className="min-w-0 truncate font-mono text-[12px] text-text" title={String(jobInfo.dataset_dir || "")}>
+                    {String(jobInfo.dataset_dir || "--").split(/[\\/]/).slice(-1)[0] || "--"}
+                  </span>
+                </div>
+              </div>
+            ) : null}
+
+            {/* 学習方式の固定表示は実行概要の「方式」行と重複するため、切替が必要なallモードのみ表示
+                （低い画面で次回学習設定の高さを確保するための統合。タスク仕様） */}
+            {trainingMode === "all" ? (
+              <div className="shrink-0 rounded-xl border border-border/80 bg-card/50 p-3">
+                <label className="app-label">学習方式</label>
+                <select value={trainingFamily} onChange={(e) => setTrainingFamily(e.target.value)} className="app-select">
+                  <option value="classification">分類モデル（classification）</option>
+                  <option value="ocr">OCR認識モデル（ocr）</option>
+                </select>
+              </div>
+            ) : null}
+
+            {trainingFamily === "classification" ? (
+              <>
+                <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">データ準備</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="app-label">学習比率</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="1"
+                        step="0.01"
+                        value={trainRatio}
+                        onChange={(e) => setTrainRatio(e.target.value)}
+                        className="app-input"
+                      />
                     </div>
-                  </div>,
-                  document.body
-                  )
-                ) : null}
+                    <div>
+                      <label className="app-label">検証比率</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="1"
+                        step="0.01"
+                        value={valRatio}
+                        onChange={(e) => setValRatio(e.target.value)}
+                        className="app-input"
+                      />
+                    </div>
+                    <div>
+                      <label className="app-label">テスト比率</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="1"
+                        step="0.01"
+                        value={testRatio}
+                        onChange={(e) => setTestRatio(e.target.value)}
+                        className="app-input"
+                      />
+                    </div>
+                  </div>
+                  <div
+                    className={`rounded-lg border px-3 py-2 text-xs ${
+                      ratioSummary.valid
+                        ? "border-success/45 bg-success/10 text-emerald-100"
+                        : "border-amber-300/40 bg-amber-300/10 text-amber-100"
+                    }`}
+                  >
+                    比率合計: {ratioSummary.total} {ratioSummary.valid ? "(OK)" : "(1.00 になるよう調整してください)"}
+                  </div>
+                  <div className="rounded-lg border border-border bg-card/40 px-3 py-2 text-xs text-muted">
+                    <p>
+                      状態: 前処理 {preprocessed ? "完了" : "未実行"} / データセット {datasetBuilt ? "完了" : "未作成"} / 保存済みラベル{" "}
+                      {Number(savedLabeledCount || 0)}件
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">初期重み</p>
+                  <div>
+                    <label className="app-label">初期化方式</label>
+                    <select value={clsInitSourceType} onChange={(e) => setClsInitSourceType(e.target.value)} className="app-select">
+                      <option value="scratch">scratch</option>
+                      <option value="imagenet">imagenet（推奨）</option>
+                      <option value="classification_model">既存モデル</option>
+                    </select>
+                  </div>
+                  {clsInitSourceType === "classification_model" ? (
+                    <div>
+                      <label className="app-label">初期モデル</label>
+                      <select
+                        value={clsInitSourceValue}
+                        onChange={(e) => setClsInitSourceValue(e.target.value)}
+                        className="app-select"
+                      >
+                        <option value="">選択してください</option>
+                        <option value="latest">latest（最新）</option>
+                        {(classificationInitModelOptions || []).map((name) => (
+                          <option key={name} value={name}>
+                            {name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : null}
+                  <div className="rounded-lg border border-success/35 bg-success/10 px-3 py-2 text-xs text-emerald-100">
+                    推奨: init=imagenet / freeze=1 / backbone_lr_scale=0.1
+                  </div>
+                  {showFreezeWarning ? (
+                    <div className="rounded-lg border border-amber-300/40 bg-amber-300/10 px-3 py-2 text-xs text-amber-100">
+                      freeze=0 は上級設定です。初期重みの破壊リスクが上がります。
+                    </div>
+                  ) : null}
+                  {showScratchSmallDataWarning ? (
+                    <div className="rounded-lg border border-amber-300/40 bg-amber-300/10 px-3 py-2 text-xs text-amber-100">
+                      少量データでは scratch より imagenet / 既存モデルの Fine-tune を推奨します。
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">学習パラメータ</p>
+                  <div>
+                    <label className="app-label">モデル種別</label>
+                    <select value={modelType} onChange={(e) => setModelType(e.target.value)} className="app-select">
+                      {modelTypes.length === 0 ? (
+                        <option value={modelType}>{modelType || "既定"}</option>
+                      ) : (
+                        modelTypes.map((item) => (
+                          <option key={item} value={item}>
+                            {item}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="app-label">エポック数</label>
+                      <input type="number" value={epochs} onChange={(e) => setEpochs(e.target.value)} className="app-input" />
+                    </div>
+                    <div>
+                      <label className="app-label">バッチサイズ</label>
+                      <input type="number" value={batchSize} onChange={(e) => setBatchSize(e.target.value)} className="app-input" />
+                    </div>
+                    <div>
+                      <label className="app-label">学習率</label>
+                      <input
+                        type="number"
+                        step="0.0001"
+                        value={learningRate}
+                        onChange={(e) => setLearningRate(e.target.value)}
+                        className="app-input"
+                      />
+                    </div>
+                  </div>
+                  {clsTrainingMode === "finetune" ? (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="app-label">凍結エポック</label>
+                        <select
+                          value={freezeBackboneEpochs}
+                          onChange={(e) => setFreezeBackboneEpochs(e.target.value)}
+                          className="app-select"
+                        >
+                          <option value="0">0（上級）</option>
+                          <option value="1">1（推奨）</option>
+                          <option value="3">3（安全）</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="app-label">Backbone LR倍率</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0.01"
+                          max="1"
+                          value={backboneLrScale}
+                          onChange={(e) => setBackboneLrScale(e.target.value)}
+                          className="app-input"
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">実行</p>
+                  <Button
+                    variant={clsNextAction === "train" ? trainingVariant : "secondary"}
+                    className={`${clsNextAction === "train" ? trainingClassName : ""} w-full`}
+                    onClick={clsNextAction === "preprocess" ? onPreprocess : clsNextAction === "dataset" ? onBuildDataset : onStartTraining}
+                    disabled={isRunning || (clsNextAction === "train" ? !canTrain || !clsHasInitModel : false)}
+                    title={isRunning ? "学習実行中は開始できません" : undefined}
+                  >
+                    {clsNextAction === "preprocess"
+                      ? "次アクション: 前処理を実行"
+                      : clsNextAction === "dataset"
+                        ? "次アクション: データセット作成"
+                        : "次アクション: 学習開始"}
+                  </Button>
+                  {!clsHasInitModel ? (
+                    <p className="text-xs text-amber-100">既存モデルFine-tuneを選択中です。初期モデルを指定してください。</p>
+                  ) : null}
+                  <div className="space-y-2">
+                    {isRunning ? (
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button variant="danger" className="w-full" onClick={onStopTraining}>
+                          学習停止
+                        </Button>
+                        <Button variant="danger" className="w-full" onClick={onStopTrainingAndDelete}>
+                          停止して削除
+                        </Button>
+                      </div>
+                    ) : null}
+                    {clsNextAction !== "preprocess" ? (
+                      <Button variant="secondary" className="w-full" onClick={onPreprocess}>
+                        前処理のみ実行
+                      </Button>
+                    ) : null}
+                    {clsNextAction !== "dataset" ? (
+                      <Button variant="secondary" className="w-full" onClick={onBuildDataset}>
+                        データセット作成のみ実行
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                {/* 次回学習に使う編集設定。実行時設定（スナップショット）と区別するため折り畳みに分離。
+                    detailsはFlex子として本文へ高さが伝わらない（Chromiumの内部スロット構造）ため、
+                    button+Flex本文のstate制御アコーディオンで実装する。
+                    開時は左ペインの残り高さ(flex-1)を本文が受け取り、この本文だけ内部スクロールする（閉時は他領域が詰まる） */}
+                <section
+                  className={`min-w-0 rounded-xl border border-border/80 bg-card/45 ${
+                    nextSettingsOpen
+                      ? `flex min-h-0 flex-col ${fitViewport ? "xl:min-h-[120px] xl:flex-1 xl:overflow-hidden" : ""}`
+                      : "shrink-0"
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setSettingsToggled(!nextSettingsOpen)}
+                    className="flex w-full shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-xl px-3 py-2 text-left text-[15px] font-semibold text-text transition hover:bg-card/70"
+                  >
+                    <span
+                      className={`text-xs text-muted transition-transform ${nextSettingsOpen ? "rotate-90" : ""}`}
+                      aria-hidden="true"
+                    >
+                      ▶
+                    </span>
+                    次回学習の設定
+                    <span className="ml-auto text-[11px] font-normal text-muted">
+                      {settingsLocked ? "学習実行中は変更できません" : "データ分割・オーグメンテーション・学習パラメータ・エンジン設定"}
+                    </span>
+                  </button>
+                  {/* 本文はカテゴリサマリーのみ（狭い左カラムで全設定を直接編集しない）。
+                      カード全体がボタン（Tab/Enter/Space対応）で、クリックすると左パネルがインライン編集表示へ切り替わる */}
+                  <div
+                    className={
+                      nextSettingsOpen
+                        ? "next-training-settings-body scroll-stable dark-scroll min-h-0 min-w-0 flex-1 space-y-2 overflow-y-auto overflow-x-hidden px-2.5 pb-2.5"
+                        : "hidden"
+                    }
+                  >
+                    <p className="rounded-lg border border-accent/25 bg-accent/10 px-2.5 py-1.5 text-[11px] leading-5 text-blue-100">
+                      ここで変更した設定は、次回の学習から適用されます。完了済みの学習結果には影響しません。
+                    </p>
+                    {[
+                      {
+                        id: "split",
+                        label: "データ分割",
+                        summary: `${trainRatio} / ${valRatio} / ${testRatio}`,
+                        sub: `Split Seed: ${ocrSplitSeed ?? 42}`,
+                      },
+                      {
+                        id: "augmentation",
+                        label: "オーグメンテーション",
+                        summary: augCategorySummaryLabel(ocrAugmentation),
+                        sub: isAugmentationOff(ocrAugmentation)
+                          ? ""
+                          : `平均適用確率: ${averageAugProbabilityPercent(ocrAugmentation) ?? "--"}%`,
+                      },
+                      {
+                        id: "params",
+                        label: "学習パラメータ",
+                        summary: `${engineDisplayLabel} / ${isTesseractEngine ? "Iteration" : "Epoch"} ${epochs}`,
+                        sub: `演算デバイス: ${isTesseractEngine ? "CPU" : ocrTrainDevice}`,
+                      },
+                      { id: "engine", label: "エンジン設定", summary: engineSummaryLabel, sub: "" },
+                    ].map((row) => (
+                      <button
+                        key={row.id}
+                        type="button"
+                        onClick={() => openSettingsTab(row.id)}
+                        aria-label={`${row.label}の設定を編集`}
+                        title={`${row.label}の設定を編集します`}
+                        className="flex w-full items-center gap-2 rounded-lg border border-border/70 bg-card/50 px-2.5 py-2 text-left transition hover:border-accent/50 hover:bg-card/80"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[12px] font-semibold text-text">{row.label}</p>
+                          <p className="truncate text-[11px] text-muted" title={row.summary}>
+                            {row.summary}
+                          </p>
+                          {row.sub ? <p className="truncate text-[11px] text-muted">{row.sub}</p> : null}
+                        </div>
+                        <span aria-hidden="true" className="shrink-0 text-base leading-none text-muted">
+                          ＞
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+
 
                 {ocrEngine !== "easyocr" ? (
                   <>
@@ -1729,6 +1826,8 @@ export default function TrainingView({
                     ) : null}
                   </>
                 ) : null}
+              </>
+            )}
               </>
             )}
           </div>
