@@ -224,6 +224,91 @@ def test_list_benchmarks_excludes_cases(bench_env):
     assert "balance_weights" in listing
 
 
+def test_benchmark_preprocess_modes(bench_env, temp_projects, monkeypatch):
+    """§前処理対応: mode解決・Profile Hashへの実効Hash反映・開始時一括適用（1回だけ）。"""
+    # none: 従来と同じ識別子（後方互換）
+    plan_none = bm.resolve_benchmark_preprocess("p1", None)
+    assert plan_none["mode"] == "none" and plan_none["identifier"] == "none" and plan_none["apply"] is None
+    # manual: 設定から決定的なHash
+    manual_spec = {"mode": "manual", "settings": {"grayscale": True, "binarize": True, "binarize_method": "fixed", "threshold": 100}}
+    plan_a = bm.resolve_benchmark_preprocess("p1", manual_spec)
+    plan_b = bm.resolve_benchmark_preprocess("p1", manual_spec)
+    assert plan_a["identifier"] == plan_b["identifier"] and plan_a["identifier"].startswith("manual:sha256:")
+    # 不正mode・training未記録・projectスナップショットなしはエラー（推測しない）
+    with pytest.raises(ValueError, match="preprocess.mode"):
+        bm.resolve_benchmark_preprocess("p1", {"mode": "auto"})
+    with pytest.raises(ValueError, match="model"):
+        bm.resolve_benchmark_preprocess("p1", {"mode": "training"})
+    with pytest.raises(ValueError, match="スナップショット"):
+        bm.resolve_benchmark_preprocess("p1", {"mode": "project"})
+
+    # 実行: 前処理は開始時に一度だけ適用され、全エンジンが同じ前処理済み画像を受け取る
+    seen_paths: dict[str, list[str]] = {"good": [], "bad": []}
+    original_good = bm.ENGINE_BUILDERS["tesseract_model"]
+    original_bad = bm.ENGINE_BUILDERS["tesseract_base"]
+
+    def wrap(builder, key):
+        def build(project_id, spec):
+            runner = builder(project_id, spec)
+            inner = runner["recognize"]
+
+            def recognize(path):
+                seen_paths[key].append(path)
+                from PIL import Image
+
+                with Image.open(path) as img:
+                    # fixed threshold=100 で gray220 → 白(255) の二値画像になっている
+                    assert img.convert("L").getpixel((5, 5)) == 255
+                return "AB12", 0.9
+
+            runner["recognize"] = recognize
+            return runner
+
+        return build
+
+    monkeypatch.setitem(bm.ENGINE_BUILDERS, "tesseract_model", wrap(original_good, "good"))
+    monkeypatch.setitem(bm.ENGINE_BUILDERS, "tesseract_base", wrap(original_bad, "bad"))
+    params = {
+        "project_id": "p1",
+        "name": "pre",
+        "image_dir": bench_env["image_dir"],
+        "gt_csv": bench_env["gt_csv"],
+        "engines": bench_env["engines"],
+        "warmup_runs": 0,
+        "preprocess": manual_spec,
+    }
+    result = bm.run_benchmark_job(params, FakeCtx())
+    detail = bm.get_benchmark("p1", result["benchmark_id"])
+    assert detail["preprocess"]["mode"] == "manual"
+    assert detail["preprocess"]["hash"].startswith("sha256:")
+    # Profile Hashがnone実行と異なる（実効前処理Hashを含むため）
+    assert detail["profile"]["common_profile"]["preprocess_identifier"].startswith("manual:")
+    plain = bm.build_profile({"a.png": "AB12"}, "eval_x", bench_env["engines"])
+    assert detail["profile"]["profile_hash"] != plain["profile_hash"]
+    # 両エンジンが同一の前処理済みパス集合を読む（エンジンごとの再処理なし）
+    assert set(seen_paths["good"]) == set(seen_paths["bad"])
+    assert all("bench_" in p for p in seen_paths["good"])  # Job ID付き一時ディレクトリ
+
+
+def test_paddleocr_custom_adapter(temp_projects, monkeypatch):
+    """§自作モデルAdapter: カタログ登録・spec正規化・未登録モデルの明確なエラー。"""
+    catalog = {c["key"]: c for c in bm.ENGINE_CATALOG}
+    assert catalog["paddleocr_custom"]["implemented"] is True
+    assert "paddleocr_custom" in bm.ENGINE_BUILDERS  # Adapter構造（builder辞書）へ登録済み
+    spec = bm.normalize_engine_spec({"engine": "paddleocr_custom", "model": "my.ocr.json"})
+    assert spec == {"engine": "paddleocr_custom", "model": "my.ocr.json"}
+    with pytest.raises(ValueError, match="model の指定が必要"):
+        bm.normalize_engine_spec({"engine": "paddleocr_custom"})
+    with pytest.raises(ValueError, match="\\.ocr\\.json"):
+        bm.normalize_engine_spec({"engine": "paddleocr_custom", "model": "x.tess.json"})
+    # 未登録・未エクスポートのモデルは明確なエラー（推測フォールバックしない）
+    monkeypatch.setattr(
+        "src.app.services.model_registry.resolve_ocr_model_meta", lambda **kwargs: None
+    )
+    with pytest.raises(FileNotFoundError, match="自作PaddleOCRモデルが見つかりません"):
+        bm.ENGINE_BUILDERS["paddleocr_custom"]("p1", spec)
+
+
 def test_job_handler_integration(bench_env, temp_projects):
     """Job Management（job_type=benchmark）経由でBenchmarkが完走する。"""
     from src.app.services.job_manager import JobService, JobWorker

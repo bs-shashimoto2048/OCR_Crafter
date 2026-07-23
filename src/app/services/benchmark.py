@@ -67,6 +67,14 @@ ENGINE_CATALOG: list[dict[str, Any]] = [
         "description": "PaddleOCR公式認識モデル（PSM/Whitelistの概念なし）",
     },
     {
+        "key": "paddleocr_custom",
+        "label": "PaddleOCR（自作モデル）",
+        "implemented": True,
+        "requires_model": True,
+        "profile_keys": [],
+        "description": "OCR Crafterで学習・推論用エクスポート済みのPaddleOCR認識モデル（.ocr.json）。未エクスポートのモデルは実行時にエラー",
+    },
+    {
         "key": "easyocr",
         "label": "EasyOCR",
         "implemented": False,
@@ -159,6 +167,8 @@ def normalize_engine_spec(spec: dict[str, Any]) -> dict[str, Any]:
             normalized["model"] = OFFICIAL_PADDLEOCR_REC_MODELS[0]
         else:
             raise ValueError(f"{catalog['label']} は model の指定が必要です")
+    if engine == "paddleocr_custom" and normalized["model"].endswith(".tess.json"):
+        raise ValueError("paddleocr_custom にはPaddleOCRモデル（.ocr.json）を指定してください")
     if "psm" in catalog["profile_keys"]:
         normalized["psm"] = int(spec.get("psm") or 7)
     if "whitelist" in catalog["profile_keys"]:
@@ -252,11 +262,65 @@ def _build_paddleocr_runner(project_id: Optional[str], spec: dict[str, Any]) -> 
     return {"label": f"PaddleOCR公式（{model_name}）", "recognize": recognize}
 
 
-# エンジン種別→Runner生成関数（テストではここを差し替えて実OCRなしで検証する）
+def _build_paddleocr_custom_runner(project_id: Optional[str], spec: dict[str, Any]) -> dict[str, Any]:
+    """自作PaddleOCRモデル用Adapter。
+
+    モデル管理へ登録済み（.ocr.json）かつ推論用エクスポート済みのモデルを
+    TextRecognition/PaddleOCR(rec_model_dir) で実行する。未登録・未エクスポートは
+    明確なエラーを返す（推測フォールバックしない）。
+    """
+    from pathlib import Path as _Path
+
+    from ..predict import (
+        _create_paddleocr_instance,
+        _get_paddle_text_recognition_reader,
+        _is_paddle_rec_inference_dir,
+        _prepare_paddle_runtime_env,
+        _run_paddleocr,
+    )
+    from .model_registry import resolve_ocr_model_meta
+
+    model_name = str(spec.get("model") or "")
+    meta = resolve_ocr_model_meta(project_id=project_id, model=model_name, engine="paddleocr", inference_ready_only=True)
+    if not isinstance(meta, dict):
+        raise FileNotFoundError(
+            f"自作PaddleOCRモデルが見つかりません（未登録または推論用エクスポート未実施）: {model_name}"
+        )
+    model_dir_raw = str(meta.get("model_dir") or meta.get("inference_dir") or "").strip()
+    model_dir = _Path(model_dir_raw) if model_dir_raw else None
+    if model_dir is None or not _is_paddle_rec_inference_dir(model_dir):
+        raise RuntimeError(f"自作PaddleOCRモデルが推論用エクスポートされていません: {model_name}（モデルExportを先に実行してください）")
+    reader = _get_paddle_text_recognition_reader(model_dir=model_dir)
+    if reader is None:
+        _prepare_paddle_runtime_env()
+        try:
+            from paddleocr import PaddleOCR  # type: ignore
+        except ImportError as e:
+            raise RuntimeError("PaddleOCRが未インストールのため実行できません（pip install paddleocr paddlepaddle）") from e
+        reader = _create_paddleocr_instance(
+            PaddleOCR,
+            lang="en",
+            use_angle_cls=False,
+            rec_model_dir=str(model_dir),
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=False,
+        )
+
+    def recognize(image_path: str) -> tuple[str, float]:
+        prediction, confidence, _results = _run_paddleocr(reader, image_path, use_angle_cls=False)
+        return prediction, confidence
+
+    return {"label": f"PaddleOCR自作（{model_name}）", "recognize": recognize}
+
+
+# エンジン種別→Runner生成関数（テストではここを差し替えて実OCRなしで検証する。
+# 新しいエンジンはこの辞書へbuilderを登録するAdapter構造で追加する）
 ENGINE_BUILDERS: dict[str, Callable[[Optional[str], dict[str, Any]], dict[str, Any]]] = {
     "tesseract_model": _build_tesseract_runner,
     "tesseract_base": _build_tesseract_runner,
     "paddleocr_official": _build_paddleocr_runner,
+    "paddleocr_custom": _build_paddleocr_custom_runner,
 }
 
 
@@ -278,17 +342,94 @@ def engine_catalog_with_availability() -> list[dict[str, Any]]:
             except Exception as e:  # noqa: BLE001
                 item["available"] = False
                 item["availability_note"] = f"Tesseractが見つかりません: {str(e)[:120]}"
-        elif entry["key"] == "paddleocr_official":
+        elif entry["key"] in {"paddleocr_official", "paddleocr_custom"}:
             try:
                 import paddleocr  # type: ignore # noqa: F401
 
                 item["available"] = True
-                item["availability_note"] = ""
+                item["availability_note"] = "推論用エクスポート済みの自作モデルが必要です" if entry["key"] == "paddleocr_custom" else ""
             except Exception:  # noqa: BLE001
                 item["available"] = False
                 item["availability_note"] = "PaddleOCRが未インストールです"
         items.append(item)
     return items
+
+
+# ---------- 前処理（全エンジン共通・Benchmark開始時に一度だけ適用） ----------
+
+BENCHMARK_PREPROCESS_MODES = {"none", "manual", "training", "project"}
+
+
+def resolve_benchmark_preprocess(project_id: Optional[str], spec: Any) -> dict[str, Any]:
+    """Benchmarkの前処理計画を解決する。
+
+    mode: none（元画像のまま） / manual（グレースケール・二値化の手動設定） /
+    training（指定モデルの学習時前処理スナップショット） / project（プロジェクトの現在の前処理）。
+    戻り値: {mode, hash, identifier, apply(callable|None), source_model}
+    identifier はProfile Hashへ含める（noneは従来と同じ "none"=後方互換）。
+    """
+    src = spec if isinstance(spec, dict) else {}
+    mode = str(src.get("mode") or "none").strip().lower()
+    if mode not in BENCHMARK_PREPROCESS_MODES:
+        raise ValueError(f"preprocess.mode は {sorted(BENCHMARK_PREPROCESS_MODES)} のいずれか: {mode}")
+
+    if mode == "none":
+        return {"mode": "none", "hash": "", "identifier": "none", "apply": None, "source_model": ""}
+
+    if mode == "manual":
+        from .preprocess import apply_eval_preprocess, parse_eval_preprocess
+
+        parsed = parse_eval_preprocess(src.get("settings"))
+        canonical = json.dumps(parsed, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        settings_hash = "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        return {
+            "mode": "manual",
+            "hash": settings_hash,
+            "identifier": f"manual:{settings_hash}",
+            "apply": (lambda img: apply_eval_preprocess(img, parsed)),
+            "source_model": "",
+            "settings": parsed,
+        }
+
+    if mode == "training":
+        from .model_registry import resolve_tesseract_model_meta
+        from .preprocess_snapshot import apply_training_preprocess
+
+        model = str(src.get("model") or "").strip()
+        if not model:
+            raise ValueError("preprocess.mode=training には学習時前処理の由来モデル（model）の指定が必要です")
+        meta = resolve_tesseract_model_meta(project_id, model=model, ready_only=True)
+        tp = (meta or {}).get("training_preprocess") if isinstance(meta, dict) else None
+        tp_hash = str((meta or {}).get("training_preprocess_hash") or "") if isinstance(meta, dict) else ""
+        if not isinstance(tp, dict):
+            raise ValueError(f"モデル {model} に学習時前処理の記録がありません（推測で補完しません）")
+        return {
+            "mode": "training",
+            "hash": tp_hash,
+            "identifier": f"training:{tp_hash}",
+            "apply": (lambda img: apply_training_preprocess(img, tp)),
+            "source_model": model,
+        }
+
+    # mode == "project": プロジェクトの現在の前処理スナップショット（最終preprocess実行時点）
+    from ..project_paths import ensure_project_directories as _ensure
+    from .preprocess_snapshot import apply_training_preprocess, compute_preprocess_hash, load_preprocess_snapshot
+
+    paths = _ensure(project_id)
+    snapshot = load_preprocess_snapshot(paths.root)
+    if snapshot is None:
+        raise ValueError("プロジェクトの前処理スナップショットがありません（先に「前処理を実行」してください）")
+    snapshot_hash = compute_preprocess_hash(
+        snapshot.get("steps") or {},
+        snapshot.get("ocr_input_normalization") if isinstance(snapshot.get("ocr_input_normalization"), dict) else None,
+    )
+    return {
+        "mode": "project",
+        "hash": snapshot_hash,
+        "identifier": f"project:{snapshot_hash}",
+        "apply": (lambda img: apply_training_preprocess(img, snapshot)),
+        "source_model": "",
+    }
 
 
 # ---------- 実行（Job Management の benchmark ハンドラから呼ばれる） ----------
@@ -319,7 +460,9 @@ def run_benchmark_job(params: dict[str, Any], ctx: Any) -> dict[str, Any]:
     warmup_runs = max(0, int(params.get("warmup_runs") if params.get("warmup_runs") is not None else 1))
 
     ctx.update(5, "条件検証", f"エンジン{len(engine_specs)}件・画像{len(gt)}件")
-    profile = build_profile(gt, str(params.get("dataset_id") or ""), engine_specs)
+    # 前処理計画（none/manual/training/project）。実効前処理HashをProfile Hashへ含める
+    plan = resolve_benchmark_preprocess(project_id, params.get("preprocess"))
+    profile = build_profile(gt, str(params.get("dataset_id") or ""), engine_specs, preprocess_identifier=plan["identifier"])
     specs = profile["engine_profiles"]
 
     # 画像の解決（全エンジンで同一の画像リストを使う=公平性）
@@ -333,6 +476,28 @@ def run_benchmark_job(params: dict[str, Any], ctx: Any) -> dict[str, Any]:
         images.append((image_name, expected, image_path))
     if not images:
         raise ValueError("Benchmark対象の画像が見つかりませんでした（正解CSVと画像フォルダを確認してください）")
+
+    # 前処理はBenchmark開始時に一度だけ適用し、全エンジンへ同じ最終入力画像を渡す
+    # （エンジンごとに再処理しない=公平性・処理時間の節約）。Job ID付き一時ディレクトリへ保存
+    work_dir: Optional[Path] = None
+    if plan["apply"] is not None:
+        import tempfile
+
+        from PIL import Image, ImageOps
+
+        work_dir = Path(tempfile.mkdtemp(prefix=f"bench_{str(getattr(ctx, 'job_id', '') or 'adhoc')}_"))
+        ctx.update(8, "前処理適用", plan["identifier"][:60])
+        preprocessed: list[tuple[str, str, Path]] = []
+        for index, (image_name, expected, image_path) in enumerate(images):
+            if index % 20 == 0:
+                ctx.check_cancelled()
+            with Image.open(image_path) as opened:
+                oriented = ImageOps.exif_transpose(opened)
+                output = plan["apply"](oriented)
+            target_path = work_dir / f"{index:05d}.png"
+            output.save(target_path, format="PNG")
+            preprocessed.append((image_name, expected, target_path))
+        images = preprocessed
 
     results: list[dict[str, Any]] = []
     cases: dict[str, dict[str, Any]] = {
@@ -481,11 +646,19 @@ def run_benchmark_job(params: dict[str, Any], ctx: Any) -> dict[str, Any]:
             "gt_csv": str(Path(str(params.get("gt_csv"))).expanduser().resolve()),
             "skipped_missing_image": skipped_missing,
             "profile": profile,
+            # 実効前処理（全エンジン共通・開始時に一度だけ適用）
+            "preprocess": {"mode": plan["mode"], "hash": plan["hash"], "source_model": plan["source_model"]},
             "results": results,
             "cases": list(cases.values()),
         }
         registry["items"].append(item)
         _save_registry(project_id, registry)
+
+    # 成功時は前処理済み一時画像を削除（失敗時はJob ID付き一時ディレクトリのまま残し調査可能にする）
+    if work_dir is not None:
+        import shutil
+
+        shutil.rmtree(work_dir, ignore_errors=True)
 
     leaderboard = build_leaderboard(results)
     best = leaderboard[0] if leaderboard else None

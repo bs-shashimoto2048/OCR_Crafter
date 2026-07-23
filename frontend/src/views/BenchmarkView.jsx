@@ -35,8 +35,18 @@ export default function BenchmarkView({
 }) {
   // 実行フォーム
   const [form, setForm] = useState({ name: "", image_dir: "", gt_csv: "", dataset_id: "", warmup_runs: 1, psm: 7, whitelist: "" });
-  const [selectedEngines, setSelectedEngines] = useState({ tesseract_model: false, tesseract_base: true, paddleocr_official: false });
+  const [selectedEngines, setSelectedEngines] = useState({
+    tesseract_model: false,
+    tesseract_base: true,
+    paddleocr_official: false,
+    paddleocr_custom: false,
+  });
   const [selectedModel, setSelectedModel] = useState("");
+  const [selectedPaddleModel, setSelectedPaddleModel] = useState("");
+  // 前処理（全エンジン共通・開始時に一度だけ適用。実効HashがProfile Hashへ含まれる）
+  const [preprocessMode, setPreprocessMode] = useState("none");
+  const [manualPre, setManualPre] = useState({ grayscale: true, binarize: false, binarize_method: "otsu", threshold: 127 });
+  const [trainingPreModel, setTrainingPreModel] = useState("");
   // 詳細・ケース表示
   const [detail, setDetail] = useState(null);
   const [caseFilter, setCaseFilter] = useState("all");
@@ -50,6 +60,10 @@ export default function BenchmarkView({
 
   const tessModels = useMemo(
     () => ocrModels.filter((m) => String(m?.name || m).endsWith(".tess.json")).map((m) => String(m?.name || m)),
+    [ocrModels]
+  );
+  const paddleModels = useMemo(
+    () => ocrModels.filter((m) => String(m?.name || m).endsWith(".ocr.json")).map((m) => String(m?.name || m)),
     [ocrModels]
   );
 
@@ -76,6 +90,17 @@ export default function BenchmarkView({
     if (selectedEngines.paddleocr_official) {
       specs.push({ engine: "paddleocr_official" });
     }
+    if (selectedEngines.paddleocr_custom && selectedPaddleModel) {
+      specs.push({ engine: "paddleocr_custom", model: selectedPaddleModel });
+    }
+    let preprocess = null;
+    if (preprocessMode === "manual") {
+      preprocess = { mode: "manual", settings: { ...manualPre, threshold: Number(manualPre.threshold) || 127 } };
+    } else if (preprocessMode === "training") {
+      preprocess = { mode: "training", model: trainingPreModel };
+    } else if (preprocessMode === "project") {
+      preprocess = { mode: "project" };
+    }
     return {
       name: form.name,
       image_dir: form.image_dir,
@@ -83,6 +108,7 @@ export default function BenchmarkView({
       dataset_id: form.dataset_id,
       warmup_runs: Number(form.warmup_runs) || 0,
       engines: specs,
+      preprocess,
     };
   }
 
@@ -130,6 +156,53 @@ export default function BenchmarkView({
                 <input type="number" min="0" className="app-input mt-0.5 h-8 w-full text-xs" value={form.warmup_runs} onChange={(e) => setForm({ ...form, warmup_runs: e.target.value })} />
               </label>
             </div>
+            {/* 前処理（全エンジン共通・開始時に一度だけ適用。実効HashがProfile Hashへ含まれる） */}
+            <div className="rounded-lg border border-border bg-card/45 px-2 py-1.5">
+              <p className="mb-1 text-[11px] font-semibold text-muted" title="前処理済み画像は開始時に一度だけ生成し、全エンジンへ同じ最終入力を渡します">
+                前処理（全エンジン共通）
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <select className="app-select h-8 text-xs" value={preprocessMode} onChange={(e) => setPreprocessMode(e.target.value)}>
+                  <option value="none">なし（元画像のまま）</option>
+                  <option value="manual">手動設定（グレースケール・二値化）</option>
+                  <option value="training">学習時前処理（モデルの記録）</option>
+                  <option value="project">プロジェクトの現在の前処理</option>
+                </select>
+                {preprocessMode === "manual" ? (
+                  <>
+                    <label className="flex items-center gap-1 text-[11px] text-text">
+                      <input type="checkbox" checked={manualPre.grayscale} onChange={(e) => setManualPre({ ...manualPre, grayscale: e.target.checked })} />
+                      グレースケール
+                    </label>
+                    <label className="flex items-center gap-1 text-[11px] text-text">
+                      <input type="checkbox" checked={manualPre.binarize} onChange={(e) => setManualPre({ ...manualPre, binarize: e.target.checked })} />
+                      二値化
+                    </label>
+                    {manualPre.binarize ? (
+                      <>
+                        <select className="app-select h-8 text-xs" value={manualPre.binarize_method} onChange={(e) => setManualPre({ ...manualPre, binarize_method: e.target.value })}>
+                          <option value="otsu">Otsu</option>
+                          <option value="fixed">固定しきい値</option>
+                        </select>
+                        {manualPre.binarize_method === "fixed" ? (
+                          <input type="number" min="0" max="255" className="app-input h-8 w-20 text-xs" value={manualPre.threshold} onChange={(e) => setManualPre({ ...manualPre, threshold: e.target.value })} />
+                        ) : null}
+                      </>
+                    ) : null}
+                  </>
+                ) : null}
+                {preprocessMode === "training" ? (
+                  <select className="app-select h-8 text-xs" value={trainingPreModel} onChange={(e) => setTrainingPreModel(e.target.value)}>
+                    <option value="">前処理の由来モデルを選択...</option>
+                    {tessModels.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+              </div>
+            </div>
           </div>
           <div className="space-y-1.5">
             <p className="text-[12px] font-semibold text-muted">対象エンジン（未導入のエンジンは選択不可）</p>
@@ -149,12 +222,26 @@ export default function BenchmarkView({
                       <span className="rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[10px] text-amber-200">
                         {engine.availability_note || "未導入・利用不可"}
                       </span>
+                    ) : engine.availability_note ? (
+                      <span className="rounded-full border border-border/60 bg-card/40 px-2 py-0.5 text-[10px] text-muted">
+                        {engine.availability_note}
+                      </span>
                     ) : null}
                   </label>
                   {engine.key === "tesseract_model" && selectedEngines.tesseract_model ? (
                     <select className="app-select mt-1 h-8 w-full text-xs" value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)}>
                       <option value="">登録モデルを選択...</option>
                       {tessModels.map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : null}
+                  {engine.key === "paddleocr_custom" && selectedEngines.paddleocr_custom ? (
+                    <select className="app-select mt-1 h-8 w-full text-xs" value={selectedPaddleModel} onChange={(e) => setSelectedPaddleModel(e.target.value)}>
+                      <option value="">自作PaddleOCRモデルを選択...</option>
+                      {paddleModels.map((name) => (
                         <option key={name} value={name}>
                           {name}
                         </option>
@@ -255,7 +342,11 @@ export default function BenchmarkView({
       {detail ? (
         <Card
           title={`Leaderboard: ${detail.benchmark_id}${detail.name ? `（${detail.name}）` : ""}`}
-          subtitle="CER昇順（同率は 完全一致率降順 → 失敗数昇順 → 平均時間昇順）"
+          subtitle={`CER昇順（同率は 完全一致率降順 → 失敗数昇順 → 平均時間昇順） / 前処理: ${
+            detail.preprocess?.mode && detail.preprocess.mode !== "none"
+              ? `${detail.preprocess.mode}（${shortHash(detail.preprocess.hash)}）`
+              : "なし"
+          }`}
           actions={
             <div className="flex gap-1.5">
               {["summary", "cases", "confusions"].map((kind) => (

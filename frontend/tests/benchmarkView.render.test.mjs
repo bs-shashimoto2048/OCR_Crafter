@@ -30,6 +30,7 @@ const ENGINES = [
   { key: "tesseract_model", label: "Tesseract（登録モデル）", implemented: true, available: true, availability_note: "", description: "登録モデル" },
   { key: "tesseract_base", label: "Tesseract標準（eng）", implemented: true, available: true, availability_note: "", description: "ベースライン" },
   { key: "paddleocr_official", label: "PaddleOCR公式", implemented: true, available: false, availability_note: "PaddleOCRが未インストールです", description: "公式モデル" },
+  { key: "paddleocr_custom", label: "PaddleOCR（自作モデル）", implemented: true, available: true, availability_note: "推論用エクスポート済みの自作モデルが必要です", description: "自作モデル" },
   { key: "easyocr", label: "EasyOCR", implemented: false, available: false, availability_note: "未導入・利用不可", description: "未導入・利用不可" },
 ];
 
@@ -74,6 +75,17 @@ test("実行フォーム: 対象エンジン一覧と未導入エンジンの「
   assert.ok(html.includes("PaddleOCRが未インストールです"), "環境未導入の理由表示がない");
   assert.ok(html.includes("Benchmarkを実行（Job作成）"));
   assert.ok(html.includes("ウォームアップ回数"));
+});
+
+test("前処理選択と自作モデルAdapterの表示", () => {
+  const html = render();
+  assert.ok(html.includes("前処理（全エンジン共通）"), "前処理セクションがない");
+  assert.ok(html.includes("なし（元画像のまま）"));
+  assert.ok(html.includes("手動設定（グレースケール・二値化）"));
+  assert.ok(html.includes("学習時前処理（モデルの記録）"));
+  assert.ok(html.includes("プロジェクトの現在の前処理"));
+  assert.ok(html.includes("PaddleOCR（自作モデル）"), "自作モデルエンジンがない");
+  assert.ok(html.includes("推論用エクスポート済みの自作モデルが必要です"));
 });
 
 test("履歴一覧: BM ID・1位エンジン・Profile Hash短縮表示", () => {

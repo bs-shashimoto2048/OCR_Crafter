@@ -277,6 +277,10 @@ class BenchmarkCreateRequest(BaseModel):
         description="対象エンジン一覧 [{engine: tesseract_model/tesseract_base/paddleocr_official, model?, psm?, whitelist?}]",
     )
     warmup_runs: Optional[int] = Field(default=1, description="ウォームアップ実行回数（統計へ含めず回数のみ記録）")
+    preprocess: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="前処理計画 {mode: none/manual/training/project, settings?（manual）, model?（training）}。未指定=none（従来動作）",
+    )
     requested_by: str = Field(default="", description="実行者（operator名）")
 
 

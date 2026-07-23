@@ -3013,7 +3013,7 @@ def api_benchmarks(project_id: Optional[str] = Query(default="default")) -> dict
 @app.post("/api/benchmarks")
 def api_benchmark_create(req: BenchmarkCreateRequest, request: Request) -> dict[str, Any]:
     """Benchmark実行（Job Management経由）。条件を検証してから job_type=benchmark のJobを作成する。"""
-    from .services.benchmark import normalize_engine_spec
+    from .services.benchmark import normalize_engine_spec, resolve_benchmark_preprocess
 
     _enforce_role(request, "benchmark_run")
     resolved = _resolve_project_id(req.project_id)
@@ -3021,6 +3021,8 @@ def api_benchmark_create(req: BenchmarkCreateRequest, request: Request) -> dict[
         engines = [normalize_engine_spec(spec) for spec in (req.engines or [])]
         if not engines:
             raise ValueError("Benchmark対象エンジンを1つ以上選択してください")
+        # 前処理計画の事前検証（不正なmode・学習時前処理未記録・スナップショットなしはここで400）
+        resolve_benchmark_preprocess(resolved, req.preprocess)
         job, deduplicated = get_job_service().create_job(
             project_id=resolved,
             job_type="benchmark",
@@ -3032,6 +3034,7 @@ def api_benchmark_create(req: BenchmarkCreateRequest, request: Request) -> dict[
                 "dataset_id": str(req.dataset_id or ""),
                 "engines": engines,
                 "warmup_runs": int(req.warmup_runs if req.warmup_runs is not None else 1),
+                "preprocess": req.preprocess,
             },
             requested_by=str(req.requested_by or ""),
         )
