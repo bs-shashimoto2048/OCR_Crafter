@@ -86,7 +86,7 @@ export const SIDEBAR_SECTIONS = [
         id: "eval-data",
         label: "評価データ",
         description: "学習データとは独立した評価データセットを作成・編集する工程。",
-        items: [{ id: "image-builder-step5", label: "評価データセット作成" }],
+        items: [{ id: "image-builder-step5", label: "データセット作成" }],
       },
     ],
   },
