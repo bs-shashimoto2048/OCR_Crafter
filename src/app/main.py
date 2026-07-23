@@ -61,6 +61,7 @@ from .schemas import (
     LabelUpdateRequest,
     OcrDatasetCreateRequest,
     ReleasePolicyRequest,
+    ReportGenerateRequest,
     RetentionConfigRequest,
     OcrDatasetSplitPreviewRequest,
     OcrAugmentationPreviewRequest,
@@ -1118,6 +1119,107 @@ def api_operations_dashboard(project_id: Optional[str] = Query(default="default"
     from .services.operations import build_dashboard
 
     return build_dashboard(_resolve_project_id(project_id))
+
+
+# ---------- モデル開発レポート（docs/16参照。生成はJob Management経由） ----------
+
+
+@app.post("/api/reports/generate")
+def api_report_generate(req: ReportGenerateRequest, request: Request) -> dict[str, Any]:
+    """レポート生成Jobの作成（job_type=report_generate。進捗はジョブ管理で監視）。"""
+    ctx = _enforce_role(request, "report_generate")
+    resolved = _resolve_project_id(req.project_id)
+    try:
+        from .services.report_generator import REPORT_TYPES
+
+        if req.report_type not in REPORT_TYPES:
+            raise ValueError(f"report_type は {REPORT_TYPES} のいずれかを指定してください")
+        if req.report_type == "single_model" and len(req.model_ids) != 1:
+            raise ValueError("単一モデルレポートは対象モデルを1件指定してください")
+        if req.report_type == "comparison" and len(req.model_ids) < 2:
+            raise ValueError("モデル比較レポートは比較モデルを2件以上指定してください")
+        job, deduplicated = get_job_service().create_job(
+            project_id=resolved,
+            job_type="report_generate",
+            params={
+                "project_id": resolved,
+                "report_type": req.report_type,
+                "model_ids": req.model_ids,
+                "formats": req.formats,
+                "include_images": bool(req.include_images),
+                "experiments_limit": req.experiments_limit,
+                "template_info": req.template_info,
+                "project_description": req.project_description,
+                "purpose": req.purpose,
+                "created_by": req.created_by or ctx.operator,
+            },
+            requested_by=req.created_by or ctx.operator,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    ensure_worker_started()
+    _record_audit_safe(
+        request, "report_generate", project_id=resolved, target_type="report_job", target_id=job["job_id"],
+        job_id=job["job_id"],
+        after={"report_type": req.report_type, "model_ids": req.model_ids, "formats": req.formats},
+    )
+    return {"project_id": resolved, "job": job, "deduplicated": deduplicated}
+
+
+@app.get("/api/reports")
+def api_reports(project_id: str = Query(default="")) -> dict[str, Any]:
+    """レポート一覧（新しい順・メタデータのみ）。"""
+    from .services.report_generator import list_reports
+
+    return {"items": list_reports(project_id)}
+
+
+@app.get("/api/reports/{report_id}")
+def api_report_detail(report_id: str) -> dict[str, Any]:
+    from .services.report_generator import get_report
+
+    try:
+        return {"item": get_report(report_id)}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+
+@app.delete("/api/reports/{report_id}")
+def api_report_delete(report_id: str, request: Request) -> dict[str, Any]:
+    """レポート削除（メタデータ+出力ファイル。監査記録あり）。"""
+    from .services.report_generator import delete_report
+
+    _enforce_role(request, "report_delete")
+    try:
+        entry = delete_report(report_id)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    _record_audit_safe(
+        request, "report_delete", project_id=str(entry.get("projectId") or ""), target_type="report", target_id=report_id,
+        before={"files": entry.get("files")},
+    )
+    return {"deleted": report_id}
+
+
+@app.get("/api/reports/{report_id}/download")
+def api_report_download(report_id: str, format: str = Query(default="markdown")) -> Response:
+    """レポートのダウンロード（markdown / pdf。reports配下限定・トラバーサル防止）。"""
+    from .services.report_generator import report_file_path
+
+    try:
+        path = report_file_path(report_id, format)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    media = "application/pdf" if format == "pdf" else "text/markdown; charset=utf-8"
+    from urllib.parse import quote
+
+    return Response(
+        content=path.read_bytes(),
+        media_type=media,
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(path.name)}"},
+    )
 
 
 # ---------- バックアップ・データ保持（docs/21_OPERATIONS_GUIDE.md） ----------

@@ -124,6 +124,10 @@ sessionStorage:
 | `ocr_training_session_by_project_v1` | 学習ジョブセッション（jobId/status/logs） |
 | `ocr_last_project_v1` | 最後に開いたプロジェクトID |
 
+## レポート機能の設定
+
+モデル開発レポート（運用 > レポート）は **settings.yaml の設定項目・localStorageキーを持たない**（未設定=従来動作の原則どおり、既存プロジェクトへの影響なし）。生成物・メタデータは `data/reports/<project_id>/` へ保存され、PDFはmatplotlib（既存依存）でローカル生成する（外部通信なし。日本語フォントはWindowsのYu Gothic等を自動検出）。`REPORT_GENERATOR_VERSION`（`services/report_generator.py`）がメタデータの `generatorVersion` へ記録される。
+
 ## Feature Flag 相当の定数
 
 | 定数 | 値 | 意味 | 場所 |

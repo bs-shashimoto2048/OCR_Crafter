@@ -116,6 +116,18 @@
 
 変更系エンドポイント（projects作成/削除・preprocess/run・dataset/create・tesseract学習開始・モデル削除・releases status/promote/rollback/policy・benchmarks実行・jobs cancel/retry・backups restore・retention apply）は `X-Role` 明示時にロール階層（viewer<operator<approver<admin）を強制し（不足403）、成功時に監査ログへ記録する。
 
+## レポート（Model Development Reports）
+
+詳細仕様: `docs/16_SCREEN_SPEC.md`（レポート画面）。生成はJob Management経由（`job_type=report_generate`）。
+
+| Method / Path | リクエスト | レスポンス主要キー | 概要 |
+|---|---|---|---|
+| POST `/api/reports/generate` | `ReportGenerateRequest`（`report_type`=single_model/comparison/project_summary, `model_ids[]`, `formats[]`=markdown/pdf, `include_images?`, `experiments_limit?`, `template_info?`, `created_by?`） | `{job, deduplicated}` | レポート生成Jobの作成（single=モデル1件必須 / comparison=2件以上。不正は400）。監査 `report_generate` |
+| GET `/api/reports` | Query: `project_id?` | `{items[]}` | レポート一覧（新しい順・メタデータ: reportId/種別/対象/形式/状態/sha256/jobId等） |
+| GET `/api/reports/{report_id}` | - | `{item}` | レポート詳細（存在しないIDは404） |
+| DELETE `/api/reports/{report_id}` | - | `{deleted}` | レポート削除（メタデータ+出力ファイル。監査 `report_delete`） |
+| GET `/api/reports/{report_id}/download` | Query: `format`=markdown/pdf | ファイル | ダウンロード（`data/reports` 配下限定・トラバーサル防止・日本語ファイル名対応） |
+
 ## ジョブ管理（Job Management）
 
 詳細仕様: `docs/18_JOB_MANAGEMENT.md`。既存の同期API（`/preprocess/run` 等）は維持し、Job APIは同じ処理を非同期実行する追加経路。

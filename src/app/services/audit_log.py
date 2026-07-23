@@ -49,6 +49,8 @@ AUDIT_ACTIONS = [
     "backup_create",  # バックアップ作成
     "deployment_export",  # Deployment Package Export
     "restore_failed",  # バックアップ復元の失敗（整合性エラー等）
+    "report_generate",  # モデル開発レポートの生成（Job作成）
+    "report_delete",  # レポートの削除
 ]
 
 # 権限ロール（弱い順）と操作に必要な最低ロール
@@ -76,6 +78,8 @@ ACTION_MIN_ROLE = {
     "backup_create": "operator",
     "deployment_export": "operator",
     "restore_failed": "admin",
+    "report_generate": "operator",
+    "report_delete": "operator",
 }
 
 # 保存禁止キー（部分一致・小文字比較）: パスワード・トークン・APIキー等の機密情報

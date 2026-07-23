@@ -16,6 +16,7 @@ export const JOB_TYPE_LABELS = {
   evaluation: "評価",
   benchmark: "Benchmark",
   deployment_export: "配布パッケージ",
+  report_generate: "レポート生成",
 };
 
 export const JOB_STATUS_LABELS = {

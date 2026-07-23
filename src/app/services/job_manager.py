@@ -35,7 +35,7 @@ from typing import Any, Callable, Optional
 
 from .. import project_paths as project_paths_module
 
-JOB_TYPES = ["preprocess", "dataset_creation", "training", "evaluation", "benchmark", "deployment_export"]
+JOB_TYPES = ["preprocess", "dataset_creation", "training", "evaluation", "benchmark", "deployment_export", "report_generate"]
 # interrupted: Backend再起動でrunning/cancel_requestedのまま残ったJobの回収先
 # （終端扱い・再実行可能。永続的にrunning表示のまま残さないための状態）
 JOB_STATUSES = ["queued", "running", "succeeded", "failed", "cancel_requested", "cancelled", "interrupted"]
@@ -304,6 +304,12 @@ def _handle_benchmark(params: dict[str, Any], ctx: JobContext) -> dict[str, Any]
     return run_benchmark_job(params, ctx)
 
 
+def _handle_report_generate(params: dict[str, Any], ctx: JobContext) -> dict[str, Any]:
+    from .report_generator import run_report_job
+
+    return run_report_job(params, ctx)
+
+
 JOB_HANDLERS: dict[str, Callable[[dict[str, Any], JobContext], dict[str, Any]]] = {
     "preprocess": _handle_preprocess,
     "dataset_creation": _handle_dataset_creation,
@@ -311,6 +317,7 @@ JOB_HANDLERS: dict[str, Callable[[dict[str, Any], JobContext], dict[str, Any]]] 
     "evaluation": _handle_evaluation,
     "deployment_export": _handle_deployment_export,
     "benchmark": _handle_benchmark,
+    "report_generate": _handle_report_generate,
 }
 
 

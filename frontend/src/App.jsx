@@ -17,6 +17,7 @@ import JobsView from "./views/JobsView";
 import BenchmarkView from "./views/BenchmarkView";
 import AuditView from "./views/AuditView";
 import OperationsView from "./views/OperationsView";
+import ReportsView from "./views/ReportsView";
 import SetupWizard from "./components/SetupWizard";
 import { buildCompletedState, readSetupState, shouldShowWizard, writeSetupState } from "./lib/setupWizard";
 import ProjectCreateModal from "./components/ProjectCreateModal";
@@ -71,6 +72,7 @@ const viewMeta = {
   releases: { title: "リリース管理", subtitle: "モデルのライフサイクル管理・本番適用・配布" },
   jobs: { title: "ジョブ管理", subtitle: "バックグラウンドジョブの一覧・進捗・キャンセル・再実行" },
   benchmark: { title: "Benchmark", subtitle: "複数OCRエンジンの公平比較（精度・速度・安定性）" },
+  reports: { title: "レポート", subtitle: "モデル開発レポートの生成・履歴（Markdown/PDF）" },
   audit: { title: "監査ログ", subtitle: "重要操作の追記型記録（削除不可）とBefore/After差分" },
   operations: { title: "システム状態", subtitle: "運用ダッシュボードとヘルスチェック" },
   "cls-models": { title: "モデル", subtitle: "実験機能（分割学習）: モデル管理" },
@@ -4156,6 +4158,10 @@ export default function App() {
         onOpenJobs={() => setActiveView("jobs")}
       />
     );
+  }
+
+  if (activeView === "reports") {
+    view = <ReportsView projectId={projectId} ocrModels={ocrModels} onOpenJobs={() => setActiveView("jobs")} notify={notify} />;
   }
 
   if (activeView === "audit") {

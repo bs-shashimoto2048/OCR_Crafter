@@ -117,6 +117,7 @@ export const SIDEBAR_SECTIONS = [
     items: [
       { id: "jobs", label: "ジョブ管理" },
       { id: "benchmark", label: "Benchmark" },
+      { id: "reports", label: "レポート" },
       { id: "audit", label: "監査ログ" },
       { id: "operations", label: "システム状態" },
     ],

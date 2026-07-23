@@ -62,7 +62,11 @@
 | GET / PUT `/api/retention` | 保持設定の取得・保存 |
 | POST `/api/retention/apply` | 適用（削除は監査記録） |
 
-## 5. 運用の目安
+## 5. モデル開発レポート
+
+社内報告・引き継ぎ・監査用のレポートを「運用 > レポート」から自動生成できる（単一モデル/比較/総括、Markdown/PDF、RPT-0001形式、`data/reports/<project_id>/`）。生成・削除は監査ログ（report_generate/report_delete）へ記録され、外部通信は行わない。定期報告には月次でプロジェクト総括レポートの生成を推奨。
+
+## 6. 運用の目安
 
 - 失敗Jobが増えた → ジョブ管理画面でエラー要約を確認 → 詳細は `data/jobs/logs/JOB-xxxxxx.log`
 - Gate判定がFAILのままProduction運用 → Override履歴（監査ログ・Release History）を確認

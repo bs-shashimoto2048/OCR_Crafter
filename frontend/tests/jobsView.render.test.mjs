@@ -116,6 +116,7 @@ test("ラベル定義: 全6種別・全6状態が揃っている", () => {
     "evaluation",
     "benchmark",
     "deployment_export",
+    "report_generate",
   ]);
   assert.deepEqual(Object.keys(JOB_STATUS_LABELS), [
     "queued",

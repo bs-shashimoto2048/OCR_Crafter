@@ -37,6 +37,7 @@
 | ジョブ管理 | バックグラウンドジョブの統一管理（JOB-000001形式・全体一意、状態遷移検証、同時実行制御、進捗0-100%＋イベント履歴、キャンセル・再実行）。詳細は `docs/18_JOB_MANAGEMENT.md` |
 | Benchmark | 複数OCRエンジンの公平比較（BM-0001形式、Profile Hash、cold start/推論時間分離、Leaderboard、用途別ベスト＋バランス式、画像単位比較、CSV3種）。詳細は `docs/19_BENCHMARK_SPEC.md` |
 | Release Gate | Release Policy（プロジェクト毎12項目）に基づく昇格自動判定（PASS/CONDITIONAL_PASS/FAIL/NOT_EVALUATED）、FAILは例外承認必須、Release ID（REL-0001）。詳細は `docs/20_RELEASE_POLICY.md` |
+| レポート | モデル開発レポート自動生成（単一モデル/比較/プロジェクト総括。Markdown/PDF・RPT-0001形式・Job経由・外部通信なし）。詳細は `docs/16_SCREEN_SPEC.md` |
 | 監査・運用 | 監査ログ（15操作・追記型・削除不可・Before/After差分）、ユーザー識別（X-Operator/X-Role・認証未設定モード明示）、運用ダッシュボード、ヘルスチェック3段階、バックアップ（metadata_only/full・復元は新Project IDへ）、データ保持設定。詳細は `docs/21_OPERATIONS_GUIDE.md` / `22_SECURITY_AND_AUDIT.md` |
 
 ## 画面構成（サイドバー・OCR開発フロー順）
@@ -47,7 +48,7 @@
                    / 学習データ（画像 / 前処理設定 / ラベル編集）
                    / 評価データ（データセット作成）  ※3つの折りたたみグループ
 OCRモデル        … データ作成・学習 / モデル管理 / 実験管理 / リリース管理 / モデル評価 / 推論 / OCR修正 / バッチ推論
-運用             … ジョブ管理 / Benchmark / 監査ログ / システム状態
+運用             … ジョブ管理 / Benchmark / レポート / 監査ログ / システム状態
 実験機能         … 分類学習 / 分類モデル管理 / 分類推論 / 分類評価
 ```
 

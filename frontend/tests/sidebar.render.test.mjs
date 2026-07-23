@@ -152,7 +152,7 @@ test("運用セクション: OCRモデルと実験機能の間・ジョブ管理
   assert.ok(ids.indexOf("ocr-model") < ids.indexOf("operations"));
   assert.ok(ids.indexOf("operations") < ids.indexOf("experimental"));
   const operations = SIDEBAR_SECTIONS.find((s) => s.id === "operations");
-  assert.deepEqual(operations.items.map((i) => i.id), ["jobs", "benchmark", "audit", "operations"]);
+  assert.deepEqual(operations.items.map((i) => i.id), ["jobs", "benchmark", "reports", "audit", "operations"]);
   assert.equal(operations.defaultOpen, false);
 });
 

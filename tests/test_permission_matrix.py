@@ -29,6 +29,8 @@ EXPECTED_MATRIX = {
     "analysis_toggle": "operator",
     "backup_create": "operator",
     "deployment_export": "operator",  # ViewerはExport不可（仕様確定）
+    "report_generate": "operator",  # レポート生成
+    "report_delete": "operator",  # レポート削除
     # Approver以上
     "release_promote": "approver",
     "release_rollback": "approver",

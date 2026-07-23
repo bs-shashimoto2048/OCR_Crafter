@@ -57,4 +57,6 @@ export const AUDIT_ACTION_LABELS = {
   backup_create: "バックアップ作成",
   deployment_export: "Deployment Export",
   restore_failed: "復元失敗",
+  report_generate: "レポート生成",
+  report_delete: "レポート削除",
 };

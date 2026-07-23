@@ -29,8 +29,9 @@ test("buildAuditDiff: 片側のみ・両方なし・ネスト値のJSON表示", 
   assert.ok(nested[0].before.includes("0.1") && nested[0].after.includes("0.05"));
 });
 
-test("監査アクションの日本語ラベル（基本13種＋バックアップ2種＋補完7種=22種）", () => {
-  assert.equal(Object.keys(AUDIT_ACTION_LABELS).length, 22);
+test("監査アクションの日本語ラベル（基本13種＋バックアップ2種＋補完7種＋レポート2種=24種）", () => {
+  assert.equal(Object.keys(AUDIT_ACTION_LABELS).length, 24);
+  assert.equal(AUDIT_ACTION_LABELS.report_generate, "レポート生成");
   assert.equal(AUDIT_ACTION_LABELS.release_promote, "Production昇格");
   assert.equal(AUDIT_ACTION_LABELS.backup_restore, "バックアップ復元");
   assert.equal(AUDIT_ACTION_LABELS.job_finished, "Job完了");

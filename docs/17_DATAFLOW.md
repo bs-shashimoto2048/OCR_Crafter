@@ -99,6 +99,8 @@ flowchart LR
 
 - `data/backups/`（全プロジェクト共通・バックアップ）: `<BK-0001>_<pid>_<mode>_<日時>.zip`（metadata_only/full）＋ `index.json`（採番・一覧）。復元は既定で新Project IDへ。`data/retention.json`=データ保持設定（Job/監査ログ保持日数。null=無期限）。詳細は `docs/21_OPERATIONS_GUIDE.md`
 
+- `data/reports/<project_id>/`（モデル開発レポート）: `index.json`=`{"counter": 採番数, "items": [レポートメタデータ...]}`（Report IDは RPT-0001形式・プロジェクト内一意・Atomic Write+file_lockで採番）＋ 生成物 `*.md` / `*.pdf`（安全なファイル名: 禁止文字除去・重複時は連番。排他的作成で予約）＋ 画像掲載時の `<RPT-xxxx>_images/`（Benchmark casesからのローカルコピーのみ）。メタデータへ sha256・jobId・generatorVersion を記録。ダウンロードは `data/reports` 配下限定（パストラバーサル防止）。詳細は `docs/16_SCREEN_SPEC.md`（レポート画面）
+
 - `data/audit/`（全プロジェクト共通・監査ログ）: `audit.jsonl`=**追記型**の監査記録（AUD-000001形式・削除/編集APIなし・パスワード/トークン/APIキー/画像バイナリ保存禁止）＋ `counter.json`=採番。詳細は `docs/22_SECURITY_AND_AUDIT.md`
 
 - `data/jobs/`（全プロジェクト共通・Job Management）: `jobs.json`=`{"counter": 通算採番数, "items": [Job...], "config": {"benchmark_concurrency": 1}}`。Job IDは JOB-000001形式・システム全体で一意・再利用しない。`events/JOB-xxxxxx.jsonl`=進捗イベント（追記型・1行1イベント。将来SSEでも同一形式）。`logs/JOB-xxxxxx.log`=スタックトレース等の内部ログ（画面へ出さない）。詳細は `docs/18_JOB_MANAGEMENT.md`

@@ -284,6 +284,21 @@ class BenchmarkCreateRequest(BaseModel):
     requested_by: str = Field(default="", description="実行者（operator名）")
 
 
+class ReportGenerateRequest(BaseModel):
+    """モデル開発レポートの生成（Job Management経由でjob_type=report_generateを作成）。"""
+
+    project_id: Optional[str] = Field(default="default")
+    report_type: str = Field(default="single_model", description="single_model / comparison / project_summary")
+    model_ids: list[str] = Field(default_factory=list, description="対象モデル（single=1件 / comparison=2件以上）")
+    formats: list[str] = Field(default_factory=lambda: ["markdown"], description="markdown / pdf（両方指定可）")
+    include_images: bool = Field(default=False, description="代表失敗例の画像を同梱ディレクトリへコピーして掲載")
+    experiments_limit: Optional[int] = Field(default=50, description="実験履歴の掲載件数（総括レポート）")
+    template_info: Optional[dict[str, Any]] = Field(default=None, description="作成元テンプレート情報（フロント保存値）")
+    project_description: str = Field(default="", description="プロジェクト概要（ユーザー入力）")
+    purpose: str = Field(default="", description="OCR用途（ユーザー入力）")
+    created_by: str = Field(default="", description="作成者")
+
+
 class BackupCreateRequest(BaseModel):
     """プロジェクトバックアップの作成（metadata_only / full）。"""
 
