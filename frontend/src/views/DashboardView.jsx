@@ -32,13 +32,14 @@ const QUICK_ACTIONS = [
   { id: "ocr-eval", stepId: "evaluation", icon: "📈", label: "評価" },
 ];
 
-// プロジェクトカードのクイックアクション（上段2件・下段3件。既存画面への遷移のみ・新規APIは使用しない）
-const CARD_QUICK_ACTIONS = [
-  { id: "open", icon: "📂", label: "開く", viewId: null, row: 1 },
-  { id: "train", icon: "▶", label: "学習", viewId: "ocr-training", row: 1 },
-  { id: "evaluate", icon: "📈", label: "評価", viewId: "ocr-eval", row: 2 },
-  { id: "benchmark", icon: "🧪", label: "Benchmark", viewId: "benchmark", row: 2 },
-  { id: "report", icon: "📄", label: "Report", viewId: "reports", row: 2 },
+// プロジェクトカードのクイックアクション。Primary（開く）を最優先操作として強調し、
+// Secondary（学習・評価・Benchmark・Report）は控えめな見た目にする（既存画面への遷移のみ・新規APIは使用しない）
+const PRIMARY_CARD_ACTION = { id: "open", icon: "▶", label: "開く", viewId: null };
+const SECONDARY_CARD_ACTIONS = [
+  { id: "train", icon: "🧠", label: "学習", viewId: "ocr-training" },
+  { id: "evaluate", icon: "📈", label: "評価", viewId: "ocr-eval" },
+  { id: "benchmark", icon: "🧪", label: "Benchmark", viewId: "benchmark" },
+  { id: "report", icon: "📄", label: "Report", viewId: "reports" },
 ];
 
 const STAGE_LABELS = {
@@ -186,6 +187,20 @@ function CardMenu({ pid, onDelete }) {
   );
 }
 
+// 品質・性能グループ内の1指標（emphasizeで品質・性能を データ より視覚的に強調する）
+function CardStat({ label, value, emphasize }) {
+  return (
+    <div
+      className={`flex items-baseline justify-between gap-1.5 rounded-lg border px-2 py-1 ${
+        emphasize ? "border-emerald-400/30 bg-emerald-500/10" : "border-border bg-card/45"
+      }`}
+    >
+      <span className="text-[12px] text-muted">{label}</span>
+      <span className={`text-[15px] font-bold leading-tight ${emphasize ? "text-emerald-200" : "text-text"}`}>{value}</span>
+    </div>
+  );
+}
+
 // プロジェクト管理カード1枚分。カード全体クリック＝「開く」と同じ動作
 function ProjectCard({ pid, selected, summary, origin, currentPreviewImage, imageVersion, onOpen, onQuickAction, onDelete }) {
   const stateBadge = projectStateBadge(summary, selected);
@@ -196,8 +211,8 @@ function ProjectCard({ pid, selected, summary, origin, currentPreviewImage, imag
   const totalImages = Number(summary.images || 0);
   const relativeTime = formatRelativeTime(summary.updated_at);
 
-  function renderAction(action) {
-    const enabled = action.id === "open" ? !selected : quickActionEnabled(action.id, summary);
+  function renderSecondaryAction(action) {
+    const enabled = quickActionEnabled(action.id, summary);
     const title =
       action.id === "benchmark"
         ? benchmarkQuickActionTooltip(summary)
@@ -210,9 +225,9 @@ function ProjectCard({ pid, selected, summary, origin, currentPreviewImage, imag
         aria-label={`${pid} を${action.label}へ`}
         title={title}
         onClick={() => onQuickAction(pid, action.viewId)}
-        className={`flex items-center justify-center gap-1 rounded-lg border px-1.5 py-1.5 text-[11px] font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 ${
+        className={`flex items-center justify-center gap-1 rounded-lg border px-1.5 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 ${
           enabled
-            ? "border-border/70 bg-card/60 text-text hover:border-accent/50 hover:text-accent"
+            ? "border-border/70 bg-card/45 text-muted hover:border-accent/40 hover:text-text"
             : "cursor-not-allowed border-border/40 bg-card/30 text-muted/50"
         }`}
       >
@@ -234,7 +249,7 @@ function ProjectCard({ pid, selected, summary, origin, currentPreviewImage, imag
           onOpen(pid, null);
         }
       }}
-      className={`flex h-[400px] cursor-pointer flex-col rounded-xl border p-3 transition-transform duration-150 hover:-translate-y-0.5 hover:scale-[1.01] hover:shadow-xl motion-reduce:transition-none motion-reduce:hover:scale-100 motion-reduce:hover:translate-y-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 ${
+      className={`flex min-h-[380px] cursor-pointer flex-col rounded-xl border p-3 transition-transform duration-150 hover:-translate-y-0.5 hover:scale-[1.01] hover:shadow-xl motion-reduce:transition-none motion-reduce:hover:scale-100 motion-reduce:hover:translate-y-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 ${
         selected ? "border-accent/60 bg-accent/10" : "border-border bg-card/45 hover:border-accent/40"
       }`}
     >
@@ -248,117 +263,115 @@ function ProjectCard({ pid, selected, summary, origin, currentPreviewImage, imag
           imageVersion={imageVersion}
         />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-text" title={pid}>
+          <p className="truncate text-[22px] font-bold leading-tight text-text" title={pid}>
             {pid}
           </p>
-          <div className="mt-1 flex flex-wrap items-center gap-1">
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
             {stateBadge ? (
               <span
-                className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${stateBadge.className}`}
+                className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[13px] font-semibold ${stateBadge.className}`}
               >
                 <span aria-hidden="true">{stateBadge.dot}</span>
                 {stateBadge.label}
               </span>
             ) : null}
-            <span className="truncate text-[10px] text-muted" title={origin.origin}>
+            <span className="truncate text-[12px] text-muted" title={origin.origin}>
               {origin.origin}
               {origin.version ? ` (v${origin.version})` : ""}
             </span>
           </div>
+        </div>
+        {/* Productionは右上へ独立表示（誤操作防止のため「・・・」メニューとは別要素） */}
+        <div className="flex shrink-0 items-start gap-1.5">
           {summary.production_model ? (
-            <p className="mt-1 truncate text-[10px] text-muted">
-              <span className="font-semibold text-emerald-300">Production</span> {formatProductionModel(summary)}
-            </p>
-          ) : null}
-        </div>
-        <CardMenu pid={pid} onDelete={() => onDelete(pid)} />
-      </div>
-
-      {/* 品質情報: データ／品質／性能の3グループへ整理 */}
-      <div className="mt-2.5 grid grid-cols-2 gap-2 rounded-lg border border-border/60 bg-card/40 px-2.5 py-2 text-[11px]">
-        <div>
-          <p className="mb-1 text-[9px] uppercase tracking-wide text-muted">データ</p>
-          <div className="space-y-0.5">
-            <p className="flex justify-between text-muted">
-              <span>画像</span>
-              <span className="font-semibold text-text">{totalImages}</span>
-            </p>
-            <p className="flex justify-between text-muted">
-              <span>ラベル</span>
-              <span className="font-semibold text-text">{Number(summary.labeled || 0)}</span>
-            </p>
-            <p className="flex justify-between text-muted">
-              <span>モデル</span>
-              <span className="font-semibold text-text">{Number(summary.models || 0)}</span>
-            </p>
-          </div>
-        </div>
-        <div className="flex flex-col gap-1.5 border-l border-border/60 pl-2">
-          <div>
-            <p className="mb-1 text-[9px] uppercase tracking-wide text-muted">品質</p>
-            <div className="space-y-0.5">
-              <p className="flex justify-between text-muted">
-                <span>Best CER</span>
-                <span className="font-semibold text-text">{formatBestCer(summary)}</span>
-              </p>
-              {exactMatch !== null ? (
-                <p className="flex justify-between text-muted">
-                  <span>Exact Match</span>
-                  <span className="font-semibold text-text">{exactMatch}</span>
-                </p>
-              ) : null}
+            <div className="rounded-md border border-emerald-400/40 bg-emerald-500/10 px-2 py-1 text-right leading-tight">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-300">Production</p>
+              <p className="text-[15px] font-bold text-emerald-200">{formatProductionModel(summary)}</p>
             </div>
-          </div>
-          <div>
-            <p className="mb-1 text-[9px] uppercase tracking-wide text-muted">性能</p>
-            {hasLatestBenchmark(summary) ? (
-              <div className="space-y-0.5">
-                <p className="flex justify-between text-muted">
-                  <span>Balance</span>
-                  <span className="font-semibold text-text">{formatBalanceScore(summary)}</span>
-                </p>
-                <p className="flex justify-between text-muted">
-                  <span>P95</span>
-                  <span className="font-semibold text-text">{formatP95(summary)}</span>
-                </p>
-                <p className="flex justify-between text-muted">
-                  <span>実施回数</span>
-                  <span className="font-semibold text-text">{Number(summary.benchmark_count || 0)}回</span>
-                </p>
-              </div>
-            ) : (
-              <p className="text-muted">未実施</p>
-            )}
-          </div>
+          ) : (
+            <p className="mt-1.5 whitespace-nowrap text-[12px] text-muted">Productionなし</p>
+          )}
+          <CardMenu pid={pid} onDelete={() => onDelete(pid)} />
         </div>
       </div>
 
-      {/* 進捗 */}
-      <div className="mt-2.5">
-        <div className="h-2.5 w-full overflow-hidden rounded-sm bg-border/40">
-          <div className="h-full rounded-sm bg-accent/80" style={{ width: `${progress}%` }} />
+      {/* 品質情報: データ／品質／性能を横並びの3列にし、品質・性能をemphasizeで視覚的に強調する */}
+      <div className="mt-2 grid grid-cols-3 gap-2 rounded-lg border border-border/60 bg-card/30 p-2">
+        <div className="space-y-1">
+          <p className="text-[13px] font-medium text-muted">データ</p>
+          <CardStat label="画像" value={totalImages} />
+          <CardStat label="ラベル" value={Number(summary.labeled || 0)} />
+          <CardStat label="モデル" value={Number(summary.models || 0)} />
         </div>
-        <div className="mt-1 flex items-center justify-between text-[10px] text-muted">
-          <span className="truncate">現在の工程: {stepLabel || "—"}</span>
-          <span className="shrink-0 font-semibold text-accent">{progress}%</span>
+        <div className="space-y-1">
+          <p className="text-[13px] font-semibold text-text">品質</p>
+          <CardStat label="Best CER" value={formatBestCer(summary)} emphasize />
+          {exactMatch !== null ? <CardStat label="Exact Match" value={exactMatch} emphasize /> : null}
+        </div>
+        <div className="space-y-1">
+          <p className="text-[13px] font-semibold text-text">性能</p>
+          {hasLatestBenchmark(summary) ? (
+            <>
+              <CardStat label="Balance" value={formatBalanceScore(summary)} emphasize />
+              <CardStat label="P95" value={formatP95(summary)} emphasize />
+              <CardStat label="実施回数" value={`${Number(summary.benchmark_count || 0)}回`} />
+            </>
+          ) : (
+            <div className="rounded-lg border border-border bg-card/45 px-2 py-1.5">
+              <p className="text-[12px] text-muted">Benchmark未実施</p>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onQuickAction(pid, "benchmark");
+                }}
+                className="mt-0.5 text-[12px] font-semibold text-accent hover:underline"
+              >
+                Benchmarkを実行 →
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* クイックアクション（誤操作防止のため削除は「・・・」メニューへ分離済み） */}
-      <div className="mt-2.5 flex flex-1 flex-col justify-end gap-1.5" onClick={(event) => event.stopPropagation()}>
-        <div className="grid grid-cols-2 gap-1.5">{CARD_QUICK_ACTIONS.filter((a) => a.row === 1).map(renderAction)}</div>
-        <div className="grid grid-cols-3 gap-1.5">{CARD_QUICK_ACTIONS.filter((a) => a.row === 2).map(renderAction)}</div>
+      {/* 進捗: 現在の工程名をバー上部へ・バーを太く・%を大きく右側表示 */}
+      <div className="mt-2">
+        <p className="text-[14px] font-semibold text-text">{stepLabel || "—"}</p>
+        <div className="mt-1 flex items-center gap-2">
+          <div className="h-4 min-w-0 flex-1 overflow-hidden rounded-sm bg-border/40">
+            <div className="h-full rounded-sm bg-accent/80" style={{ width: `${progress}%` }} />
+          </div>
+          <span className="shrink-0 text-base font-bold text-accent">{progress}%</span>
+        </div>
+      </div>
+
+      {/* クイックアクション: Primary（開く）を強調し、Secondaryは控えめに（誤操作防止のため削除は「・・・」メニューへ分離済み） */}
+      <div className="mt-2 flex flex-1 flex-col justify-end gap-1.5" onClick={(event) => event.stopPropagation()}>
+        <button
+          type="button"
+          disabled={selected}
+          aria-label={`${pid} を${PRIMARY_CARD_ACTION.label}へ`}
+          title={selected ? "現在使用中のプロジェクトです" : PRIMARY_CARD_ACTION.label}
+          onClick={() => onQuickAction(pid, PRIMARY_CARD_ACTION.viewId)}
+          className={`flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[15px] font-semibold text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 ${
+            selected ? "cursor-not-allowed bg-accent/40" : "bg-accent shadow-[0_4px_14px_rgba(88,166,255,0.32)] hover:bg-[#79b8ff]"
+          }`}
+        >
+          <span aria-hidden="true">{PRIMARY_CARD_ACTION.icon}</span>
+          {PRIMARY_CARD_ACTION.label}
+        </button>
+        <div className="grid grid-cols-2 gap-1.5">{SECONDARY_CARD_ACTIONS.map(renderSecondaryAction)}</div>
       </div>
 
       {/* フッター */}
-      <div className="mt-2.5 flex items-center justify-between border-t border-border/60 pt-2 text-[10px] text-muted">
+      <div className="mt-2 flex items-center justify-between border-t border-border/60 pt-2 text-[12px] text-muted">
         <div className="leading-tight">
           <p>{relativeTime || "—"}</p>
           <p>{formatShortDateTime(summary.updated_at)}</p>
         </div>
         <span
           title={[healthBadge.label, ...(healthBadge.reasons || [])].join("\n")}
-          className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${healthBadge.className}`}
+          className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[13px] font-semibold ${healthBadge.className}`}
         >
           <span aria-hidden="true">{healthBadge.dot}</span>
           {healthBadge.label}
