@@ -898,7 +898,7 @@ export default function PreprocessView({
                       value={predictWhitelist}
                       onChange={(e) => setPredictWhitelist?.(e.target.value)}
                       className="app-input"
-                      placeholder="例: ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt"
+                      placeholder="例: ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt+-"
                     />
                   </div>
                 </div>

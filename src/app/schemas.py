@@ -209,8 +209,8 @@ class OcrEvaluateRequest(BaseModel):
         default_factory=lambda: [OcrEvalTarget(engine="tesseract", model="eng"), OcrEvalTarget(engine="tesseract", model="latest")]
     )
     charset: str = Field(
-        default="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt",
-        description="評価時whitelist。既定=実運用(A-Z/0-9/klt)、空文字=whitelistなし、任意文字列=カスタム",
+        default="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt+-",
+        description="評価時whitelist。既定=実運用(A-Z/0-9/klt/+-)、空文字=whitelistなし、任意文字列=カスタム",
     )
     psm: int = Field(default=7, ge=0, le=13)
     # Step5と共通の評価前処理（services/preprocess.py の apply_eval_preprocess を共用）。
@@ -391,8 +391,8 @@ class TesseractTrainStartRequest(BaseModel):
     project_id: Optional[str] = Field(default="default")
     dataset_dir: str = Field(..., description="OCRデータ作成で生成したデータセットディレクトリ")
     charset: str = Field(
-        default="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt",
-        description="学習対象文字セット（A-Z / 0-9 / 小文字筆記体 k,l,t）。whitelistとは別概念",
+        default="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt+-",
+        description="学習対象文字セット（A-Z / 0-9 / 小文字筆記体 k,l,t / 記号 +,-）。whitelistとは別概念",
     )
     max_iterations: int = Field(default=1000, ge=1, le=100000, description="LSTM fine-tuneの最大イテレーション")
     base_lang: str = Field(default="eng", description="fine-tuneのベース言語(traineddata)")

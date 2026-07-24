@@ -26,7 +26,7 @@ from ..config import get_settings
 from ..project_paths import ensure_project_directories
 
 # 学習対象文字セット: 学習データに含めてよい文字（unicharsetが覚えるべき集合）
-TESSERACT_TARGET_CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt"
+TESSERACT_TARGET_CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt+-"
 # 推論時whitelist既定: tessedit_char_whitelist に渡す探索制約。
 # 現在は学習対象文字セットと同値だが、概念が異なるため別定数として保持する。
 TESSERACT_WHITELIST_DEFAULT = TESSERACT_TARGET_CHARSET

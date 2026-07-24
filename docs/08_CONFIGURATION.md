@@ -85,7 +85,7 @@
 | `tesseract_cmd` 等 | `C:\Program Files\Tesseract-OCR\` 配下の実行ファイルパス（空ならPATH解決） |
 | `tessdata_dir` | `models/tessdata_best`（絶対パスで記載） |
 | `base_lang` | `eng` |
-| `default_charset` | `ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt`（学習対象文字。whitelistとは別概念、詳細は `docs/12_TESSERACT_CHARSET_SPEC.md`） |
+| `default_charset` | `ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt+-`（学習対象文字。whitelistとは別概念、詳細は `docs/12_TESSERACT_CHARSET_SPEC.md`） |
 | `default_max_iterations` | 1000 |
 | `default_psm` | 7（単一行認識） |
 
@@ -111,7 +111,7 @@ localStorage（`try/catch` で不可環境でも動作継続）:
 | `ocr_eval_preprocess_settings_by_project_v1` | Step5専用OCR前処理（`{grayscale, binarize, binarizeMethod: otsu/fixed, threshold}`。OCR候補生成時のみ適用・評価用画像/作成データには反映しない。プロジェクト共通OCR前処理・YOLO検出前処理とは独立） | プロジェクト別 |
 | `ocr_detection_preprocess_by_project_v1` | YOLO検出用前処理 | プロジェクト別 |
 | `ocr_sidebar_collapsed_v1` | サイドバー折り畳み | 全体共通 |
-| `ocr_training_settings_tab_v1` | 学習画面「次回学習の設定」モーダルで最後に開いた設定カテゴリ（split/augmentation/params/engine。初期表示の維持用・設定値は含まない） | 全体共通 |
+| `ocr_training_settings_tab_v1` | 学習画面「次回学習の設定」（インライン編集）で最後に開いた設定カテゴリ（`training-settings`/`augmentation`/`engine`。初期表示の維持用・設定値は含まない）。**旧4タブ構成時代の値（`data-split`/`training-params`）は`training-settings`へ安全に移行**され、想定外の値も同様にフォールバックする（`lib/trainingSettingsTabs.js`） | 全体共通 |
 | `ocr_sidebar_groups_v1` | データ準備配下サブグループ（OCR画像作成/学習データ/評価データ）の展開状態（`{"ocr-image": bool, "training-data": bool, "eval-data": bool}`。未保存のグループは既定=展開） | 全体共通 |
 | `ocr_setup_wizard_v1` | 初回セットアップウィザードの完了記録（`{completed, wizardVersion, projectsDir, completedAt}`。未保存・壊れた値・旧wizardVersion=起動時にウィザード表示。docs/16参照） | 全体共通 |
 | `ocr_project_template_by_project_v1` | 作成元テンプレートの記録（`{[projectId]: {templateId, templateVersion, templateName, appliedAt}}`。記録のない既存プロジェクト=「記録なし」表示。テンプレート更新時も自動反映しない） | プロジェクト別 |

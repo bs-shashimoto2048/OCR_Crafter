@@ -80,7 +80,7 @@ cd frontend && npm test        # フロント純関数
 ## 重要な設計思想（コード・docsから確認できるもの）
 
 - **プロジェクト分離**: すべてのデータ・設定・モデルは project_id 単位。切替時の混在防止（レスポンス競合ガード）が徹底されている。
-- **charset仕様**: 学習対象文字 `A-Z0-9klt` / 推論whitelist / 評価whitelist は**別概念**（`docs/12_TESSERACT_CHARSET_SPEC.md`）。評価はcase-sensitive完全一致。GTは勝手に大文字化しない。
+- **charset仕様**: 学習対象文字 `A-Z0-9klt+-` / 推論whitelist / 評価whitelist は**別概念**（`docs/12_TESSERACT_CHARSET_SPEC.md`）。評価はcase-sensitive完全一致。GTは勝手に大文字化しない。
 - **既存動作を壊さない**: 新設定は「未設定=従来動作」のデフォルトを持つ（例: include_lowercase未指定=true）。
 - **元データ不変**: 前処理・マスク・辞書は表示/推論用の派生であり、元画像・元ファイルを変更しない。
 

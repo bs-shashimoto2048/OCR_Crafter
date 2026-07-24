@@ -245,8 +245,8 @@ const DEFAULT_PREPROCESS_PARAMS = {
   deskew_enabled: true,
 };
 const OCR_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-// Tesseract学習対象文字セット: A-Z / 0-9 / 小文字筆記体 k,l,t
-const TESSERACT_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt";
+// Tesseract学習対象文字セット: A-Z / 0-9 / 小文字筆記体 k,l,t / 記号 + -
+const TESSERACT_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt+-";
 // 学習回数の既定値。Tesseractは最大iterationとして扱われるためFine-tuning向けの1500を既定にする
 // （PaddleOCR等のEpoch既定30には影響しない。ユーザー変更済みの値は上書きしない）
 const OCR_EPOCHS_DEFAULT = 30;
@@ -1244,7 +1244,7 @@ export default function App() {
     }
   }, [activeView, trainingFamily]);
 
-  // OCRタイプ切替時に文字セット既定を切替（Paddle/EasyOCR: A-Z0-9 / Tesseract: A-Z0-9+筆記体klt）
+  // OCRタイプ切替時に文字セット既定を切替（Paddle/EasyOCR: A-Z0-9 / Tesseract: A-Z0-9+筆記体klt+記号+-）
   useEffect(() => {
     if (ocrEngine === "tesseract") {
       setOcrCharset((prev) => (prev === OCR_CHARSET_DEFAULT ? TESSERACT_CHARSET_DEFAULT : prev));

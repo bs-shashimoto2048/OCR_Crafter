@@ -29,6 +29,17 @@
   - charset外文字を含むラベルは「文字削除」ではなくサンプル除外＋skipped集計
   - 評価比較は case-sensitive の完全一致（`KT` ≠ `kt`）
   - 詳細: `docs/12_TESSERACT_CHARSET_SPEC.md`
+- **Tesseract既定charsetへ記号 `+` `-` を追加**: `ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt` →
+  `ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt+-`（学習対象文字セット/推論時whitelist/評価時whitelistの
+  既定値・設定ファイルの既定値・フロントエンドの新規作成時既定値が対象。**既存プロジェクトの保存済み
+  charset/whitelistは自動変更しない**。詳細: `docs/12_TESSERACT_CHARSET_SPEC.md`）
+- **学習画面「次回学習の設定」を4タブ→3タブへ統合**: 「学習パラメータ」「データ分割」を「学習設定」へ
+  統合（学習パラメータが先・データ分割が後の順で1タブ内に表示）。localStorageキー
+  `ocr_training_settings_tab_v1` は維持し、旧タブID（`data-split`/`training-params`）は新ID
+  `training-settings` へ安全に移行する
+- **共通ツールチップ（InfoTooltip）の表示位置を上部優先へ変更**: 既定で対象要素の上部中央へ表示し、
+  上端に十分な空間が無い場合のみ下側へフォールバック（画面端は左右クランプ・Escで閉じる・
+  キーボードfocus対応）
 
 ### Fixed / Security
 

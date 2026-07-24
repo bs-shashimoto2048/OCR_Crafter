@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Card from "../components/Card";
 import Button from "../components/Button";
+import InfoTooltip from "../components/InfoTooltip";
 import { PADDLEOCR_OFFICIAL_MODELS_TOOLTIP } from "../lib/paddleocrOfficialTooltip";
 import { autoTestRatio, normalizeRatioInput, summarizeRatios } from "../lib/ratio";
 import AugmentationSettingsPanel from "../components/AugmentationSettingsPanel";
 import { augCategorySummaryLabel, averageAugProbabilityPercent, isAugmentationOff } from "../lib/augmentationSettings";
 import { collectSettingsSnapshot, isSettingsDirty } from "../lib/trainingSettingsDraft";
+import { SETTINGS_TABS, normalizeSettingsTabId } from "../lib/trainingSettingsTabs";
 import {
   UI_TRAINING_STATE_LABELS,
   classifyLogLine,
@@ -19,27 +21,15 @@ import {
 } from "../lib/trainingLog";
 
 const OCR_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-// Tesseract学習対象文字セット（A-Z / 0-9 / 小文字筆記体 k,l,t）
-const TESSERACT_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt";
+// Tesseract学習対象文字セット（A-Z / 0-9 / 小文字筆記体 k,l,t / 記号 + -）
+const TESSERACT_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt+-";
 
-// 次回学習の設定（インライン編集）のタブ（4カテゴリ。設定値・保存処理は従来のstateを共有する）
-const NEXT_SETTINGS_TABS = [
-  { id: "split", label: "データ分割" },
-  { id: "augmentation", label: "オーグメンテーション" },
-  { id: "params", label: "学習パラメータ" },
-  { id: "engine", label: "エンジン設定" },
-];
-// 最後に開いた設定カテゴリの保存キー（初期表示の維持用。UI状態のみで設定値は含まない）
+// 次回学習の設定（インライン編集）のタブ（3カテゴリ＝学習設定＋オーグメンテーション＋エンジン設定。
+// 設定値・保存処理は従来のstateを共有する）。定義は lib/trainingSettingsTabs.js を共通ソースとする
+const NEXT_SETTINGS_TABS = SETTINGS_TABS;
+// 最後に開いた設定カテゴリの保存キー（初期表示の維持用。UI状態のみで設定値は含まない）。
+// 旧4タブ構成時代の値（data-split/training-params）はnormalizeSettingsTabIdで安全に移行する
 const NEXT_SETTINGS_TAB_STORAGE_KEY = "ocr_training_settings_tab_v1";
-
-// ラベル横の ⓘ ヘルプ（title属性によるツールチップ表示）
-function InfoHint({ text }) {
-  return (
-    <span title={text} className="ml-1 inline-block cursor-help align-middle text-[11px] text-accent" aria-label="ヘルプ">
-      ⓘ
-    </span>
-  );
-}
 
 export default function TrainingView({
   trainingMode = "all",
@@ -178,7 +168,8 @@ export default function TrainingView({
   const nextSettingsOpen = settingsToggled ?? (uiTrainingState === "idle" && !jobInfo);
   // 次回学習の設定のインライン編集（null=サマリー表示 / タブID=左パネルを編集表示へ切替。モーダルは使用しない）。
   // 最後に開いたカテゴリをlocalStorageへ保存し初期表示を維持する。initialSettingsTabはレンダリングテスト用
-  const [settingsTab, setSettingsTab] = useState(initialSettingsTab);
+  // （nullは「閉じている」を表すため正規化しない。値が渡された場合のみ旧タブID等を安全に正規化する）
+  const [settingsTab, setSettingsTab] = useState(() => (initialSettingsTab ? normalizeSettingsTabId(initialSettingsTab) : null));
   // 編集開始時のスナップショット（「変更を破棄」時の復元用。変更自体は既存stateへ直接反映される）
   const settingsSnapshotRef = useRef(null);
   function currentSettingsValues() {
@@ -213,13 +204,15 @@ export default function TrainingView({
     });
   }
   function openSettingsTab(tabId) {
+    // 旧4タブ構成の値やその他の想定外の値が渡されても、必ず現行の有効なタブIDへ正規化する
+    const normalizedTabId = normalizeSettingsTabId(tabId);
     if (!settingsTab) {
       // 編集開始: 破棄時の復元用に現在値を採取（タブ切替では採取し直さない=編集内容を失わない）
       settingsSnapshotRef.current = currentSettingsValues();
     }
-    setSettingsTab(tabId);
+    setSettingsTab(normalizedTabId);
     try {
-      window.localStorage?.setItem(NEXT_SETTINGS_TAB_STORAGE_KEY, tabId);
+      window.localStorage?.setItem(NEXT_SETTINGS_TAB_STORAGE_KEY, normalizedTabId);
     } catch {
       // 保存失敗（容量等）は無視（表示状態はメモリ側で維持される）
     }
@@ -601,202 +594,35 @@ export default function TrainingView({
                           className={settingsLocked ? "opacity-70" : ""}
                           title={settingsLocked ? "学習実行中は設定を変更できません。" : undefined}
                         >
-                          {settingsTab === "split" ? (
-                            <div role="tabpanel" id="settings-panel-split" aria-labelledby="settings-tab-split" className="space-y-3">
-                              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                          {settingsTab === "training-settings" ? (
+                            <div
+                              role="tabpanel"
+                              id="settings-panel-training-settings"
+                              aria-labelledby="settings-tab-training-settings"
+                              className="space-y-4"
+                            >
+                              {/* セクション1: 学習パラメータ（上）。カードの過剰な入れ子を避けるため
+                                  枠線+薄い背景のセクションを1枚だけ使う（内側の入力欄は従来どおりgridのみ） */}
+                              <section className="space-y-3 rounded-xl border border-border/70 bg-card/40 p-3">
                                 <div>
-                                  <label className="app-label">
-                                    プロジェクト
-                                    <InfoHint text="学習対象のプロジェクトです。プロジェクト画面で切り替えできます。" />
-                                  </label>
-                                  <input className="app-input" value={projectId || ""} readOnly placeholder="未選択" />
-                                </div>
-                                <div>
-                                  <label className="app-label">
-                                    学習データ
-                                    <InfoHint text="学習に使用するデータセットのディレクトリです。データ作成後に自動設定されます。" />
-                                  </label>
-                                  <input className="app-input" value={ocrDatasetDir} readOnly placeholder="データ作成後に自動設定されます" />
-                                </div>
-                              </div>
-                              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                                <div>
-                                  <label className="app-label">学習データ作成方法</label>
-                                  <select
-                                    value={ocrDatasetCreateMode}
-                                    onChange={(e) => setOcrDatasetCreateMode(e.target.value)}
-                                    className="app-select"
-                                  >
-                                    <option value="new">新規作成（ラベルデータから）</option>
-                                    <option value="from_logs">再学習作成（OCRログから）</option>
-                                  </select>
-                                </div>
-                                {ocrDatasetCreateMode === "from_logs" ? (
-                                  <div className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-card/40 p-3 text-xs text-muted">
-                                    <label className="inline-flex items-center gap-2">
-                                      <input
-                                        type="checkbox"
-                                        checked={Boolean(ocrFromLogsOnlyInvalid)}
-                                        onChange={(e) => setOcrFromLogsOnlyInvalid(e.target.checked)}
-                                      />
-                                      invalidのみ対象
-                                    </label>
-                                    <label className="inline-flex items-center gap-2">
-                                      <input
-                                        type="checkbox"
-                                        checked={Boolean(ocrFromLogsIncludeCorrected)}
-                                        onChange={(e) => setOcrFromLogsIncludeCorrected(e.target.checked)}
-                                      />
-                                      correctedを優先
-                                    </label>
-                                  </div>
-                                ) : (
-                                  <p className="self-end pb-2 text-xs text-muted">
-                                    ラベル付け済みデータから学習データを新規作成します（作成は「実行操作」から実行）。
+                                  <p className="text-sm font-semibold text-text">学習パラメータ</p>
+                                  <p className="text-[11px] text-muted">
+                                    OCRタイプ・学習回数・演算デバイスなど、学習の実行条件を設定します。
                                   </p>
-                                )}
-                              </div>
-                              <div className="min-w-0 md:max-w-xl">
-                                <label className="app-label">
-                                  データ分割
-                                  <InfoHint text="Train / Validation / Test の分割比率（合計1.00）。0.05単位で変更でき、TestはTrain・Validationから自動計算されます（Test = 1.0 − Train − Val）。枚数は最大剰余法で算出され合計が必ず有効画像数と一致します。Tesseractでは Train→train.list / Validation→eval.list / Test→評価用 として使われます。" />
-                                </label>
-                                {/* 0.05単位入力。Testは自動計算（方式A）で合計エラーを構造的に防ぐ */}
-                                <div className="grid grid-cols-3 gap-1">
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    max="1"
-                                    step="0.05"
-                                    value={trainRatio}
-                                    onChange={(e) => {
-                                      const next = normalizeRatioInput(e.target.value);
-                                      setTrainRatio(next);
-                                      setTestRatio(autoTestRatio(next, valRatio));
-                                    }}
-                                    className="app-input min-w-0 px-2"
-                                    title="Train 比率"
-                                  />
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    max="1"
-                                    step="0.05"
-                                    value={valRatio}
-                                    onChange={(e) => {
-                                      const next = normalizeRatioInput(e.target.value);
-                                      setValRatio(next);
-                                      setTestRatio(autoTestRatio(trainRatio, next));
-                                    }}
-                                    className="app-input min-w-0 px-2"
-                                    title="Validation 比率"
-                                  />
-                                  <input
-                                    type="number"
-                                    value={testRatio}
-                                    readOnly
-                                    className="app-input min-w-0 px-2 opacity-80"
-                                    title="Test 比率（自動計算: 1.0 − Train − Val）"
-                                  />
                                 </div>
-                                <p className={`mt-1 text-[11px] ${ratioSummary.valid ? "text-muted" : "text-amber-100"}`}>
-                                  Train/Val/Test 合計: {ratioSummary.total}
-                                  {ratioSummary.valid ? "（Testは自動計算）" : "（1.00 になるよう調整してください）"}
-                                </p>
-                                {ratioError ? (
-                                  <p role="alert" className="mt-1 text-[11px] text-red-300">
-                                    {ratioError}
-                                  </p>
-                                ) : null}
-                                <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2">
-                                  <div>
-                                    <label className="app-label">
-                                      Split Seed
-                                      <InfoHint text="データ分割（シャッフル）に使う乱数の種です。同じ画像集合・同じ比率・同じSeedなら分割結果が完全に再現されます。モデルメタへ保存され学習条件比較で確認できます。" />
-                                    </label>
-                                    <input
-                                      type="number"
-                                      className="app-input"
-                                      value={ocrSplitSeed ?? 42}
-                                      onChange={(e) => setOcrSplitSeed?.(e.target.value)}
-                                    />
-                                  </div>
-                                  <Button
-                                    size="sm"
-                                    variant="secondary"
-                                    className="h-9 whitespace-nowrap px-2.5 text-[12px]"
-                                    disabled={Boolean(ocrSplitPreviewLoading)}
-                                    onClick={() => onPreviewSplit?.()}
-                                    title="現在の条件（charset・比率）での入力/有効画像数と分割予定枚数を確認します"
-                                  >
-                                    {ocrSplitPreviewLoading ? "確認中..." : "分割枚数を確認"}
-                                  </Button>
-                                </div>
-                                {ocrSplitPreview ? (
-                                  <div
-                                    aria-live="polite"
-                                    className="mt-2 rounded-lg border border-border/70 bg-card/55 px-2.5 py-2 text-[12px] tabular-nums"
-                                  >
-                                    <p className="text-text">
-                                      入力画像数 {ocrSplitPreview.input_count}枚 / 有効画像数 {ocrSplitPreview.valid_count}枚
-                                      {ocrSplitPreview.input_count - ocrSplitPreview.valid_count > 0
-                                        ? ` / 除外 ${ocrSplitPreview.input_count - ocrSplitPreview.valid_count}枚`
-                                        : ""}
-                                    </p>
-                                    {ocrSplitPreview.input_count - ocrSplitPreview.valid_count > 0 ? (
-                                      <p className="text-muted">
-                                        除外内訳: 対象外タイプ {ocrSplitPreview.skipped?.type ?? 0} / ラベル不正（charset外・空）{" "}
-                                        {ocrSplitPreview.skipped?.invalid_label ?? 0} / 元画像なし{" "}
-                                        {ocrSplitPreview.skipped?.missing_source ?? 0}
-                                      </p>
-                                    ) : null}
-                                    <p className="mt-0.5 text-text">
-                                      予定: Train {ocrSplitPreview.counts?.train}枚（
-                                      {((ocrSplitPreview.counts?.train / Math.max(1, ocrSplitPreview.valid_count)) * 100).toFixed(2)}
-                                      %）/ Val {ocrSplitPreview.counts?.val}枚 / Test {ocrSplitPreview.counts?.test}枚 = 合計{" "}
-                                      {(ocrSplitPreview.counts?.train ?? 0) +
-                                        (ocrSplitPreview.counts?.val ?? 0) +
-                                        (ocrSplitPreview.counts?.test ?? 0)}
-                                      枚
-                                    </p>
-                                    <p className="text-muted">
-                                      分割方式: 画像単位（設定比率と実枚数比率は端数処理でわずかに異なる場合があります）
-                                    </p>
-                                  </div>
-                                ) : null}
-                              </div>
-                            </div>
-                          ) : null}
-
-                          {settingsTab === "augmentation" ? (
-                            <div role="tabpanel" id="settings-panel-augmentation" aria-labelledby="settings-tab-augmentation">
-                              <AugmentationSettingsPanel
-                                augmentation={ocrAugmentation}
-                                onChange={setOcrAugmentation}
-                                disabled={settingsLocked}
-                                preview={ocrAugPreview}
-                                previewLoading={ocrAugPreviewLoading}
-                                onRegeneratePreview={(count) => onPreviewAugmentation?.(count)}
-                                trainCount={ocrSplitPreview?.counts?.train ?? null}
-                              />
-                            </div>
-                          ) : null}
-
-                          {settingsTab === "params" ? (
-                            <div role="tabpanel" id="settings-panel-params" aria-labelledby="settings-tab-params" className="space-y-3">
                               <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                                 <div>
                                   <label className="app-label">OCRタイプ</label>
                                   <select value={ocrEngine} onChange={(e) => setOcrEngine(e.target.value)} className="app-select">
                                     <option value="paddleocr">PaddleOCR（学習可）</option>
-                                    <option value="tesseract">Tesseract（学習可 / A-Z・0-9・筆記体klt）</option>
+                                    <option value="tesseract">Tesseract（学習可 / A-Z・0-9・筆記体klt・記号+-）</option>
                                     <option value="easyocr">EasyOCR（推論専用）</option>
                                   </select>
                                 </div>
                                 <div>
                                   <label className="app-label">
                                     {isTesseractEngine ? "最大イテレーション" : "学習回数"}
-                                    <InfoHint text="学習の繰り返し回数です。PaddleOCR / EasyOCR では Epoch 数、Tesseract では Iteration 数として使用します。Tesseractでは一般的に500〜3000程度で学習します。" />
+                                    <InfoTooltip title={isTesseractEngine ? "最大イテレーション" : "学習回数"} body="学習の繰り返し回数です。PaddleOCR / EasyOCR では Epoch 数、Tesseract では Iteration 数として使用します。Tesseractでは一般的に500〜3000程度で学習します。" />
                                   </label>
                                   <input
                                     type="number"
@@ -815,7 +641,7 @@ export default function TrainingView({
                               <div>
                                 <label className="app-label">
                                   演算デバイス
-                                  <InfoHint text="学習に使用する演算デバイスです。auto はGPUが利用可能な場合にGPUを使用します。TesseractはCPUのみ対応しています。" />
+                                  <InfoTooltip title="演算デバイス" body="学習に使用する演算デバイスです。auto はGPUが利用可能な場合にGPUを使用します。TesseractはCPUのみ対応しています。" />
                                 </label>
                                 <div className="grid h-8 max-w-md grid-cols-3 gap-1.5">
                                   {[
@@ -887,10 +713,197 @@ export default function TrainingView({
                               <div className="md:max-w-md">
                                 <label className="app-label">
                                   出力先
-                                  <InfoHint text="学習済みモデルの保存先です（変更不可）。" />
+                                  <InfoTooltip title="出力先" body="学習済みモデルの保存先です（変更不可）。" />
                                 </label>
                                 <input className="app-input" value={`data/projects/${projectId || "<project>"}/models/`} readOnly />
                               </div>
+                              </section>
+                              <div className="border-t border-border/60" />
+                              {/* セクション2: データ分割（下） */}
+                              <section className="space-y-3 rounded-xl border border-border/70 bg-card/40 p-3">
+                                <div>
+                                  <p className="text-sm font-semibold text-text">データ分割</p>
+                                  <p className="text-[11px] text-muted">
+                                    学習・検証・評価に使う画像の割り当てと、対象プロジェクト・学習データを確認します。
+                                  </p>
+                                </div>
+                              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                                <div>
+                                  <label className="app-label">
+                                    プロジェクト
+                                    <InfoTooltip title="プロジェクト" body="学習対象のプロジェクトです。プロジェクト画面で切り替えできます。" />
+                                  </label>
+                                  <input className="app-input" value={projectId || ""} readOnly placeholder="未選択" />
+                                </div>
+                                <div>
+                                  <label className="app-label">
+                                    学習データ
+                                    <InfoTooltip title="学習データ" body="学習に使用するデータセットのディレクトリです。データ作成後に自動設定されます。" />
+                                  </label>
+                                  <input className="app-input" value={ocrDatasetDir} readOnly placeholder="データ作成後に自動設定されます" />
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                                <div>
+                                  <label className="app-label">学習データ作成方法</label>
+                                  <select
+                                    value={ocrDatasetCreateMode}
+                                    onChange={(e) => setOcrDatasetCreateMode(e.target.value)}
+                                    className="app-select"
+                                  >
+                                    <option value="new">新規作成（ラベルデータから）</option>
+                                    <option value="from_logs">再学習作成（OCRログから）</option>
+                                  </select>
+                                </div>
+                                {ocrDatasetCreateMode === "from_logs" ? (
+                                  <div className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-card/40 p-3 text-xs text-muted">
+                                    <label className="inline-flex items-center gap-2">
+                                      <input
+                                        type="checkbox"
+                                        checked={Boolean(ocrFromLogsOnlyInvalid)}
+                                        onChange={(e) => setOcrFromLogsOnlyInvalid(e.target.checked)}
+                                      />
+                                      invalidのみ対象
+                                    </label>
+                                    <label className="inline-flex items-center gap-2">
+                                      <input
+                                        type="checkbox"
+                                        checked={Boolean(ocrFromLogsIncludeCorrected)}
+                                        onChange={(e) => setOcrFromLogsIncludeCorrected(e.target.checked)}
+                                      />
+                                      correctedを優先
+                                    </label>
+                                  </div>
+                                ) : (
+                                  <p className="self-end pb-2 text-xs text-muted">
+                                    ラベル付け済みデータから学習データを新規作成します（作成は「実行操作」から実行）。
+                                  </p>
+                                )}
+                              </div>
+                              <div className="min-w-0 md:max-w-xl">
+                                <label className="app-label">
+                                  データ分割
+                                  <InfoTooltip title="データ分割" body="Train / Validation / Test の分割比率（合計1.00）。0.05単位で変更でき、TestはTrain・Validationから自動計算されます（Test = 1.0 − Train − Val）。枚数は最大剰余法で算出され合計が必ず有効画像数と一致します。Tesseractでは Train→train.list / Validation→eval.list / Test→評価用 として使われます。" />
+                                </label>
+                                {/* 0.05単位入力。Testは自動計算（方式A）で合計エラーを構造的に防ぐ */}
+                                <div className="grid grid-cols-3 gap-1">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max="1"
+                                    step="0.05"
+                                    value={trainRatio}
+                                    onChange={(e) => {
+                                      const next = normalizeRatioInput(e.target.value);
+                                      setTrainRatio(next);
+                                      setTestRatio(autoTestRatio(next, valRatio));
+                                    }}
+                                    className="app-input min-w-0 px-2"
+                                    title="Train 比率"
+                                  />
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max="1"
+                                    step="0.05"
+                                    value={valRatio}
+                                    onChange={(e) => {
+                                      const next = normalizeRatioInput(e.target.value);
+                                      setValRatio(next);
+                                      setTestRatio(autoTestRatio(trainRatio, next));
+                                    }}
+                                    className="app-input min-w-0 px-2"
+                                    title="Validation 比率"
+                                  />
+                                  <input
+                                    type="number"
+                                    value={testRatio}
+                                    readOnly
+                                    className="app-input min-w-0 px-2 opacity-80"
+                                    title="Test 比率（自動計算: 1.0 − Train − Val）"
+                                  />
+                                </div>
+                                <p className={`mt-1 text-[11px] ${ratioSummary.valid ? "text-muted" : "text-amber-100"}`}>
+                                  Train/Val/Test 合計: {ratioSummary.total}
+                                  {ratioSummary.valid ? "（Testは自動計算）" : "（1.00 になるよう調整してください）"}
+                                </p>
+                                {ratioError ? (
+                                  <p role="alert" className="mt-1 text-[11px] text-red-300">
+                                    {ratioError}
+                                  </p>
+                                ) : null}
+                                <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2">
+                                  <div>
+                                    <label className="app-label">
+                                      Split Seed
+                                      <InfoTooltip title="Split Seed" body="データ分割（シャッフル）に使う乱数の種です。同じ画像集合・同じ比率・同じSeedなら分割結果が完全に再現されます。モデルメタへ保存され学習条件比較で確認できます。" />
+                                    </label>
+                                    <input
+                                      type="number"
+                                      className="app-input"
+                                      value={ocrSplitSeed ?? 42}
+                                      onChange={(e) => setOcrSplitSeed?.(e.target.value)}
+                                    />
+                                  </div>
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    className="h-9 whitespace-nowrap px-2.5 text-[12px]"
+                                    disabled={Boolean(ocrSplitPreviewLoading)}
+                                    onClick={() => onPreviewSplit?.()}
+                                    title="現在の条件（charset・比率）での入力/有効画像数と分割予定枚数を確認します"
+                                  >
+                                    {ocrSplitPreviewLoading ? "確認中..." : "分割枚数を確認"}
+                                  </Button>
+                                </div>
+                                {ocrSplitPreview ? (
+                                  <div
+                                    aria-live="polite"
+                                    className="mt-2 rounded-lg border border-border/70 bg-card/55 px-2.5 py-2 text-[12px] tabular-nums"
+                                  >
+                                    <p className="text-text">
+                                      入力画像数 {ocrSplitPreview.input_count}枚 / 有効画像数 {ocrSplitPreview.valid_count}枚
+                                      {ocrSplitPreview.input_count - ocrSplitPreview.valid_count > 0
+                                        ? ` / 除外 ${ocrSplitPreview.input_count - ocrSplitPreview.valid_count}枚`
+                                        : ""}
+                                    </p>
+                                    {ocrSplitPreview.input_count - ocrSplitPreview.valid_count > 0 ? (
+                                      <p className="text-muted">
+                                        除外内訳: 対象外タイプ {ocrSplitPreview.skipped?.type ?? 0} / ラベル不正（charset外・空）{" "}
+                                        {ocrSplitPreview.skipped?.invalid_label ?? 0} / 元画像なし{" "}
+                                        {ocrSplitPreview.skipped?.missing_source ?? 0}
+                                      </p>
+                                    ) : null}
+                                    <p className="mt-0.5 text-text">
+                                      予定: Train {ocrSplitPreview.counts?.train}枚（
+                                      {((ocrSplitPreview.counts?.train / Math.max(1, ocrSplitPreview.valid_count)) * 100).toFixed(2)}
+                                      %）/ Val {ocrSplitPreview.counts?.val}枚 / Test {ocrSplitPreview.counts?.test}枚 = 合計{" "}
+                                      {(ocrSplitPreview.counts?.train ?? 0) +
+                                        (ocrSplitPreview.counts?.val ?? 0) +
+                                        (ocrSplitPreview.counts?.test ?? 0)}
+                                      枚
+                                    </p>
+                                    <p className="text-muted">
+                                      分割方式: 画像単位（設定比率と実枚数比率は端数処理でわずかに異なる場合があります）
+                                    </p>
+                                  </div>
+                                ) : null}
+                              </div>
+                              </section>
+                            </div>
+                          ) : null}
+
+                          {settingsTab === "augmentation" ? (
+                            <div role="tabpanel" id="settings-panel-augmentation" aria-labelledby="settings-tab-augmentation">
+                              <AugmentationSettingsPanel
+                                augmentation={ocrAugmentation}
+                                onChange={setOcrAugmentation}
+                                disabled={settingsLocked}
+                                preview={ocrAugPreview}
+                                previewLoading={ocrAugPreviewLoading}
+                                onRegeneratePreview={(count) => onPreviewAugmentation?.(count)}
+                                trainCount={ocrSplitPreview?.counts?.train ?? null}
+                              />
                             </div>
                           ) : null}
 
@@ -909,14 +922,14 @@ export default function TrainingView({
                                     <div>
                                       <label className="app-label">
                                         Base Model
-                                        <InfoHint text="fine-tune のベースとなる公式学習済みモデルです（固定）。" />
+                                        <InfoTooltip title="Base Model" body="fine-tune のベースとなる公式学習済みモデルです（固定）。" />
                                       </label>
                                       <input className="app-input" value="eng.traineddata" readOnly />
                                     </div>
                                     <div>
                                       <label className="app-label">
                                         PSM
-                                        <InfoHint text="Tesseractのページセグメンテーションモードです。1行テキスト向けの 7 に固定されています。" />
+                                        <InfoTooltip title="PSM" body="Tesseractのページセグメンテーションモードです。1行テキスト向けの 7 に固定されています。" />
                                       </label>
                                       <input className="app-input" value="7" readOnly />
                                     </div>
@@ -924,7 +937,7 @@ export default function TrainingView({
                                   <div>
                                     <label className="app-label">
                                       学習対象文字セット（Charset）
-                                      <InfoHint text="学習対象の文字セットです。charset外の文字を含むラベルは学習から除外されます（文字削除はしません）。" />
+                                      <InfoTooltip title="学習対象文字セット（Charset）" body="学習対象の文字セットです。charset外の文字を含むラベルは学習から除外されます（文字削除はしません）。" />
                                     </label>
                                     <input
                                       className="app-input"
@@ -942,7 +955,7 @@ export default function TrainingView({
                                   <div>
                                     <label className="app-label">
                                       Whitelist
-                                      <InfoHint text="推論時に許可する文字の一覧（既定値）です。学習内容には影響しません。" />
+                                      <InfoTooltip title="Whitelist" body="推論時に許可する文字の一覧（既定値）です。学習内容には影響しません。" />
                                     </label>
                                     <input className="app-input" value={TESSERACT_CHARSET_DEFAULT} readOnly />
                                     <p className="mt-1 text-xs text-muted">推論時whitelist（既定）</p>
@@ -952,7 +965,7 @@ export default function TrainingView({
                                     <div>
                                       <label className="app-label">
                                         実験名
-                                        <InfoHint text="この学習の目的が分かる名前です（例: Iteration 15000）。モデルメタへ保存され、モデル比較の学習条件比較で表示されます。" />
+                                        <InfoTooltip title="実験名" body="この学習の目的が分かる名前です（例: Iteration 15000）。モデルメタへ保存され、モデル比較の学習条件比較で表示されます。" />
                                       </label>
                                       <input
                                         className="app-input"
@@ -964,7 +977,7 @@ export default function TrainingView({
                                     <div>
                                       <label className="app-label">
                                         親モデル（管理No）
-                                        <InfoHint text="このモデルの学習開始時に参照した直前のモデルの管理Noです。派生関係の追跡用で、学習内容には影響しません（ベース直学習は空欄）。" />
+                                        <InfoTooltip title="親モデル（管理No）" body="このモデルの学習開始時に参照した直前のモデルの管理Noです。派生関係の追跡用で、学習内容には影響しません（ベース直学習は空欄）。" />
                                       </label>
                                       <input
                                         className="app-input"
@@ -977,7 +990,7 @@ export default function TrainingView({
                                   <div>
                                     <label className="app-label">
                                       学習メモ
-                                      <InfoHint text="前回から変更した内容などの自由記述です。モデルメタへ保存され、学習条件比較で表示されます。" />
+                                      <InfoTooltip title="学習メモ" body="前回から変更した内容などの自由記述です。モデルメタへ保存され、学習条件比較で表示されます。" />
                                     </label>
                                     <textarea
                                       className="app-input min-h-[64px] py-1.5"
@@ -1087,12 +1100,12 @@ export default function TrainingView({
                                       ) : null}
                                     </div>
                                     {/* ラベルは日本語＋折り返し禁止（whitespace-nowrap）で3項目の高さを揃える。
-                                        内部キー（save_epoch_step / train・eval num_workers）は変更せずInfoHintで示す */}
+                                        内部キー（save_epoch_step / train・eval num_workers）は変更せずInfoTooltipで示す */}
                                     <div className="grid grid-cols-3 gap-2">
                                       <div className="min-w-0">
                                         <label className="app-label whitespace-nowrap">
                                           エポック数
-                                          <InfoHint text="チェックポイントを保存するエポック間隔です（内部キー: save_epoch_step）。学習回数そのものはプロジェクト設定の「学習回数」で指定します。" />
+                                          <InfoTooltip title="エポック数" body="チェックポイントを保存するエポック間隔です（内部キー: save_epoch_step）。学習回数そのものはプロジェクト設定の「学習回数」で指定します。" />
                                         </label>
                                         <input
                                           type="number"
@@ -1105,7 +1118,7 @@ export default function TrainingView({
                                       <div className="min-w-0">
                                         <label className="app-label whitespace-nowrap">
                                           学習ワーカー数
-                                          <InfoHint text="学習データ読み込みの並列プロセス数です（内部キー: train num_workers）。Mac環境では0〜1推奨です。" />
+                                          <InfoTooltip title="学習ワーカー数" body="学習データ読み込みの並列プロセス数です（内部キー: train num_workers）。Mac環境では0〜1推奨です。" />
                                         </label>
                                         <input
                                           type="number"
@@ -1118,7 +1131,7 @@ export default function TrainingView({
                                       <div className="min-w-0">
                                         <label className="app-label whitespace-nowrap">
                                           評価ワーカー数
-                                          <InfoHint text="評価データ読み込みの並列プロセス数です（内部キー: eval num_workers）。Mac環境では0〜1推奨です。" />
+                                          <InfoTooltip title="評価ワーカー数" body="評価データ読み込みの並列プロセス数です（内部キー: eval num_workers）。Mac環境では0〜1推奨です。" />
                                         </label>
                                         <input
                                           type="number"
@@ -1193,7 +1206,7 @@ export default function TrainingView({
                                     <div>
                                       <label className="app-label">
                                         文字セット（charset）
-                                        <InfoHint text="学習対象の文字セットです。PaddleOCRでは大文字に正規化されます。" />
+                                        <InfoTooltip title="文字セット（charset）" body="学習対象の文字セットです。PaddleOCRでは大文字に正規化されます。" />
                                       </label>
                                       <input
                                         className="app-input"
@@ -1242,7 +1255,7 @@ export default function TrainingView({
                                       <div>
                                         <label className="app-label">
                                           バッチサイズ
-                                          <InfoHint text="1ステップで処理する画像枚数です。Batch自動最適化がONの場合はVRAM基準で調整されます。" />
+                                          <InfoTooltip title="バッチサイズ" body="1ステップで処理する画像枚数です。Batch自動最適化がONの場合はVRAM基準で調整されます。" />
                                         </label>
                                         <input
                                           type="number"
@@ -1254,7 +1267,7 @@ export default function TrainingView({
                                       <div>
                                         <label className="app-label">
                                           最大文字数
-                                          <InfoHint text="1ラベルあたりの最大文字数（max_text_length）です。" />
+                                          <InfoTooltip title="最大文字数" body="1ラベルあたりの最大文字数（max_text_length）です。" />
                                         </label>
                                         <input
                                           type="number"
@@ -1613,7 +1626,7 @@ export default function TrainingView({
                     </span>
                     次回学習の設定
                     <span className="ml-auto text-[11px] font-normal text-muted">
-                      {settingsLocked ? "学習実行中は変更できません" : "データ分割・オーグメンテーション・学習パラメータ・エンジン設定"}
+                      {settingsLocked ? "学習実行中は変更できません" : "学習設定・オーグメンテーション・エンジン設定"}
                     </span>
                   </button>
                   {/* 本文はカテゴリサマリーのみ（狭い左カラムで全設定を直接編集しない）。
@@ -1630,10 +1643,15 @@ export default function TrainingView({
                     </p>
                     {[
                       {
-                        id: "split",
-                        label: "データ分割",
-                        summary: `${trainRatio} / ${valRatio} / ${testRatio}`,
-                        sub: `Split Seed: ${ocrSplitSeed ?? 42}`,
+                        id: "training-settings",
+                        label: "学習設定",
+                        summary: `${engineDisplayLabel} / ${isTesseractEngine ? "Iteration" : "Epoch"} ${epochs}`,
+                        // 学習パラメータ（エンジン・演算デバイス）とデータ分割（比率・Seed）の主要値を両方表示する
+                        sub: [
+                          isTesseractEngine ? "CPU" : `演算デバイス: ${ocrTrainDevice}`,
+                          `Train / Val / Test: ${trainRatio} / ${valRatio} / ${testRatio}`,
+                          `Split Seed: ${ocrSplitSeed ?? 42}`,
+                        ],
                       },
                       {
                         id: "augmentation",
@@ -1642,12 +1660,6 @@ export default function TrainingView({
                         sub: isAugmentationOff(ocrAugmentation)
                           ? ""
                           : `平均適用確率: ${averageAugProbabilityPercent(ocrAugmentation) ?? "--"}%`,
-                      },
-                      {
-                        id: "params",
-                        label: "学習パラメータ",
-                        summary: `${engineDisplayLabel} / ${isTesseractEngine ? "Iteration" : "Epoch"} ${epochs}`,
-                        sub: `演算デバイス: ${isTesseractEngine ? "CPU" : ocrTrainDevice}`,
                       },
                       { id: "engine", label: "エンジン設定", summary: engineSummaryLabel, sub: "" },
                     ].map((row) => (
@@ -1664,7 +1676,15 @@ export default function TrainingView({
                           <p className="truncate text-[11px] text-muted" title={row.summary}>
                             {row.summary}
                           </p>
-                          {row.sub ? <p className="truncate text-[11px] text-muted">{row.sub}</p> : null}
+                          {Array.isArray(row.sub)
+                            ? row.sub.map((line) => (
+                                <p key={line} className="truncate text-[11px] text-muted">
+                                  {line}
+                                </p>
+                              ))
+                            : row.sub
+                              ? <p className="truncate text-[11px] text-muted">{row.sub}</p>
+                              : null}
                         </div>
                         <span aria-hidden="true" className="shrink-0 text-base leading-none text-muted">
                           ＞

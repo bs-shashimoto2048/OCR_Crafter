@@ -8,7 +8,7 @@
 A. 画像の取り込み・前処理・ラベル付け・データセット作成・OCRモデルの学習（Tesseract/PaddleOCR）・評価・推論・修正・モデル管理・リリース管理・レポート生成までを、ローカル環境のWeb UIで一貫して行えます。
 
 **Q. TesseractとPaddleOCRの違いは何ですか**
-A. どちらも学習・推論に対応するOCRエンジンです。Tesseractは軽量でCPUのみで動作し、LSTM fine-tune（既定charset `A-Z0-9klt`）に対応します。PaddleOCRはディープラーニングベースの認識モデルを学習でき、GPUで高速化できます。用途に対する優劣はデータ依存のため、Benchmarkで同一条件比較して選定してください。
+A. どちらも学習・推論に対応するOCRエンジンです。Tesseractは軽量でCPUのみで動作し、LSTM fine-tune（既定charset `A-Z0-9klt+-`）に対応します。PaddleOCRはディープラーニングベースの認識モデルを学習でき、GPUで高速化できます。用途に対する優劣はデータ依存のため、Benchmarkで同一条件比較して選定してください。
 
 **Q. GPUは必須ですか**
 A. 必須ではありません。全機能がCPUで動作します。GPUがあるとPaddleOCR学習などが高速化されます。

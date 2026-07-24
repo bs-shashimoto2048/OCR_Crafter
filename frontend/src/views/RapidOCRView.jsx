@@ -10,8 +10,8 @@ import { lowercaseToggleApplicable } from "../lib/lowercase";
 
 const BUSINESS_PATTERN = /^[A-Z0-9]{8}$/;
 const FORBIDDEN = new Set(["AAAAAAAA", "00000000"]);
-// Tesseract実運用の文字セット（大文字A-Z / 数字 / 小文字筆記体 k,l,t）
-const TESSERACT_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt";
+// Tesseract実運用の文字セット（大文字A-Z / 数字 / 小文字筆記体 k,l,t / 記号 + -）
+const TESSERACT_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt+-";
 const STATUS_LABELS = {
   all: "全て",
   unprocessed: "未処理",

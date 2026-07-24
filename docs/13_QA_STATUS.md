@@ -8,7 +8,7 @@
 
 | 工程 | 結果 | 確認内容 |
 |---|---|---|
-| データセット作成 | ✅ | charset=A-Z0-9klt / text_case=keep / `CHYBkt` 非改変 |
+| データセット作成 | ✅ | charset=A-Z0-9klt+- / text_case=keep / `CHYBkt` 非改変 |
 | from_logs | ✅ | /api/ocr/log/save → from_logs、混在ラベル保持 |
 | 学習 | ✅ | 200イテレーションで completed、skipped集計動作 |
 | モデル登録 | ✅ | .tess.json 生成、/models・info・latest 反映 |

@@ -35,7 +35,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 PROJECT = "e2etest"
-CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt"
+CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt+-"
 FONT_DIR = r"C:\Windows\Fonts"
 
 

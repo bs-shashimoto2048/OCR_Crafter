@@ -2,7 +2,7 @@
 
 Tesseract の学習・推論・評価が動くことを確認するチェックリスト（Windows PowerShell 前提、バックエンドは `http://127.0.0.1:8000` 起動済みとする）。
 
-> 学習対象文字セット: `ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt`（A-Z / 0-9 / 小文字筆記体 k,l,t）
+> 学習対象文字セット: `ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt+-`（A-Z / 0-9 / 小文字筆記体 k,l,t / 記号 +,-）
 > whitelist（推論時の探索制約）は別概念。既定は学習対象と同値。詳細は `docs/12_TESSERACT_CHARSET_SPEC.md`。
 
 ## 1. ツールの存在確認
@@ -40,7 +40,7 @@ tesseract:
   combine_tessdata_cmd: "C:\\Program Files\\Tesseract-OCR\\combine_tessdata.exe"
   tessdata_dir: "C:/path/to/ocr_crafter/models/tessdata_best"
   base_lang: eng
-  default_charset: ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt
+  default_charset: ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt+-
   default_max_iterations: 1000
   default_psm: 7
 ```
@@ -50,9 +50,9 @@ tesseract:
 ## 4. 学習データセット作成（新規作成）
 
 UI: サイドバー `OCRモデル > データ作成・学習` で `学習方式=ocr` / `OCRタイプ=Tesseract` → `OCRデータ作成`。
-API: `POST /api/ocr/dataset/create`（`charset=A-Z0-9klt`, `text_case=keep`, `image_shape=[1,48,320]`）
+API: `POST /api/ocr/dataset/create`（`charset=A-Z0-9klt+-`, `text_case=keep`, `image_shape=[1,48,320]`）
 
-- [ ] `meta.json` の `charset` が `ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt`、`text_case` が `keep`
+- [ ] `meta.json` の `charset` が `ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt+-`、`text_case` が `keep`
 - [ ] `train.txt` のラベルが元の表記のまま（`CHYBkt` が `chybkt`/`CHYBKT` に改変されない）
 - [ ] charset外の文字を含むラベルは「文字削除」ではなく**サンプル除外**される
 
@@ -91,14 +91,14 @@ API: `POST /api/ocr/dataset/create`（`charset=A-Z0-9klt`, `text_case=keep`, `im
 
 - [ ] `model=eng` で eng.traineddata（学習前ベースライン）推論ができる
 - [ ] `model=latest` で学習済み最新モデルの推論ができる
-- [ ] 認識結果が whitelist（`A-Z0-9klt`）内の文字のみ
+- [ ] 認識結果が whitelist（`A-Z0-9klt+-`）内の文字のみ
 - [ ] TSV信頼度（confidence）が返る
 - [ ] Tesseract未導入環境では導入案内つきエラー（クラッシュしない）
 
 ## 9. 評価（学習前後比較・CER主指標）
 
 UI: サイドバー `OCRモデル > モデル評価`。API: `POST /api/ocr/evaluate`
-（targets に eng と latest、`charset=A-Z0-9klt`＝実運用whitelist、空文字=whitelistなし）。
+（targets に eng と latest、`charset=A-Z0-9klt+-`＝実運用whitelist、空文字=whitelistなし）。
 
 - [ ] 比較は **case-sensitive**（`KT` と `kt` は別物。trim＋Unicode NFC正規化のみ・NFKC不使用）
 - [ ] `targets` に `cer`（マイクロ平均）/ `char_accuracy` / `confusions`（置換/脱落/挿入TOP10）が入る

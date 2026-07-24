@@ -13,7 +13,7 @@
 
 | エンジン | 学習 | 推論 | 備考 |
 |---|---|---|---|
-| Tesseract | ○（LSTM fine-tune） | ○ | 学習対象文字 `A-Z0-9klt`（[docs/12](docs/12_TESSERACT_CHARSET_SPEC.md)） |
+| Tesseract | ○（LSTM fine-tune） | ○ | 学習対象文字 `A-Z0-9klt+-`（[docs/12](docs/12_TESSERACT_CHARSET_SPEC.md)） |
 | PaddleOCR | ○（認識モデル） | ○ | `external/PaddleOCR` を使用 |
 | EasyOCR | ×（推論のみ） | ○ | |
 | custom（分類モデル） | ○（実験機能） | ○ | 文字分割ベースの分類学習 |

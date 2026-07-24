@@ -183,9 +183,9 @@ tesseract:
   tessdata_dir: "C:/Users/shashimoto/project/workspace_codex/ocr_crafter/models/tessdata_best"
   # fine-tune のベース言語（英語筆記体の小文字学習は eng を使用）
   base_lang: eng
-  # 学習対象文字セット（英大文字A-Z / 数字0-9 / 小文字筆記体 k,l,t）
+  # 学習対象文字セット（英大文字A-Z / 数字0-9 / 小文字筆記体 k,l,t / 記号 +,-）
   # ※whitelist（推論時の探索制約）は別概念。既定はこの値と同じだが独立に変更可
-  default_charset: ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt
+  default_charset: ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt+-
   # LSTM fine-tune の最大イテレーション数
   default_max_iterations: 1000
   # 単一行認識用の Page Segmentation Mode

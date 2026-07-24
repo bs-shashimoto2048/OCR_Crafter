@@ -128,7 +128,7 @@ export const PROJECT_TEMPLATES = [
       caseSensitive: true,
       augmentation: "弱い（データ拡張は弱めの初期値）",
       evaluation: { primary: "cer", secondary: "exact_match", exactMatchEnabled: true },
-      notes: ["文字セット（charset）を明示的に管理する（例: A-Z0-9klt）", "CERと完全一致率の両方を確認"],
+      notes: ["文字セット（charset）を明示的に管理する（例: A-Z0-9klt+-）", "CERと完全一致率の両方を確認"],
     },
     guidance: ["学習時のデータ拡張プリセットは「弱い」から始めてください"],
   },

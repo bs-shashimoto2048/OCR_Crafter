@@ -61,7 +61,7 @@
 
 - **原因**: 正解CSV・ラベルの文字コード / エンジンの言語設定
 - **確認**: CSV・ラベルがUTF-8か。EasyOCRの言語設定（`easyocr_langs`）
-- **対処**: UTF-8で保存し直す。日本語認識はPaddleOCR/EasyOCRの日本語対応設定を使用（Tesseractの既定charsetは英数字向け `A-Z0-9klt`）
+- **対処**: UTF-8で保存し直す。日本語認識はPaddleOCR/EasyOCRの日本語対応設定を使用（Tesseractの既定charsetは英数字向け `A-Z0-9klt+-`）
 
 ### GPUが利用されない
 
