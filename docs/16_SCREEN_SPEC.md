@@ -134,32 +134,48 @@ flowchart LR
 - 現在のプロジェクト（統計4項目・進捗バー・代表サムネイル最大4枚・作成元テンプレート）
 - ワークフロー進捗と「続きから作業」クイックアクション
 
-**表示内容（下段: プロジェクト一覧・v1.0.0で品質・運用指標を追加して1行あたりの情報量を拡張）**
+**表示内容（下段: プロジェクト一覧・v1.0.0でカードビューへ全面刷新。「一覧を見る」ではなく「プロジェクトを管理する」プロジェクト管理ダッシュボードとして再設計）**
 
-現在のテーブルレイアウト（ヘッダー行＋1プロジェクト1行）は維持しつつ、1行を「プロジェクト情報」の1行と、既存の各種カウント/進捗の1行の内容を1つの行（高さ約1.5倍）へまとめている。
+旧テーブルレイアウト（ヘッダー行＋1プロジェクト1行）は廃止し、CSS GridによるカードビューへUIを刷新した。カード1枚＝プロジェクト1件。高さ約340px・幅はGridに応じて可変。カード全体クリック（`role="button"` `tabIndex=0`・Enter/Space対応・`aria-label`つき）で「開く」と同じ動作になる。
 
-| 列 | 内容 | 表示例 |
+**Gridレスポンシブ列数**（横スクロールなし）
+
+| 画面幅 | 列数 |
+|---|---|
+| 1920px以上 | 3列 |
+| 1100〜1919px | 2列 |
+| 1099px以下 | 1列 |
+
+**カード構成（5セクション）**
+
+| セクション | 内容 | 表示例 |
 |---|---|---|
-| サムネイル | 約64×40（実寸44×36）。優先順位: ①選択中プロジェクトの代表画像（現在のプロジェクトのpreviewItems先頭と同一）②プロジェクトの最初の画像（`GET /projects` summaries の `sample_image` をサーバー生成サムネイルAPIで取得）③EmptyStateアイコン（⊘・共通コンポーネントと同じ表記） | ─ |
-| プロジェクト | 1行目=★（選択中のみ表示）+プロジェクト名。2行目=作成元テンプレート（`config/projectTemplates.js` の `templateOriginLabel`。記録なしは「記録なし」・標準は「標準設定」＝既存仕様のまま） | `★ tube_20260710` / `銘板OCR (v1)` |
-| 状態 | 既存の状態語彙のみを色分け（新しい状態は追加しない）。優先順位: **使用中**（選択中）＞**学習中**/**評価中**（当該プロジェクトで training/evaluation Jobがqueued・running）＞**Archived**（Productionが無く全モデルがArchived）＞記録なし（—） | 🟢使用中 / 🟡学習中 / 🔵評価中 / ⚪Archived / — |
-| Production | Productionモデルが存在する場合のみ「Production」ラベル＋管理No（M0001形式）。存在しなければ—。Candidateのみの場合はここに表示しない（Production判定ロジックは不変） | `Production` / `M0009` |
-| 更新日時 *(ソート可)* | プロジェクトディレクトリの最終更新（既存の`updated_at`。今回フロント側で summaries→state への転記漏れを修正） | `07/23 17:47` |
-| 画像 *(ソート可)* | 画像枚数 | `1000` |
-| ラベル *(ソート可)* | 完了/合計＋% | `1000 / 1000` |
-| モデル *(ソート可)* | 学習済みモデル数 | `9` |
-| Benchmark | Benchmark件数。0件は— | `7件` / `—` |
-| Best CER *(ソート可)* | 優先順位: ①最新Production（評価記録があるモデル）②Candidate（評価記録があるモデルの中で最良）③Best Model（プロジェクト内の評価済みモデルで最良）④記録なし=—。**推測補完はしない**（評価未実施は常に—） | `0.91%` / `—` |
-| 進捗 | 既存の4要素均等配分の進捗バー＋%はそのまま維持し、その下へ現在の工程名を追加表示（実行中Jobがあれば「モデル学習」「評価」を最優先、無ければ画像/ラベル/モデル/Productionの各カウントから簡易推定） | `75% / 評価` |
-| 操作 | アイコンボタン6種: 開く・学習（ocr-training）・評価（ocr-eval）・Benchmark・レポート（reports）・削除。学習・開くは常時有効、評価/レポートはモデル0件で無効、Benchmarkは画像0件で無効（disabled+title案内）。いずれも既存画面への遷移のみで新規APIは不要 | 📂🧠📈🏁📄🗑 |
+| ①ヘッダー | 左=サムネイル約64×48（優先順位: ①選択中プロジェクトの代表画像②プロジェクトの最初の画像＝`GET /projects` summaries の `sample_image` をサーバー生成サムネイルAPIで取得③EmptyStateアイコン⊘。画像がプロジェクトの識別子になるため大きめに表示）。右=プロジェクト名＋状態バッジ（既存の状態語彙のみ色分け。優先順位: **使用中**＞**学習中**/**評価中**＞**Archived**＞記録なし）＋テンプレート名。Productionモデルがあれば「Production」＋管理No（M0001形式）も表示。右上に「・・・」メニュー（削除はここへ集約。誤操作防止のため独立） | `tube_20260710` / `🟢 使用中` / `銘板OCR` / `Production M0009` |
+| ②品質情報 | 2列。左=画像数/ラベル数/モデル数。右=Benchmark件数/Best CER/Exact Match。Best CERの優先順位は従来どおり①最新Production②Candidate③Best Model④記録なし=—（推測補完しない）。**Exact MatchはBest CERと同一モデル・同一評価の値のみを使用し、未記録の場合は行自体を非表示にする**（—表示も推測補完もしない） | `画像 1000` / `Best CER 0.91%` / `Exact Match 92.34%` |
+| ③進捗 | 既存の4要素均等配分の進捗バー＋%はそのまま維持し、その下へ現在の工程名を表示（実行中Jobがあれば「モデル学習」「評価」を最優先、無ければ画像/ラベル/モデル/Productionの各カウントから簡易推定。工程が特定できない場合のみ「—」・推測表示はしない） | `現在の工程: 評価` / `75%` |
+| ④クイックアクション | 横並びではなく2段構成。上段=📂開く・▶学習。下段=📈評価・🧪Benchmark・📄Report。学習・開くは常時有効、評価/Reportはモデル0件で無効、Benchmarkは画像0件で無効（disabled+title案内）。削除はクイックアクションから外し①の「・・・」メニューへ移動（誤操作防止） | 📂 開く / ▶ 学習 |
+| ⑤フッター | 左=最終更新日時（相対表示＋絶対表示の2行）。右=Health Badge | `2時間前` / `2026/07/23 17:47` / `🟢 Excellent` |
 
-**ソート**: 既存の並び（`GET /projects` の順）を既定として維持し、列見出し（更新日時・画像・ラベル・モデル・Best CER・進捗）をクリックすると降順→昇順→既定の並びの順に切り替わる（`lib/dashboardProjectList.js` の `sortProjectIds`）。Best CERは低いほど良いため、記録なしは常に最後（昇順でも降順でも末尾）。
+**Health Badge**（純粋なルールベース判定。AIによる推定は行わない。`computeHealthBadge`、優先順位: Incomplete＞Excellent＞Good＞Needs Review）
 
-**検索**: プロジェクト名（既存互換）に加えてテンプレート名・Productionモデル（管理No/モデル名）・状態ラベルにも一致する（`matchesSearch`）。
+| バッジ | 条件 |
+|---|---|
+| 🔴 Incomplete | 画像・ラベル・モデルのいずれかが0件 |
+| 🟢 Excellent | Productionあり・Benchmarkあり・CERあり・Candidate以上のモデルあり（すべて満たす） |
+| 🟡 Good | 評価済みモデルが存在する（Excellentの条件を満たさない場合を含む） |
+| 🟠 Needs Review | 評価未実施 |
 
-**行クリック**: 行全体（`role="button"` `tabIndex=0`・Enter/Space対応・`aria-label`つき）をクリック/Enterでプロジェクトを開く。操作列のボタンは `stopPropagation` で行クリックと独立。既存の「開く」ボタンの動作（選択中は無効）も維持。
+**ソート**: 既存の並び（`GET /projects` の順）を既定として維持し、並び替え用のセレクト（更新日時・画像・ラベル・モデル・CER・Benchmark・進捗・Health）と昇順/降順切替ボタンで並び替える（`lib/dashboardProjectList.js` の `sortProjectIds`。カードビューへの刷新でテーブルの列見出しクリックは廃止し、セレクト+方向ボタンのUIへ変更した）。CERは低いほど良いため、記録なしは常に最後（昇順でも降順でも末尾）。HealthはIncomplete<Needs Review<Good<Excellentの順位で並び替える。
 
-**パフォーマンス**: Production・Best CER・Benchmark件数・実行中Job種別は `GET /projects` の1回の応答へ集約済み（バックエンドで `list_releases`/`list_experiments`/`count_benchmarks`/Jobレジストリを**プロジェクトごとに1回ずつ**参照。実行中Job種別は全プロジェクト分をjobs.json 1回の読み取りで解決しN+1にならない）。テンプレート表示は既存のlocalStorage（`ocr_project_template_by_project_v1`）を1回読み取って全行へ配る。一覧描画のたびの個別リクエストは発生しない。
+**検索**: プロジェクト名（既存互換）に加えてテンプレート名・Productionモデル（管理No/モデル名）・状態ラベル・Healthラベルにも一致する（`matchesSearch`）。
+
+**空状態**: プロジェクト0件時は中央に⊘アイコン・説明文・大きめの「新規プロジェクトを作成」ボタン（`size="lg"`）を表示する。
+
+**アニメーション**: カードhover時のみ軽く浮く（`scale-[1.01]`・影を強調）。`prefers-reduced-motion`環境では無効化（`motion-reduce:`）。それ以外の演出は行わない。
+
+**アクセシビリティ**: カードは`role="button"` `tabIndex=0`・Enter/Space対応・`aria-label`（状態・Healthを含む）。アイコンのみのボタン（クイックアクション・「・・・」メニュー）には`aria-label`を付与。
+
+**パフォーマンス**: Production・Best CER・Exact Match・Benchmark件数・Candidate以上有無・実行中Job種別は `GET /projects` の1回の応答へ集約済み（バックエンドで `list_releases`/`list_experiments`/`count_benchmarks`/Jobレジストリを**プロジェクトごとに1回ずつ**参照。実行中Job種別は全プロジェクト分をjobs.json 1回の読み取りで解決しN+1にならない）。カードビューへの刷新後も一覧取得のAPI呼び出し回数・N+1は増やしていない。テンプレート表示は既存のlocalStorage（`ocr_project_template_by_project_v1`）を1回読み取って全カードへ配る。
 
 **ショートカット**
 なし

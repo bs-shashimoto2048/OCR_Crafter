@@ -3,10 +3,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  computeHealthBadge,
   currentStepLabel,
   formatBenchmarkCount,
   formatBestCer,
+  formatExactMatch,
   formatProductionModel,
+  formatRelativeTime,
   matchesSearch,
   projectStateBadge,
   quickActionEnabled,
@@ -87,7 +90,49 @@ test("検索: プロジェクト名（既存互換）・テンプレート名・
   assert.equal(matchesSearch("tube_20260710", summary, "銘板OCR", "使用中", ""), true);
 });
 
-test("ソート: 更新日時・画像数・ラベル数・モデル数・Best CER・進捗の各列で並び替えできる", () => {
+test("検索: Healthでも一致する（新規追加項目・既存5引数呼び出しは後方互換で維持）", () => {
+  const summary = { production_model: "", production_model_id: "" };
+  assert.equal(matchesSearch("tube_20260710", summary, "銘板OCR", "使用中", "Excellent", "Excellent"), true);
+  assert.equal(matchesSearch("tube_20260710", summary, "銘板OCR", "使用中", "Excellent"), false);
+});
+
+test("Exact Match表示: 記録があれば%表記、未記録はnull（推測補完しない）", () => {
+  assert.equal(formatExactMatch({ best_exact_match: 92.3 }), "92.30%");
+  assert.equal(formatExactMatch({ best_exact_match: 0 }), "0.00%");
+  assert.equal(formatExactMatch({ best_exact_match: null }), null);
+  assert.equal(formatExactMatch({}), null);
+});
+
+test("相対時刻表示: たった今・N分前・N時間前・N日前・1ヶ月以上は空文字（絶対時刻表示に委ねる）", () => {
+  const now = Date.parse("2026-07-24T12:00:00");
+  assert.equal(formatRelativeTime("2026-07-24T11:59:50", now), "たった今");
+  assert.equal(formatRelativeTime("2026-07-24T11:30:00", now), "30分前");
+  assert.equal(formatRelativeTime("2026-07-24T09:00:00", now), "3時間前");
+  assert.equal(formatRelativeTime("2026-07-20T12:00:00", now), "4日前");
+  assert.equal(formatRelativeTime("2026-01-01T00:00:00", now), "");
+  assert.equal(formatRelativeTime(null, now), "");
+});
+
+test("Health Badge: 純粋なルールベース判定（Incomplete>Excellent>Good>Needs Reviewの優先順位）", () => {
+  assert.equal(computeHealthBadge({ images: 0, labeled: 0, models: 0 }).key, "incomplete");
+  assert.equal(computeHealthBadge({ images: 5, labeled: 0, models: 1 }).key, "incomplete");
+  assert.equal(
+    computeHealthBadge({
+      images: 5,
+      labeled: 5,
+      models: 1,
+      production_model: "m",
+      benchmark_count: 1,
+      best_cer: 0.05,
+      has_candidate_or_above: true,
+    }).key,
+    "excellent"
+  );
+  assert.equal(computeHealthBadge({ images: 5, labeled: 5, models: 1, best_cer: 0.05 }).key, "good");
+  assert.equal(computeHealthBadge({ images: 5, labeled: 5, models: 1, best_cer: null }).key, "needs_review");
+});
+
+test("ソート: 更新日時・画像数・ラベル数・モデル数・CER・進捗の各列で並び替えできる", () => {
   const summaries = {
     a: { images: 10, labeled: 5, models: 1, best_cer: 0.1, updated_at: "2026-07-01T00:00:00" },
     b: { images: 20, labeled: 20, models: 3, best_cer: 0.02, updated_at: "2026-07-20T00:00:00" },
@@ -100,4 +145,16 @@ test("ソート: 更新日時・画像数・ラベル数・モデル数・Best C
   assert.deepEqual(sortProjectIds(pids, summaries, "updated_at", "desc"), ["b", "a", "c"]);
   // sortKey未指定は既存順を維持
   assert.deepEqual(sortProjectIds(pids, summaries, null), pids);
+});
+
+test("ソート: Benchmark件数・Health（新規追加列）でも並び替えできる", () => {
+  const summaries = {
+    a: { images: 5, labeled: 5, models: 1, benchmark_count: 1, best_cer: 0.05 }, // good
+    b: { images: 5, labeled: 5, models: 1, benchmark_count: 3, best_cer: 0.02, production_model: "m", has_candidate_or_above: true }, // excellent
+    c: { images: 0, labeled: 0, models: 0, benchmark_count: 0 }, // incomplete
+  };
+  const pids = ["a", "b", "c"];
+  assert.deepEqual(sortProjectIds(pids, summaries, "benchmark_count", "desc"), ["b", "a", "c"]);
+  assert.deepEqual(sortProjectIds(pids, summaries, "health", "desc"), ["b", "a", "c"]);
+  assert.deepEqual(sortProjectIds(pids, summaries, "health", "asc"), ["c", "a", "b"]);
 });

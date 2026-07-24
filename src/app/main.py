@@ -433,12 +433,17 @@ def _project_dashboard_quality(project_id: str) -> dict[str, Any]:
     # backfill=Falseで読み取り専用に留める（一覧表示のたびに全プロジェクトへ書き込みが走らないように）
     experiments = list_experiments(project_id, backfill=False)
     model_cer: dict[str, float] = {}
+    model_exact_match: dict[str, float] = {}
     for exp in experiments:
-        cer = (exp.get("evaluation") or {}).get("cer")
+        evaluation = exp.get("evaluation") or {}
+        cer = evaluation.get("cer")
         if cer is None:
             continue
+        accuracy_percent = evaluation.get("accuracy_percent")
         for model in (exp.get("models") or []):
             model_cer[str(model)] = float(cer)
+            if accuracy_percent is not None:
+                model_exact_match[str(model)] = float(accuracy_percent)
     # 管理No（M0001形式）は既存の list_model_infos（/api/models/info と同じ経路）で解決する
     model_id_of = {str(item.get("name")): str(item.get("model_id") or "") for item in list_model_infos(project_id=project_id)}
 
@@ -458,6 +463,10 @@ def _project_dashboard_quality(project_id: str) -> dict[str, Any]:
             best_cer_model = min(model_cer, key=lambda m: model_cer[m])
             best_cer_value, best_cer_source = model_cer[best_cer_model], "best_model"
 
+    # Exact Match（完全一致率）はBest CERと同一モデル・同一評価の値のみを使う（別モデルの値を混在させない）。
+    # 記録が無い場合はNone（フロント側で非表示。推測補完はしない）
+    best_exact_match = model_exact_match.get(best_cer_model) if best_cer_model else None
+
     all_archived = bool(statuses) and not production_model and all(
         str((info or {}).get("status")) == "Archived" for info in statuses.values()
     )
@@ -468,8 +477,13 @@ def _project_dashboard_quality(project_id: str) -> dict[str, Any]:
         "best_cer": best_cer_value,
         "best_cer_model": best_cer_model,
         "best_cer_source": best_cer_source,
+        "best_exact_match": best_exact_match,
         "benchmark_count": count_benchmarks(project_id),
         "all_models_archived": all_archived,
+        # Health Badge用: Candidate/Production昇格済みモデルが存在するか（既存のリリース状態のみで判定）
+        "has_candidate_or_above": bool(production_model) or any(
+            str((info or {}).get("status")) in ("Candidate", "Production") for info in statuses.values()
+        ),
     }
 
 

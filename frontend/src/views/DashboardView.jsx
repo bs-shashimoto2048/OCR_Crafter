@@ -1,16 +1,18 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import Card from "../components/Card";
 import Button from "../components/Button";
-import EmptyState from "../components/EmptyState";
 import { imageUrl, interimImageUrl, processedImageUrl, thumbnailUrl } from "../lib/api";
 import { templateOriginLabel } from "../config/projectTemplates";
 import {
   SORT_COLUMNS,
+  computeHealthBadge,
   currentStepLabel as rowCurrentStepLabel,
   formatBenchmarkCount,
   formatBestCer,
+  formatExactMatch,
   formatProductionModel,
+  formatRelativeTime,
   matchesSearch,
   projectStateBadge,
   quickActionEnabled,
@@ -27,13 +29,13 @@ const QUICK_ACTIONS = [
   { id: "ocr-eval", stepId: "evaluation", icon: "📈", label: "評価" },
 ];
 
-// プロジェクト一覧の行クイックアクション（既存画面への遷移のみ・新規APIは使用しない）
-const ROW_QUICK_ACTIONS = [
-  { id: "open", icon: "📂", label: "開く", viewId: null },
-  { id: "train", icon: "🧠", label: "学習", viewId: "ocr-training" },
-  { id: "evaluate", icon: "📈", label: "評価", viewId: "ocr-eval" },
-  { id: "benchmark", icon: "🏁", label: "Benchmark", viewId: "benchmark" },
-  { id: "report", icon: "📄", label: "レポート", viewId: "reports" },
+// プロジェクトカードのクイックアクション（上段2件・下段3件。既存画面への遷移のみ・新規APIは使用しない）
+const CARD_QUICK_ACTIONS = [
+  { id: "open", icon: "📂", label: "開く", viewId: null, row: 1 },
+  { id: "train", icon: "▶", label: "学習", viewId: "ocr-training", row: 1 },
+  { id: "evaluate", icon: "📈", label: "評価", viewId: "ocr-eval", row: 2 },
+  { id: "benchmark", icon: "🧪", label: "Benchmark", viewId: "benchmark", row: 2 },
+  { id: "report", icon: "📄", label: "Report", viewId: "reports", row: 2 },
 ];
 
 const STAGE_LABELS = {
@@ -89,23 +91,23 @@ function ProjectThumb({ item, projectId, imageVersion, stage, onOpen }) {
   );
 }
 
-// 一覧行のサムネイル（約64×40）。優先順位: ①現在ダッシュボードで使用中の代表画像
+// カードのサムネイル（約64×48）。優先順位: ①現在ダッシュボードで使用中の代表画像
 // （選択中プロジェクトのpreviewItems先頭）②プロジェクトの最初の画像（サーバー生成サムネイル）
-// ③EmptyStateアイコン（共通コンポーネントと同じ⊘表記）
-function RowThumb({ pid, selected, currentPreviewImage, sampleImage, imageVersion }) {
+// ③EmptyStateアイコン（共通コンポーネントと同じ⊘表記）。画像がプロジェクトの識別子になるため大きめに表示する
+function CardThumb({ pid, selected, currentPreviewImage, sampleImage, imageVersion }) {
   const [failed, setFailed] = useState(false);
   const representativeImage = selected ? currentPreviewImage : null;
   const src = representativeImage
     ? imageUrl(representativeImage, pid, imageVersion)
     : sampleImage
-      ? thumbnailUrl(sampleImage, pid, 0, 64, 40)
+      ? thumbnailUrl(sampleImage, pid, 0, 64, 48)
       : "";
 
   if (!src || failed) {
     return (
       <span
         aria-hidden="true"
-        className="flex h-9 w-11 shrink-0 items-center justify-center rounded-lg border border-border/70 bg-card/60 text-sm text-muted"
+        className="flex h-12 w-16 shrink-0 items-center justify-center rounded-lg border border-border/70 bg-card/60 text-lg text-muted"
       >
         ⊘
       </span>
@@ -118,7 +120,7 @@ function RowThumb({ pid, selected, currentPreviewImage, sampleImage, imageVersio
       aria-hidden="true"
       loading="lazy"
       onError={() => setFailed(true)}
-      className="h-9 w-11 shrink-0 rounded-lg border border-border/70 bg-[#3b444f]/40 object-contain"
+      className="h-12 w-16 shrink-0 rounded-lg border border-border/70 bg-[#3b444f]/40 object-contain"
     />
   );
 }
@@ -128,15 +130,207 @@ function formatShortDateTime(value) {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "--";
   const pad = (n) => String(n).padStart(2, "0");
-  return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function RatioCell({ done, total }) {
-  const percent = total > 0 ? Math.round((done / total) * 100) : null;
+// カード右上の「・・・」メニュー（削除の誤操作防止のため独立させる）
+function CardMenu({ pid, onDelete }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    function handleOutside(event) {
+      if (ref.current && !ref.current.contains(event.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, [open]);
+
   return (
-    <div className="leading-tight">
-      <p className="text-text">{total > 0 ? `${done} / ${total}` : "-"}</p>
-      {percent !== null ? <p className="text-[10px] text-muted">{percent}%</p> : null}
+    <div ref={ref} className="relative shrink-0" onClick={(event) => event.stopPropagation()}>
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`${pid} のその他の操作`}
+        title="その他の操作"
+        onClick={() => setOpen((v) => !v)}
+        className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted transition hover:bg-card/70 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+      >
+        <span aria-hidden="true">・・・</span>
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          className="absolute right-0 top-7 z-20 min-w-[112px] overflow-hidden rounded-lg border border-border bg-[#2f3841] py-1 shadow-lg"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            aria-label={`${pid} を削除`}
+            onClick={() => {
+              setOpen(false);
+              onDelete();
+            }}
+            className="block w-full px-3 py-1.5 text-left text-xs text-danger transition hover:bg-danger/15"
+          >
+            🗑 削除
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// プロジェクト管理カード1枚分。カード全体クリック＝「開く」と同じ動作
+function ProjectCard({ pid, selected, summary, origin, currentPreviewImage, imageVersion, onOpen, onQuickAction, onDelete }) {
+  const stateBadge = projectStateBadge(summary, selected);
+  const healthBadge = computeHealthBadge(summary);
+  const progress = rowProgressPercent(summary);
+  const stepLabel = rowCurrentStepLabel(summary);
+  const exactMatch = formatExactMatch(summary);
+  const totalImages = Number(summary.images || 0);
+  const relativeTime = formatRelativeTime(summary.updated_at);
+
+  function renderAction(action) {
+    const enabled = action.id === "open" ? !selected : quickActionEnabled(action.id, summary);
+    return (
+      <button
+        key={action.id}
+        type="button"
+        disabled={!enabled}
+        aria-label={`${pid} を${action.label}へ`}
+        title={`${action.label}${enabled ? "" : "（対象データがありません）"}`}
+        onClick={() => onQuickAction(pid, action.viewId)}
+        className={`flex items-center justify-center gap-1 rounded-lg border px-1.5 py-1.5 text-[11px] font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 ${
+          enabled
+            ? "border-border/70 bg-card/60 text-text hover:border-accent/50 hover:text-accent"
+            : "cursor-not-allowed border-border/40 bg-card/30 text-muted/50"
+        }`}
+      >
+        <span aria-hidden="true">{action.icon}</span>
+        <span className="truncate">{action.label}</span>
+      </button>
+    );
+  }
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      aria-label={`プロジェクト ${pid} を開く（状態: ${stateBadge?.label || "-"}、Health: ${healthBadge.label}）`}
+      onClick={() => onOpen(pid, null)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen(pid, null);
+        }
+      }}
+      className={`flex h-[340px] cursor-pointer flex-col rounded-xl border p-3 transition-transform duration-150 hover:-translate-y-0.5 hover:scale-[1.01] hover:shadow-xl motion-reduce:transition-none motion-reduce:hover:scale-100 motion-reduce:hover:translate-y-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 ${
+        selected ? "border-accent/60 bg-accent/10" : "border-border bg-card/45 hover:border-accent/40"
+      }`}
+    >
+      {/* ヘッダー */}
+      <div className="flex items-start gap-2">
+        <CardThumb
+          pid={pid}
+          selected={selected}
+          currentPreviewImage={currentPreviewImage}
+          sampleImage={summary.sample_image}
+          imageVersion={imageVersion}
+        />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-semibold text-text" title={pid}>
+            {pid}
+          </p>
+          <div className="mt-1 flex flex-wrap items-center gap-1">
+            {stateBadge ? (
+              <span
+                className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${stateBadge.className}`}
+              >
+                <span aria-hidden="true">{stateBadge.dot}</span>
+                {stateBadge.label}
+              </span>
+            ) : null}
+            <span className="truncate text-[10px] text-muted" title={origin.origin}>
+              {origin.origin}
+              {origin.version ? ` (v${origin.version})` : ""}
+            </span>
+          </div>
+          {summary.production_model ? (
+            <p className="mt-1 truncate text-[10px] text-muted">
+              <span className="font-semibold text-emerald-300">Production</span> {formatProductionModel(summary)}
+            </p>
+          ) : null}
+        </div>
+        <CardMenu pid={pid} onDelete={() => onDelete(pid)} />
+      </div>
+
+      {/* 品質情報 */}
+      <div className="mt-2.5 grid grid-cols-2 gap-2 rounded-lg border border-border/60 bg-card/40 px-2.5 py-2 text-[11px]">
+        <div className="space-y-0.5">
+          <p className="flex justify-between text-muted">
+            <span>画像</span>
+            <span className="font-semibold text-text">{totalImages}</span>
+          </p>
+          <p className="flex justify-between text-muted">
+            <span>ラベル</span>
+            <span className="font-semibold text-text">{Number(summary.labeled || 0)}</span>
+          </p>
+          <p className="flex justify-between text-muted">
+            <span>モデル</span>
+            <span className="font-semibold text-text">{Number(summary.models || 0)}</span>
+          </p>
+        </div>
+        <div className="space-y-0.5 border-l border-border/60 pl-2">
+          <p className="flex justify-between text-muted">
+            <span>Benchmark</span>
+            <span className="font-semibold text-text">{formatBenchmarkCount(summary)}</span>
+          </p>
+          <p className="flex justify-between text-muted">
+            <span>Best CER</span>
+            <span className="font-semibold text-text">{formatBestCer(summary)}</span>
+          </p>
+          {exactMatch !== null ? (
+            <p className="flex justify-between text-muted">
+              <span>Exact Match</span>
+              <span className="font-semibold text-text">{exactMatch}</span>
+            </p>
+          ) : null}
+        </div>
+      </div>
+
+      {/* 進捗 */}
+      <div className="mt-2.5">
+        <div className="h-2.5 w-full overflow-hidden rounded-sm bg-border/40">
+          <div className="h-full rounded-sm bg-accent/80" style={{ width: `${progress}%` }} />
+        </div>
+        <div className="mt-1 flex items-center justify-between text-[10px] text-muted">
+          <span className="truncate">現在の工程: {stepLabel || "—"}</span>
+          <span className="shrink-0 font-semibold text-accent">{progress}%</span>
+        </div>
+      </div>
+
+      {/* クイックアクション（誤操作防止のため削除は「・・・」メニューへ分離済み） */}
+      <div className="mt-2.5 flex flex-1 flex-col justify-end gap-1.5" onClick={(event) => event.stopPropagation()}>
+        <div className="grid grid-cols-2 gap-1.5">{CARD_QUICK_ACTIONS.filter((a) => a.row === 1).map(renderAction)}</div>
+        <div className="grid grid-cols-3 gap-1.5">{CARD_QUICK_ACTIONS.filter((a) => a.row === 2).map(renderAction)}</div>
+      </div>
+
+      {/* フッター */}
+      <div className="mt-2.5 flex items-center justify-between border-t border-border/60 pt-2 text-[10px] text-muted">
+        <div className="leading-tight">
+          <p>{relativeTime || "—"}</p>
+          <p>{formatShortDateTime(summary.updated_at)}</p>
+        </div>
+        <span
+          className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${healthBadge.className}`}
+        >
+          <span aria-hidden="true">{healthBadge.dot}</span>
+          {healthBadge.label}
+        </span>
+      </div>
     </div>
   );
 }
@@ -192,7 +386,7 @@ export default function DashboardView({
     return picks;
   }, [images]);
 
-  // 検索: プロジェクト名（既存互換）＋テンプレート名＋Productionモデル＋状態
+  // 検索: プロジェクト名（既存互換）＋テンプレート名＋Productionモデル＋状態＋Health
   const filteredProjects = useMemo(() => {
     const keyword = search.trim();
     if (!keyword) return projects;
@@ -200,30 +394,16 @@ export default function DashboardView({
       const summary = projectSummaries?.[pid] || {};
       const origin = templateOriginLabel(templateRecords?.[pid]).origin;
       const stateLabel = projectStateBadge(summary, pid === projectId)?.label || "";
-      return matchesSearch(pid, summary, origin, stateLabel, keyword);
+      const healthLabel = computeHealthBadge(summary).label;
+      return matchesSearch(pid, summary, origin, stateLabel, keyword, healthLabel);
     });
   }, [projects, search, projectSummaries, templateRecords, projectId]);
 
-  // ソート: 既存の並び（sortKey未指定）を維持しつつ、列ヘッダークリックで並び替える
+  // ソート: 既存の並び（sortKey未指定）を維持しつつ、並び替えUIで並び替える
   const sortedProjects = useMemo(
     () => sortProjectIds(filteredProjects, projectSummaries, sortKey, sortDir),
     [filteredProjects, projectSummaries, sortKey, sortDir]
   );
-
-  function toggleSort(key) {
-    if (sortKey !== key) {
-      setSortKey(key);
-      setSortDir("desc");
-      return;
-    }
-    if (sortDir === "desc") {
-      setSortDir("asc");
-      return;
-    }
-    // 3回目のクリックで既存の並びへ戻す
-    setSortKey(null);
-    setSortDir("desc");
-  }
 
   // 行クリック・クイックアクション: プロジェクトを開いてから対象画面へ遷移する（新規APIは使わない）
   function openProjectInView(pid, viewId) {
@@ -365,15 +545,39 @@ export default function DashboardView({
         </Card>
       </div>
 
-      {/* 下段: プロジェクト一覧（この領域のみ内部スクロール） */}
+      {/* 下段: プロジェクト一覧（カードビュー。この領域のみ内部スクロール） */}
       <Card title="プロジェクト一覧" subtitle={`${projects.length}件`} className="flex min-h-0 flex-1 flex-col">
-        <div className="mb-2 flex shrink-0 items-center gap-2">
+        <div className="mb-2 flex shrink-0 flex-wrap items-center gap-2">
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             className="app-input h-8 w-64 text-xs"
-            placeholder="検索（プロジェクト名・テンプレート・Production・状態）"
+            placeholder="検索（プロジェクト名・テンプレート・Production・状態・Health）"
           />
+          <select
+            value={sortKey || ""}
+            onChange={(event) => setSortKey(event.target.value || null)}
+            aria-label="並び替え項目"
+            title="並び替え項目"
+            className="app-select h-8 text-xs"
+          >
+            <option value="">既定の並び</option>
+            {SORT_COLUMNS.map((col) => (
+              <option key={col.key} value={col.key}>
+                {col.label}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            disabled={!sortKey}
+            onClick={() => setSortDir((dir) => (dir === "desc" ? "asc" : "desc"))}
+            aria-label={`並び替え方向を切り替え（現在${sortDir === "desc" ? "降順" : "昇順"}）`}
+            title="並び替え方向を切り替え"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-card/45 text-xs text-muted transition hover:border-accent/40 hover:text-accent disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+          >
+            <span aria-hidden="true">{sortDir === "desc" ? "▼" : "▲"}</span>
+          </button>
           <div className="ml-auto flex items-center gap-2">
             <Button size="sm" onClick={onOpenCreate} title="テンプレートを選んで新規プロジェクトを作成します">
               新規プロジェクト
@@ -381,190 +585,54 @@ export default function DashboardView({
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-border/60 bg-card/40">
+        <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-border/60 bg-card/40 p-3">
           {filteredProjects.length === 0 ? (
             projects.length === 0 ? (
-              <EmptyState
-                title="プロジェクトがありません"
-                description="最初のプロジェクトを作成しましょう。用途別テンプレート（英数字OCR・日本語OCR・銘板OCRなど）から初期設定を選べます。"
-                actionLabel="新規プロジェクトを作成"
-                onAction={onOpenCreate}
-              />
+              <div className="flex flex-col items-center justify-center gap-3 px-4 py-16 text-center">
+                <span
+                  aria-hidden="true"
+                  className="flex h-14 w-14 items-center justify-center rounded-full border border-border/70 bg-card/60 text-2xl text-muted"
+                >
+                  ⊘
+                </span>
+                <div>
+                  <p className="text-base font-semibold text-text">プロジェクトがありません</p>
+                  <p className="mt-1 max-w-md text-sm text-muted">
+                    最初のプロジェクトを作成しましょう。用途別テンプレート（英数字OCR・日本語OCR・銘板OCRなど）から初期設定を選べます。
+                  </p>
+                </div>
+                <Button size="lg" className="mt-1 px-8" onClick={onOpenCreate}>
+                  新規プロジェクトを作成
+                </Button>
+              </div>
             ) : (
               <p className="px-3 py-8 text-center text-sm text-muted">検索条件に一致するプロジェクトがありません。</p>
             )
           ) : (
-            <table className="w-full min-w-[860px] table-fixed text-sm">
-              <thead className="sticky top-0 z-10 bg-[#2f3841]/95 backdrop-blur">
-                <tr className="border-b border-border text-left text-[11px] text-muted">
-                  <th className="w-14 px-1.5 py-2 font-medium" />
-                  <th className="w-[132px] px-1.5 py-2 font-medium">プロジェクト</th>
-                  <th className="w-[64px] px-1 py-2 text-center font-medium">状態</th>
-                  <th className="w-[62px] px-1 py-2 text-center font-medium">Production</th>
-                  <SortableTh col={SORT_COLUMNS[0]} sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} width="w-[70px]" />
-                  <SortableTh col={SORT_COLUMNS[1]} sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} width="w-10" />
-                  <SortableTh col={SORT_COLUMNS[2]} sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} width="w-14" />
-                  <SortableTh col={SORT_COLUMNS[3]} sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} width="w-10" />
-                  <th className="w-14 whitespace-nowrap px-1 py-2 text-center font-medium">Benchmark</th>
-                  <SortableTh col={SORT_COLUMNS[4]} sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} width="w-14" />
-                  <SortableTh col={SORT_COLUMNS[5]} sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} width="w-16" />
-                  <th className="w-[136px] px-1 py-2 text-right font-medium">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedProjects.map((pid) => {
-                  const selected = pid === projectId;
-                  const summary = projectSummaries?.[pid] || {};
-                  const totalImages = Number(summary.images || 0);
-                  const progress = rowProgressPercent(summary);
-                  const stateBadge = projectStateBadge(summary, selected);
-                  const origin = templateOriginLabel(templateRecords?.[pid]);
-                  const stepLabel = rowCurrentStepLabel(summary);
-                  return (
-                    <tr
-                      key={pid}
-                      role="button"
-                      tabIndex={0}
-                      aria-label={`プロジェクト ${pid} を開く（状態: ${stateBadge?.label || "-"}）`}
-                      onClick={() => openProjectInView(pid, null)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          openProjectInView(pid, null);
-                        }
-                      }}
-                      className={`h-16 cursor-pointer border-b border-border/60 align-middle transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 focus-visible:ring-inset ${
-                        selected ? "bg-accent/10" : "hover:bg-accent/5"
-                      }`}
-                    >
-                      <td className={`px-2 py-1.5 ${selected ? "border-l-2 border-l-accent" : "border-l-2 border-l-transparent"}`}>
-                        <RowThumb
-                          pid={pid}
-                          selected={selected}
-                          currentPreviewImage={previewItems[0]?.image}
-                          sampleImage={summary.sample_image}
-                          imageVersion={imageVersion}
-                        />
-                      </td>
-                      <td className="min-w-0 px-2 py-1.5">
-                        <div className="flex items-center gap-1 truncate">
-                          <span className={selected ? "text-accent" : "text-transparent"} aria-hidden="true">
-                            ★
-                          </span>
-                          <span className="truncate font-semibold text-text" title={pid}>
-                            {pid}
-                          </span>
-                        </div>
-                        <p className="mt-0.5 truncate pl-3.5 text-[10px] text-muted" title={origin.origin}>
-                          {origin.origin}
-                          {origin.version ? ` (v${origin.version})` : ""}
-                        </p>
-                      </td>
-                      <td className="px-1 py-1.5 text-center">
-                        {stateBadge ? (
-                          <span
-                            className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${stateBadge.className}`}
-                          >
-                            <span aria-hidden="true">{stateBadge.dot}</span>
-                            {stateBadge.label}
-                          </span>
-                        ) : (
-                          <span className="text-muted">—</span>
-                        )}
-                      </td>
-                      <td className="px-1 py-1.5 text-center">
-                        {summary.production_model ? (
-                          <div className="leading-tight">
-                            <p className="text-[9px] uppercase tracking-wide text-muted">Production</p>
-                            <p className="font-semibold text-text" title={summary.production_model}>
-                              {formatProductionModel(summary)}
-                            </p>
-                          </div>
-                        ) : (
-                          <span className="text-muted">—</span>
-                        )}
-                      </td>
-                      <td className="px-1 py-1.5 text-center text-muted">{formatShortDateTime(summary.updated_at)}</td>
-                      <td className="px-1 py-1.5 text-center text-muted">{totalImages}</td>
-                      <td className="px-1 py-1.5 text-center text-muted">
-                        <RatioCell done={Number(summary.labeled || 0)} total={totalImages} />
-                      </td>
-                      <td className="px-1 py-1.5 text-center text-muted">{Number(summary.models || 0)}</td>
-                      <td className="px-1 py-1.5 text-center text-muted">{formatBenchmarkCount(summary)}</td>
-                      <td className="px-2 py-1.5 text-center font-semibold text-text">{formatBestCer(summary)}</td>
-                      <td className="px-1 py-1.5">
-                        <div className="flex items-center gap-1.5">
-                          <div className="h-1.5 w-10 shrink-0 overflow-hidden rounded-sm bg-border/40">
-                            <div className="h-full rounded-sm bg-accent/80" style={{ width: `${progress}%` }} />
-                          </div>
-                          <span className="shrink-0 text-[11px] font-semibold text-accent">{progress}%</span>
-                        </div>
-                        <p className="mt-0.5 truncate text-[10px] text-muted">{stepLabel}</p>
-                      </td>
-                      <td className="px-1 py-1.5 text-right" onClick={(event) => event.stopPropagation()}>
-                        <div className="flex items-center justify-end gap-0.5">
-                          {ROW_QUICK_ACTIONS.map((action) => {
-                            const enabled = action.id === "open" ? !selected : quickActionEnabled(action.id, summary);
-                            return (
-                              <button
-                                key={action.id}
-                                type="button"
-                                disabled={!enabled}
-                                aria-label={`${pid} を${action.label}へ`}
-                                title={`${action.label}${enabled ? "" : "（対象データがありません）"}`}
-                                onClick={() => openProjectInView(pid, action.viewId)}
-                                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border text-[10px] transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 ${
-                                  enabled
-                                    ? "border-border/70 bg-card/60 text-text hover:border-accent/50 hover:text-accent"
-                                    : "cursor-not-allowed border-border/40 bg-card/30 text-muted/50"
-                                }`}
-                              >
-                                <span aria-hidden="true">{action.icon}</span>
-                              </button>
-                            );
-                          })}
-                          <button
-                            type="button"
-                            aria-label={`${pid} を削除`}
-                            title="削除"
-                            onClick={() => onDeleteProject(pid)}
-                            className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-danger/50 bg-danger/10 text-[10px] text-danger transition hover:bg-danger/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-danger/70"
-                          >
-                            <span aria-hidden="true">🗑</span>
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div className="grid grid-cols-1 gap-3 min-[1100px]:grid-cols-2 min-[1920px]:grid-cols-3">
+              {sortedProjects.map((pid) => {
+                const selected = pid === projectId;
+                const summary = projectSummaries?.[pid] || {};
+                const origin = templateOriginLabel(templateRecords?.[pid]);
+                return (
+                  <ProjectCard
+                    key={pid}
+                    pid={pid}
+                    selected={selected}
+                    summary={summary}
+                    origin={origin}
+                    currentPreviewImage={previewItems[0]?.image}
+                    imageVersion={imageVersion}
+                    onOpen={openProjectInView}
+                    onQuickAction={openProjectInView}
+                    onDelete={onDeleteProject}
+                  />
+                );
+              })}
+            </div>
           )}
         </div>
       </Card>
     </div>
-  );
-}
-
-// ソート可能な列見出し（クリックで降順→昇順→既定の並びの順に切り替え）
-function SortableTh({ col, sortKey, sortDir, onToggle, width = "w-16" }) {
-  const active = sortKey === col.key;
-  return (
-    <th className={`${width} whitespace-nowrap px-1 py-2 text-center font-medium`}>
-      <button
-        type="button"
-        onClick={() => onToggle(col.key)}
-        title={`${col.label}で並び替え`}
-        aria-label={`${col.label}で並び替え${active ? `（現在${sortDir === "desc" ? "降順" : "昇順"}）` : ""}`}
-        className={`inline-flex items-center gap-0.5 whitespace-nowrap rounded px-0.5 py-0.5 text-[11px] transition hover:text-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 ${
-          active ? "text-accent" : "text-muted"
-        }`}
-      >
-        {col.label}
-        <span aria-hidden="true" className="text-[9px]">
-          {active ? (sortDir === "desc" ? "▼" : "▲") : "⇅"}
-        </span>
-      </button>
-    </th>
   );
 }

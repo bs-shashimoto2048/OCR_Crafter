@@ -38,6 +38,65 @@ export function formatBenchmarkCount(summary) {
   return count > 0 ? `${count}件` : "—";
 }
 
+// Exact Match（完全一致率）表示。未記録（accuracy_percentが保存されていない）場合は
+// nullを返し、呼び出し側で「行自体を表示しない」（推測補完も「—」表示もしない）
+export function formatExactMatch(summary) {
+  const value = summary?.best_exact_match;
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return null;
+  return `${Number(value).toFixed(2)}%`;
+}
+
+// 相対時刻表示（フッター用。「たった今」「N分前」「N時間前」「N日前」。1週間以上は絶対日時のみに委ねる）
+export function formatRelativeTime(updatedAt, nowMs = Date.now()) {
+  const t = Date.parse(updatedAt || "");
+  if (!Number.isFinite(t)) return "";
+  const diffSec = Math.max(0, Math.round((nowMs - t) / 1000));
+  if (diffSec < 60) return "たった今";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}分前`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour}時間前`;
+  const diffDay = Math.floor(diffHour / 24);
+  if (diffDay < 30) return `${diffDay}日前`;
+  return "";
+}
+
+// Health Badge: 純粋なルールベース判定（AIによる推定は行わない）。優先順位（上から）:
+// ①Incomplete（基礎データ不足）②Excellent（Production+Benchmark+CER+Candidate以上の全条件）
+// ③Good（評価済みモデルが存在＝Excellentの一部条件を満たさない場合を含む）④NeedsReview（未評価）
+export function computeHealthBadge(summary) {
+  const images = Number(summary?.images || 0);
+  const labeled = Number(summary?.labeled || 0);
+  const models = Number(summary?.models || 0);
+  const hasCer = summary?.best_cer !== null && summary?.best_cer !== undefined;
+
+  if (images === 0 || labeled === 0 || models === 0) {
+    return { key: "incomplete", label: "Incomplete", dot: "🔴", className: "border-red-400/50 bg-red-500/15 text-red-200" };
+  }
+  const isExcellent =
+    Boolean(summary?.production_model) &&
+    Number(summary?.benchmark_count || 0) > 0 &&
+    hasCer &&
+    Boolean(summary?.has_candidate_or_above);
+  if (isExcellent) {
+    return {
+      key: "excellent",
+      label: "Excellent",
+      dot: "🟢",
+      className: "border-emerald-400/50 bg-emerald-500/15 text-emerald-200",
+    };
+  }
+  if (hasCer) {
+    return { key: "good", label: "Good", dot: "🟡", className: "border-amber-400/50 bg-amber-500/15 text-amber-200" };
+  }
+  return {
+    key: "needs_review",
+    label: "Needs Review",
+    dot: "🟠",
+    className: "border-orange-400/50 bg-orange-500/15 text-orange-200",
+  };
+}
+
 // 現在の工程名（既存のワークフロー概念=画像取込/前処理/ラベル/データ作成・学習/評価 を、
 // 一覧の集約カウントのみから推定する簡易版。実行中Jobがあれば最優先で反映する）
 export function currentStepLabel(summary) {
@@ -73,11 +132,11 @@ export function quickActionEnabled(actionId, summary) {
   return true;
 }
 
-// 検索: プロジェクト名（既存互換）＋テンプレート名＋Productionモデル＋状態ラベル
-export function matchesSearch(pid, summary, templateOrigin, stateLabel, keyword) {
+// 検索: プロジェクト名（既存互換）＋テンプレート名＋Productionモデル＋状態＋Health
+export function matchesSearch(pid, summary, templateOrigin, stateLabel, keyword, healthLabel = "") {
   const kw = String(keyword || "").trim().toLowerCase();
   if (!kw) return true;
-  const haystacks = [pid, templateOrigin, summary?.production_model, summary?.production_model_id, stateLabel];
+  const haystacks = [pid, templateOrigin, summary?.production_model, summary?.production_model_id, stateLabel, healthLabel];
   return haystacks.some((v) => String(v || "").toLowerCase().includes(kw));
 }
 
@@ -86,9 +145,14 @@ export const SORT_COLUMNS = [
   { key: "images", label: "画像" },
   { key: "labeled", label: "ラベル" },
   { key: "models", label: "モデル" },
-  { key: "best_cer", label: "Best CER" },
+  { key: "best_cer", label: "CER" },
+  { key: "benchmark_count", label: "Benchmark" },
   { key: "progress", label: "進捗" },
+  { key: "health", label: "Health" },
 ];
+
+// Health段階の順位（ソート用。数値が大きいほど良好）
+const HEALTH_RANK = { incomplete: 0, needs_review: 1, good: 2, excellent: 3 };
 
 function sortValueOf(pid, summary, key) {
   switch (key) {
@@ -107,8 +171,12 @@ function sortValueOf(pid, summary, key) {
       // CERは低いほど良いが「記録なし」は最下位（昇順で最後・降順で最初にならないよう最大値扱い）
       return v === null || v === undefined ? Infinity : Number(v);
     }
+    case "benchmark_count":
+      return Number(summary?.benchmark_count || 0);
     case "progress":
       return rowProgressPercent(summary);
+    case "health":
+      return HEALTH_RANK[computeHealthBadge(summary).key] ?? 0;
     default:
       return 0;
   }

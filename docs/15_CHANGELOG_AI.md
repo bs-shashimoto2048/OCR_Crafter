@@ -13,11 +13,31 @@ timeline
     07-15〜16 : 評価データ作成（Step5）とディレクトリ入力 : Step5性能改善（共有Executor・in-flight共有・保存分離） : YOLO検出復旧
     07-17 : CER中心の評価体系（マイクロ平均・混同集計・改善/悪化） : モデルカルテ/比較ダッシュボード : モデル管理No（M0001） : モデル識別色 : Unicode特殊文字表示 : 一覧バッジ削除と右ペイン拡張
     07-18〜 : 学習条件比較・条件差分・次回学習提案 : サイドバーのOCR開発フロー順再編 : 性能サマリー省スペース化と比較カード短縮名
+    07-24 : ダッシュボード「プロジェクト一覧」テーブル拡張 : 同カードビュー化（Health Badge・Exact Match）
 ```
 
 ---
 
 ## 2026-07
+
+### ダッシュボード「プロジェクト一覧」のカードビュー化（テーブル廃止・プロジェクト管理ダッシュボード化）
+
+**概要**
+前タスクでテーブルの1行あたり情報量を拡張したばかりだったが、テーブルレイアウトの制約（視線移動の多さ・列の窮屈さ）が解消しないため、**テーブルを廃止しCSS GridによるカードビューへUIを全面刷新**した。GitHubのRepository一覧やVisual Studio Start画面を参考に、「一覧を見る」ではなく「プロジェクトを管理する」画面を目指す。①【Grid】1920px以上=3列・1100〜1919px=2列・1099px以下=1列（横スクロールなし）。②【カード構成】高さ約340px・幅可変・カード全体クリックで「開く」と同じ動作。ヘッダー（サムネイル64×48拡大表示＋プロジェクト名＋状態バッジ＋テンプレート名＋Production/管理No）→品質情報（画像/ラベル/モデル数、Benchmark/Best CER/Exact Match）→進捗（バー＋現在の工程＋%）→クイックアクション（横並びではなく2段: 上段=開く/学習、下段=評価/Benchmark/Report）→フッター（相対＋絶対の更新日時、Health Badge）の5セクション。③【Exact Match追加】バックエンド`_project_dashboard_quality`へ`best_exact_match`（Best CERと**同一モデル・同一評価**の`accuracy_percent`のみを採用）と`has_candidate_or_above`（Health Badge判定用）を追加。未記録時はExact Matchの行自体を非表示（推測補完はしない）。④【Health Badge】純粋なルールベース判定（`computeHealthBadge`、AIによる推定は不使用）。優先順位Incomplete＞Excellent＞Good＞Needs Reviewの4段階排他ロジックとし、要件のAND/OR箇条書き（Good条件に「Productionなし」を含む等）をそのまま実装すると判定が割れる組み合わせが生じるため、全入力が必ずいずれか1段階に一意に収まるよう優先順位チェーンとして再設計した。⑤【削除の分離】誤操作防止のため、削除をクイックアクションから外しカード右上の「・・・」メニューへ移動。⑥【ソート・検索UI変更】テーブルの列見出しクリックは廃止し、並び替え用セレクト（更新日時/画像/ラベル/モデル/CER/Benchmark/進捗/Health）＋昇順・降順切替ボタンへ変更。検索はHealthラベルにも一致するよう拡張。⑦【アニメーション】カードhover時のみ`scale-[1.01]`＋影強調、`prefers-reduced-motion`で無効化。
+
+**変更理由**
+ユーザーからの明示的な要望（前タスクで拡張したテーブルでも情報の把握しづらさが解消しなかったため）。「一覧を見る」受動的な画面ではなく「プロジェクトを管理する」能動的な画面へ転換する狙い。
+
+**注意事項**
+- **Health Badgeの判定ロジックは要件文の忠実な実装ではなく解釈による補完**: 要件のGood条件「Productionなし」を字面通り実装するとProduction昇格済みだがBenchmark未実施のプロジェクトがどの段階にも当てはまらなくなるため、Good条件から「Productionなし」を除外し「評価済みモデルが存在する（Excellent条件を満たさない場合を含む）」へ広げた。要件の意図を汲んだ解釈であり、必要に応じて調整可能
+- Exact MatchはBest CERと**紐付くモデルのみ**を参照する（Best CERとは異なるモデルの高いExact Matchを拾わない）仕様のため、Best CERの優先順位（Production→Candidate→Best Model）が変わらない限りExact Matchの対象モデルも変わらない
+- サムネイルサイズ・優先順位（代表画像→最初の画像→EmptyStateアイコン）はテーブル時代のロジックをそのまま流用し、表示サイズのみ拡大（44×36→48×64相当）
+- ソートUIをテーブル列見出しクリックからセレクト+方向ボタンへ変更したため、テーブル時代の`dashboardView.render.test.mjs`のソート関連テストは全面的に書き換えた
+
+**影響範囲**
+`main.py`（`_project_dashboard_quality`へ`best_exact_match`/`has_candidate_or_above`追加）、`lib/dashboardProjectList.js`（`computeHealthBadge`/`formatExactMatch`/`formatRelativeTime`新規、`matchesSearch`/`SORT_COLUMNS`/`sortValueOf`拡張）、`DashboardView.jsx`（プロジェクト一覧セクション全面書き換え。`ProjectCard`/`CardThumb`/`CardMenu`新規コンポーネント）、`tests/test_dashboard_summary.py`（`TestBestExactMatch`/`TestHasCandidateOrAbove`追加）、`frontend/tests/dashboardProjectList.test.mjs`・`dashboardView.render.test.mjs`（新規関数のテスト追加・カードビュー向けに全面書き換え）。バックエンド419件・フロント387件全通過、`npm run build`成功、1920/1600/1366/1100pxで実データ（3プロジェクト）による横スクロールなし・列数切替を画面確認。
+
+---
 
 ### 混同表示の空文字を `[空文字]` 表記へ変更（∅廃止）
 

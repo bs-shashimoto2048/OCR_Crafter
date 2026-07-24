@@ -15,7 +15,7 @@ from src.app.main import _active_job_types_by_project, _build_project_summary, _
 from src.app.project_paths import ensure_project_directories
 
 
-def _seed_model(project, name, *, status=None, cer=None, experiment_name="exp"):
+def _seed_model(project, name, *, status=None, cer=None, exact_match=90.0, experiment_name="exp"):
     """モデル+実験カルテ（必要なら評価結果・リリースステータス）を用意する。"""
     from src.app.services.experiment_tracker import attach_evaluation, record_experiment
     from src.app.services.release_manager import promote_model, set_model_status
@@ -41,7 +41,10 @@ def _seed_model(project, name, *, status=None, cer=None, experiment_name="exp"):
     model_file = f"{name}.tess.json"
     record_experiment(project, {"models": [model_file], "experiment_name": experiment_name})
     if cer is not None:
-        attach_evaluation(project, model_file, {"cer": cer, "char_accuracy": 1 - cer, "accuracy_percent": 90.0})
+        evaluation = {"cer": cer, "char_accuracy": 1 - cer}
+        if exact_match is not None:
+            evaluation["accuracy_percent"] = exact_match
+        attach_evaluation(project, model_file, evaluation)
     if status == "Production":
         promote_model(project, model_file, note="テスト昇格", author="tester")
     elif status:
@@ -135,6 +138,55 @@ class TestBenchmarkAndProduction:
         assert quality["production_model_id"].startswith("M")
 
 
+class TestBestExactMatch:
+    def test_paired_with_best_cer_model_not_a_different_model(self, temp_projects):
+        pid = "p_exact"
+        _seed_model(pid, "prod_model", status="Production", cer=0.05, exact_match=88.5)
+        _seed_model(pid, "cand_model", status="Candidate", cer=0.01, exact_match=99.9)  # 良いCERでも無視される
+        quality = _project_dashboard_quality(pid)
+        assert quality["best_cer_source"] == "production"
+        assert quality["best_exact_match"] == 88.5
+
+    def test_none_when_not_recorded_not_estimated(self, temp_projects):
+        pid = "p_exact_missing"
+        _seed_model(pid, "m1", status="Production", cer=0.05, exact_match=None)
+        quality = _project_dashboard_quality(pid)
+        assert quality["best_cer"] == 0.05
+        assert quality["best_exact_match"] is None
+
+    def test_none_when_no_evaluation_at_all(self, temp_projects):
+        pid = "p_exact_none"
+        _seed_model(pid, "m1", status=None, cer=None)
+        quality = _project_dashboard_quality(pid)
+        assert quality["best_exact_match"] is None
+
+
+class TestHasCandidateOrAbove:
+    def test_true_when_production_exists(self, temp_projects):
+        pid = "p_cand_prod"
+        _seed_model(pid, "m1", status="Production", cer=0.05)
+        quality = _project_dashboard_quality(pid)
+        assert quality["has_candidate_or_above"] is True
+
+    def test_true_when_candidate_exists_without_production(self, temp_projects):
+        pid = "p_cand_only"
+        _seed_model(pid, "m1", status="Candidate", cer=0.05)
+        quality = _project_dashboard_quality(pid)
+        assert quality["has_candidate_or_above"] is True
+
+    def test_false_when_only_draft_or_validated(self, temp_projects):
+        pid = "p_draft_only"
+        _seed_model(pid, "m1", status=None, cer=0.05)
+        quality = _project_dashboard_quality(pid)
+        assert quality["has_candidate_or_above"] is False
+
+    def test_false_when_no_models(self, temp_projects):
+        pid = "p_no_models_cand"
+        ensure_project_directories(pid)
+        quality = _project_dashboard_quality(pid)
+        assert quality["has_candidate_or_above"] is False
+
+
 class TestAllModelsArchived:
     def test_true_when_every_model_archived_and_no_production(self, temp_projects):
         pid = "p_archived"
@@ -213,5 +265,7 @@ class TestApiEndToEnd:
         assert row["production_model"] == "api_model.tess.json"
         assert row["best_cer"] == 0.09
         assert row["best_cer_source"] == "production"
+        assert row["best_exact_match"] == 90.0
+        assert row["has_candidate_or_above"] is True
         assert row["benchmark_count"] == 3
         assert row["active_job_type"] == ""

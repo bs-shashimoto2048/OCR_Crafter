@@ -807,9 +807,12 @@ export default function App() {
         production_model_id: String(row?.production_model_id || ""),
         best_cer: row?.best_cer === null || row?.best_cer === undefined ? null : Number(row.best_cer),
         best_cer_source: String(row?.best_cer_source || ""),
+        best_exact_match:
+          row?.best_exact_match === null || row?.best_exact_match === undefined ? null : Number(row.best_exact_match),
         benchmark_count: Number(row?.benchmark_count || 0),
         active_job_type: String(row?.active_job_type || ""),
         all_models_archived: Boolean(row?.all_models_archived),
+        has_candidate_or_above: Boolean(row?.has_candidate_or_above),
       };
     }
     setProjectSummaries(summaryMap);
