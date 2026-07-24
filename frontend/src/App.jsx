@@ -810,6 +810,21 @@ export default function App() {
         best_exact_match:
           row?.best_exact_match === null || row?.best_exact_match === undefined ? null : Number(row.best_exact_match),
         benchmark_count: Number(row?.benchmark_count || 0),
+        // v1.0.0 プロジェクトカードへBenchmark性能指標を追加: 最新の正常完了Benchmarkのみ（未実施はnull・推測補完しない）
+        latest_benchmark: row?.latest_benchmark
+          ? {
+              benchmark_id: String(row.latest_benchmark.benchmark_id || ""),
+              balance_score:
+                row.latest_benchmark.balance_score === null || row.latest_benchmark.balance_score === undefined
+                  ? null
+                  : Number(row.latest_benchmark.balance_score),
+              p95_ms:
+                row.latest_benchmark.p95_ms === null || row.latest_benchmark.p95_ms === undefined
+                  ? null
+                  : Number(row.latest_benchmark.p95_ms),
+              completed_at: row.latest_benchmark.completed_at || "",
+            }
+          : null,
         active_job_type: String(row?.active_job_type || ""),
         all_models_archived: Boolean(row?.all_models_archived),
         has_candidate_or_above: Boolean(row?.has_candidate_or_above),

@@ -38,6 +38,36 @@ export function formatBenchmarkCount(summary) {
   return count > 0 ? `${count}件` : "—";
 }
 
+// 最新の正常完了Benchmarkが存在するか（Health Badge・クイックアクションのツールチップで共用）
+export function hasLatestBenchmark(summary) {
+  return Boolean(summary?.latest_benchmark);
+}
+
+// Balance Score表示（バックエンドで既に0-100スケール済み。未記録はnull＝呼び出し側で「未実施」表示）
+export function formatBalanceScore(summary) {
+  const value = summary?.latest_benchmark?.balance_score;
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return null;
+  return Number(value).toFixed(1);
+}
+
+// P95推論時間表示（ms・整数丸め。未記録はnull）
+export function formatP95(summary) {
+  const value = summary?.latest_benchmark?.p95_ms;
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return null;
+  return `${Math.round(Number(value))} ms`;
+}
+
+// クイックアクション「Benchmark」ボタンのツールチップ文言。単なる「—」は使わない
+export function benchmarkQuickActionTooltip(summary) {
+  if (!hasLatestBenchmark(summary)) return "Benchmarkはまだ実施されていません";
+  const parts = [];
+  const balance = formatBalanceScore(summary);
+  const p95 = formatP95(summary);
+  if (balance !== null) parts.push(`Balance ${balance}`);
+  if (p95 !== null) parts.push(`P95 ${p95}`);
+  return `最新Benchmark: ${parts.join(" / ")}`;
+}
+
 // Exact Match（完全一致率）表示。未記録（accuracy_percentが保存されていない）場合は
 // nullを返し、呼び出し側で「行自体を表示しない」（推測補完も「—」表示もしない）
 export function formatExactMatch(summary) {
@@ -64,36 +94,59 @@ export function formatRelativeTime(updatedAt, nowMs = Date.now()) {
 // Health Badge: 純粋なルールベース判定（AIによる推定は行わない）。優先順位（上から）:
 // ①Incomplete（基礎データ不足）②Excellent（Production+Benchmark+CER+Candidate以上の全条件）
 // ③Good（評価済みモデルが存在＝Excellentの一部条件を満たさない場合を含む）④NeedsReview（未評価）
+// Benchmarkの有無は「最新の正常完了Benchmark」（latest_benchmark）の存在を基準とする（benchmark_countは
+// 試行回数の表示用であり、Failed等を含み得るため判定には使わない）。
+// reasons: バッジのツールチップ表示用（判定根拠を明示。推測ではなく実データの有無をそのまま列挙する）
 export function computeHealthBadge(summary) {
   const images = Number(summary?.images || 0);
   const labeled = Number(summary?.labeled || 0);
   const models = Number(summary?.models || 0);
   const hasCer = summary?.best_cer !== null && summary?.best_cer !== undefined;
+  const hasProduction = Boolean(summary?.production_model);
+  const hasBenchmark = hasLatestBenchmark(summary);
+  const hasCandidateOrAbove = Boolean(summary?.has_candidate_or_above);
 
   if (images === 0 || labeled === 0 || models === 0) {
-    return { key: "incomplete", label: "Incomplete", dot: "🔴", className: "border-red-400/50 bg-red-500/15 text-red-200" };
+    const reasons = [];
+    if (images === 0) reasons.push("画像がありません。");
+    if (labeled === 0) reasons.push("ラベルがありません。");
+    if (models === 0) reasons.push("モデルがありません。");
+    return {
+      key: "incomplete",
+      label: "Incomplete",
+      dot: "🔴",
+      className: "border-red-400/50 bg-red-500/15 text-red-200",
+      reasons,
+    };
   }
-  const isExcellent =
-    Boolean(summary?.production_model) &&
-    Number(summary?.benchmark_count || 0) > 0 &&
-    hasCer &&
-    Boolean(summary?.has_candidate_or_above);
+  const isExcellent = hasProduction && hasBenchmark && hasCer && hasCandidateOrAbove;
   if (isExcellent) {
     return {
       key: "excellent",
       label: "Excellent",
       dot: "🟢",
       className: "border-emerald-400/50 bg-emerald-500/15 text-emerald-200",
+      reasons: [
+        "Productionモデルがあります。",
+        "Benchmarkを実施済みです。",
+        "CERを記録済みです。",
+        "Candidate以上のモデルがあります。",
+      ],
     };
   }
   if (hasCer) {
-    return { key: "good", label: "Good", dot: "🟡", className: "border-amber-400/50 bg-amber-500/15 text-amber-200" };
+    const reasons = ["評価済みモデルがあります。"];
+    if (!hasBenchmark) reasons.push("Benchmarkは未実施です。");
+    if (!hasProduction) reasons.push("Productionモデルはありません。");
+    if (!hasCandidateOrAbove) reasons.push("Candidate以上のモデルはありません。");
+    return { key: "good", label: "Good", dot: "🟡", className: "border-amber-400/50 bg-amber-500/15 text-amber-200", reasons };
   }
   return {
     key: "needs_review",
     label: "Needs Review",
     dot: "🟠",
     className: "border-orange-400/50 bg-orange-500/15 text-orange-200",
+    reasons: ["評価が未実施のため、CERが記録されていません。"],
   };
 }
 

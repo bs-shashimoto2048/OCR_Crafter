@@ -136,7 +136,7 @@ flowchart LR
 
 **表示内容（下段: プロジェクト一覧・v1.0.0でカードビューへ全面刷新。「一覧を見る」ではなく「プロジェクトを管理する」プロジェクト管理ダッシュボードとして再設計）**
 
-旧テーブルレイアウト（ヘッダー行＋1プロジェクト1行）は廃止し、CSS GridによるカードビューへUIを刷新した。カード1枚＝プロジェクト1件。高さ約340px・幅はGridに応じて可変。カード全体クリック（`role="button"` `tabIndex=0`・Enter/Space対応・`aria-label`つき）で「開く」と同じ動作になる。
+旧テーブルレイアウト（ヘッダー行＋1プロジェクト1行）は廃止し、CSS GridによるカードビューへUIを刷新した。カード1枚＝プロジェクト1件。高さ約400px（Benchmark性能指標の追加により当初の340pxから拡張）・幅はGridに応じて可変。カード全体クリック（`role="button"` `tabIndex=0`・Enter/Space対応・`aria-label`つき）で「開く」と同じ動作になる。
 
 **Gridレスポンシブ列数**（横スクロールなし）
 
@@ -151,10 +151,10 @@ flowchart LR
 | セクション | 内容 | 表示例 |
 |---|---|---|
 | ①ヘッダー | 左=サムネイル約64×48（優先順位: ①選択中プロジェクトの代表画像②プロジェクトの最初の画像＝`GET /projects` summaries の `sample_image` をサーバー生成サムネイルAPIで取得③EmptyStateアイコン⊘。画像がプロジェクトの識別子になるため大きめに表示）。右=プロジェクト名＋状態バッジ（既存の状態語彙のみ色分け。優先順位: **使用中**＞**学習中**/**評価中**＞**Archived**＞記録なし）＋テンプレート名。Productionモデルがあれば「Production」＋管理No（M0001形式）も表示。右上に「・・・」メニュー（削除はここへ集約。誤操作防止のため独立） | `tube_20260710` / `🟢 使用中` / `銘板OCR` / `Production M0009` |
-| ②品質情報 | 2列。左=画像数/ラベル数/モデル数。右=Benchmark件数/Best CER/Exact Match。Best CERの優先順位は従来どおり①最新Production②Candidate③Best Model④記録なし=—（推測補完しない）。**Exact MatchはBest CERと同一モデル・同一評価の値のみを使用し、未記録の場合は行自体を非表示にする**（—表示も推測補完もしない） | `画像 1000` / `Best CER 0.91%` / `Exact Match 92.34%` |
+| ②品質情報 | 2列。左=「データ」グループ（画像数/ラベル数/モデル数）。右=「品質」グループ（Best CER/Exact Match）＋「性能」グループ（Balance Score/P95推論時間/実施回数）の2段。Best CERの優先順位は従来どおり①最新Production②Candidate③Best Model④記録なし=—（推測補完しない）。**Exact MatchはBest CERと同一モデル・同一評価の値のみを使用し、未記録の場合は行自体を非表示にする**（—表示も推測補完もしない）。**性能グループはBenchmark未実施の場合、単なる「—」ではなく「未実施」と表示する**。Balance Scoreはバランス最良エンジン（`build_purpose_picks`の`best_balance`）の値を採用し、バックエンドで既に0-100スケールへ変換済み | `Best CER 0.91%` / `Balance 96.2` / `P95 42 ms` / `7回` / （未実施時）`未実施` |
 | ③進捗 | 既存の4要素均等配分の進捗バー＋%はそのまま維持し、その下へ現在の工程名を表示（実行中Jobがあれば「モデル学習」「評価」を最優先、無ければ画像/ラベル/モデル/Productionの各カウントから簡易推定。工程が特定できない場合のみ「—」・推測表示はしない） | `現在の工程: 評価` / `75%` |
-| ④クイックアクション | 横並びではなく2段構成。上段=📂開く・▶学習。下段=📈評価・🧪Benchmark・📄Report。学習・開くは常時有効、評価/Reportはモデル0件で無効、Benchmarkは画像0件で無効（disabled+title案内）。削除はクイックアクションから外し①の「・・・」メニューへ移動（誤操作防止） | 📂 開く / ▶ 学習 |
-| ⑤フッター | 左=最終更新日時（相対表示＋絶対表示の2行）。右=Health Badge | `2時間前` / `2026/07/23 17:47` / `🟢 Excellent` |
+| ④クイックアクション | 横並びではなく2段構成。上段=📂開く・▶学習。下段=📈評価・🧪Benchmark・📄Report。学習・開くは常時有効、評価/Reportはモデル0件で無効、Benchmarkは画像0件で無効（disabled+title案内）。**Benchmarkボタンのツールチップは最新結果があれば`最新Benchmark: Balance 96.2 / P95 42 ms`、無ければ`Benchmarkはまだ実施されていません`を表示**（`benchmarkQuickActionTooltip`）。削除はクイックアクションから外し①の「・・・」メニューへ移動（誤操作防止） | 📂 開く / ▶ 学習 |
+| ⑤フッター | 左=最終更新日時（相対表示＋絶対表示の2行）。右=Health Badge（**ツールチップに判定根拠のreasonsを表示**） | `2時間前` / `2026/07/23 17:47` / `🟢 Excellent` |
 
 **Health Badge**（純粋なルールベース判定。AIによる推定は行わない。`computeHealthBadge`、優先順位: Incomplete＞Excellent＞Good＞Needs Review）
 
@@ -164,6 +164,17 @@ flowchart LR
 | 🟢 Excellent | Productionあり・Benchmarkあり・CERあり・Candidate以上のモデルあり（すべて満たす） |
 | 🟡 Good | 評価済みモデルが存在する（Excellentの条件を満たさない場合を含む） |
 | 🟠 Needs Review | 評価未実施 |
+
+**Benchmarkの有無の判定基準**: Health BadgeにおけるBenchmarkの有無は`benchmark_count`（試行回数）ではなく、**最新の正常完了Benchmarkの存在**（`latest_benchmark`が非null）を基準とする。Benchmarkレコードは`run_benchmark_job`が全エンジンの実行を最後まで完了した場合にのみ登録簿（`benchmarks.json`）へ保存される実装のため、Failed/Cancelled/Interruptedで終わった実行はそもそも登録簿へ残らない（追加のstatus判定は不要）。
+
+**Health Badgeのツールチップ（判定根拠のreasons）**: バッジへカーソルを合わせると、ラベルの下に判定根拠を1行ずつ表示する。例（Good・Benchmark未実施・Productionなしの場合）:
+
+```text
+Good
+評価済みモデルがあります。
+Benchmarkは未実施です。
+Productionモデルはありません。
+```
 
 **ソート**: 既存の並び（`GET /projects` の順）を既定として維持し、並び替え用のセレクト（更新日時・画像・ラベル・モデル・CER・Benchmark・進捗・Health）と昇順/降順切替ボタンで並び替える（`lib/dashboardProjectList.js` の `sortProjectIds`。カードビューへの刷新でテーブルの列見出しクリックは廃止し、セレクト+方向ボタンのUIへ変更した）。CERは低いほど良いため、記録なしは常に最後（昇順でも降順でも末尾）。HealthはIncomplete<Needs Review<Good<Excellentの順位で並び替える。
 
@@ -175,7 +186,7 @@ flowchart LR
 
 **アクセシビリティ**: カードは`role="button"` `tabIndex=0`・Enter/Space対応・`aria-label`（状態・Healthを含む）。アイコンのみのボタン（クイックアクション・「・・・」メニュー）には`aria-label`を付与。
 
-**パフォーマンス**: Production・Best CER・Exact Match・Benchmark件数・Candidate以上有無・実行中Job種別は `GET /projects` の1回の応答へ集約済み（バックエンドで `list_releases`/`list_experiments`/`count_benchmarks`/Jobレジストリを**プロジェクトごとに1回ずつ**参照。実行中Job種別は全プロジェクト分をjobs.json 1回の読み取りで解決しN+1にならない）。カードビューへの刷新後も一覧取得のAPI呼び出し回数・N+1は増やしていない。テンプレート表示は既存のlocalStorage（`ocr_project_template_by_project_v1`）を1回読み取って全カードへ配る。
+**パフォーマンス**: Production・Best CER・Exact Match・Benchmark件数・**最新Benchmark性能指標（`latest_benchmark`）**・Candidate以上有無・実行中Job種別は `GET /projects` の1回の応答へ集約済み（バックエンドで `list_releases`/`list_experiments`/`count_benchmarks`/`get_latest_completed_benchmark`/Jobレジストリを**プロジェクトごとに1回ずつ**参照。実行中Job種別は全プロジェクト分をjobs.json 1回の読み取りで解決しN+1にならない）。`get_latest_completed_benchmark`はBenchmark登録簿の最後の要素からBalance Score（既存の`build_purpose_picks`/`compute_balance_scores`を再利用）とP95推論時間を算出するのみで、追加のBenchmark詳細APIは呼ばない。カードビューへの刷新後も一覧取得のAPI呼び出し回数・N+1は増やしていない。テンプレート表示は既存のlocalStorage（`ocr_project_template_by_project_v1`）を1回読み取って全カードへ配る。
 
 **ショートカット**
 なし

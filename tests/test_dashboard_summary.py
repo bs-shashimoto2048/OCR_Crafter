@@ -60,6 +60,35 @@ def _seed_benchmarks(project, count):
     )
 
 
+def _seed_benchmark_run(project, benchmark_id, *, cer=0.05, mean_time_ms=200.0, p95_time_ms=42.0, failed=0, total=50, completed_at="2026-07-24T10:00:00"):
+    """1エンジンのBenchmark実行結果を1件、登録簿へ直接書き込む（run_benchmark_jobの実行は行わない軽量版）。"""
+    paths = ensure_project_directories(project)
+    path = paths.root / "benchmarks.json"
+    registry = {"counter": 0, "items": [], "config": {}}
+    if path.exists():
+        registry = json.loads(path.read_text(encoding="utf-8"))
+    registry["counter"] = int(registry.get("counter", 0)) + 1
+    registry["items"].append(
+        {
+            "benchmark_id": benchmark_id,
+            "completed_at": completed_at,
+            "results": [
+                {
+                    "engine": "tesseract",
+                    "model": "model_a",
+                    "engine_key": "tesseract:model_a",
+                    "cer": cer,
+                    "mean_time_ms": mean_time_ms,
+                    "p95_time_ms": p95_time_ms,
+                    "failed": failed,
+                    "total": total,
+                }
+            ],
+        }
+    )
+    path.write_text(json.dumps(registry), encoding="utf-8")
+
+
 def _seed_job(project, job_type, status="running", job_id="JOB-000001"):
     from src.app.services import job_manager as jm
 
@@ -136,6 +165,57 @@ class TestBenchmarkAndProduction:
         _seed_model(pid, "m1", status="Production", cer=0.03)
         quality = _project_dashboard_quality(pid)
         assert quality["production_model_id"].startswith("M")
+
+
+class TestLatestBenchmark:
+    def test_latest_completed_benchmark_returns_balance_and_p95(self, temp_projects):
+        pid = "p_bench_latest"
+        # cer=0.05・failed無し・単一エンジンのため speed_score=1.0/stability=1.0
+        # balance = 0.7*(1-0.05) + 0.2*1 + 0.1*1 = 0.965 → ×100で96.5
+        _seed_benchmark_run(pid, "BM-0001", cer=0.05, mean_time_ms=200.0, p95_time_ms=42.0)
+        quality = _project_dashboard_quality(pid)
+        latest = quality["latest_benchmark"]
+        assert latest is not None
+        assert latest["benchmark_id"] == "BM-0001"
+        assert latest["balance_score"] == 96.5
+        assert latest["p95_ms"] == 42.0
+        assert latest["completed_at"] == "2026-07-24T10:00:00"
+
+    def test_multiple_items_selects_latest(self, temp_projects):
+        pid = "p_bench_multi"
+        _seed_benchmark_run(pid, "BM-0001", cer=0.20, p95_time_ms=100.0, completed_at="2026-07-20T10:00:00")
+        _seed_benchmark_run(pid, "BM-0002", cer=0.05, p95_time_ms=42.0, completed_at="2026-07-24T10:00:00")
+        quality = _project_dashboard_quality(pid)
+        latest = quality["latest_benchmark"]
+        assert latest["benchmark_id"] == "BM-0002"
+        assert latest["p95_ms"] == 42.0
+
+    def test_no_benchmark_at_all_returns_none(self, temp_projects):
+        pid = "p_bench_none"
+        ensure_project_directories(pid)
+        quality = _project_dashboard_quality(pid)
+        assert quality["latest_benchmark"] is None
+
+    def test_failed_only_returns_none(self, temp_projects):
+        # Failed（Job側で失敗）は run_benchmark_job の保存処理まで到達しないため、
+        # benchmarks.json へitemとして残らない（Jobレコードのみ存在する状態を模す）
+        pid = "p_bench_failed"
+        _seed_job(pid, "benchmark", status="failed", job_id="JOB-BENCH-1")
+        quality = _project_dashboard_quality(pid)
+        assert quality["latest_benchmark"] is None
+
+    def test_cancelled_only_returns_none(self, temp_projects):
+        pid = "p_bench_cancelled"
+        _seed_job(pid, "benchmark", status="cancel_requested", job_id="JOB-BENCH-2")
+        quality = _project_dashboard_quality(pid)
+        assert quality["latest_benchmark"] is None
+
+    def test_interrupted_only_returns_none(self, temp_projects):
+        # Interrupted（プロセス強制終了等でrunningのまま完了しなかった実行）も同様にitem化されない
+        pid = "p_bench_interrupted"
+        _seed_job(pid, "benchmark", status="stopped", job_id="JOB-BENCH-3")
+        quality = _project_dashboard_quality(pid)
+        assert quality["latest_benchmark"] is None
 
 
 class TestBestExactMatch:
@@ -269,3 +349,6 @@ class TestApiEndToEnd:
         assert row["has_candidate_or_above"] is True
         assert row["benchmark_count"] == 3
         assert row["active_job_type"] == ""
+        # latest_benchmark: 登録簿はあるがresults未記録の軽量フィクスチャのため、benchmark_idのみ解決できる
+        assert row["latest_benchmark"]["benchmark_id"] == "BM-0002"
+        assert row["latest_benchmark"]["balance_score"] is None

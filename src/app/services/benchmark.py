@@ -759,6 +759,40 @@ def count_benchmarks(project_id: Optional[str]) -> int:
     return len(_load_registry(project_id)["items"])
 
 
+def get_latest_completed_benchmark(project_id: Optional[str]) -> Optional[dict[str, Any]]:
+    """最新の正常完了BenchmarkからBalance Score（バランス最良エンジン）・P95推論時間を要約する（ダッシュボード集計用）。
+
+    benchmarks.json の各itemは run_benchmark_job が全エンジンの実行を最後まで終えた場合にのみ
+    保存される（Job側でFailed/Cancelled/Interruptedになった実行は保存前に処理が止まるため、
+    そもそも登録簿へitemとして残らない）。そのため「最新のCompleted Benchmark」は登録簿の
+    最後の要素と同義であり、追加のstatus判定は不要（推測値は使わず、実データのみを参照する）。
+    """
+    registry = _load_registry(project_id)
+    items = registry.get("items") or []
+    if not items:
+        return None
+    item = items[-1]
+    results = item.get("results") or []
+    weights = get_balance_weights(project_id)
+    picks = build_purpose_picks(results, weights)
+    best_key = picks.get("best_balance")
+    balance_score: Optional[float] = None
+    p95_ms: Optional[float] = None
+    if best_key:
+        score_row = next((s for s in picks.get("scores") or [] if s.get("engine_key") == best_key), None)
+        if score_row and score_row.get("balance_score") is not None:
+            balance_score = round(float(score_row["balance_score"]) * 100.0, 1)
+        result_row = next((r for r in results if r.get("engine_key") == best_key), None)
+        if result_row is not None:
+            p95_ms = result_row.get("p95_time_ms")
+    return {
+        "benchmark_id": str(item.get("benchmark_id") or ""),
+        "balance_score": balance_score,
+        "p95_ms": p95_ms,
+        "completed_at": str(item.get("completed_at") or ""),
+    }
+
+
 def list_benchmarks(project_id: Optional[str]) -> dict[str, Any]:
     """Benchmark一覧（新しい順・casesは含めない要約）＋バランス重み設定。"""
     registry = _load_registry(project_id)

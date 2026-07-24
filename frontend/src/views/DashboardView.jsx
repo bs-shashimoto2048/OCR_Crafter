@@ -6,13 +6,16 @@ import { imageUrl, interimImageUrl, processedImageUrl, thumbnailUrl } from "../l
 import { templateOriginLabel } from "../config/projectTemplates";
 import {
   SORT_COLUMNS,
+  benchmarkQuickActionTooltip,
   computeHealthBadge,
   currentStepLabel as rowCurrentStepLabel,
-  formatBenchmarkCount,
+  formatBalanceScore,
   formatBestCer,
   formatExactMatch,
+  formatP95,
   formatProductionModel,
   formatRelativeTime,
+  hasLatestBenchmark,
   matchesSearch,
   projectStateBadge,
   quickActionEnabled,
@@ -195,13 +198,17 @@ function ProjectCard({ pid, selected, summary, origin, currentPreviewImage, imag
 
   function renderAction(action) {
     const enabled = action.id === "open" ? !selected : quickActionEnabled(action.id, summary);
+    const title =
+      action.id === "benchmark"
+        ? benchmarkQuickActionTooltip(summary)
+        : `${action.label}${enabled ? "" : "（対象データがありません）"}`;
     return (
       <button
         key={action.id}
         type="button"
         disabled={!enabled}
         aria-label={`${pid} を${action.label}へ`}
-        title={`${action.label}${enabled ? "" : "（対象データがありません）"}`}
+        title={title}
         onClick={() => onQuickAction(pid, action.viewId)}
         className={`flex items-center justify-center gap-1 rounded-lg border px-1.5 py-1.5 text-[11px] font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 ${
           enabled
@@ -227,7 +234,7 @@ function ProjectCard({ pid, selected, summary, origin, currentPreviewImage, imag
           onOpen(pid, null);
         }
       }}
-      className={`flex h-[340px] cursor-pointer flex-col rounded-xl border p-3 transition-transform duration-150 hover:-translate-y-0.5 hover:scale-[1.01] hover:shadow-xl motion-reduce:transition-none motion-reduce:hover:scale-100 motion-reduce:hover:translate-y-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 ${
+      className={`flex h-[400px] cursor-pointer flex-col rounded-xl border p-3 transition-transform duration-150 hover:-translate-y-0.5 hover:scale-[1.01] hover:shadow-xl motion-reduce:transition-none motion-reduce:hover:scale-100 motion-reduce:hover:translate-y-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 ${
         selected ? "border-accent/60 bg-accent/10" : "border-border bg-card/45 hover:border-accent/40"
       }`}
     >
@@ -267,37 +274,62 @@ function ProjectCard({ pid, selected, summary, origin, currentPreviewImage, imag
         <CardMenu pid={pid} onDelete={() => onDelete(pid)} />
       </div>
 
-      {/* 品質情報 */}
+      {/* 品質情報: データ／品質／性能の3グループへ整理 */}
       <div className="mt-2.5 grid grid-cols-2 gap-2 rounded-lg border border-border/60 bg-card/40 px-2.5 py-2 text-[11px]">
-        <div className="space-y-0.5">
-          <p className="flex justify-between text-muted">
-            <span>画像</span>
-            <span className="font-semibold text-text">{totalImages}</span>
-          </p>
-          <p className="flex justify-between text-muted">
-            <span>ラベル</span>
-            <span className="font-semibold text-text">{Number(summary.labeled || 0)}</span>
-          </p>
-          <p className="flex justify-between text-muted">
-            <span>モデル</span>
-            <span className="font-semibold text-text">{Number(summary.models || 0)}</span>
-          </p>
-        </div>
-        <div className="space-y-0.5 border-l border-border/60 pl-2">
-          <p className="flex justify-between text-muted">
-            <span>Benchmark</span>
-            <span className="font-semibold text-text">{formatBenchmarkCount(summary)}</span>
-          </p>
-          <p className="flex justify-between text-muted">
-            <span>Best CER</span>
-            <span className="font-semibold text-text">{formatBestCer(summary)}</span>
-          </p>
-          {exactMatch !== null ? (
+        <div>
+          <p className="mb-1 text-[9px] uppercase tracking-wide text-muted">データ</p>
+          <div className="space-y-0.5">
             <p className="flex justify-between text-muted">
-              <span>Exact Match</span>
-              <span className="font-semibold text-text">{exactMatch}</span>
+              <span>画像</span>
+              <span className="font-semibold text-text">{totalImages}</span>
             </p>
-          ) : null}
+            <p className="flex justify-between text-muted">
+              <span>ラベル</span>
+              <span className="font-semibold text-text">{Number(summary.labeled || 0)}</span>
+            </p>
+            <p className="flex justify-between text-muted">
+              <span>モデル</span>
+              <span className="font-semibold text-text">{Number(summary.models || 0)}</span>
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-col gap-1.5 border-l border-border/60 pl-2">
+          <div>
+            <p className="mb-1 text-[9px] uppercase tracking-wide text-muted">品質</p>
+            <div className="space-y-0.5">
+              <p className="flex justify-between text-muted">
+                <span>Best CER</span>
+                <span className="font-semibold text-text">{formatBestCer(summary)}</span>
+              </p>
+              {exactMatch !== null ? (
+                <p className="flex justify-between text-muted">
+                  <span>Exact Match</span>
+                  <span className="font-semibold text-text">{exactMatch}</span>
+                </p>
+              ) : null}
+            </div>
+          </div>
+          <div>
+            <p className="mb-1 text-[9px] uppercase tracking-wide text-muted">性能</p>
+            {hasLatestBenchmark(summary) ? (
+              <div className="space-y-0.5">
+                <p className="flex justify-between text-muted">
+                  <span>Balance</span>
+                  <span className="font-semibold text-text">{formatBalanceScore(summary)}</span>
+                </p>
+                <p className="flex justify-between text-muted">
+                  <span>P95</span>
+                  <span className="font-semibold text-text">{formatP95(summary)}</span>
+                </p>
+                <p className="flex justify-between text-muted">
+                  <span>実施回数</span>
+                  <span className="font-semibold text-text">{Number(summary.benchmark_count || 0)}回</span>
+                </p>
+              </div>
+            ) : (
+              <p className="text-muted">未実施</p>
+            )}
+          </div>
         </div>
       </div>
 
@@ -325,6 +357,7 @@ function ProjectCard({ pid, selected, summary, origin, currentPreviewImage, imag
           <p>{formatShortDateTime(summary.updated_at)}</p>
         </div>
         <span
+          title={[healthBadge.label, ...(healthBadge.reasons || [])].join("\n")}
           className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${healthBadge.className}`}
         >
           <span aria-hidden="true">{healthBadge.dot}</span>

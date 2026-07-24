@@ -13,12 +13,30 @@ timeline
     07-15〜16 : 評価データ作成（Step5）とディレクトリ入力 : Step5性能改善（共有Executor・in-flight共有・保存分離） : YOLO検出復旧
     07-17 : CER中心の評価体系（マイクロ平均・混同集計・改善/悪化） : モデルカルテ/比較ダッシュボード : モデル管理No（M0001） : モデル識別色 : Unicode特殊文字表示 : 一覧バッジ削除と右ペイン拡張
     07-18〜 : 学習条件比較・条件差分・次回学習提案 : サイドバーのOCR開発フロー順再編 : 性能サマリー省スペース化と比較カード短縮名
-    07-24 : ダッシュボード「プロジェクト一覧」テーブル拡張 : 同カードビュー化（Health Badge・Exact Match）
+    07-24 : ダッシュボード「プロジェクト一覧」テーブル拡張 : 同カードビュー化（Health Badge・Exact Match） : カードへBenchmark性能指標追加（Balance Score・P95・Healthのreasons）
 ```
 
 ---
 
 ## 2026-07
+
+### プロジェクトカードへBenchmark性能指標を追加（Balance Score・P95・Health Badgeのreasons）
+
+**概要**
+カードビュー化直後は「Benchmark件数のみ／—表示」だったプロジェクトカードへ、最新の正常完了Benchmarkの主要指標を追加した。①【表示区分の再編】カードの品質情報を「データ」（画像/ラベル/モデル数）・「品質」（Best CER/Exact Match）・「性能」（Balance Score/P95推論時間/実施回数）の3グループへ整理。性能グループはBenchmark未実施の場合、単なる「—」ではなく明示的に「未実施」と表示する（要件で「単なる—は禁止」と明記されたため）。②【バックエンド】`services/benchmark.py`へ`get_latest_completed_benchmark(project_id)`を新規追加。Benchmark登録簿（`benchmarks.json`）の**最後の要素**を「最新の正常完了Benchmark」として扱い、既存の`build_purpose_picks`/`compute_balance_scores`（Benchmark詳細画面と同じ計算ロジック）を再利用してバランス最良エンジンのBalance Score（0-100スケールへ変換）とP95推論時間を算出する。`main.py`の`_project_dashboard_quality`へ`latest_benchmark`（`{benchmark_id, balance_score, p95_ms, completed_at}`。未実施はnull）を追加（既存の`benchmark_count`は試行回数表示用としてそのまま維持）。③【Health Badge】Benchmarkの有無の判定基準を`benchmark_count>0`から`latest_benchmark`の存在へ変更。④【判定根拠の可視化】`computeHealthBadge`が`reasons`（判定根拠の文字列配列）を返すようにし、バッジのツールチップへ「ラベル+根拠」を表示するようにした。⑤【クイックアクション】Benchmarkボタンのツールチップへ最新結果（`最新Benchmark: Balance 96.2 / P95 42 ms`）または未実施案内（`Benchmarkはまだ実施されていません`）を表示する。
+
+**変更理由**
+Benchmarkの件数だけでは「実施したかどうか」しか分からず、どのエンジン構成が実運用に向いているか（速度と精度のバランス）をダッシュボード一覧から読み取れなかったため（ユーザー要望）。Health Badgeのツールチップは、判定結果（Good/Excellent等）だけでは「なぜその評価になったか」が分からず判断に迷うという指摘に対応した。
+
+**注意事項**
+- **「最新の正常完了Benchmark」の実装は登録簿の最後の要素と同義**: `run_benchmark_job`は全エンジンの実行を最後まで終えた場合にのみ`benchmarks.json`へitemを保存する実装のため、Job側でFailed/Cancelled/Interruptedになった実行はitemとして残らない。そのため「Failed/Cancelled/Interruptedを除外する」という要件は、登録簿に保存されたitemを常にそのまま使うことで自動的に満たされる（item自体にstatusフィールドを追加する必要はなかった）。テストはJobレコードのみ（statusがfailed/cancel_requested/stopped）を用意しBenchmark登録簿へitemを作らないことで「Failedのみ→未実施」等を再現している
+- Balance Scoreは複数エンジンを比較した場合の「バランス最良」エンジン1件の値のみを表示する（Benchmark詳細画面の全エンジン比較とは別の要約値）
+- カード高さは性能グループの追加により340px→400pxへ拡張
+
+**影響範囲**
+`services/benchmark.py`（`get_latest_completed_benchmark`新規）、`main.py`（`_project_dashboard_quality`へ`latest_benchmark`追加）、`lib/dashboardProjectList.js`（`formatBalanceScore`/`formatP95`/`hasLatestBenchmark`/`benchmarkQuickActionTooltip`新規、`computeHealthBadge`をBenchmark判定基準変更＋`reasons`追加）、`DashboardView.jsx`（`ProjectCard`の品質情報3グループ化・Health Badgeツールチップ・Benchmarkボタンツールチップ）、`tests/test_dashboard_summary.py`（`TestLatestBenchmark`新規6件）、`frontend/tests/dashboardProjectList.test.mjs`・`dashboardView.render.test.mjs`（新規関数・reasons・性能表示のテスト追加）。バックエンド425件・フロント392件全通過、`npm run build`成功。1920px実データ（Benchmark実施済み1件・未実施2件）で性能グループ・Health Badgeツールチップ・クイックアクションツールチップの表示を画面確認。
+
+---
 
 ### ダッシュボード「プロジェクト一覧」のカードビュー化（テーブル廃止・プロジェクト管理ダッシュボード化）
 

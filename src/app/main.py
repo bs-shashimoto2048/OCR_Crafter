@@ -424,7 +424,7 @@ def _project_dashboard_quality(project_id: str) -> dict[str, Any]:
     既存のリリース管理・実験管理・Benchmarkの登録簿を読み取るのみで、推測による補完は行わない
     （評価結果が存在しない項目は None のまま返し、フロント側で「—」表示する）。
     """
-    from .services.benchmark import count_benchmarks
+    from .services.benchmark import count_benchmarks, get_latest_completed_benchmark
 
     releases = list_releases(project_id)
     production_model = str(releases.get("production") or "")
@@ -479,6 +479,7 @@ def _project_dashboard_quality(project_id: str) -> dict[str, Any]:
         "best_cer_source": best_cer_source,
         "best_exact_match": best_exact_match,
         "benchmark_count": count_benchmarks(project_id),
+        "latest_benchmark": get_latest_completed_benchmark(project_id),
         "all_models_archived": all_archived,
         # Health Badge用: Candidate/Production昇格済みモデルが存在するか（既存のリリース状態のみで判定）
         "has_candidate_or_above": bool(production_model) or any(

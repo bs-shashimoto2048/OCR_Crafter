@@ -18,7 +18,7 @@
 
 | Method / Path | リクエスト | レスポンス主要キー | 概要 |
 |---|---|---|---|
-| GET `/projects` | なし | `items`, `summaries[]`（`project_id, images, labeled, ocr_confirmed, ocr_pending, models, image_stage, updated_at, sample_image, production_model, production_model_id, best_cer, best_cer_source, best_exact_match, benchmark_count, all_models_archived, has_candidate_or_above, active_job_type`） | プロジェクト一覧＋サマリ（ダッシュボード一覧向け品質・運用指標を含む集約。既存フィールドは不変・追加のみ）。`best_exact_match`はBest CERと同一モデル・同一評価の完全一致率（未記録はnull）、`has_candidate_or_above`はCandidate以上のモデルが存在するか（Health Badge判定用） |
+| GET `/projects` | なし | `items`, `summaries[]`（`project_id, images, labeled, ocr_confirmed, ocr_pending, models, image_stage, updated_at, sample_image, production_model, production_model_id, best_cer, best_cer_source, best_exact_match, benchmark_count, latest_benchmark, all_models_archived, has_candidate_or_above, active_job_type`） | プロジェクト一覧＋サマリ（ダッシュボード一覧向け品質・運用指標を含む集約。既存フィールドは不変・追加のみ）。`best_exact_match`はBest CERと同一モデル・同一評価の完全一致率（未記録はnull）、`has_candidate_or_above`はCandidate以上のモデルが存在するか（Health Badge判定用）、`latest_benchmark`は最新の正常完了Benchmarkの要約`{benchmark_id, balance_score, p95_ms, completed_at}`（Benchmark未実施はnull。`balance_score`は0-100スケール・バランス最良エンジンの値。`benchmark_count`はstatusを問わない試行回数） |
 | POST `/projects` | `ProjectCreateRequest`（`project_id`） | `project_id` | プロジェクト作成（ディレクトリ+master CSV） |
 | DELETE `/projects/{project_id}` | Path | `project_id`, `deleted_jobs` | プロジェクト削除（学習ジョブも削除） |
 
