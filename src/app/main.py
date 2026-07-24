@@ -418,8 +418,88 @@ def _project_updated_at(paths: Any) -> Optional[str]:
     return datetime.fromtimestamp(latest).isoformat()
 
 
-def _build_project_summary(project_id: str) -> dict[str, Any]:
-    image_count = len(list_raw_images(project_id=project_id))
+def _project_dashboard_quality(project_id: str) -> dict[str, Any]:
+    """ダッシュボード一覧向けの品質・運用指標（テンプレート/Production/Best CER/Benchmark件数）。
+
+    既存のリリース管理・実験管理・Benchmarkの登録簿を読み取るのみで、推測による補完は行わない
+    （評価結果が存在しない項目は None のまま返し、フロント側で「—」表示する）。
+    """
+    from .services.benchmark import count_benchmarks
+
+    releases = list_releases(project_id)
+    production_model = str(releases.get("production") or "")
+    statuses = releases.get("statuses") or {}
+
+    # backfill=Falseで読み取り専用に留める（一覧表示のたびに全プロジェクトへ書き込みが走らないように）
+    experiments = list_experiments(project_id, backfill=False)
+    model_cer: dict[str, float] = {}
+    for exp in experiments:
+        cer = (exp.get("evaluation") or {}).get("cer")
+        if cer is None:
+            continue
+        for model in (exp.get("models") or []):
+            model_cer[str(model)] = float(cer)
+    # 管理No（M0001形式）は既存の list_model_infos（/api/models/info と同じ経路）で解決する
+    model_id_of = {str(item.get("name")): str(item.get("model_id") or "") for item in list_model_infos(project_id=project_id)}
+
+    best_cer_value: Optional[float] = None
+    best_cer_model = ""
+    best_cer_source = ""
+    if production_model and production_model in model_cer:
+        best_cer_model, best_cer_value, best_cer_source = production_model, model_cer[production_model], "production"
+    else:
+        candidate_models = [
+            m for m, info in statuses.items() if str((info or {}).get("status")) == "Candidate" and m in model_cer
+        ]
+        if candidate_models:
+            best_cer_model = min(candidate_models, key=lambda m: model_cer[m])
+            best_cer_value, best_cer_source = model_cer[best_cer_model], "candidate"
+        elif model_cer:
+            best_cer_model = min(model_cer, key=lambda m: model_cer[m])
+            best_cer_value, best_cer_source = model_cer[best_cer_model], "best_model"
+
+    all_archived = bool(statuses) and not production_model and all(
+        str((info or {}).get("status")) == "Archived" for info in statuses.values()
+    )
+
+    return {
+        "production_model": production_model,
+        "production_model_id": model_id_of.get(production_model, "") if production_model else "",
+        "best_cer": best_cer_value,
+        "best_cer_model": best_cer_model,
+        "best_cer_source": best_cer_source,
+        "benchmark_count": count_benchmarks(project_id),
+        "all_models_archived": all_archived,
+    }
+
+
+def _active_job_types_by_project() -> dict[str, str]:
+    """全プロジェクトの実行中Job種別（training/evaluation）を1回のjobs.json読み取りで求める。
+
+    一覧描画のたびにプロジェクトごとへ問い合わせない（N+1回避。他のjob_typeは対象外＝新しい状態を追加しない）。
+    """
+    try:
+        jobs = get_job_service().repository.list()
+    except Exception:  # noqa: BLE001
+        return {}
+    result: dict[str, str] = {}
+    for job in jobs:
+        status = str(job.get("status") or "")
+        if status not in ("queued", "running"):
+            continue
+        job_type = str(job.get("job_type") or "")
+        if job_type not in ("training", "evaluation"):
+            continue
+        pid = str(job.get("project_id") or "")
+        if not pid or pid in result:
+            continue
+        result[pid] = job_type
+    return result
+
+
+def _build_project_summary(project_id: str, active_job_type: str = "") -> dict[str, Any]:
+    raw_images = list_raw_images(project_id=project_id)
+    image_count = len(raw_images)
     labels = read_labels(project_id=project_id)
     labeled_count = len([row for row in labels if str(row.get("label") or "").strip() != ""])
     models_count = len(list_models(project_id=project_id))
@@ -435,6 +515,7 @@ def _build_project_summary(project_id: str) -> dict[str, Any]:
             elif status == "pending":
                 pending_count += 1
     paths = ensure_project_directories(project_id)
+    quality = _project_dashboard_quality(project_id)
     return {
         "project_id": project_id,
         "images": image_count,
@@ -445,6 +526,11 @@ def _build_project_summary(project_id: str) -> dict[str, Any]:
         # ダッシュボード表示用の読み取り専用フィールド（実在ファイルに基づく判定）
         "image_stage": _project_image_stage(paths) if image_count > 0 else "none",
         "updated_at": _project_updated_at(paths),
+        # 一覧サムネイル用（優先順位2「最初の画像」）。image_count算出と同じ一覧を再利用しファイル名のみ渡す
+        "sample_image": raw_images[0] if raw_images else "",
+        # v1.0.0 ダッシュボード一覧UX改善: 品質・運用指標（推測禁止・既存登録簿のみ参照）
+        **quality,
+        "active_job_type": active_job_type,
     }
 
 
@@ -1351,7 +1437,9 @@ def shutdown_app(req: AppShutdownRequest, background_tasks: BackgroundTasks) -> 
 @app.get("/projects")
 def projects() -> dict[str, Any]:
     items = list_projects()
-    summaries = [_build_project_summary(project_id) for project_id in items]
+    # 実行中Job種別は全プロジェクト分を1回のjobs.json読み取りで求め、各サマリーへ配る（N+1回避）
+    active_job_types = _active_job_types_by_project()
+    summaries = [_build_project_summary(project_id, active_job_types.get(project_id, "")) for project_id in items]
     return {"items": items, "summaries": summaries}
 
 

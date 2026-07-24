@@ -18,7 +18,7 @@
 
 | Method / Path | リクエスト | レスポンス主要キー | 概要 |
 |---|---|---|---|
-| GET `/projects` | なし | `items`, `summaries` | プロジェクト一覧＋サマリ |
+| GET `/projects` | なし | `items`, `summaries[]`（`project_id, images, labeled, ocr_confirmed, ocr_pending, models, image_stage, updated_at, sample_image, production_model, production_model_id, best_cer, best_cer_source, benchmark_count, active_job_type, all_models_archived`） | プロジェクト一覧＋サマリ（ダッシュボード一覧向け品質・運用指標を含む集約。既存フィールドは不変・追加のみ） |
 | POST `/projects` | `ProjectCreateRequest`（`project_id`） | `project_id` | プロジェクト作成（ディレクトリ+master CSV） |
 | DELETE `/projects/{project_id}` | Path | `project_id`, `deleted_jobs` | プロジェクト削除（学習ジョブも削除） |
 

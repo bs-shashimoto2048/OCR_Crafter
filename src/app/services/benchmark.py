@@ -754,6 +754,11 @@ def build_purpose_picks(results: list[dict[str, Any]], weights: dict[str, float]
 # ---------- 取得・CSV Export ----------
 
 
+def count_benchmarks(project_id: Optional[str]) -> int:
+    """Benchmark件数のみを返す軽量版（ダッシュボード集計用。Leaderboard等は構築しない）。"""
+    return len(_load_registry(project_id)["items"])
+
+
 def list_benchmarks(project_id: Optional[str]) -> dict[str, Any]:
     """Benchmark一覧（新しい順・casesは含めない要約）＋バランス重み設定。"""
     registry = _load_registry(project_id)

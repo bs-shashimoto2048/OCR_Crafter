@@ -799,6 +799,17 @@ export default function App() {
         ocr_confirmed: Number(row?.ocr_confirmed || 0),
         ocr_pending: Number(row?.ocr_pending || 0),
         models: Number(row?.models || 0),
+        image_stage: String(row?.image_stage || "none"),
+        updated_at: row?.updated_at || null,
+        sample_image: String(row?.sample_image || ""),
+        // v1.0.0 ダッシュボード一覧UX改善: 品質・運用指標（記録なし=null/空文字のまま。推測補完しない）
+        production_model: String(row?.production_model || ""),
+        production_model_id: String(row?.production_model_id || ""),
+        best_cer: row?.best_cer === null || row?.best_cer === undefined ? null : Number(row.best_cer),
+        best_cer_source: String(row?.best_cer_source || ""),
+        benchmark_count: Number(row?.benchmark_count || 0),
+        active_job_type: String(row?.active_job_type || ""),
+        all_models_archived: Boolean(row?.all_models_archived),
       };
     }
     setProjectSummaries(summaryMap);
@@ -3675,6 +3686,7 @@ export default function App() {
           onSelectProject={setProjectId}
         onOpenCreate={() => setShowProjectCreate(true)}
         templateRecord={readTemplateRecords()[projectId]}
+        templateRecords={readTemplateRecords()}
         onDeleteProject={deleteProject}
         onNavigate={setActiveView}
         onOpenImageInPreprocess={(name) => {
