@@ -103,22 +103,46 @@ test("buildOcrDatasetSummary: 未作成/作成中/失敗/件数0はすべて未�
   );
 });
 
-test("buildTrainingPreprocessStatus: 未実行時は「未実行」・件数0・日時プレースホルダを返す", () => {
+test("buildTrainingPreprocessStatus: 新規プロジェクト（画像なし）は not_processed（前処理画像なし）", () => {
   const status = buildTrainingPreprocessStatus(null);
-  assert.equal(status.executed, false);
-  assert.equal(status.label, "未実行");
+  assert.equal(status.status, "not_processed");
+  assert.equal(status.label, "前処理画像なし");
   assert.equal(status.processedImageCount, 0);
   assert.equal(status.executedAt, "-");
 });
 
-test("buildTrainingPreprocessStatus: 実行済みは処理画像数・処理日時を整形して返す", () => {
+test("buildTrainingPreprocessStatus: 旧プロジェクト（processedあり・snapshotなし）は processed_without_snapshot", () => {
   const status = buildTrainingPreprocessStatus({
+    training_preprocess: null,
+    training_preprocess_hash: null,
+    executed: false,
+    executed_at: "",
+    processed_image_count: 1000,
+  });
+  assert.equal(status.status, "processed_without_snapshot");
+  assert.equal(status.label, "前処理済み・設定記録なし");
+  assert.equal(status.processedImageCount, 1000);
+  // 設定記録が無い以上、処理日時も不明（推測補完しない）
+  assert.equal(status.executedAt, "-");
+});
+
+test("buildTrainingPreprocessStatus: 記録ありは処理画像数・処理日時を整形して返す（training_preprocess/hash/executedのいずれかで判定）", () => {
+  const status = buildTrainingPreprocessStatus({
+    training_preprocess: { steps: {} },
     executed: true,
     executed_at: "2026-07-27T12:18:00.123456",
     processed_image_count: 1024,
   });
-  assert.equal(status.executed, true);
-  assert.equal(status.label, "実行済み");
+  assert.equal(status.status, "recorded");
+  assert.equal(status.label, "前処理済み・設定記録あり");
   assert.equal(status.processedImageCount, 1024);
   assert.equal(status.executedAt, "2026-07-27 12:18:00");
+
+  // executedのみでも記録ありと判定する（後方互換: 旧フィールドのみのデータ）
+  const status2 = buildTrainingPreprocessStatus({ executed: true, executed_at: "2026-07-27T12:18:00", processed_image_count: 5 });
+  assert.equal(status2.status, "recorded");
+
+  // training_preprocess_hashのみでも記録ありと判定する
+  const status3 = buildTrainingPreprocessStatus({ training_preprocess_hash: "sha256:abc", processed_image_count: 5 });
+  assert.equal(status3.status, "recorded");
 });

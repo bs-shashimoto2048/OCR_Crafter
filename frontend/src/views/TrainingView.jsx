@@ -794,18 +794,38 @@ export default function TrainingView({
                                   学習前処理
                                   <InfoTooltip
                                     title="学習前処理の実行状況"
-                                    body="「前処理設定」画面で実行済みかどうかの確認です。未実行の場合、学習データは元画像（未加工）から作成されます。"
+                                    body="「前処理設定」画面での実行状況の確認です。前処理済みの画像から学習データが作成されます。"
                                   />
                                 </p>
-                                <p className={`mt-0.5 ${trainingPreprocessStatus.executed ? "text-emerald-300" : "text-amber-100"}`}>
-                                  {trainingPreprocessStatus.executed ? "✔" : "○"} {trainingPreprocessStatus.label}
-                                  {trainingPreprocessStatus.executed ? (
+                                {trainingPreprocessStatus.status === "recorded" ? (
+                                  <p className="mt-0.5 text-emerald-300">
+                                    ✔ 前処理済み・設定記録あり
                                     <span className="ml-1 tabular-nums text-muted">
                                       （処理画像数: {trainingPreprocessStatus.processedImageCount.toLocaleString()} / 処理日時:{" "}
                                       {trainingPreprocessStatus.executedAt}）
                                     </span>
-                                  ) : null}
-                                </p>
+                                  </p>
+                                ) : trainingPreprocessStatus.status === "processed_without_snapshot" ? (
+                                  <div className="mt-0.5">
+                                    <p className="text-amber-100">
+                                      ◐ 前処理済み・設定記録なし
+                                      <span className="ml-1 tabular-nums text-muted">
+                                        （処理画像数: {trainingPreprocessStatus.processedImageCount.toLocaleString()}）
+                                      </span>
+                                    </p>
+                                    <p className="mt-0.5 text-[11px] leading-5 text-muted">
+                                      前処理済み画像は存在しますが、前処理設定の履歴は保存されていません。
+                                      履歴保存機能導入前に処理された画像のため、使用した前処理設定は確認できません。
+                                    </p>
+                                  </div>
+                                ) : (
+                                  <div className="mt-0.5">
+                                    <p className="text-muted">○ 前処理画像なし</p>
+                                    <p className="mt-0.5 text-[11px] leading-5 text-muted">
+                                      前処理設定画面で前処理を実行すると、処理済み画像と設定履歴が保存されます。
+                                    </p>
+                                  </div>
+                                )}
                               </div>
                               <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                                 <div>
@@ -979,12 +999,29 @@ export default function TrainingView({
                               {(() => {
                                 const built = trainingPreprocessBuilt;
                                 if (!built.recorded) {
+                                  if (trainingPreprocessStatus.status === "processed_without_snapshot") {
+                                    return (
+                                      <div className="rounded-xl border border-border/70 bg-card/40 p-4 text-sm">
+                                        <p className="font-semibold text-text">設定記録なし</p>
+                                        <p className="mt-1 text-[12px] leading-5 text-muted">
+                                          前処理済み画像は存在しますが、使用した前処理設定の履歴は保存されていません。
+                                          履歴保存機能導入前に処理された画像のため、グレースケール・CLAHE・二値化などの設定内容は確認できません。
+                                        </p>
+                                        <p className="mt-2 text-[12px] leading-5 text-muted">
+                                          設定履歴を残すには、前処理設定画面で再度前処理を実行してください。
+                                        </p>
+                                        <p className="mt-1 text-[11px] leading-5 text-amber-100">
+                                          ※再実行するとprocessed画像が更新されるため、必要に応じて学習データセットも再作成してください。
+                                        </p>
+                                      </div>
+                                    );
+                                  }
                                   return (
                                     <div className="rounded-xl border border-border/70 bg-card/40 p-4 text-sm">
-                                      <p className="font-semibold text-text">未記録</p>
+                                      <p className="font-semibold text-text">前処理画像なし</p>
                                       <p className="mt-1 text-[12px] leading-5 text-muted">
-                                        このプロジェクトではまだ「前処理設定」画面で前処理が実行されていません。
-                                        学習データセット作成時、「前処理設定」画面の設定内容がそのまま学習前処理として使用されます。
+                                        前処理画像はまだ作成されていません。
+                                        前処理設定画面で前処理を実行すると、ここへ設定内容が表示されます。
                                       </p>
                                     </div>
                                   );

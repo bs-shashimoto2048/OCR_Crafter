@@ -74,14 +74,26 @@ export function buildOcrDatasetSummary({ datasetInfo, creating = false, failed =
 
 // 学習前処理（前処理設定画面）の実行状況サマリー。「前処理は終わっているか」を一目で
 // 確認できるようにするための表示専用の派生値（GET /api/ocr/training-preprocess/current の
-// executed/executed_at/processed_image_countから組み立てる。新規の設定・判定基準は追加しない）
+// training_preprocess/training_preprocess_hash/executed/executed_at/processed_image_countから
+// 組み立てる。新規API・判定基準は追加しない）。
+//
+// 3状態（v1.0.0で2状態から変更）:
+// - recorded: 設定記録あり（training_preprocess/training_preprocess_hash/executedのいずれかが有効）
+// - processed_without_snapshot: 前処理済み画像はあるが設定記録が無い（履歴保存機能導入前の旧プロジェクト）
+// - not_processed: 前処理画像自体が無い（本当に未実行）
+//
+// 「未実行」という文言はprocessed_without_snapshot（実際には前処理済み）と混同するため使用しない。
 export function buildTrainingPreprocessStatus(current) {
-  const executed = Boolean(current?.executed);
+  const hasRecord = Boolean(current?.training_preprocess) || Boolean(current?.training_preprocess_hash) || Boolean(current?.executed);
+  const processedImageCount = Number(current?.processed_image_count ?? 0) || 0;
   const executedAtRaw = String(current?.executed_at || "");
-  return {
-    executed,
-    label: executed ? "実行済み" : "未実行",
-    processedImageCount: Number(current?.processed_image_count ?? 0) || 0,
-    executedAt: executedAtRaw ? executedAtRaw.replace("T", " ").slice(0, 19) : "-",
-  };
+  const executedAt = executedAtRaw ? executedAtRaw.replace("T", " ").slice(0, 19) : "-";
+
+  if (hasRecord) {
+    return { status: "recorded", label: "前処理済み・設定記録あり", processedImageCount, executedAt };
+  }
+  if (processedImageCount > 0) {
+    return { status: "processed_without_snapshot", label: "前処理済み・設定記録なし", processedImageCount, executedAt: "-" };
+  }
+  return { status: "not_processed", label: "前処理画像なし", processedImageCount: 0, executedAt: "-" };
 }

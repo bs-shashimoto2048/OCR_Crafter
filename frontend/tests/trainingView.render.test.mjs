@@ -243,14 +243,33 @@ test("タブは4件・並び順は学習設定→学習前処理→オーグメ�
   assert.ok(positions[0] < positions[1] && positions[1] < positions[2] && positions[2] < positions[3]);
 });
 
-test("学習前処理タブ: 未記録時は「未記録」と案内を表示し、推測で埋めない", () => {
+test("学習前処理タブ①: 前処理画像なし（新規プロジェクト）は「前処理画像なし」と案内を表示し、推測で埋めない", () => {
   const html = render({ initialSettingsTab: "preprocess" }).replaceAll("<!-- -->", "");
   assert.ok(html.includes('id="settings-panel-preprocess"'));
-  assert.ok(html.includes("未記録"));
+  assert.ok(html.includes("前処理画像なし"));
   assert.ok(html.includes("前処理設定"));
+  assert.ok(!html.includes("未実行"));
 });
 
-test("学習前処理タブ: 記録があれば表示名・専門パラメータ名・現在値・単位・説明を表示する", () => {
+test("学習前処理タブ②: 前処理済み画像はあるが設定記録が無い（旧プロジェクト）は「設定記録なし」を表示する", () => {
+  const html = render({
+    initialSettingsTab: "preprocess",
+    ocrTrainingPreprocessCurrent: {
+      training_preprocess: null,
+      training_preprocess_hash: null,
+      executed: false,
+      executed_at: "",
+      processed_image_count: 1000,
+    },
+  }).replaceAll("<!-- -->", "");
+  assert.ok(html.includes("設定記録なし"));
+  assert.ok(html.includes("履歴保存機能導入前"));
+  assert.ok(html.includes("グレースケール"));
+  assert.ok(html.includes("再度前処理を実行"));
+  assert.ok(!html.includes("未実行"));
+});
+
+test("学習前処理タブ③: 記録があれば表示名・専門パラメータ名・現在値・単位・説明を表示する", () => {
   const trainingPreprocess = {
     schema_version: 1,
     image_types: ["wide"],
@@ -359,25 +378,45 @@ test("分割枚数を確認プレビュー: 前処理未実行の警告が無け
   assert.ok(!html.includes("前処理未実行の状態です"));
 });
 
-test("データ分割: 学習前処理の実行状況（未実行）を表示する", () => {
+test("データ分割: 学習前処理カード①新規プロジェクト（画像なし）は「前処理画像なし」を表示し、未実行という文言は使わない", () => {
   const html = render({ initialSettingsTab: "training-settings", ocrTrainingPreprocessCurrent: null }).replaceAll(
     "<!-- -->",
     ""
   );
   assert.ok(html.includes("学習前処理"));
-  assert.ok(html.includes("未実行"));
+  assert.ok(html.includes("前処理画像なし"));
+  assert.ok(!html.includes("未実行"));
 });
 
-test("データ分割: 学習前処理の実行状況（実行済み・処理画像数・処理日時）を表示する", () => {
+test("データ分割: 学習前処理カード②旧プロジェクト（processedあり・snapshotなし）は「前処理済み・設定記録なし」を表示する", () => {
   const html = render({
     initialSettingsTab: "training-settings",
     ocrTrainingPreprocessCurrent: {
+      training_preprocess: null,
+      training_preprocess_hash: null,
+      executed: false,
+      executed_at: "",
+      processed_image_count: 1000,
+    },
+  }).replaceAll("<!-- -->", "");
+  assert.ok(html.includes("前処理済み・設定記録なし"));
+  assert.ok(html.includes("1,000"));
+  assert.ok(html.includes("履歴保存機能導入前"));
+  assert.ok(!html.includes("未実行"));
+});
+
+test("データ分割: 学習前処理カード③記録あり（snapshotあり）は「前処理済み・設定記録あり」と処理画像数・処理日時を表示する", () => {
+  const html = render({
+    initialSettingsTab: "training-settings",
+    ocrTrainingPreprocessCurrent: {
+      training_preprocess: { steps: {} },
+      training_preprocess_hash: "sha256:abcdef",
       executed: true,
       executed_at: "2026-07-27T12:18:00",
       processed_image_count: 1024,
     },
   }).replaceAll("<!-- -->", "");
-  assert.ok(html.includes("実行済み"));
+  assert.ok(html.includes("前処理済み・設定記録あり"));
   assert.ok(html.includes("1,024"));
   assert.ok(html.includes("2026-07-27 12:18:00"));
 });
