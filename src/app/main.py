@@ -109,6 +109,7 @@ from .services.model_registry import (
 from .services.ocr_tuning import export_ocr_training_data
 from .services.ocr_pipeline import (
     OCR_CHARSET_DEFAULT,
+    build_training_condition_snapshot,
     create_ocr_dataset_from_logs,
     create_ocr_dataset,
     preview_ocr_dataset_split,
@@ -1761,6 +1762,29 @@ def image_interim_file(
     raise HTTPException(status_code=404, detail="interim image not found")
 
 
+@app.get("/api/ocr/training-preprocess/current")
+def api_training_preprocess_current(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+    """次回学習で使用される学習前処理の現況（プロジェクトの現在の前処理スナップショット）。
+
+    「次回学習の設定」画面の学習前処理タブが、学習実行前に確認用として参照する
+    （新規の学習前処理設定を追加するものではなく、既存の前処理設定画面の値をそのまま表示する）。
+    一度も /preprocess/run を実行していないプロジェクトは training_preprocess=None
+    （推測で補完しない。UI側で「未記録」表示）。
+    """
+    from .services.preprocess_snapshot import build_training_preprocess, compute_training_preprocess_hash, load_preprocess_snapshot
+
+    resolved = _resolve_project_id(project_id)
+    paths = ensure_project_directories(resolved)
+    snapshot = load_preprocess_snapshot(paths.root)
+    training_preprocess = build_training_preprocess(snapshot, ["single", "wide"], None) if snapshot else None
+    training_preprocess_hash = compute_training_preprocess_hash(training_preprocess)
+    return {
+        "project_id": resolved,
+        "training_preprocess": training_preprocess,
+        "training_preprocess_hash": training_preprocess_hash,
+    }
+
+
 @app.post("/preprocess/run")
 def preprocess(req: PreprocessRequest, request: Request) -> dict[str, Any]:
     _enforce_role(request, "preprocess_run")
@@ -2832,6 +2856,8 @@ def api_ocr_train_start(req: OcrTrainStartRequest, background_tasks: BackgroundT
         "model_path": None,
         "worker_pid": None,
         "log_path": str(log_path),
+        # 学習前処理・オーグメンテーションのスナップショット（Job作成時点で確定。学習中の設定変更・失敗Jobでも実行条件を追跡できるようにするため）
+        "training_condition_snapshot": build_training_condition_snapshot(str(req.dataset_dir or "")),
         "created_at": now,
         "updated_at": now,
     }
@@ -2895,6 +2921,8 @@ def api_tesseract_train_start(req: TesseractTrainStartRequest, request: Request)
         "model_path": None,
         "worker_pid": None,
         "log_path": str(log_path),
+        # 学習前処理・オーグメンテーションのスナップショット（Job作成時点で確定。学習中の設定変更・失敗Jobでも実行条件を追跡できるようにするため）
+        "training_condition_snapshot": build_training_condition_snapshot(dataset_dir),
         # 実験情報はジョブ経由でモデルメタ（.tess.json）へ引き継ぐ（未指定なら保存しない=従来動作）
         "experiment_meta": (
             json.dumps(

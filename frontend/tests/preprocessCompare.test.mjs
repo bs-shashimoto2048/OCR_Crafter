@@ -5,6 +5,7 @@ import { test } from "node:test";
 
 import {
   PREPROCESS_COMPARISON_ROWS,
+  buildEffectiveTrainingPreprocess,
   buildPreprocessNotes,
   diffTrainingPreprocess,
   normalizeTrainingPreprocess,
@@ -119,7 +120,7 @@ test("diffTrainingPreprocess: 変更点のみ抽出・同一ハッシュは差�
   const labels = diff.changes.map((c) => c.label);
   assert.ok(labels.includes("照明ムラ補正"));
   assert.ok(labels.includes("二値化方式"));
-  assert.ok(labels.includes("Gamma"));
+  assert.ok(labels.includes("ガンマ補正"));
   const thresholdChange = diff.changes.find((c) => c.key === "thresholdMethod");
   assert.equal(thresholdChange.from, "Binary 128");
   assert.equal(thresholdChange.to, "Otsu");
@@ -132,6 +133,30 @@ test("diffTrainingPreprocess: 変更点のみ抽出・同一ハッシュは差�
 
   const unknown = diffTrainingPreprocess(normalizeTrainingPreprocess({}), a);
   assert.equal(unknown.comparable, false);
+});
+
+test("buildEffectiveTrainingPreprocess: 有効な項目のみ列挙し表示名/専門パラメータ名/値/単位/説明を持つ", () => {
+  const built = buildEffectiveTrainingPreprocess(makeInfo(makeTp({ illumination: true, gamma: 1.1 })));
+  assert.equal(built.recorded, true);
+  const illumination = built.items.find((i) => i.key === "illumination");
+  assert.equal(illumination.label, "照明ムラ補正");
+  assert.equal(illumination.paramName, "illumination_method");
+  assert.equal(illumination.value, "ON（gaussian）");
+  assert.ok(illumination.description.length > 0);
+  assert.equal(illumination.enabled, true);
+  // morphはmakeTpでenabled:falseのため、有効項目カウントから除外される
+  const morph = built.items.find((i) => i.key === "morph");
+  assert.equal(morph.enabled, false);
+  // グレースケール・入力整形は常時実行のためenabledCount（トグル可能項目数）には含めない
+  assert.ok(!built.items.some((i) => i.key === "grayscale") === false); // グレースケール自体は一覧に含まれる
+  assert.ok(built.enabledCount < built.totalCount);
+});
+
+test("buildEffectiveTrainingPreprocess: 未記録は recorded=false・items空", () => {
+  const built = buildEffectiveTrainingPreprocess({});
+  assert.equal(built.recorded, false);
+  assert.deepEqual(built.items, []);
+  assert.equal(built.enabledCount, 0);
 });
 
 test("buildPreprocessNotes: モデル間不一致・未記録混在の注意文", () => {

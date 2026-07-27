@@ -116,6 +116,11 @@ def init_db() -> None:
             # 実験情報（experiment_name / parent_model_id / training_note）のJSON文字列。
             # モデルメタ（.tess.json等）へ引き継ぐための一時保管（後方互換のためNULL可）
             conn.execute("ALTER TABLE training_jobs ADD COLUMN experiment_meta TEXT")
+        if "training_condition_snapshot" not in columns:
+            # 学習前処理・オーグメンテーションのスナップショット（display/effective/hash）JSON文字列。
+            # Job作成時点（train/start呼び出し時）に確定し、完了後のモデルメタへそのまま引き継ぐ
+            # （学習中の設定変更・失敗Jobでも当時の実行条件を追跡できるようにするため。後方互換のためNULL可）
+            conn.execute("ALTER TABLE training_jobs ADD COLUMN training_condition_snapshot TEXT")
         conn.commit()
 
 
@@ -144,12 +149,15 @@ def upsert_training_job(job: dict[str, Any]) -> None:
     image_shape = job.get("image_shape")
     if isinstance(image_shape, (list, tuple, dict)):
         image_shape = json.dumps(image_shape, ensure_ascii=False)
+    training_condition_snapshot = job.get("training_condition_snapshot")
+    if isinstance(training_condition_snapshot, dict):
+        training_condition_snapshot = json.dumps(training_condition_snapshot, ensure_ascii=False)
     with get_conn() as conn:
         conn.execute(
             """
             INSERT INTO training_jobs (
-                id, project_id, training_family, engine, model_type, epochs, batch_size, device, auto_batch_size, train_num_workers, eval_num_workers, save_epoch_step, use_amp, pin_memory, persistent_workers, resolved_device, learning_rate, training_mode, init_source_type, init_source_value, freeze_backbone_epochs, backbone_lr_scale, charset, max_text_length, dataset_dir, paddle_repo_dir, image_shape, status, message, model_path, worker_pid, log_path, experiment_meta, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, project_id, training_family, engine, model_type, epochs, batch_size, device, auto_batch_size, train_num_workers, eval_num_workers, save_epoch_step, use_amp, pin_memory, persistent_workers, resolved_device, learning_rate, training_mode, init_source_type, init_source_value, freeze_backbone_epochs, backbone_lr_scale, charset, max_text_length, dataset_dir, paddle_repo_dir, image_shape, status, message, model_path, worker_pid, log_path, experiment_meta, training_condition_snapshot, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 project_id=excluded.project_id,
                 training_family=excluded.training_family,
@@ -183,6 +191,7 @@ def upsert_training_job(job: dict[str, Any]) -> None:
                 worker_pid=excluded.worker_pid,
                 log_path=excluded.log_path,
                 experiment_meta=excluded.experiment_meta,
+                training_condition_snapshot=excluded.training_condition_snapshot,
                 updated_at=excluded.updated_at
             """,
             (
@@ -219,6 +228,7 @@ def upsert_training_job(job: dict[str, Any]) -> None:
                 worker_pid,
                 job.get("log_path"),
                 job.get("experiment_meta"),
+                training_condition_snapshot,
                 job["created_at"],
                 job["updated_at"],
             ),
@@ -230,7 +240,7 @@ def fetch_training_job(job_id: str) -> Optional[dict[str, Any]]:
     with get_conn() as conn:
         row = conn.execute(
             """
-            SELECT id, project_id, training_family, engine, model_type, epochs, batch_size, device, auto_batch_size, train_num_workers, eval_num_workers, save_epoch_step, use_amp, pin_memory, persistent_workers, resolved_device, learning_rate, training_mode, init_source_type, init_source_value, freeze_backbone_epochs, backbone_lr_scale, charset, max_text_length, dataset_dir, paddle_repo_dir, image_shape, status, message, model_path, worker_pid, log_path, experiment_meta, created_at, updated_at
+            SELECT id, project_id, training_family, engine, model_type, epochs, batch_size, device, auto_batch_size, train_num_workers, eval_num_workers, save_epoch_step, use_amp, pin_memory, persistent_workers, resolved_device, learning_rate, training_mode, init_source_type, init_source_value, freeze_backbone_epochs, backbone_lr_scale, charset, max_text_length, dataset_dir, paddle_repo_dir, image_shape, status, message, model_path, worker_pid, log_path, experiment_meta, training_condition_snapshot, created_at, updated_at
             FROM training_jobs WHERE id = ?
             """,
             (job_id,),
@@ -273,6 +283,7 @@ def fetch_training_job(job_id: str) -> Optional[dict[str, Any]]:
         "worker_pid",
         "log_path",
         "experiment_meta",
+        "training_condition_snapshot",
         "created_at",
         "updated_at",
     ]
@@ -287,6 +298,14 @@ def fetch_training_job(job_id: str) -> Optional[dict[str, Any]]:
             payload["image_shape"] = json.loads(image_shape_raw)
         except Exception:  # noqa: BLE001
             payload["image_shape"] = image_shape_raw
+    snapshot_raw = payload.get("training_condition_snapshot")
+    if isinstance(snapshot_raw, str) and snapshot_raw.strip():
+        try:
+            payload["training_condition_snapshot"] = json.loads(snapshot_raw)
+        except (TypeError, ValueError):
+            payload["training_condition_snapshot"] = None
+    else:
+        payload["training_condition_snapshot"] = None
     return payload
 
 

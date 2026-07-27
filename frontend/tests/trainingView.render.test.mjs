@@ -139,18 +139,19 @@ test("jobなし（idle）でレンダリングでき、開始ボタンと未開�
   assert.ok(!html.includes("statusText"));
 });
 
-test("次回学習の設定はカテゴリサマリー（3カード・カード全体がボタン）を表示し、編集UIは初期非表示", () => {
+test("次回学習の設定はカテゴリサマリー（4カード・カード全体がボタン）を表示し、編集UIは初期非表示", () => {
   const html = render().replaceAll("<!-- -->", "");
   assert.ok(html.includes("次回学習の設定"));
-  // 3カテゴリ（学習パラメータとデータ分割は「学習設定」へ統合）
-  for (const label of ["学習設定", "オーグメンテーション", "エンジン設定"]) {
+  // 4カテゴリ（学習パラメータとデータ分割は「学習設定」へ統合、学習前処理を新設）
+  for (const label of ["学習設定", "学習前処理", "オーグメンテーション", "エンジン設定"]) {
     assert.ok(html.includes(label), label);
   }
   assert.ok(!html.includes("データ分割"));
   // 旧タブ由来の見出し文言「学習パラメータ」はカード見出しとしては存在しない（タブ内セクション見出しとしては別テストで確認）
-  assert.ok(html.includes("学習設定・オーグメンテーション・エンジン設定"));
+  assert.ok(html.includes("学習設定・学習前処理・オーグメンテーション・エンジン設定"));
   // カード全体がbutton（aria-label・Tab/Enter/Space対応）＋「＞」表示
   assert.ok(html.includes('aria-label="学習設定の設定を編集"'));
+  assert.ok(html.includes('aria-label="学習前処理の設定を編集"'));
   assert.ok(html.includes('aria-label="オーグメンテーションの設定を編集"'));
   assert.ok(html.includes('aria-label="エンジン設定の設定を編集"'));
   assert.ok(html.includes("＞"));
@@ -229,12 +230,48 @@ test("学習設定タブは学習パラメータが先・データ分割が後�
   assert.ok(!html.includes('id="settings-tab-params"'));
 });
 
-test("タブは3件・並び順は学習設定→オーグメンテーション→エンジン設定", () => {
+test("タブは4件・並び順は学習設定→学習前処理→オーグメンテーション→エンジン設定", () => {
   const html = render({ initialSettingsTab: "training-settings" }).replaceAll("<!-- -->", "");
-  const tabOrder = ["settings-tab-training-settings", "settings-tab-augmentation", "settings-tab-engine"];
+  const tabOrder = [
+    "settings-tab-training-settings",
+    "settings-tab-preprocess",
+    "settings-tab-augmentation",
+    "settings-tab-engine",
+  ];
   const positions = tabOrder.map((id) => html.indexOf(`id="${id}"`));
   assert.ok(positions.every((pos) => pos >= 0), positions);
-  assert.ok(positions[0] < positions[1] && positions[1] < positions[2]);
+  assert.ok(positions[0] < positions[1] && positions[1] < positions[2] && positions[2] < positions[3]);
+});
+
+test("学習前処理タブ: 未記録時は「未記録」と案内を表示し、推測で埋めない", () => {
+  const html = render({ initialSettingsTab: "preprocess" }).replaceAll("<!-- -->", "");
+  assert.ok(html.includes('id="settings-panel-preprocess"'));
+  assert.ok(html.includes("未記録"));
+  assert.ok(html.includes("前処理設定"));
+});
+
+test("学習前処理タブ: 記録があれば表示名・専門パラメータ名・現在値・単位・説明を表示する", () => {
+  const trainingPreprocess = {
+    schema_version: 1,
+    image_types: ["wide"],
+    steps: {
+      wide: [
+        { name: "grayscale", enabled: true, params: {} },
+        { name: "threshold", enabled: true, params: { type: "otsu", value: 128, block_size: 35, c: 11 } },
+        { name: "deskew", enabled: true, params: {} },
+      ],
+    },
+    ocr_input_normalization: { channels: 3, target_height: 48, canvas_width: 320 },
+  };
+  const html = render({
+    initialSettingsTab: "preprocess",
+    ocrTrainingPreprocessCurrent: { training_preprocess: trainingPreprocess, training_preprocess_hash: "sha256:abcdef1234567890" },
+  }).replaceAll("<!-- -->", "");
+  assert.ok(html.includes("二値化方式"));
+  assert.ok(html.includes("threshold_type"));
+  assert.ok(html.includes("Otsu"));
+  assert.ok(html.includes("傾き補正"));
+  assert.ok(html.includes("項目有効"));
 });
 
 test("旧タブID（data-split / training-params）が保存されていても安全に学習設定タブへ移行し、タブを開ける", () => {

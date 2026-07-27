@@ -1,11 +1,13 @@
-// 次回学習の設定タブ定義（3カテゴリ）と、旧4タブ構成からの安全なID移行。
+// 次回学習の設定タブ定義（4カテゴリ）と、旧タブ構成からの安全なID移行。
 // 「学習パラメータ」「データ分割」タブは「学習設定」へ統合された（並び順は固定）。
+// 並び順は固定: 学習設定 → 学習前処理 → オーグメンテーション → エンジン設定。
 // localStorageキー ocr_training_settings_tab_v1 はそのまま使用し、
 // 旧タブID（data-split / training-params）が保存されている場合は新IDへマッピングする。
 // 想定外の値も含め、正規化後は必ずいずれかの有効タブIDを返す（既存ユーザーがタブを開けなくならないように）。
 
 export const SETTINGS_TABS = [
   { id: "training-settings", label: "学習設定" },
+  { id: "preprocess", label: "学習前処理" },
   { id: "augmentation", label: "オーグメンテーション" },
   { id: "engine", label: "エンジン設定" },
 ];

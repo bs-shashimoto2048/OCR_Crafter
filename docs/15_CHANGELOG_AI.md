@@ -13,12 +13,73 @@ timeline
     07-15〜16 : 評価データ作成（Step5）とディレクトリ入力 : Step5性能改善（共有Executor・in-flight共有・保存分離） : YOLO検出復旧
     07-17 : CER中心の評価体系（マイクロ平均・混同集計・改善/悪化） : モデルカルテ/比較ダッシュボード : モデル管理No（M0001） : モデル識別色 : Unicode特殊文字表示 : 一覧バッジ削除と右ペイン拡張
     07-18〜 : 学習条件比較・条件差分・次回学習提案 : サイドバーのOCR開発フロー順再編 : 性能サマリー省スペース化と比較カード短縮名
-    07-24 : ダッシュボード「プロジェクト一覧」テーブル拡張 : 同カードビュー化（Health Badge・Exact Match） : カードへBenchmark性能指標追加（Balance Score・P95・Healthのreasons） : カードUI/UXブラッシュアップ（文字拡大・3列化・Primary/Secondary・Production独立表示）
+    07-24 : ダッシュボード「プロジェクト一覧」テーブル拡張 : 同カードビュー化（Health Badge・Exact Match） : カードへBenchmark性能指標追加（Balance Score・P95・Healthのreasons） : カードUI/UXブラッシュアップ（文字拡大・3列化・Primary/Secondary・Production独立表示） : 学習前処理・オーグメンテーションの実効値スナップショット保存と学習条件比較の2セクション化・推論使用モデルの一覧強調
 ```
 
 ---
 
 ## 2026-07
+
+### 学習前処理・オーグメンテーションの実効値スナップショット保存と学習条件比較の再構成、推論使用モデルの一覧強調
+
+**調査で判明した現状の不整合**
+モデル管理「学習条件比較」の「学習前処理」行は、`training_preprocess`（`services/preprocess_snapshot.py`）が保存されているプロジェクトでのみ実値を表示し、一度も「前処理設定」画面で `/preprocess/run` を実行していないプロジェクトでは常に「未記録」になっていた（バグではなく、その前処理パイプライン設定自体が記録されていないため）。一方、学習画面でユーザーが直接編集できるのは主に**オーグメンテーション**（`services/ocr_pipeline.py` の `parse_augmentation_config`/`_apply_augmentation_config`。プリセット=none/weak/custom、rotation/brightness/contrast/blur/noiseの5項目）のみで、学習画像へ実際に適用される**前処理**（グレースケール・二値化・照明ムラ補正・CLAHE等。`services/preprocess.py` の取込パイプライン）は学習画面に一切UIが無く、「前処理設定」画面で設定した内容がデータセット作成時に凍結コピーされるだけだった。さらに、オーグメンテーションの「強度（弱・中）」はUI上は抽象ラベルのみで、実際に画素へ適用される内部値（ぼかしのGaussian半径・ノイズのsigma）は一切表示されていなかった——ユーザーが学習画面の設定とモデル管理の履歴表示を見比べても、同じ設定なのか判断できない状態だった。また、学習前処理・オーグメンテーションの記録はいずれも**学習完了後**にデータセットのmeta.jsonから間接的に導出されるのみで、Job（`training_jobs`テーブル）自体には確定した記録が無く、失敗した学習や再起動後には実行条件を追跡できなかった。
+
+**学習前処理とオーグメンテーションの分離**
+①【学習前処理】画像へ固定的に適用される処理（`services/preprocess.py`の取込パイプライン。グレースケール・二値化[Otsu/Adaptive/固定]・照明ムラ補正・CLAHE・ガンマ補正・シャープ化・アンシャープマスク・バイラテラルノイズ除去・局所コントラスト・ヒストグラム平坦化・オープンクローズ処理・掠れ補正・傾き補正・余白トリミング・リサイズ・ノイズ除去）。②【オーグメンテーション】学習データへ確率的に適用する変換（回転・明るさ・コントラスト・ぼかし・ノイズ・生成倍率・適用確率・強度）。**実装前に`config/settings.yaml`のpreprocess.pipelinesと`services/ocr_pipeline.py`を調査し、実際にパイプラインへ存在する工程のみをUIへ表示**した（存在しない前処理は追加していない）。学習前処理は「学習画像を作る際に既に適用済みの処理」であり、学習時に新たに設定できる項目ではないため、学習前処理タブは**既存の「前処理設定」画面を複製せず、読み取り専用の確認表示**とした。
+
+**学習前処理タブの項目**
+「次回学習の設定」に4番目のタブとして追加（順序: 学習設定→**学習前処理**→オーグメンテーション→エンジン設定）。`GET /api/ocr/training-preprocess/current`（新規）でプロジェクトの現在の前処理スナップショットを取得し、`lib/preprocessCompare.js`の`buildEffectiveTrainingPreprocess`で実際に有効な工程のみを「表示名・専門パラメータ名（ホバーで内部パラメータ名）・現在値・単位・説明」の形式で列挙する。前処理未実行のプロジェクトは「未記録」（現在の設定から推測して埋めない）。
+
+**抽象値と実効値の対応**
+オーグメンテーションの強度ラベル（弱・中）から実際の内部パラメータへの変換は、バックエンド`services/ocr_pipeline.py`の`AUGMENTATION_STRENGTH_PARAMS`（weak: blur radius 0.3-0.6・noise sigma 3.0 / medium: blur radius 0.5-0.9・noise sigma 6.0）を唯一の定義とし、実際の画素変換（`_apply_augmentation_config`）とスナップショット用の実効値算出（`build_effective_augmentation`）の両方がこの1箇所だけを参照するようリファクタリングした（既存の数値は変更していない。回帰テストで確認）。回転・明るさ・コントラストはもともと抽象値＝実効値（度数・%レンジがそのまま実際に使われる値）のため変換不要。フロント側`lib/augmentation.js`の`buildEffectiveAugmentation`は、この定義の手動ミラー（既存の`WEAK_AUGMENTATION_CONFIG`複製方針と同じ）で、UI表示・比較画面の両方から利用する。オーグメンテーション設定パネルの「強度」選択欄には、抽象ラベルに加えて「実効値: sigma=3」「実効値: radius=0.3-0.6」を併記した。
+
+**共通の正規化処理**
+`build_effective_augmentation(config)`（backend: `ocr_pipeline.py` / frontend: `lib/augmentation.js`。同一構造の手動ミラー）が`{enabled, display, effective}`を組み立て、学習API payload・学習時スナップショット・モデル管理の履歴表示・比較画面のすべてから利用される。学習前処理は抽象値＝実効値のため専用の変換関数は不要で、`lib/preprocessCompare.js`の`buildEffectiveTrainingPreprocess`が生のスナップショット（steps/params）を表示行へ整形する共通定義として機能する。
+
+**Jobスナップショット**
+スナップショットは学習完了時ではなく**学習開始Job作成時**（`POST /api/tesseract/train/start`・`POST /api/ocr/train/start`）に確定する（`ocr_pipeline.py`の新規`build_training_condition_snapshot(dataset_dir)`が、既に作成済みのデータセットmeta.jsonから読み取って組み立てる。データセット自体はJob作成より前に構築されているため、この時点で凍結すれば以後のプロジェクト設定変更の影響を受けない）。`{trainingPreprocess: {display, effective, hash}, augmentation: {display, effective, hash}, trainingInputPipelineHash}`の形でJSON化し、`training_jobs`テーブルの新規列`training_condition_snapshot`へ保存する（学習中の設定変更・失敗Jobでも当時の実行条件を追跡できる・再起動後も同じ条件で状態を確認できる、という3つの理由による）。
+
+**モデルメタデータ保存**
+`tesseract_pipeline.py`の`register_tesseract_model`が、学習完了時に**Jobレコードのスナップショットを優先**して`.tess.json`へ引き継ぐ（`fetch_training_job(job_id)`経由。Jobレコードが存在しない場合[旧`job_manager.py`経由の汎用フローなど]はデータセットmeta.jsonから直接導出する既存動作へフォールバックする）。これにより「Jobへ保存したスナップショットを、そのまま完成モデルのメタデータへ引き継ぐ」という要件を、既存の後方互換を壊さずに満たした。
+
+**Hash構成**
+既存の`training_preprocess_hash`（前処理パイプラインのみのハッシュ。評価の比較可能性判定など複数箇所で既に使われている概念）の意味は一切変更していない。新たに`augmentation_hash`（オーグメンテーション設定のみのsha256。未使用時はnull）と、両方を結合した`training_input_pipeline_hash`（いずれか一方でも記録があれば生成）を追加し、既存のハッシュ名を再利用・上書きしなかった。
+
+**モデル比較画面の変更**
+「学習条件比較」テーブルから「学習前処理」「Augプリセット」「Augmentation設定」の1行要約を除外し（同じ情報が2箇所に別形式で出て混乱するため）、代わりに**⑤-2 学習前処理比較**（既存。今回rowsを拡充: バイラテラル/シャープ化/アンシャープマスク/局所コントラスト/ヒストグラム平坦化/余白トリミングを追加）と、新設の**⑤-3 オーグメンテーション比較**（`lib/augmentation.js`の`AUGMENTATION_COMPARISON_ROWS`/`normalizeAugmentationForCompare`。プリセット・生成倍率・回転・明るさ・コントラスト・ぼかし・ノイズを、確率＋実効値を1行に併記して表示。例:「ノイズ 10% / 弱 / sigma=3」）の2セクションへ分離した。専門用語（内部パラメータ名）はホバーのツールチップまたは補助表示とし、表の主表示は利用者向け名称（グレースケール・傾き補正等）にした。
+
+**旧モデルの扱い**
+既存モデルにはJobスナップショット・`training_preprocess`のいずれも存在しない場合があり、その場合は学習前処理比較・オーグメンテーション比較の両方で「未記録」を表示する（現在のプロジェクト設定から推測して埋めない）。オーグメンテーションは旧形式（`use_augmentation`/`aug_strength`の強度1-3指定）のみ記録がある場合、プリセット行は「旧形式（強度指定）」と表示しつつ、項目別の内訳（回転・明るさ等）は「-」とする（旧形式には項目別の記録が存在しないため、推測で埋めない）。
+
+**推論使用モデルの強調表示**
+調査の結果、「推論に使用」はProduction（リリース管理の`release_manager.py`）とは完全に別の概念で、`App.jsx`の`inferEngine`/`inferModel`等（ブラウザのセッション内state。バックエンドAPIも呼ばない・永続化されない）だけで管理されていることが判明した。`ModelsView.jsx`の一覧行へ、①行全体の背景（`bg-cyan-500/10`）②左端accentバー（`border-l-cyan-400`）③「推論使用中」バッジ④管理Noのリング強調、をシアン系（既存の`accent`青・比較識別色ブルー/オレンジ/パープルと衝突しない色）で追加した。この強調は`statusOf()`のリリースステータス優先ロジックとは独立しているため、Candidate/Production等の状態バッジで隠れることなく常時判別できる。
+
+**比較選択との併用**
+推論使用中の行にも比較用チェックボックスは変更なく表示され、行の背景色・accentバー・バッジと、チェックボックスのチェック状態・比較識別色（詳細/比較ペインでのみ使用）は完全に独立した状態として共存できる（片方の表示で他方を上書きしない）。
+
+**即時UI更新**
+「推論に使用」ボタンの押下は既存どおりAPIを呼ばない同期的なstate更新のため、ハイライトも即座に切り替わる（新たな非同期処理を追加する必要はなかった）。バックエンド永続化が存在しないため「API失敗時の表示維持」という要件は該当せず、常に成功する設計のままとした。
+
+**API変更**
+`GET /api/ocr/training-preprocess/current`（新規。プロジェクトの現在の前処理スナップショット取得。学習前処理タブの確認表示専用）、`GET /models/info`へ`augmentation_hash`/`training_input_pipeline_hash`を追加（既存フィールドは不変）、`training_jobs`テーブルへ`training_condition_snapshot`列を追加（`ALTER TABLE ADD COLUMN`。既存行はNULL＝後方互換）。**モデル一覧の「推論使用中」表示は既存のクライアント側stateをそのまま使い、新規APIやフィールドは追加していない**（`isInferenceModel`のようなサーバー側フィールドは不要と判断した）。
+
+**N+1対策**
+学習前処理タブのデータ取得は「次回学習の設定」画面を開いた/学習前処理タブを選んだプロジェクトについて1回のみ（`App.jsx`の`activeView==="ocr-training"`時にフェッチ）で、一覧描画時の追加取得ではない。推論使用モデルの強調は追加APIを一切呼ばない（既存propの比較のみ）ため、N+1は発生しない。
+
+**テスト結果**
+バックエンド443件（新規18件: `tests/test_training_condition_snapshot.py`）・フロントエンド408件（新規: `augmentation.test.mjs`/`preprocessCompare.test.mjs`/`trainingSettingsTabs.test.mjs`/`trainingView.render.test.mjs`/`augmentationPanel.render.test.mjs`/`modelsView.render.test.mjs`の追加分）全通過、`npm run build`成功。既存のTesseract/PaddleOCR学習・オーグメンテーション・モデル比較・推論モデル切替・モデル評価の回帰テストに影響なし。
+
+**ドキュメント更新**
+`docs/16_SCREEN_SPEC.md`（学習前処理タブ・4タブ構成・オーグメンテーション実効値表示・学習条件比較の再構成・推論使用モデル強調）、`docs/USER_GUIDE.md`（同内容の利用者向け説明）、`docs/06_API_REFERENCE.md`（新規エンドポイント・フィールド追加）、`docs/07_DATABASE.md`（`training_condition_snapshot`列）、`docs/08_CONFIGURATION.md`（`ocr_training_settings_tab_v1`のタブ一覧更新）、`docs/17_DATAFLOW.md`（「前処理スナップショット」行の拡充）を更新。
+
+**既知の制約**
+- PaddleOCR（`.ocr.json`）モデルは、TesseractのようにJobスナップショットを明示的に経由させる改修を行っていない（`_register_ocr_model`は変更なし）。ただし`model_registry.py`の`list_model_infos`が既にデータセットmeta.json（`augmentation_hash`/`training_input_pipeline_hash`含む）を都度参照する設計のため、表示上は正しい値が出る。Job作成時点のスナップショットはPaddleOCR側でも`training_jobs.training_condition_snapshot`へ保存されるが、モデルメタへの引き継ぎ経路はTesseractほど明示的ではない
+- ぼかしの実効値は「radius=0.3-0.6」のように**Gaussian半径のレンジ**で表示している（PIL の `ImageFilter.GaussianBlur(radius=...)` を使用しているため）。カーネルサイズという概念は実装に存在しないため使用していない
+- 学習前処理タブは複数の画像種別（single/wide）が設定されている場合、wideを優先した代表1種別のみを表示する（`normalizeTrainingPreprocess`の既存ロジックを再利用）
+- オーグメンテーション比較の「旧形式のみ記録」時の項目別内訳「-」表示は、旧形式に項目別データが存在しないための設計上の割り切りであり、実データの欠落ではない
+
+---
 
 ### プロジェクトカードUI/UXブラッシュアップ（文字拡大・データ/品質/性能の3列化・Primary/Secondary・Production独立表示）
 

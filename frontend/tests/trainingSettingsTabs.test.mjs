@@ -4,15 +4,15 @@ import { test } from "node:test";
 
 import { DEFAULT_SETTINGS_TAB_ID, SETTINGS_TABS, normalizeSettingsTabId } from "../src/lib/trainingSettingsTabs.js";
 
-test("タブは3件で、学習設定→オーグメンテーション→エンジン設定の順", () => {
-  assert.equal(SETTINGS_TABS.length, 3);
+test("タブは4件で、学習設定→学習前処理→オーグメンテーション→エンジン設定の順", () => {
+  assert.equal(SETTINGS_TABS.length, 4);
   assert.deepEqual(
     SETTINGS_TABS.map((t) => t.id),
-    ["training-settings", "augmentation", "engine"]
+    ["training-settings", "preprocess", "augmentation", "engine"]
   );
   assert.deepEqual(
     SETTINGS_TABS.map((t) => t.label),
-    ["学習設定", "オーグメンテーション", "エンジン設定"]
+    ["学習設定", "学習前処理", "オーグメンテーション", "エンジン設定"]
   );
   assert.equal(DEFAULT_SETTINGS_TAB_ID, "training-settings");
 });
@@ -24,6 +24,7 @@ test("旧タブID（data-split / training-params）は学習設定へ安全に�
 
 test("現行タブIDはそのまま維持される", () => {
   assert.equal(normalizeSettingsTabId("training-settings"), "training-settings");
+  assert.equal(normalizeSettingsTabId("preprocess"), "preprocess");
   assert.equal(normalizeSettingsTabId("augmentation"), "augmentation");
   assert.equal(normalizeSettingsTabId("engine"), "engine");
 });

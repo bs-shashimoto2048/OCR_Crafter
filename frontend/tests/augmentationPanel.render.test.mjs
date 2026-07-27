@@ -56,6 +56,10 @@ test("weak設定でカテゴリ・項目行・サマリー・プレビューEmpt
   assert.ok(html.includes("推定値は目安です。実際の生成枚数はデータ内容により変動します。"));
   // 次回学習から適用される旨（Trainのみ）
   assert.ok(html.includes("Trainのみへ適用"));
+  // 抽象表現（強度=弱）と実効値（sigma/radius）の両方を表示する（設定画面と履歴画面で同じ値と判断できるように）
+  assert.ok(html.includes("実効値:"));
+  assert.ok(html.includes("sigma=3"));
+  assert.ok(html.includes("radius=0.3-0.6"));
 });
 
 test("適用モード「なし」では案内を表示し、項目入力がdisabledになる", () => {

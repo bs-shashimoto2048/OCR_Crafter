@@ -386,6 +386,35 @@ def register_tesseract_model(
                 dataset_meta = loaded
     except (OSError, ValueError):
         dataset_meta = {}
+
+    # Job作成時点で確定保存したスナップショット（学習前処理・オーグメンテーション）を優先して使う
+    # （§7: 学習中の設定変更・失敗Jobでも実行条件を追跡できるようにするため）。
+    # 旧フロー（job_managerのgeneric経路等）でスナップショットが無い場合は、従来どおり
+    # データセットmeta.jsonから直接導出する（フォールバック。データセットは学習開始前に
+    # 確定済みのため、通常はどちらの経路でも同じ値になる）
+    job_snapshot: Optional[dict[str, Any]] = None
+    try:
+        from ..db import fetch_training_job
+
+        job_record = fetch_training_job(job_id) if job_id else None
+        if isinstance(job_record, dict) and isinstance(job_record.get("training_condition_snapshot"), dict):
+            job_snapshot = job_record["training_condition_snapshot"]
+    except Exception:  # noqa: BLE001
+        job_snapshot = None
+
+    if job_snapshot is not None:
+        snapshot_preprocess = (job_snapshot.get("trainingPreprocess") or {}).get("display")
+        snapshot_preprocess_hash = (job_snapshot.get("trainingPreprocess") or {}).get("hash")
+        snapshot_aug_display = (job_snapshot.get("augmentation") or {}).get("display")
+        snapshot_aug_hash = (job_snapshot.get("augmentation") or {}).get("hash")
+        snapshot_pipeline_hash = job_snapshot.get("trainingInputPipelineHash")
+    else:
+        snapshot_preprocess = dataset_meta.get("training_preprocess") if isinstance(dataset_meta.get("training_preprocess"), dict) else None
+        snapshot_preprocess_hash = dataset_meta.get("training_preprocess_hash")
+        snapshot_aug_display = dataset_meta.get("augmentation") if isinstance(dataset_meta.get("augmentation"), dict) else None
+        snapshot_aug_hash = dataset_meta.get("augmentation_hash")
+        snapshot_pipeline_hash = dataset_meta.get("training_input_pipeline_hash")
+
     meta = {
         "engine": "tesseract",
         "training_family": "tesseract",
@@ -418,22 +447,19 @@ def register_tesseract_model(
         ),
         "split_seed": int(dataset_meta["seed"]) if isinstance(dataset_meta.get("seed"), (int, float)) else None,
         "split_method": str(dataset_meta.get("split_method") or ""),
-        "augmentation_config": dataset_meta.get("augmentation") if isinstance(dataset_meta.get("augmentation"), dict) else None,
+        "augmentation_config": snapshot_aug_display,
         "augmentation_generated": (
             int(dataset_meta["augmentation_generated"])
             if isinstance(dataset_meta.get("augmentation_generated"), (int, float))
             else None
         ),
-        # 学習時前処理（データセットmeta.jsonの確定保存値をそのまま引き継ぐ。
+        # 学習時前処理（Jobスナップショット優先・無ければデータセットmeta.jsonの確定保存値を引き継ぐ。
         # 未記録=None・UIで「未記録」表示。推測で補完しない）
-        "training_preprocess": (
-            dataset_meta.get("training_preprocess") if isinstance(dataset_meta.get("training_preprocess"), dict) else None
-        ),
-        "training_preprocess_hash": (
-            str(dataset_meta.get("training_preprocess_hash"))
-            if dataset_meta.get("training_preprocess_hash")
-            else None
-        ),
+        "training_preprocess": snapshot_preprocess,
+        "training_preprocess_hash": str(snapshot_preprocess_hash) if snapshot_preprocess_hash else None,
+        # オーグメンテーション・結合ハッシュ（未記録=None・推測補完しない）
+        "augmentation_hash": str(snapshot_aug_hash) if snapshot_aug_hash else None,
+        "training_input_pipeline_hash": str(snapshot_pipeline_hash) if snapshot_pipeline_hash else None,
         # 学習データの由来（processed=取込前処理適用済み画像から作成）
         "dataset_source_image_state": str(dataset_meta.get("source_image_state") or ""),
     }

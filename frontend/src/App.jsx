@@ -639,6 +639,8 @@ export default function App() {
   // リリース管理（Model Release Management）。状態・履歴はサーバー保存（releases.json）
   const [releases, setReleases] = useState({ production: "", statuses: {}, history: [] });
   const [releasesLoading, setReleasesLoading] = useState(false);
+  // 次回学習の設定「学習前処理」タブ用: プロジェクトの現在の前処理スナップショット（確認表示専用）
+  const [ocrTrainingPreprocessCurrent, setOcrTrainingPreprocessCurrent] = useState(null);
   // ジョブ管理（Job Management）。一覧・状態はサーバー保存（data/jobs/jobs.json）・JOB-000001形式
   const [jobs, setJobs] = useState([]);
   const [jobsLoading, setJobsLoading] = useState(false);
@@ -2184,6 +2186,23 @@ export default function App() {
     }
   }
 
+  // 「学習前処理」タブ用: プロジェクトの現在の前処理スナップショット取得（確認表示のみ。設定は変更しない）
+  async function loadOcrTrainingPreprocessCurrent(pid = projectId) {
+    if (!pid) {
+      setOcrTrainingPreprocessCurrent(null);
+      return;
+    }
+    try {
+      const data = await request(`/api/ocr/training-preprocess/current?project_id=${encodeURIComponent(pid)}`);
+      setOcrTrainingPreprocessCurrent({
+        training_preprocess: data?.training_preprocess ?? null,
+        training_preprocess_hash: data?.training_preprocess_hash ?? null,
+      });
+    } catch {
+      setOcrTrainingPreprocessCurrent(null);
+    }
+  }
+
   // 実験カルテの更新（タグ・★・メモ等）→ 一覧を差し替え
   async function updateExperiment(experimentId, patch) {
     try {
@@ -2208,6 +2227,9 @@ export default function App() {
     }
     if (["releases", "ocr-models"].includes(activeView)) {
       loadReleases(projectId);
+    }
+    if (activeView === "ocr-training") {
+      loadOcrTrainingPreprocessCurrent(projectId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeView, projectId]);
@@ -3893,6 +3915,7 @@ export default function App() {
         setOcrImageShape={setOcrImageShape}
         ocrAugmentation={ocrAugmentation}
         setOcrAugmentation={setOcrAugmentation}
+        ocrTrainingPreprocessCurrent={ocrTrainingPreprocessCurrent}
         ocrAugPreview={ocrAugPreview}
         ocrAugPreviewLoading={ocrAugPreviewLoading}
         onPreviewAugmentation={previewOcrAugmentation}

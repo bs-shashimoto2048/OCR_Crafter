@@ -6,6 +6,8 @@ import { PADDLEOCR_OFFICIAL_MODELS_TOOLTIP } from "../lib/paddleocrOfficialToolt
 import { autoTestRatio, normalizeRatioInput, summarizeRatios } from "../lib/ratio";
 import AugmentationSettingsPanel from "../components/AugmentationSettingsPanel";
 import { augCategorySummaryLabel, averageAugProbabilityPercent, isAugmentationOff } from "../lib/augmentationSettings";
+import { buildEffectiveAugmentation } from "../lib/augmentation";
+import { buildEffectiveTrainingPreprocess } from "../lib/preprocessCompare";
 import { collectSettingsSnapshot, isSettingsDirty } from "../lib/trainingSettingsDraft";
 import { SETTINGS_TABS, normalizeSettingsTabId } from "../lib/trainingSettingsTabs";
 import {
@@ -77,6 +79,7 @@ export default function TrainingView({
   setOcrImageShape,
   ocrAugmentation,
   setOcrAugmentation,
+  ocrTrainingPreprocessCurrent = null,
   ocrAugPreview,
   ocrAugPreviewLoading,
   onPreviewAugmentation,
@@ -432,6 +435,13 @@ export default function TrainingView({
 
   const ocrHasInitModel = ocrInitSourceType === "scratch" || String(ocrInitSourceValue || "").trim() !== "";
   const ocrDatasetReady = String(ocrDatasetDir || "").trim() !== "";
+  // 学習前処理タブ・サマリーカード共通: プロジェクトの現在の前処理設定から実効値を組み立てる
+  // （buildEffectiveTrainingPreprocess。学習前処理は「前処理設定」画面の値をそのまま使うため、
+  // ここでは新たな設定値を作らず表示専用として利用する）
+  const trainingPreprocessBuilt = useMemo(
+    () => buildEffectiveTrainingPreprocess(ocrTrainingPreprocessCurrent || {}),
+    [ocrTrainingPreprocessCurrent]
+  );
   // 次回学習の設定のカテゴリサマリー表示用ラベル
   const engineDisplayLabel = ocrEngine === "paddleocr" ? "PaddleOCR" : ocrEngine === "tesseract" ? "Tesseract" : "EasyOCR";
   const engineSummaryLabel =
@@ -890,6 +900,58 @@ export default function TrainingView({
                                 ) : null}
                               </div>
                               </section>
+                            </div>
+                          ) : null}
+
+                          {settingsTab === "preprocess" ? (
+                            <div role="tabpanel" id="settings-panel-preprocess" aria-labelledby="settings-tab-preprocess" className="space-y-3">
+                              {(() => {
+                                const built = trainingPreprocessBuilt;
+                                if (!built.recorded) {
+                                  return (
+                                    <div className="rounded-xl border border-border/70 bg-card/40 p-4 text-sm">
+                                      <p className="font-semibold text-text">未記録</p>
+                                      <p className="mt-1 text-[12px] leading-5 text-muted">
+                                        このプロジェクトではまだ「前処理設定」画面で前処理が実行されていません。
+                                        学習データセット作成時、「前処理設定」画面の設定内容がそのまま学習前処理として使用されます。
+                                      </p>
+                                    </div>
+                                  );
+                                }
+                                return (
+                                  <>
+                                    <p className="text-[11px] leading-5 text-muted">
+                                      学習前処理は「前処理設定」画面で設定した内容がそのまま使用されます（この画面では新たに設定できません）。
+                                      以下は現在の設定に基づく確認表示です。実際にはデータセット作成時点の設定が使用されます。
+                                    </p>
+                                    <div className="space-y-2">
+                                      {built.items.map((item) => (
+                                        <div
+                                          key={item.key}
+                                          className={`rounded-lg border p-3 ${
+                                            item.enabled ? "border-border/70 bg-card/40" : "border-border/40 bg-card/20 opacity-60"
+                                          }`}
+                                        >
+                                          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                                            <p className="text-sm font-semibold text-text">{item.label}</p>
+                                            <p className="text-[11px] text-muted" title={`内部パラメータ: ${item.paramName}`}>
+                                              専門名: {item.paramName}
+                                            </p>
+                                          </div>
+                                          <p className="mt-1 text-[13px] font-medium text-accent">
+                                            現在値: {item.value}
+                                            {item.unit ? ` ${item.unit}` : ""}
+                                          </p>
+                                          <p className="mt-1 text-[11px] leading-5 text-muted">{item.description}</p>
+                                        </div>
+                                      ))}
+                                    </div>
+                                    <p className="text-[10px] text-muted">
+                                      {built.enabledCount}/{built.totalCount}項目有効・Hash: {built.hashShort || "-"}
+                                    </p>
+                                  </>
+                                );
+                              })()}
                             </div>
                           ) : null}
 
@@ -1626,7 +1688,7 @@ export default function TrainingView({
                     </span>
                     次回学習の設定
                     <span className="ml-auto text-[11px] font-normal text-muted">
-                      {settingsLocked ? "学習実行中は変更できません" : "学習設定・オーグメンテーション・エンジン設定"}
+                      {settingsLocked ? "学習実行中は変更できません" : "学習設定・学習前処理・オーグメンテーション・エンジン設定"}
                     </span>
                   </button>
                   {/* 本文はカテゴリサマリーのみ（狭い左カラムで全設定を直接編集しない）。
@@ -1652,6 +1714,19 @@ export default function TrainingView({
                           `Train / Val / Test: ${trainRatio} / ${valRatio} / ${testRatio}`,
                           `Split Seed: ${ocrSplitSeed ?? 42}`,
                         ],
+                      },
+                      {
+                        id: "preprocess",
+                        label: "学習前処理",
+                        summary: !trainingPreprocessBuilt.recorded
+                          ? "未記録"
+                          : trainingPreprocessBuilt.enabledItems.length > 0
+                            ? trainingPreprocessBuilt.enabledItems
+                                .map((item) => item.label)
+                                .slice(0, 3)
+                                .join("・")
+                            : "有効な項目なし",
+                        sub: trainingPreprocessBuilt.recorded ? `${trainingPreprocessBuilt.enabledCount}項目有効` : "",
                       },
                       {
                         id: "augmentation",

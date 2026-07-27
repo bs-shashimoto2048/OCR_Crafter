@@ -26,6 +26,7 @@
 | 区別列 | `training_family`（classification / ocr）、`engine`（paddleocr / tesseract 等） |
 | シリアライズ | `image_shape` 等の list/dict は JSON 文字列で格納し、読出時に復元 |
 | 実験情報 | `experiment_meta`（JSON文字列・NULL可）: Tesseract学習開始時の `experiment_name` / `parent_model_id` / `training_note` を保持し、ジョブ完了時にモデルメタ（`.tess.json`）へ引き継ぐ |
+| 学習前処理・オーグメンテーションのスナップショット（v1.0.0で追加） | `training_condition_snapshot`（JSON文字列・NULL可）: `/api/tesseract/train/start`・`/api/ocr/train/start` が**Job作成時点**でデータセットのmeta.jsonから組み立てて保存する（`{trainingPreprocess: {display, effective, hash}, augmentation: {display, effective, hash}, trainingInputPipelineHash}`）。学習中の設定変更・失敗Jobでも当時の実行条件を追跡できるようにするための列で、学習完了時にモデルメタ（`.tess.json`）へそのまま引き継ぐ（Jobレコードが無い/未記録の場合はデータセットmeta.jsonから直接導出するフォールバックあり）。`upsert_training_job`の`{**job, ...}`更新パターンにより、途中のstatus更新（running/completed/failed等）で消えない |
 
 分類・PaddleOCR・Tesseract の全学習ジョブがこの1テーブルに保存される。
 

@@ -256,6 +256,9 @@ def list_model_infos(project_id: Optional[str] = None) -> list[dict]:
                         payload.get("training_preprocess") if isinstance(payload.get("training_preprocess"), dict) else None
                     ),
                     "training_preprocess_hash": str(payload.get("training_preprocess_hash") or ""),
+                    # オーグメンテーション・結合ハッシュ（旧モデルは空文字=未記録表示）
+                    "augmentation_hash": str(payload.get("augmentation_hash") or ""),
+                    "training_input_pipeline_hash": str(payload.get("training_input_pipeline_hash") or ""),
                     "dataset_source_image_state": str(payload.get("dataset_source_image_state") or ""),
                 }
             )
@@ -353,6 +356,9 @@ def list_model_infos(project_id: Optional[str] = None) -> list[dict]:
                         else None
                     ),
                     "training_preprocess_hash": str(dataset_meta.get("training_preprocess_hash") or ""),
+                    # オーグメンテーション・結合ハッシュ（旧データセットは空文字=未記録表示）
+                    "augmentation_hash": str(dataset_meta.get("augmentation_hash") or ""),
+                    "training_input_pipeline_hash": str(dataset_meta.get("training_input_pipeline_hash") or ""),
                     "dataset_source_image_state": str(dataset_meta.get("source_image_state") or ""),
                     "ocr_preprocess": {
                         "image_shape": image_shape,

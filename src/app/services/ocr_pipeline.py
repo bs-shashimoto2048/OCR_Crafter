@@ -1,4 +1,6 @@
 import base64
+import copy
+import hashlib
 import io
 import json
 import importlib.util
@@ -402,6 +404,15 @@ WEAK_AUGMENTATION_CONFIG: dict[str, Any] = {
     "noise": {"enabled": True, "strength": "weak", "probability": 0.1},
 }
 
+# 強度ラベル（弱/中）→実効パラメータの唯一の定義。_apply_augmentation_config（実際の画素変換）と
+# build_effective_augmentation（表示・スナップショット用の実効値算出）の両方がここを参照する
+# （2箇所で別々に定義すると値が乖離するため）。フロント側 lib/augmentationEffective.js は
+# この値を手動で同期したミラー（既存の WEAK_AUGMENTATION_CONFIG と同じ複製方針）
+AUGMENTATION_STRENGTH_PARAMS: dict[str, dict[str, Any]] = {
+    "weak": {"blur_radius_range": (0.3, 0.6), "noise_sigma": 3.0},
+    "medium": {"blur_radius_range": (0.5, 0.9), "noise_sigma": 6.0},
+}
+
 
 def _clamp(value: Any, low: float, high: float, default: float) -> float:
     try:
@@ -458,8 +469,17 @@ def parse_augmentation_config(raw: Any) -> Optional[dict[str, Any]]:
     return config
 
 
+def _strength_key(value: Any) -> str:
+    key = str(value or "weak").strip().lower()
+    return key if key in AUGMENTATION_STRENGTH_PARAMS else "weak"
+
+
 def _apply_augmentation_config(image: Image.Image, rng: random.Random, config: dict[str, Any]) -> Image.Image:
-    """設定に基づくランダム変換をTrain画像へ適用する（ラベルは変更しない）。"""
+    """設定に基づくランダム変換をTrain画像へ適用する（ラベルは変更しない）。
+
+    blur/noiseの強度→実効パラメータ変換は AUGMENTATION_STRENGTH_PARAMS の1箇所のみを参照する
+    （build_effective_augmentation の表示値と実際の適用処理が乖離しないようにするため）。
+    """
     pil = image.convert("RGB")
     rot = config.get("rotation") or {}
     if rot.get("enabled") and rng.random() < float(rot.get("probability", 0)):
@@ -476,16 +496,78 @@ def _apply_augmentation_config(image: Image.Image, rng: random.Random, config: d
         pil = ImageEnhance.Contrast(pil).enhance(rng.uniform(1.0 - r, 1.0 + r))
     blur = config.get("blur") or {}
     if blur.get("enabled") and rng.random() < float(blur.get("probability", 0)):
-        radius = rng.uniform(0.3, 0.6) if str(blur.get("strength")) != "medium" else rng.uniform(0.5, 0.9)
+        low, high = AUGMENTATION_STRENGTH_PARAMS[_strength_key(blur.get("strength"))]["blur_radius_range"]
+        radius = rng.uniform(low, high)
         pil = pil.filter(ImageFilter.GaussianBlur(radius=radius))
     noise = config.get("noise") or {}
     if noise.get("enabled") and rng.random() < float(noise.get("probability", 0)):
-        sigma = 3.0 if str(noise.get("strength")) != "medium" else 6.0
+        sigma = AUGMENTATION_STRENGTH_PARAMS[_strength_key(noise.get("strength"))]["noise_sigma"]
         arr = np.asarray(pil).astype(np.float32)
         np_rng = np.random.default_rng(rng.randrange(0, 2**32 - 1))
         arr = np.clip(arr + np_rng.normal(loc=0.0, scale=sigma, size=arr.shape).astype(np.float32), 0, 255).astype(np.uint8)
         pil = Image.fromarray(arr, mode="RGB")
     return pil
+
+
+def build_effective_augmentation(config: Optional[dict[str, Any]]) -> dict[str, Any]:
+    """オーグメンテーション設定の表示値(display)と実効値(effective)を1箇所で組み立てる。
+
+    学習API payload・学習時スナップショット・モデル管理の履歴表示・比較画面のすべてが
+    この関数の出力（またはフロント側の同一定義 lib/augmentationEffective.js）を使う。
+    設定が無効（None・全項目disabled）の場合は enabled=False のみを返す。
+    """
+    if not isinstance(config, dict) or not any(
+        (config.get(key) or {}).get("enabled") for key in ("rotation", "brightness", "contrast", "blur", "noise")
+    ):
+        return {"enabled": False, "display": {}, "effective": {}}
+
+    rot = config.get("rotation") or {}
+    bri = config.get("brightness") or {}
+    con = config.get("contrast") or {}
+    blur = config.get("blur") or {}
+    noise = config.get("noise") or {}
+
+    effective: dict[str, Any] = {}
+    if rot.get("enabled"):
+        max_deg = float(rot.get("max_degrees", 2.0))
+        effective["rotation"] = {"minDegrees": -max_deg, "maxDegrees": max_deg, "probability": float(rot.get("probability", 0))}
+    if bri.get("enabled"):
+        r = float(bri.get("range", 0.1))
+        effective["brightness"] = {"minFactor": round(1.0 - r, 4), "maxFactor": round(1.0 + r, 4), "probability": float(bri.get("probability", 0))}
+    if con.get("enabled"):
+        r = float(con.get("range", 0.1))
+        effective["contrast"] = {"minFactor": round(1.0 - r, 4), "maxFactor": round(1.0 + r, 4), "probability": float(con.get("probability", 0))}
+    if blur.get("enabled"):
+        strength = _strength_key(blur.get("strength"))
+        low, high = AUGMENTATION_STRENGTH_PARAMS[strength]["blur_radius_range"]
+        effective["blur"] = {"strength": strength, "radiusMin": low, "radiusMax": high, "probability": float(blur.get("probability", 0))}
+    if noise.get("enabled"):
+        strength = _strength_key(noise.get("strength"))
+        effective["noise"] = {
+            "strength": strength,
+            "sigma": AUGMENTATION_STRENGTH_PARAMS[strength]["noise_sigma"],
+            "probability": float(noise.get("probability", 0)),
+        }
+
+    return {
+        "enabled": True,
+        # display: ユーザーが画面で見た抽象設定（=configそのもの。preset/multiplier/各項目のenabled・確率・抽象値）
+        "display": copy.deepcopy(config),
+        "effective": effective,
+    }
+
+
+def compute_augmentation_hash(config: Optional[dict[str, Any]]) -> Optional[str]:
+    """オーグメンテーション設定のハッシュ（sha256:...）。未設定（None・全項目disabled）はNone。
+
+    既存の training_preprocess_hash（前処理パイプライン専用）とは別概念のため、
+    同名を再利用せず新規に augmentation_hash として管理する。
+    """
+    built = build_effective_augmentation(config)
+    if not built["enabled"]:
+        return None
+    canonical = json.dumps(built["display"], sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _apply_augmentation(image: Image.Image, rng: random.Random, aug_strength: int) -> Image.Image:
@@ -1081,6 +1163,19 @@ def create_ocr_dataset(
     snapshot = load_preprocess_snapshot(paths.root)
     training_preprocess = build_training_preprocess(snapshot, selected_types, shape)
     training_preprocess_hash = compute_training_preprocess_hash(training_preprocess)
+    # オーグメンテーションのハッシュ（前処理ハッシュとは別概念。既存のtraining_preprocess_hashの
+    # 意味は変更しない）。両方をまとめたtraining_input_pipeline_hashは、いずれか一方でも
+    # 記録があれば生成する（片方のみ未記録の場合はその側を空文字として結合）
+    augmentation_hash = compute_augmentation_hash(aug_config)
+    training_input_pipeline_hash = None
+    if training_preprocess_hash or augmentation_hash:
+        combined = json.dumps(
+            {"training_preprocess_hash": training_preprocess_hash or "", "augmentation_hash": augmentation_hash or ""},
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        training_input_pipeline_hash = "sha256:" + hashlib.sha256(combined.encode("utf-8")).hexdigest()
     # 学習データの由来（processed / interim / raw）。processed 以外の混在は警告する
     source_summary = summarize_source_states([str(c.get("source_state") or "") for c in candidates])
 
@@ -1110,6 +1205,9 @@ def create_ocr_dataset(
         # 学習時前処理（processedスナップショットの確定保存。未記録=None・推測補完しない）
         "training_preprocess": training_preprocess,
         "training_preprocess_hash": training_preprocess_hash,
+        # オーグメンテーションのハッシュ・結合ハッシュ（いずれも未記録=None・推測補完しない）
+        "augmentation_hash": augmentation_hash,
+        "training_input_pipeline_hash": training_input_pipeline_hash,
         # 学習データの由来（processed=前処理適用済み画像。二重適用防止の判定に使う）
         "source_image_state": source_summary["overall"],
         "source_priority": ["processed", "interim", "raw"],
@@ -1131,6 +1229,43 @@ def create_ocr_dataset(
         "test_file": str(test_file),
         "charset_path": str(charset_path),
         "meta_path": str(meta_path),
+    }
+
+
+def build_training_condition_snapshot(dataset_dir: str) -> Optional[dict[str, Any]]:
+    """学習開始Job作成時点で確定保存する「学習前処理・オーグメンテーション」スナップショット。
+
+    データセット作成時（create_ocr_dataset）に既に確定済みの meta.json の値をそのまま使う
+    （ここで再計算はしない。プロジェクト設定がその後変更されても、この呼び出し時点の
+    データセットの値で固定されるため、学習中の設定変更の影響を受けない）。
+    データセットが無い/読めない（旧フロー・classification学習等）場合は None。
+    """
+    try:
+        meta_file = Path(str(dataset_dir or "")) / "meta.json"
+        if not meta_file.is_file():
+            return None
+        dataset_meta = json.loads(meta_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(dataset_meta, dict):
+        return None
+
+    training_preprocess = dataset_meta.get("training_preprocess") if isinstance(dataset_meta.get("training_preprocess"), dict) else None
+    aug_config = dataset_meta.get("augmentation") if isinstance(dataset_meta.get("augmentation"), dict) else None
+    aug_built = build_effective_augmentation(aug_config)
+
+    return {
+        "trainingPreprocess": {
+            "display": training_preprocess,
+            "effective": (training_preprocess or {}).get("ocr_input_normalization"),
+            "hash": dataset_meta.get("training_preprocess_hash"),
+        },
+        "augmentation": {
+            "display": aug_built["display"] if aug_built["enabled"] else None,
+            "effective": aug_built["effective"] if aug_built["enabled"] else None,
+            "hash": dataset_meta.get("augmentation_hash"),
+        },
+        "trainingInputPipelineHash": dataset_meta.get("training_input_pipeline_hash"),
     }
 
 

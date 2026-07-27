@@ -69,12 +69,25 @@ export function normalizationLabel(pre) {
   return `${num(n.canvas_width, 0)}×${num(n.target_height, 0)}`;
 }
 
-// 学習前処理比較テーブルの行定義（label / 値の取り出し）。タスク仕様の最低限項目
+// 学習前処理比較テーブル・学習前処理タブ共通の行定義（label / 値の取り出し）。
+// 実際の学習パイプライン（config/settings.yaml preprocess.pipelines）に存在する工程のみを列挙する
+// （存在しない前処理を追加しない。§20の調査結果に基づく）。
+// paramName/unit/description は「学習前処理」タブの詳細表示でのみ使用する（比較表は value() の要約のみ）
 export const PREPROCESS_COMPARISON_ROWS = [
-  { key: "grayscale", label: "グレースケール", value: (p) => onOff(p.stepMap.grayscale) },
+  {
+    key: "grayscale",
+    label: "グレースケール",
+    paramName: "grayscale",
+    unit: "",
+    description: "カラー画像をグレースケール（白黒濃淡）へ変換します。常時実行される工程です。",
+    value: (p) => onOff(p.stepMap.grayscale),
+  },
   {
     key: "illumination",
     label: "照明ムラ補正",
+    paramName: "illumination_method",
+    unit: "",
+    description: "背景の明暗ムラ（照明の偏り）を補正し、文字と背景のコントラストを均一にします。",
     value: (p) => {
       const s = p.stepMap.illumination;
       if (!s) return "工程なし";
@@ -83,7 +96,10 @@ export const PREPROCESS_COMPARISON_ROWS = [
   },
   {
     key: "gamma",
-    label: "Gamma",
+    label: "ガンマ補正",
+    paramName: "gamma_value",
+    unit: "",
+    description: "画像全体の明るさをガンマカーブで補正します（1.0=補正なし）。",
     value: (p) => {
       const s = p.stepMap.gamma;
       if (!s) return "工程なし";
@@ -93,16 +109,80 @@ export const PREPROCESS_COMPARISON_ROWS = [
   {
     key: "clahe",
     label: "CLAHE",
+    paramName: "clahe_clip_limit / clahe_tile_grid_size",
+    unit: "",
+    description: "局所領域ごとにコントラストを強調します（ヒストグラム平坦化の一種）。",
     value: (p) => {
       const s = p.stepMap.clahe;
       if (!s) return "工程なし";
       return s.enabled ? `ON（clip ${num(s.params.clip_limit)} / tile ${num(s.params.tile_grid_size, 0)}）` : "OFF";
     },
   },
-  { key: "thresholdMethod", label: "二値化方式", value: (p) => thresholdLabel(p) },
+  {
+    key: "localContrast",
+    label: "局所コントラスト",
+    paramName: "local_contrast_clip_limit / local_contrast_tile_grid_size",
+    unit: "",
+    description: "CLAHEに似た局所コントラスト強調を追加で適用します。",
+    value: (p) => {
+      const s = p.stepMap.local_contrast;
+      if (!s) return "工程なし";
+      return s.enabled ? `ON（clip ${num(s.params.clip_limit)} / tile ${num(s.params.tile_grid_size, 0)}）` : "OFF";
+    },
+  },
+  {
+    key: "histEqualize",
+    label: "ヒストグラム平坦化",
+    paramName: "hist_equalize_enabled",
+    unit: "",
+    description: "画像全体の明暗ヒストグラムを平坦化し、コントラストを底上げします。",
+    value: (p) => onOff(p.stepMap.hist_equalize),
+  },
+  {
+    key: "bilateral",
+    label: "バイラテラルノイズ除去",
+    paramName: "bilateral_diameter / bilateral_sigma_color / bilateral_sigma_space",
+    unit: "",
+    description: "輪郭（文字の線）を保ったまま、なめらかにノイズを除去します。",
+    value: (p) => {
+      const s = p.stepMap.bilateral;
+      if (!s) return "工程なし";
+      return s.enabled
+        ? `ON（d${num(s.params.diameter, 0)} / σc${num(s.params.sigma_color, 0)} / σs${num(s.params.sigma_space, 0)}）`
+        : "OFF";
+    },
+  },
+  {
+    key: "sharpen",
+    label: "シャープ化",
+    paramName: "sharpen_amount / sharpen_sigma",
+    unit: "",
+    description: "文字の輪郭を強調してくっきりさせます。",
+    value: (p) => {
+      const s = p.stepMap.sharpen;
+      if (!s) return "工程なし";
+      return s.enabled ? `ON（amount ${num(s.params.amount)} / σ${num(s.params.sigma)}）` : "OFF";
+    },
+  },
+  {
+    key: "unsharp",
+    label: "アンシャープマスク",
+    paramName: "unsharp_amount / unsharp_radius / unsharp_threshold",
+    unit: "",
+    description: "ぼかした画像との差分を利用して輪郭を強調します（シャープ化の一種）。",
+    value: (p) => {
+      const s = p.stepMap.unsharp;
+      if (!s) return "工程なし";
+      return s.enabled ? `ON（amount ${num(s.params.amount)} / r${num(s.params.radius)}）` : "OFF";
+    },
+  },
+  { key: "thresholdMethod", label: "二値化方式", paramName: "threshold_type", unit: "", description: "文字と背景を白黒2値へ分離する方式（Otsu=自動しきい値 / Adaptive=領域適応 / 固定値）。", value: (p) => thresholdLabel(p) },
   {
     key: "morph",
-    label: "Morphology",
+    label: "オープン/クローズ処理",
+    paramName: "morph_method / morph_ksize / morph_iterations",
+    unit: "",
+    description: "モルフォロジー処理で微小なノイズの除去や文字の穴埋めを行います。",
     value: (p) => {
       const s = p.stepMap.morph;
       if (!s) return "工程なし";
@@ -111,17 +191,35 @@ export const PREPROCESS_COMPARISON_ROWS = [
   },
   {
     key: "strokeBoost",
-    label: "Stroke Boost",
+    label: "掠れ補正",
+    paramName: "stroke_boost_method / stroke_boost_ksize / stroke_boost_iterations",
+    unit: "",
+    description: "文字の掠れ（線の欠け）を太らせて補います。",
     value: (p) => {
       const s = p.stepMap.stroke_boost;
       if (!s) return "工程なし";
       return s.enabled ? `${String(s.params.method || "close")} k${num(s.params.ksize, 0)}×${num(s.params.iterations, 0)}` : "OFF";
     },
   },
-  { key: "deskew", label: "Deskew", value: (p) => onOff(p.stepMap.deskew) },
+  {
+    key: "cropMargin",
+    label: "余白トリミング",
+    paramName: "crop_margin_threshold / crop_margin_margin",
+    unit: "px",
+    description: "文字領域の外側の余白を検出して切り詰めます。",
+    value: (p) => {
+      const s = p.stepMap.crop_margin;
+      if (!s) return "工程なし";
+      return s.enabled ? `ON（margin ${num(s.params.margin, 0)}px）` : "OFF";
+    },
+  },
+  { key: "deskew", label: "傾き補正", paramName: "deskew_enabled", unit: "", description: "文字列の傾きを検出して水平に補正します。", value: (p) => onOff(p.stepMap.deskew) },
   {
     key: "resize",
     label: "リサイズ",
+    paramName: "resize_single / resize_wide_height",
+    unit: "px",
+    description: "学習画像を一定の高さ・サイズへ統一します。",
     value: (p) => {
       const s = p.stepMap.resize;
       if (!s) return "工程なし";
@@ -131,7 +229,10 @@ export const PREPROCESS_COMPARISON_ROWS = [
   },
   {
     key: "denoise",
-    label: "Denoise",
+    label: "ノイズ除去",
+    paramName: "denoise_method / denoise_ksize",
+    unit: "",
+    description: "画像の細かなノイズを軽減します（method=gaussianの場合はガウシアンぼかしを使用）。",
     value: (p) => {
       const s = p.stepMap.denoise;
       if (!s) return "工程なし";
@@ -139,8 +240,68 @@ export const PREPROCESS_COMPARISON_ROWS = [
       return method === "none" ? "OFF" : `${method} k${num(s.params.ksize, 0)}`;
     },
   },
-  { key: "normalization", label: "入力整形", value: (p) => normalizationLabel(p) },
+  {
+    key: "normalization",
+    label: "入力整形",
+    paramName: "canvas_width / target_height",
+    unit: "px",
+    description: "OCRエンジンへ入力する固定サイズへ整形します（中央配置・白背景でパディング）。常時実行される工程です。",
+    value: (p) => normalizationLabel(p),
+  },
 ];
+
+// PREPROCESS_COMPARISON_ROWS の key（camelCase）→ stepMap のキー（snake_case）対応表。
+// 一致する場合は明示せずそのまま同名を使う
+const STEP_KEY_OVERRIDES = {
+  thresholdMethod: "threshold",
+  localContrast: "local_contrast",
+  histEqualize: "hist_equalize",
+  strokeBoost: "stroke_boost",
+  cropMargin: "crop_margin",
+};
+
+function rowStepKey(row) {
+  return STEP_KEY_OVERRIDES[row.key] || row.key;
+}
+
+// 「学習前処理」タブ・次回学習設定カードで使う詳細行（表示名/専門パラメータ名/現在値/単位/説明）を
+// 組み立てる共通定義（buildEffectiveTrainingPreprocess）。PREPROCESS_COMPARISON_ROWS と同一の
+// 値組み立てロジックを再利用し、表示専用の別ロジックを複製しない。
+// 学習前処理は（オーグメンテーションの強度ラベルと異なり）設定値がそのまま実効値のため、
+// display/effectiveの変換は不要——学習パイプラインに実在する工程のみを一覧化する。
+export function buildEffectiveTrainingPreprocess(info = {}) {
+  const pre = normalizeTrainingPreprocess(info);
+  if (!pre.recorded) {
+    return { recorded: false, items: [], enabledItems: [], enabledCount: 0, totalCount: 0, primaryType: "", hash: "", hashShort: "" };
+  }
+  const items = PREPROCESS_COMPARISON_ROWS.filter((row) => row.key === "normalization" || pre.stepMap[rowStepKey(row)]).map(
+    (row) => {
+      const step = row.key === "normalization" ? null : pre.stepMap[rowStepKey(row)];
+      // グレースケール・入力整形は常時実行の工程のため、ON/OFF切替可能な項目としては数えない
+      const enabled = row.key === "normalization" || row.key === "grayscale" ? true : Boolean(step?.enabled);
+      return {
+        key: row.key,
+        label: row.label,
+        paramName: row.paramName,
+        unit: row.unit,
+        description: row.description,
+        enabled,
+        value: row.value(pre),
+      };
+    }
+  );
+  const toggleable = items.filter((item) => item.key !== "grayscale" && item.key !== "normalization");
+  return {
+    recorded: true,
+    items,
+    enabledItems: items.filter((item) => item.enabled),
+    enabledCount: toggleable.filter((item) => item.enabled).length,
+    totalCount: toggleable.length,
+    primaryType: pre.primaryType,
+    hash: pre.hash,
+    hashShort: pre.hashShort,
+  };
+}
 
 // 行の表示値（未記録モデルは全行「未記録」）
 export function preprocessRowValue(row, pre) {

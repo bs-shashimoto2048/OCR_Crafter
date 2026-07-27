@@ -131,6 +131,38 @@ test("長いモデル名は一覧で省略表示され、title属性で全文確
   assert.ok(html.includes("truncate"), "省略表示（truncate）がない");
 });
 
+test("推論使用モデル: 一覧行に専用背景・左accentバー・「推論使用中」バッジを常時表示する", () => {
+  const html = renderToString(React.createElement(ModelsView, baseProps({ inferenceInUseModel: "model_a.tess.json" })));
+  assert.ok(html.includes("推論使用中"), "「推論使用中」バッジが表示されていない");
+  assert.ok(html.includes("border-l-cyan-400"), "左端のaccentバーがない");
+  assert.ok(html.includes("bg-cyan-500/10"), "行の専用背景がない");
+  // ModelIdChipの強調（リング）
+  assert.ok(html.includes("ring-2 ring-cyan-400/70"), "管理Noの強調（リング）がない");
+});
+
+test("推論使用モデル: 非推論モデルの行には「推論使用中」バッジ・強調が付かない", () => {
+  const html = renderToString(React.createElement(ModelsView, baseProps({ inferenceInUseModel: "model_a.tess.json" })));
+  // 「推論使用中」の可視バッジ（rounded-fullのcyanピル）は1件のみ描画される（行のaria-labelにも同文言が入るため、
+  // ピル要素自体の出現回数をクラス名込みで数える）
+  const badgeCount = (html.match(/text-cyan-200/g) || []).length;
+  assert.equal(badgeCount, 1, "「推論使用中」バッジのピル要素が複数（もしくは0）描画されている");
+  // 左accentバー（border-l-cyan-400）も1行分のみ
+  const barCount = (html.match(/border-l-cyan-400/g) || []).length;
+  assert.equal(barCount, 1, "左accentバーが複数（もしくは0）の行に付いている");
+});
+
+test("推論使用モデル: 未設定（空文字）の場合はどの行にも強調表示が付かない", () => {
+  const html = renderToString(React.createElement(ModelsView, baseProps({ inferenceInUseModel: "" })));
+  assert.ok(!html.includes("推論使用中"));
+  assert.ok(!html.includes("border-l-cyan-400"));
+});
+
+test("推論使用モデル: 比較選択チェックボックスと併用できる（片方の表示で上書きしない）", () => {
+  const html = renderToString(React.createElement(ModelsView, baseProps({ inferenceInUseModel: "model_a.tess.json" })));
+  // 推論使用中の行にもチェックボックス（比較選択）が存在し続ける
+  assert.ok(html.includes('aria-label="model_a.tess.json を比較・削除対象に選択"'));
+});
+
 test("一覧の列定義: モデル名に最大幅400px・ヘッダーとデータ行が同じ列定義を共有", () => {
   // 共有定数: モデル名は minmax(300px,420px) の上限付き（余った幅いっぱいまで伸ばさない）
   assert.equal(MODEL_LIST_GRID_COLUMNS, "32px minmax(300px, 420px) 80px 85px 140px 140px 70px");

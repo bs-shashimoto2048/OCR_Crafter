@@ -2,7 +2,7 @@ import { useState } from "react";
 
 import Button from "./Button";
 import InfoTooltip from "./InfoTooltip";
-import { AUG_PRESET_LABELS } from "../lib/augmentation";
+import { AUG_PRESET_LABELS, buildEffectiveAugmentation } from "../lib/augmentation";
 import {
   AUG_CATEGORIES,
   AUG_STRENGTH_LABELS,
@@ -34,6 +34,9 @@ export default function AugmentationSettingsPanel({
   const off = isAugmentationOff(augmentation);
   const summary = buildAugSummary(augmentation, trainCount);
   const appliedLabels = enabledAugItemLabels(augmentation);
+  // 強度ラベル（弱/中）の実効値（sigma/radius）。抽象表現と実効値の両方を表示するため
+  // （設定画面と履歴画面で同じ値だと判断できるように buildEffectiveAugmentation を共通利用する）
+  const effectiveAugmentation = buildEffectiveAugmentation(augmentation).effective;
   const [sampleCount, setSampleCount] = useState(3);
 
   // 推奨設定の適用（即上書きせず確認する）
@@ -222,21 +225,34 @@ export default function AugmentationSettingsPanel({
                           </label>
                         ) : null}
                         {def.input.type === "strength" ? (
-                          <label className="inline-flex items-center gap-1 whitespace-nowrap text-muted">
-                            強度
-                            <select
-                              className="app-select w-16 min-w-0 px-2 py-1 text-[12px]"
-                              value={entry[def.input.valueKey] || def.input.fallback}
-                              disabled={rowDisabled || !enabled}
-                              onChange={(e) => onChange?.(setAugItemValue(augmentation, def, { [def.input.valueKey]: e.target.value }))}
-                            >
-                              {Object.entries(AUG_STRENGTH_LABELS).map(([value, label]) => (
-                                <option key={value} value={value}>
-                                  {label}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
+                          <>
+                            <label className="inline-flex items-center gap-1 whitespace-nowrap text-muted">
+                              強度
+                              <select
+                                className="app-select w-16 min-w-0 px-2 py-1 text-[12px]"
+                                value={entry[def.input.valueKey] || def.input.fallback}
+                                disabled={rowDisabled || !enabled}
+                                onChange={(e) => onChange?.(setAugItemValue(augmentation, def, { [def.input.valueKey]: e.target.value }))}
+                              >
+                                {Object.entries(AUG_STRENGTH_LABELS).map(([value, label]) => (
+                                  <option key={value} value={value}>
+                                    {label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            {enabled && effectiveAugmentation?.[def.key] ? (
+                              <span
+                                className="whitespace-nowrap text-[11px] text-muted"
+                                title="実際に適用される内部パラメータ（設定画面と履歴画面で同じ値です）"
+                              >
+                                実効値:{" "}
+                                {def.key === "noise"
+                                  ? `sigma=${effectiveAugmentation.noise.sigma}`
+                                  : `radius=${effectiveAugmentation.blur.radiusMin}-${effectiveAugmentation.blur.radiusMax}`}
+                              </span>
+                            ) : null}
+                          </>
                         ) : null}
                       </div>
                     </div>

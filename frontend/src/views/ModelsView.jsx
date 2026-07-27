@@ -19,6 +19,7 @@ import {
   whitelistLabelOf,
 } from "../lib/modelEval";
 import { confusionTitle } from "../lib/confusionFormat";
+import { AUGMENTATION_COMPARISON_ROWS, normalizeAugmentationForCompare } from "../lib/augmentation";
 import {
   DIFF_CLASSIFICATION_LABELS,
   TRAINING_CONDITION_ROWS,
@@ -936,6 +937,9 @@ export default function ModelsView({
       to: name,
       ...diffTrainingPreprocess(preList[index], preList[index + 1]),
     }));
+    // オーグメンテーション比較（学習時オーグメンテーション設定。新形式のみ項目別内訳を表示）
+    const augOf = (name) => normalizeAugmentationForCompare(infoOf(name));
+    const augList = compareTargets.map(augOf);
     const proposals = buildNextTrainingProposals({
       targets: compareTargets,
       labelOf: compareLabel,
@@ -1191,7 +1195,11 @@ export default function ModelsView({
                   </tr>
                 </thead>
                 <tbody>
-                  {TRAINING_CONDITION_ROWS.map((row) => (
+                  {/* 学習前処理・オーグメンテーションは専用セクション（学習前処理比較・オーグメンテーション比較）
+                      で項目別に詳細表示するため、この一般表の1行要約は重複表示せず除外する */}
+                  {TRAINING_CONDITION_ROWS.filter(
+                    (row) => !["trainingPreprocess", "augPreset", "augmentation"].includes(row.key)
+                  ).map((row) => (
                     <tr key={row.key} className="border-t border-border/50">
                       <td className={stickyLabel}>
                         <span className="flex items-center">
@@ -1401,6 +1409,52 @@ export default function ModelsView({
                 })}
               </div>
             </details>
+          </div>
+
+          {/* ⑤-3 オーグメンテーション比較（学習時オーグメンテーション設定。確率・強度と実効値[sigma/radius/角度]を併記。
+              新形式（augmentation_config）が無い旧モデルは「未記録」、記録はあるが項目別内訳が無い旧形式は「-」） */}
+          <div className="rounded-lg border border-border bg-card/45 px-2.5 py-2.5">
+            <p className="mb-1.5 text-[15px] font-semibold text-text">オーグメンテーション比較</p>
+            <div className="comparison-table-wrap">
+              <table className="w-full text-[13px]">
+                <thead>
+                  <tr>
+                    <th className={stickyLabel}></th>
+                    {compareTargets.map((name) => (
+                      <th
+                        key={name}
+                        className="min-w-[135px] whitespace-nowrap px-2 py-1.5 text-left align-top"
+                        title={compareTitle(name)}
+                      >
+                        <ModelIdBadge modelId={compareLabel(name)} size="md" color={colorOf(name)} />
+                        <span className="block max-w-[10rem] truncate text-[10px] font-normal text-muted">{shortFileLabel(name)}</span>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {AUGMENTATION_COMPARISON_ROWS.map((row) => (
+                    <tr key={row.key} className="border-t border-border/50">
+                      <td className={stickyLabel}>{row.label}</td>
+                      {compareTargets.map((name, index) => {
+                        const text = row.value(augList[index]);
+                        return (
+                          <td
+                            key={name}
+                            className={`min-w-0 max-w-[12rem] truncate px-2 py-1.5 text-[13px] ${
+                              text === "未記録" || text === "OFF" || text === "-" ? "text-muted" : "text-text"
+                            }`}
+                            title={text}
+                          >
+                            {text}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           {/* ⑥ 条件差分の要約（隣接ペアの変更項目・性能変化・判定。単一条件比較/複数条件変更を明示） */}
@@ -1834,13 +1888,17 @@ export default function ModelsView({
             {filteredModels.map((name) => {
               const checked = selectedModels.includes(name);
               const active = detailModel === name && !compareMode;
+              // 推論使用中は行の常時強調表示（hoverしなくても判別可能）。比較選択（チェックボックス）・
+              // 行が開いている状態（active=accent/青）とは独立した状態のため、シアン系の別色を使い併存させる
+              const isInference = Boolean(name) && name === inferenceInUseModel;
               return (
                 <div
                   key={name}
                   onClick={() => openDetail(name)}
-                  className={`grid cursor-pointer items-center border-b border-border/80 transition ${
-                    active ? "bg-accent/15" : "hover:bg-[#3b444e]/65"
-                  }`}
+                  aria-label={isInference ? `${name}（推論使用中）` : undefined}
+                  className={`grid cursor-pointer items-center border-b border-l-4 border-border/80 transition ${
+                    isInference ? "border-l-cyan-400 bg-cyan-500/10 hover:bg-cyan-500/15" : "border-l-transparent"
+                  } ${active ? "bg-accent/15" : isInference ? "" : "hover:bg-[#3b444e]/65"}`}
                   style={{ gridTemplateColumns: MODEL_LIST_GRID_COLUMNS }}
                 >
                   <span className="flex items-center px-1.5 py-2" onClick={(e) => e.stopPropagation()}>
@@ -1857,10 +1915,20 @@ export default function ModelsView({
                   <span className="min-w-0 px-2 py-2">
                     {/* 一覧は管理No＋モデル名のみ（Best/Recommended等の比較バッジは比較画面へ集約）。
                         モデル名は15px・管理No（通しナンバー）は共通ModelIdBadge（等幅12px/600・最低幅48px）。
-                        gap-2（8px）で管理Noとモデル名が一続きに見えないよう分離し、バッジは縮めない */}
+                        gap-2（8px）で管理Noとモデル名が一続きに見えないよう分離し、バッジは縮めない。
+                        推論使用中はModelIdChipをリング付きで強調する */}
                     <p className="flex min-w-0 items-center gap-2 text-[15px] text-text" title={name}>
-                      <ModelIdChip name={name} />
+                      <ModelIdChip name={name} className={isInference ? "ring-2 ring-cyan-400/70" : ""} />
                       <span className="min-w-0 truncate">{displayName(name)}</span>
+                      {isInference ? (
+                        <span
+                          className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-cyan-400/60 bg-cyan-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-cyan-200"
+                          title="現在この推論画面（OCR推論）で使用するモデルに設定されています"
+                        >
+                          <span aria-hidden="true">●</span>
+                          推論使用中
+                        </span>
+                      ) : null}
                     </p>
                     {aliases[name] ? (
                       <p className="truncate text-[11px] text-muted" title={name}>
