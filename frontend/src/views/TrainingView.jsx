@@ -16,6 +16,7 @@ import {
   buildOcrDatasetSummary,
   buildTrainingPreprocessStatus,
 } from "../lib/ocrDatasetStatus";
+import { buildDatasetPreprocessVersionDisplay } from "../lib/preprocessConfigStatus";
 import { HELP_TEXTS } from "../lib/helpTexts";
 import {
   UI_TRAINING_STATE_LABELS,
@@ -461,6 +462,20 @@ export default function TrainingView({
   const trainingPreprocessStatus = useMemo(
     () => buildTrainingPreprocessStatus(ocrTrainingPreprocessCurrent),
     [ocrTrainingPreprocessCurrent]
+  );
+  // 「今回学習で使用した前処理」の設定Version表示（保存日時=学習用設定として確定した日時 /
+  // 適用日時=Dataset作成時点で全画像へ適用した日時、を区別する）。最後に作成されたデータセット
+  // （ocrDatasetInfo）のmeta.json由来。preprocess_config_versionが無い（旧プロジェクト等）場合は
+  // 推測補完せずプレースホルダを表示する
+  const datasetPreprocessVersion = useMemo(
+    () =>
+      buildDatasetPreprocessVersionDisplay({
+        version: ocrDatasetInfo?.preprocess_config_version ?? null,
+        savedAt: ocrDatasetInfo?.preprocess_config_saved_at ?? "",
+        appliedAt: ocrDatasetInfo?.created_at ?? "",
+        hash: ocrDatasetInfo?.training_preprocess_hash ?? "",
+      }),
+    [ocrDatasetInfo]
   );
   // 学習前処理タブ・サマリーカード共通: プロジェクトの現在の前処理設定から実効値を組み立てる
   // （buildEffectiveTrainingPreprocess。学習前処理は「前処理設定」画面の値をそのまま使うため、
@@ -1073,6 +1088,16 @@ export default function TrainingView({
                                       学習前処理は「前処理設定」画面で設定した内容がそのまま使用されます（この画面では新たに設定できません）。
                                       以下は現在の設定に基づく確認表示です。実際にはデータセット作成時点の設定が使用されます。
                                     </p>
+                                    {ocrDatasetInfo?.preprocess_config_version ? (
+                                      <div className="rounded-lg border border-border/70 bg-card/40 p-3 text-[12px] leading-5">
+                                        <p className="font-semibold text-text">設定Version: {datasetPreprocessVersion.version}</p>
+                                        <p className="text-muted">保存日時: {datasetPreprocessVersion.savedAt}</p>
+                                        <p className="text-muted">適用日時: {datasetPreprocessVersion.appliedAt}</p>
+                                        <p className="truncate text-muted" title={datasetPreprocessVersion.hash}>
+                                          Hash: {datasetPreprocessVersion.hash}
+                                        </p>
+                                      </div>
+                                    ) : null}
                                     <div className="space-y-2">
                                       {built.items.map((item) => (
                                         <div

@@ -59,4 +59,6 @@ export const AUDIT_ACTION_LABELS = {
   restore_failed: "復元失敗",
   report_generate: "レポート生成",
   report_delete: "レポート削除",
+  preprocess_config_save: "前処理設定保存",
+  preprocess_config_restore: "前処理設定復元",
 };

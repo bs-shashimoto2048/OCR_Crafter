@@ -56,6 +56,7 @@ from .schemas import (
     BenchmarkCreateRequest,
     FileSelectRequest,
     ImportImagesRequest,
+    InferenceModelSaveRequest,
     JobCreateRequest,
     JobRetryRequest,
     LabelUpdateRequest,
@@ -79,6 +80,7 @@ from .schemas import (
     OcrTuningExportRequest,
     PreprocessPreviewRequest,
     PreprocessRequest,
+    PreprocessSavedConfigRequest,
     ProjectCreateRequest,
     ReleasePromoteRequest,
     ReleaseRollbackRequest,
@@ -1797,6 +1799,18 @@ def api_training_preprocess_current(project_id: Optional[str] = Query(default="d
     }
 
 
+def _build_current_preprocess_snapshot(paths: Any) -> tuple[dict[str, Any], Optional[str]]:
+    """現在の解決済み前処理設定（build_training_preprocess形状）とそのHashを組み立てる（副作用なし）。"""
+    from .services.preprocess import load_project_preprocess_overrides
+    from .services.preprocess_snapshot import build_preprocess_snapshot, build_training_preprocess, compute_training_preprocess_hash
+
+    overrides = load_project_preprocess_overrides(paths.root)
+    cfg = build_preprocess_config(overrides)
+    snapshot = build_preprocess_snapshot(cfg, source="current_config")
+    current_preprocess = build_training_preprocess(snapshot, ["single", "wide"], None)
+    return current_preprocess, compute_training_preprocess_hash(current_preprocess)
+
+
 @app.get("/api/ocr/preprocess/current-config")
 def api_ocr_preprocess_current_config(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
     """現在保存されている前処理設定（次回 /preprocess/run 実行時に使用される設定）を返す（読み取り専用・何も実行しない）。
@@ -1807,21 +1821,141 @@ def api_ocr_preprocess_current_config(project_id: Optional[str] = Query(default=
     行わない。学習時前処理（training-preprocess/current）と同一の構造
     （build_preprocess_snapshot→build_training_preprocess）を再利用し、
     フロント側の表示ロジック（lib/preprocessCompare.js）をそのまま共用できるようにする。
+
+    **v1.0.0で追加**: `saved_config`（「前処理設定保存」で確定した学習用設定。無ければnull）と
+    `is_saved`（現在設定と保存済み設定のHash一致=未保存の変更が無いか）を追加。
+    未保存変更の判定はReact stateの単純比較やJSON文字列比較ではなく、既存の正式なHash生成
+    （compute_training_preprocess_hash）で行う。`saved_config.overrides`は
+    `training_preprocess_to_config`で変換済みの、そのまま`/preprocess/run`のoverridesへ渡せる形。
     """
-    from .services.preprocess import load_project_preprocess_overrides
-    from .services.preprocess_snapshot import build_preprocess_snapshot, build_training_preprocess, compute_training_preprocess_hash
+    from .services.preprocess_config_store import load_saved_preprocess_config
+    from .services.preprocess_snapshot import training_preprocess_to_config
 
     resolved = _resolve_project_id(project_id)
     paths = ensure_project_directories(resolved)
-    overrides = load_project_preprocess_overrides(paths.root)
-    cfg = build_preprocess_config(overrides)
-    snapshot = build_preprocess_snapshot(cfg, source="current_config")
-    current_preprocess = build_training_preprocess(snapshot, ["single", "wide"], None)
+    current_preprocess, current_hash = _build_current_preprocess_snapshot(paths)
+
+    saved = load_saved_preprocess_config(paths.root)
+    saved_config = None
+    is_saved = False
+    if saved:
+        saved_hash = str(saved.get("config_hash") or "")
+        saved_config = {
+            "version": int(saved.get("version") or 0),
+            "saved_at": str(saved.get("saved_at") or ""),
+            "config_hash": saved_hash,
+            "training_preprocess": saved.get("training_preprocess"),
+            "overrides": training_preprocess_to_config(saved["training_preprocess"]),
+        }
+        is_saved = bool(current_hash) and current_hash == saved_hash
+
     return {
         "project_id": resolved,
         "current_preprocess": current_preprocess,
-        "current_preprocess_hash": compute_training_preprocess_hash(current_preprocess),
+        "current_preprocess_hash": current_hash,
+        "saved_config": saved_config,
+        "is_saved": is_saved,
     }
+
+
+@app.get("/api/ocr/preprocess/saved-config")
+def api_ocr_preprocess_saved_config(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+    """確定済み学習用前処理設定と、その保存履歴を返す（読み取り専用）。
+
+    プリセット（複数保存・再利用可能なテンプレート）とは別概念——このプロジェクトで
+    学習に使用する確定設定を1件（+履歴）だけ持つ。履歴は初回実装では読み取り専用（過去
+    Versionへの復元機能は無い）。
+    """
+    from .services.preprocess_config_store import list_preprocess_config_history, load_saved_preprocess_config
+
+    resolved = _resolve_project_id(project_id)
+    paths = ensure_project_directories(resolved)
+    saved = load_saved_preprocess_config(paths.root)
+    history = list_preprocess_config_history(paths.root)
+    return {
+        "project_id": resolved,
+        "saved_config": saved,
+        "history": history,
+    }
+
+
+@app.post("/api/ocr/preprocess/saved-config")
+def api_ocr_preprocess_saved_config_create(req: PreprocessSavedConfigRequest, request: Request) -> dict[str, Any]:
+    """現在の解決済み前処理設定を「学習に使用する確定済み設定」として保存する。
+
+    保存対象は実際のrun_preprocess()が使用する設定と一致させる（build_preprocess_config→
+    build_preprocess_snapshot→build_training_preprocessを再利用。別形式・別Hashロジックは
+    作らない）。この操作では全画像への前処理再実行は行わない（設定調整中に重い処理を
+    走らせないため。実画像への適用はDataset作成時に行う）。同一Hashの再保存は履歴を
+    増やさず既存の確定設定をそのまま返す。
+    """
+    from .services.preprocess_config_store import save_preprocess_config_version
+
+    _enforce_role(request, "preprocess_config_save")
+    resolved = _resolve_project_id(req.project_id)
+    paths = ensure_project_directories(resolved)
+    current_preprocess, current_hash = _build_current_preprocess_snapshot(paths)
+    if not current_preprocess or not current_hash:
+        raise HTTPException(status_code=400, detail="前処理設定を解決できませんでした")
+    result = save_preprocess_config_version(paths.root, current_preprocess, current_hash)
+    _record_audit_safe(
+        request, "preprocess_config_save", project_id=resolved, target_type="preprocess_config",
+        target_id=str(result["saved_config"].get("version")),
+        after={"created": result["created"], "config_hash": current_hash},
+    )
+    return {"project_id": resolved, **result}
+
+
+@app.post("/api/ocr/preprocess/saved-config/restore")
+def api_ocr_preprocess_saved_config_restore(req: PreprocessSavedConfigRequest, request: Request) -> dict[str, Any]:
+    """確定済み設定を現在のプロジェクト前処理設定（次回実行時に使う値）へ復元する。
+
+    保存済みのtraining_preprocessをtraining_preprocess_to_configでoverrides形状へ戻し、
+    既存のsave_project_preprocess_overrides（前処理設定の保存先）へそのまま書き込む。
+    プリセットの読込とは異なり、実際のプロジェクト前処理設定へ反映する。この操作では
+    全画像への前処理再実行は行わない（processed/の再生成はDataset作成時のみ）。
+    """
+    from .services.preprocess import save_project_preprocess_overrides
+    from .services.preprocess_config_store import load_saved_preprocess_config
+    from .services.preprocess_snapshot import training_preprocess_to_config
+
+    _enforce_role(request, "preprocess_config_restore")
+    resolved = _resolve_project_id(req.project_id)
+    paths = ensure_project_directories(resolved)
+    saved = load_saved_preprocess_config(paths.root)
+    if not saved:
+        raise HTTPException(status_code=404, detail="確定済みの学習用前処理設定がありません")
+    cfg = training_preprocess_to_config(saved["training_preprocess"])
+    save_project_preprocess_overrides(paths.root, cfg)
+    _record_audit_safe(
+        request, "preprocess_config_restore", project_id=resolved, target_type="preprocess_config",
+        target_id=str(saved.get("version")), after={"config_hash": saved.get("config_hash")},
+    )
+    return {"project_id": resolved, "overrides": cfg, "restored_version": int(saved.get("version") or 0)}
+
+
+@app.get("/api/ocr/inference/model")
+def api_ocr_inference_model_get(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+    """プロジェクト単位で保存されている推論使用モデルの選択を返す（読み取り専用）。
+
+    存在しない場合は`inference_model: null`（推測補完しない。フロント側で「未選択」表示）。
+    """
+    from .services.inference_model import load_inference_model
+
+    resolved = _resolve_project_id(project_id)
+    paths = ensure_project_directories(resolved)
+    return {"project_id": resolved, "inference_model": load_inference_model(paths.root)}
+
+
+@app.post("/api/ocr/inference/model")
+def api_ocr_inference_model_set(req: InferenceModelSaveRequest) -> dict[str, Any]:
+    """推論使用モデルの選択をプロジェクト単位で保存する（利用者が選択した時点で即時保存）。"""
+    from .services.inference_model import save_inference_model
+
+    resolved = _resolve_project_id(req.project_id)
+    paths = ensure_project_directories(resolved)
+    saved = save_inference_model(paths.root, engine=req.engine, model=req.model, model_id=req.model_id or "")
+    return {"project_id": resolved, "inference_model": saved}
 
 
 @app.post("/preprocess/run")
@@ -3612,6 +3746,14 @@ def delete_model_endpoint(
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    # v1.0.0で追加: 削除したモデルが推論使用モデルに設定されていた場合、保存済み選択をクリアする
+    # （削除済みモデルを指したままにせず、次回は「見つかりません」ではなく素直に未選択とする）
+    from .services.inference_model import clear_inference_model, load_inference_model
+
+    paths_for_delete = ensure_project_directories(resolved)
+    saved_inference = load_inference_model(paths_for_delete.root)
+    if saved_inference and str(saved_inference.get("model") or "") == model_name:
+        clear_inference_model(paths_for_delete.root)
     _record_audit_safe(
         request, "model_delete", project_id=resolved, target_type="model", target_id=model_name,
         before={"model": model_name}, after={"deleted": deleted},

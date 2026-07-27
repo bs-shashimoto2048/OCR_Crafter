@@ -294,6 +294,46 @@ test("学習前処理タブ③: 記録があれば表示名・専門パラメー
   assert.ok(html.includes("項目有効"));
 });
 
+test("学習前処理タブ: 今回学習で使用した前処理へ設定Version・保存日時・適用日時・Hashを表示する", () => {
+  const trainingPreprocess = {
+    schema_version: 1,
+    image_types: ["wide"],
+    steps: { wide: [{ name: "grayscale", enabled: true, params: {} }] },
+    ocr_input_normalization: { channels: 3, target_height: 48, canvas_width: 320 },
+  };
+  const html = render({
+    initialSettingsTab: "preprocess",
+    ocrTrainingPreprocessCurrent: { training_preprocess: trainingPreprocess, training_preprocess_hash: "sha256:abc123" },
+    ocrDatasetInfo: {
+      dataset_root: "/x/20260727_192000",
+      counts: { train: 700, val: 200, test: 100 },
+      preprocess_config_version: 4,
+      preprocess_config_saved_at: "2026-07-27T19:10:00",
+      created_at: "2026-07-27T19:20:00",
+      training_preprocess_hash: "sha256:abc123",
+    },
+  }).replaceAll("<!-- -->", "");
+  assert.ok(html.includes("設定Version: 4"));
+  assert.ok(html.includes("保存日時: 2026-07-27 19:10:00"));
+  assert.ok(html.includes("適用日時: 2026-07-27 19:20:00"));
+  assert.ok(html.includes("Hash: sha256:abc123"));
+});
+
+test("学習前処理タブ: preprocess_config_versionが無い（旧プロジェクト等）場合はVersion表示自体を出さない", () => {
+  const trainingPreprocess = {
+    schema_version: 1,
+    image_types: ["wide"],
+    steps: { wide: [{ name: "grayscale", enabled: true, params: {} }] },
+    ocr_input_normalization: { channels: 3, target_height: 48, canvas_width: 320 },
+  };
+  const html = render({
+    initialSettingsTab: "preprocess",
+    ocrTrainingPreprocessCurrent: { training_preprocess: trainingPreprocess, training_preprocess_hash: "sha256:abc123" },
+    ocrDatasetInfo: { dataset_root: "/x/20260727_192000", counts: { train: 1, val: 0, test: 0 } },
+  }).replaceAll("<!-- -->", "");
+  assert.ok(!html.includes("設定Version"));
+});
+
 const CURRENT_CONFIG_PREPROCESS = {
   schema_version: 1,
   image_types: ["single", "wide"],

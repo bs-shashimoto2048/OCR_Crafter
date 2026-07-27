@@ -61,6 +61,13 @@ export default function PreprocessView({
   setPredictPsm,
   predictWhitelist = "",
   setPredictWhitelist,
+  // 「前処理設定保存」（学習に使用する確定済み設定。プリセットとは別機能）
+  saveStatus,
+  onSaveConfirmedConfig,
+  onRestoreConfirmedConfig,
+  savingConfirmedConfig = false,
+  restoringConfirmedConfig = false,
+  configHistory = [],
 }) {
   const latestAny = String(latestModels?.any || "");
   const latestByType = latestModels?.byType || {};
@@ -1064,6 +1071,12 @@ export default function PreprocessView({
         uiState={uiState}
         onUiStateChange={onUiStateChange}
         previewType={preview?.type || ""}
+        saveStatus={saveStatus}
+        onSaveConfirmedConfig={onSaveConfirmedConfig}
+        onRestoreConfirmedConfig={onRestoreConfirmedConfig}
+        savingConfirmedConfig={savingConfirmedConfig}
+        restoringConfirmedConfig={restoringConfirmedConfig}
+        configHistory={configHistory}
       />
     </div>
   );

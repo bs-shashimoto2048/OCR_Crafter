@@ -119,6 +119,13 @@ export default function PreprocessPanel({
   uiState = { mode: "basic", openSections: ["input", "brightness", "threshold"] },
   onUiStateChange,
   previewType = "",
+  // 「前処理設定保存」（学習に使用する確定済み設定。プリセットとは別機能）
+  saveStatus = { status: "never_saved", label: "学習用設定は未保存です", version: null, savedAt: "-" },
+  onSaveConfirmedConfig,
+  onRestoreConfirmedConfig,
+  savingConfirmedConfig = false,
+  restoringConfirmedConfig = false,
+  configHistory = [],
 }) {
   const presetKeys = Object.keys(presets);
   const inferenceRef = useRef(null);
@@ -887,11 +894,86 @@ export default function PreprocessPanel({
         ) : null}
       </div>
 
-      <div className="mt-2 flex shrink-0 items-center gap-2 border-t border-border pt-2">
-        <Button className="flex-1" size="sm" variant="secondary" onClick={onSavePreset}>
+      <div className="mt-2 flex shrink-0 flex-col gap-2 border-t border-border pt-2">
+        <Button className="w-full" size="sm" variant="secondary" onClick={onSavePreset}>
           プリセット保存
         </Button>
-        <Button className="flex-1" size="sm" variant="danger" onClick={resetAll} title="すべての前処理パラメータを既定値へ戻します">
+
+        {/* 「前処理設定保存」: プリセット（複数保存・再利用可能なテンプレート）とは別機能。
+            このプロジェクトで学習に使用する確定済み設定を1件（+履歴）だけ持つ */}
+        <div className="rounded-lg border border-border bg-card/60 p-2.5">
+          <Button
+            className="w-full"
+            size="sm"
+            variant="primary"
+            onClick={onSaveConfirmedConfig}
+            disabled={savingConfirmedConfig}
+            title="現在の解決済み設定を、学習に使用する確定済み設定として保存します（全画像への前処理再実行は行いません）"
+          >
+            {savingConfirmedConfig ? "保存中..." : "前処理設定保存"}
+          </Button>
+          <div className="mt-2 text-[11px] leading-5">
+            {saveStatus.status === "saved" ? (
+              <p className="text-success">
+                ✔ 保存済み
+                <br />
+                Version {saveStatus.version}
+                <br />
+                保存日時: {saveStatus.savedAt}
+              </p>
+            ) : saveStatus.status === "changed" ? (
+              <p className="text-amber-300">
+                ⚠ 未保存の変更があります
+                <br />
+                現在の設定は、最後に保存した学習用設定と異なります。
+              </p>
+            ) : (
+              <p className="text-muted">
+                ○ 学習用設定は未保存です
+                <br />
+                学習データセットを作成する前に、現在の前処理設定を保存してください。
+              </p>
+            )}
+          </div>
+          {saveStatus.status === "changed" ? (
+            <Button
+              className="mt-2 w-full"
+              size="sm"
+              variant="secondary"
+              onClick={onRestoreConfirmedConfig}
+              disabled={restoringConfirmedConfig}
+              title="現在の未保存変更を破棄し、最後に保存した前処理設定へ戻します"
+            >
+              {restoringConfirmedConfig ? "復元中..." : "保存時の設定に戻す"}
+            </Button>
+          ) : null}
+          {configHistory.length > 0 ? (
+            <details className="mt-2 text-[11px]">
+              <summary className="cursor-pointer text-muted">保存履歴（{configHistory.length}件・読み取り専用）</summary>
+              <div className="mt-1 space-y-1">
+                {configHistory.map((item) => (
+                  <div
+                    key={item.version}
+                    className={`rounded border px-2 py-1 ${
+                      item.isCurrent ? "border-accent/50 bg-accent/10" : "border-border/60"
+                    }`}
+                  >
+                    <p className="font-semibold text-text">
+                      Version {item.version}
+                      {item.isCurrent ? <span className="ml-1 text-[10px] text-accent">現在使用中</span> : null}
+                    </p>
+                    <p className="text-muted">{item.savedAt}</p>
+                    <p className="truncate text-muted" title={item.hash}>
+                      Hash: {item.hash}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </details>
+          ) : null}
+        </div>
+
+        <Button className="w-full" size="sm" variant="danger" onClick={resetAll} title="すべての前処理パラメータを既定値へ戻します">
           すべてリセット
         </Button>
       </div>

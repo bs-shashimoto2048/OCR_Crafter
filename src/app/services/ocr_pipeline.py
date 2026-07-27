@@ -23,6 +23,7 @@ from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 from ..project_paths import ensure_project_directories, safe_rmtree
 from .labels import read_labels
 from .model_registry import resolve_ocr_model_meta
+from .preprocess_config_store import load_saved_preprocess_config
 from .preprocess_snapshot import (
     build_training_preprocess,
     compute_training_preprocess_hash,
@@ -1223,6 +1224,21 @@ def create_ocr_dataset(
     # 学習データの由来（processed / interim / raw）。processed 以外の混在は警告する
     source_summary = summarize_source_states([str(c.get("source_state") or "") for c in candidates])
 
+    # v1.0.0で追加: 「前処理設定保存」で確定した学習用設定のVersion・保存日時。
+    # 実際に使用したtraining_preprocess_hashと保存済み設定のHashが一致する場合のみ記録する
+    # （一致しない＝保存済み設定を経由せずに作成された旧来のデータセットや、保存後に設定が
+    # 変わった状態で作成された場合は、過去の設定を推測せずNoneのままとする）
+    preprocess_config_version: Optional[int] = None
+    preprocess_config_saved_at: Optional[str] = None
+    saved_preprocess_config = load_saved_preprocess_config(paths.root)
+    if (
+        saved_preprocess_config
+        and training_preprocess_hash
+        and str(saved_preprocess_config.get("config_hash") or "") == training_preprocess_hash
+    ):
+        preprocess_config_version = int(saved_preprocess_config.get("version") or 0)
+        preprocess_config_saved_at = str(saved_preprocess_config.get("saved_at") or "")
+
     meta = {
         "project_id": paths.project_id,
         "dataset_root": str(dataset_root),
@@ -1258,6 +1274,9 @@ def create_ocr_dataset(
         "source_state_counts": source_summary["counts"],
         "source_preprocess_snapshot_id": str((snapshot or {}).get("snapshot_id") or ""),
         "source_warning": source_summary["warning"],
+        # v1.0.0で追加: 実際に使用した「前処理設定保存」のVersion・保存日時（未記録=None）
+        "preprocess_config_version": preprocess_config_version,
+        "preprocess_config_saved_at": preprocess_config_saved_at,
         "created_at": datetime.now().isoformat(),
     }
     meta_path = dataset_root / "meta.json"

@@ -14,12 +14,32 @@ timeline
     07-17 : CER中心の評価体系（マイクロ平均・混同集計・改善/悪化） : モデルカルテ/比較ダッシュボード : モデル管理No（M0001） : モデル識別色 : Unicode特殊文字表示 : 一覧バッジ削除と右ペイン拡張
     07-18〜 : 学習条件比較・条件差分・次回学習提案 : サイドバーのOCR開発フロー順再編 : 性能サマリー省スペース化と比較カード短縮名
     07-24 : ダッシュボード「プロジェクト一覧」テーブル拡張 : 同カードビュー化（Health Badge・Exact Match） : カードへBenchmark性能指標追加（Balance Score・P95・Healthのreasons） : カードUI/UXブラッシュアップ（文字拡大・3列化・Primary/Secondary・Production独立表示） : 学習前処理・オーグメンテーションの実効値スナップショット保存と学習条件比較の2セクション化・推論使用モデルの一覧強調
-    07-27 : 学習データ作成フローの明確化（事前作成の可視化・準備状況サマリー・評価データとの違いの明記） : 学習前処理の実行タイミング調査と前処理未実行時の警告・実行状況表示の追加 : 学習前処理ステータスの3状態化（旧プロジェクトの誤表示を是正） : 現在の前処理設定の可視化（GET /api/ocr/preprocess/current-config 追加） : OCR Dataset作成フローの見直し（Dataset作成時に必ずrun_preprocess()を自動実行する設計へ変更）
+    07-27 : 学習データ作成フローの明確化（事前作成の可視化・準備状況サマリー・評価データとの違いの明記） : 学習前処理の実行タイミング調査と前処理未実行時の警告・実行状況表示の追加 : 学習前処理ステータスの3状態化（旧プロジェクトの誤表示を是正） : 現在の前処理設定の可視化（GET /api/ocr/preprocess/current-config 追加） : OCR Dataset作成フローの見直し（Dataset作成時に必ずrun_preprocess()を自動実行する設計へ変更） : 推論使用モデルの永続化と学習用前処理設定の保存管理（Version・履歴・未保存変更ガード）
 ```
 
 ---
 
 ## 2026-07
+
+### 推論使用モデルの永続化と学習用前処理設定の保存管理（Version・履歴・未保存変更ガード）
+
+**背景（2件）**: ①推論使用モデルの選択が画面遷移・再読み込み・アプリ再起動・プロジェクトの開き直しのたびにリセットされる（`App.jsx`の`inferEngine`/`inferModel`等はプレーンな`useState`のみで永続化されておらず、ブラウザのセッション内stateに過ぎなかった。前タスクの`16_SCREEN_SPEC.md`にも「バックエンドAPIは呼ばない設計」と明記されていた）。②直前のタスクで「Dataset作成時に必ずrun_preprocess()を自動実行する」設計へ変更したが、これは「現在の前処理設定」を暗黙に取得して使うだけで、学習に使う設定を利用者が明示的に確定させる操作が無かった（前処理設定画面には「学習に使用する確定済み設定」という概念自体が存在せず、調整中の設定がそのまま学習へ使われてしまう）。
+
+**1. 推論使用モデルの永続化**: 既存のプロジェクト設定管理方式を調査した結果、汎用のプロジェクト設定ストア（`project_settings.json`等）は存在せず、`preprocess_config.json`（project_root直下に小さなJSONファイルを1つ置く方式）が唯一の先例だった。新しい保存機構を増やさず、この方式を踏襲して`data/projects/<id>/inference_model.json`（`services/inference_model.py`）を追加。`GET/POST /api/ocr/inference/model`で取得・保存する。復元は`App.jsx`の`loadModels()`（モデル一覧取得完了時点）に組み込み、プロジェクトごとに1回だけ試みる（手動更新での再取得時に、利用者がその後変更した選択を上書きしないため）。保存済みモデルが一覧に存在しない場合は「前回使用していた推論モデルが見つかりません。別のモデルを選択してください。」を表示するのみで、勝手に別モデルへ確定保存しない。モデル削除時（`DELETE /models/{name}`）、削除対象が現在の推論使用モデルと一致する場合はバックエンド側で`inference_model.json`を自動クリアし、フロント側は削除前に個別警告を表示、削除後は選択状態も既定（latest）へリセットする。
+
+**2. 学習用前処理設定の保存管理（「前処理設定保存」）**: プリセット（`services/preprocess.py`の複数保存・再利用可能なテンプレート）とは役割が異なる別機能として新設した。保存対象は実際の`run_preprocess()`が使用する設定と一致させるため、既存の`build_preprocess_config`→`build_preprocess_snapshot`→`build_training_preprocess`をそのまま再利用し（別形式・別Hashロジックは作らない）、既にこのセッションの別タスクで実装済みの`GET /api/ocr/preprocess/current-config`のロジックを内部で共用する。保存先は`project_root/preprocess/saved_config.json`（現在の確定設定）＋`project_root/preprocess/history/v{NNNN}.json`（履歴。上書きされない）。version は既存確定設定の`version+1`で単調増加。同一Hashの再保存は新しい履歴を増やさず、既存の確定設定をそのまま返す（`created: false`）。「前処理設定保存」押下時は全画像への前処理再実行を行わない（設定調整中に重い処理を走らせないため。実画像への適用はDataset作成時のみ）。
+
+**未保存変更の判定**: `GET /api/ocr/preprocess/current-config`を拡張し、`saved_config`（確定済み設定）と`is_saved`（現在設定とのHash一致）を追加した。判定は既存の正式なHash生成（`compute_training_preprocess_hash`）のみで行い、React stateの単純比較・JSON文字列比較はしない。UIは3状態（保存済みで一致／保存後に変更あり／一度も保存されていない）を表示し、「保存後に変更あり」の場合のみ「保存時の設定に戻す」を表示する。復元（`POST /api/ocr/preprocess/saved-config/restore`）は、保存済み`training_preprocess`を既存の`training_preprocess_to_config`でoverrides形状へ戻し、既存の`save_project_preprocess_overrides`（前処理設定の保存先）へそのまま書き込む——プリセット読込とは異なり、実際のプロジェクト前処理設定へ反映する。フロント側は逆変換（`lib/preprocessRequest.js denormalizePreprocessOperations`。既存の`normalizePreprocessOverrides`の対称関数）で`preprocessParams`（画面のスライダー等）へ即時反映し、プレビューも自動更新される。復元・保存とも全画像への前処理再実行は行わない。
+
+**Dataset作成との連携**: 学習データセットは必ず「保存済みの学習用前処理設定」を使用するよう`App.jsx createOcrDataset()`を変更した。①未保存（保存済み設定が無い）→Dataset作成を開始せず案内を表示。②保存後に変更あり→「前処理設定を保存」「保存時の設定に戻す」「キャンセル」の選択を経てからのみ続行（選択後に再度一致を確認）。③一致→`POST /preprocess/run`へ**保存済みconfigを明示的にoverridesとして渡す**（前タスクの「overrides省略で現在設定を暗黙取得する」実装から変更。現在設定を暗黙取得するだけの方式にしない、という要件のため）。`create_ocr_dataset`のmeta.jsonへ`preprocess_config_version`/`preprocess_config_saved_at`を追加（既存の`training_preprocess_hash`と保存済み設定の`config_hash`が一致する場合のみ記録し、一致しない/保存済み設定が無い場合はnullのまま=過去設定を推測しない）。学習画面「今回学習で使用した前処理」へ設定Version・保存日時（学習用設定として確定した日時）・適用日時（Dataset作成時点で全画像へ適用した日時）・Hashを表示し、両者の意味を分離した。
+
+**旧プロジェクトの互換性**: 「processedあり・snapshotなし」（前処理済みだがスナップショット未保存）は前タスクの3状態表示をそのまま維持。「snapshotあり・saved_configなし」（前処理履歴はあるが学習用設定は未確定）は、既存Snapshotから保存済み設定を勝手に生成せず、利用者が「前処理設定保存」を押した時点でVersion 1が作成される（過去の設定を推測しない）——この最も細かい状態分岐（履歴の有無で未保存メッセージを出し分ける4状態目）は実装せず、いずれも「学習用設定は未保存です」という統一メッセージへ集約した（`saved_config`が存在しないことのみを判定基準とする、というコア要件は満たしつつ、UIの複雑化を避けるための簡略化）。
+
+**制約遵守**: 前処理アルゴリズム・プレビュー処理・プリセットの既存仕様・画像取込後の既存前処理・回転後の既存前処理・Dataset分割仕様・Charset仕様・学習エンジン・評価データセット・OCRログ由来Dataset・既存モデルmetadataはすべて無変更。OCRログ由来データセット（`from_logs`）は、参照する画像パスが`processed/`の現在状態と無関係なため、今回の保存済み設定ゲート・自動前処理の対象外とした（前タスクからの継続方針）。
+
+**API追加・変更**: `GET/POST /api/ocr/inference/model`（新規）・`GET/POST /api/ocr/preprocess/saved-config`（新規。`config-history`は別エンドポイントを新設せず`GET saved-config`の`history`フィールドへ折り込んだ）・`POST /api/ocr/preprocess/saved-config/restore`（新規）・`GET /api/ocr/preprocess/current-config`（`saved_config`/`is_saved`を追加）・`DELETE /models/{name}`（推論使用モデルクリアを追加）。監査アクションへ`preprocess_config_save`/`preprocess_config_restore`（operator権限）を追加（計26種）。
+
+**テスト**: バックエンド`tests/test_preprocess_config_store.py`18件（保存履歴の永続化ロジック・API・Dataset連携・推論モデルストア）を新規追加し、既存の監査アクション数・権限マトリクステスト（`test_audit_operations.py`・`test_permission_matrix.py`）を26種へ更新→バックエンド全件回帰481件通過。フロントエンド`lib/preprocessConfigStatus.js`（新規）7件・`lib/preprocessRequest.js`の`denormalizePreprocessOperations`往復テスト2件・`preprocessView.render.test.mjs`5件・`trainingView.render.test.mjs`2件・`auditDiff.test.mjs`のラベル数更新→フロント459件全通過、`npm run build`成功。App.jsxの保存/復元/Dataset作成ゲートの命令的なfetchオーケストレーション自体（3-way確認ダイアログの分岐等）は、このコードベースにApp.jsx全体を対象にした既存のレンダリングテスト基盤が無いため、新規に構築することはせず、その土台となる純粋関数（Hash比較はバックエンドの正式ロジックへ委譲、UI状態導出は`lib/`関数）とAPI契約（バックエンドテスト）で担保する方針とした。
 
 ### OCR Dataset作成フローの見直し（Dataset作成時に必ずrun_preprocess()を自動実行する設計へ変更）
 

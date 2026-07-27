@@ -7,6 +7,7 @@ import { test } from "node:test";
 import {
   buildPreprocessPreviewPayload,
   buildPreprocessRunPayload,
+  denormalizePreprocessOperations,
   normalizePreprocessOverrides,
   preprocessRunConfirmText,
   summarizePreprocessRun,
@@ -75,6 +76,25 @@ test("確認ダイアログ文言: 注意＋実行設定要約を含む", () => 
   const text = preprocessRunConfirmText(PARAMS);
   assert.ok(text.includes("既存の学習用画像・前処理スナップショットが更新されます"));
   assert.ok(text.includes("二値化: 固定しきい値 90"));
+});
+
+test("denormalizePreprocessOperations: normalizePreprocessOverridesの逆変換で往復一致する（「保存時の設定に戻す」用）", () => {
+  const normalized = normalizePreprocessOverrides(PARAMS).preprocess;
+  const denormalized = denormalizePreprocessOperations(normalized);
+  // 往復後に再度normalizeすると同じoverridesになる（値が失われていないこと）
+  assert.deepEqual(normalizePreprocessOverrides(denormalized).preprocess, normalized);
+  assert.equal(denormalized.threshold_value, 90);
+  assert.equal(denormalized.illumination_enabled, true);
+  assert.equal(denormalized.wide_height, 48);
+  assert.equal(denormalized.wide_keep_ratio, true);
+});
+
+test("denormalizePreprocessOperations: 空/未指定は既定値で補完する（例外を出さない）", () => {
+  const denormalized = denormalizePreprocessOperations({});
+  assert.equal(denormalized.threshold_type, "binary");
+  assert.equal(denormalized.threshold_value, 128);
+  assert.equal(denormalized.gamma_enabled, false);
+  assert.equal(denormalized.wide_height, 48);
 });
 
 test("App.jsx: preview・run とも共通ライブラリを使用し、旧の画面内組み立てが残っていない", async () => {

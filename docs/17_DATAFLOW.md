@@ -19,13 +19,18 @@ flowchart TD
     OPP --> PPCUR["前処理実行状況（読み取り専用）<br/>GET /api/ocr/training-preprocess/current<br/>（executed・処理画像数・処理日時）"]
 
     PROC --> OCR["OCR推論<br/>POST /preprocess/preview・/predict<br/>EasyOCR / PaddleOCR / Tesseract / カスタム"]
+    OCR -.-> INFMODEL["推論使用モデルの永続化<br/>GET/POST /api/ocr/inference/model<br/>v1.0.0で追加: data/projects/&lt;id&gt;/inference_model.json<br/>（選択時に即時保存・モデル一覧取得完了後に復元・モデル削除時に自動クリア）"]
     OCR --> DICT["辞書近似候補<br/>candidateDictionary.js<br/>（重み付きLevenshtein・表示のみ）"]
     OCR --> CAND["OCR候補表示（最大3モデル）"]
     DICT --> LABEL
     CAND --> LABEL["ラベル保存<br/>PUT /labels/{name}<br/>annotations/master.csv"]
 
-    LABEL --> AUTOPP["自動前処理更新<br/>POST /preprocess/run（現在の前処理設定・overrides省略）<br/>v1.0.0で追加: 学習データ作成ボタン内部で自動実行"]
-    AUTOPP --> DS["OCRデータセット作成<br/>POST /api/ocr/dataset/create<br/>（path\ttext 形式）"]
+    SAVECFG["前処理設定保存（学習用確定設定）<br/>POST /api/ocr/preprocess/saved-config<br/>v1.0.0で追加: build_preprocess_snapshot→build_training_preprocessを再利用<br/>project_root/preprocess/saved_config.json + history/v{NNNN}.json"]
+    LABEL --> GATE{"保存済み設定と現在設定が一致?<br/>GET /api/ocr/preprocess/current-config<br/>is_saved判定（既存Hash生成を再利用）"}
+    SAVECFG -.-> GATE
+    GATE -- "未保存/不一致=Dataset作成しない" --> SAVECFG
+    GATE -- "一致" --> AUTOPP["自動前処理更新<br/>POST /preprocess/run（保存済みconfigを明示的にoverridesへ渡す）<br/>v1.0.0で更新: 学習データ作成ボタン内部で自動実行"]
+    AUTOPP --> DS["OCRデータセット作成<br/>POST /api/ocr/dataset/create<br/>（path\ttext 形式）<br/>meta.jsonへpreprocess_config_version/saved_atを記録（v1.0.0で追加）"]
     FIX["OCR修正ログ<br/>POST /api/ocr/log/save<br/>outputs/ocr_logs/predictions.jsonl"] --> DS2["ログ由来データセット<br/>POST /api/ocr/dataset/from_logs<br/>（自動前処理の対象外。ログ参照画像パスは前処理と独立）"]
     OCR --> FIX
     DS -.-> SPLITP["分割プレビュー（作成前・保存なし）<br/>POST /api/ocr/dataset/split-preview<br/>（対象画像数/ラベル済み件数/入力/有効/除外内訳＋最大剰余法の予定枚数<br/>＋前処理未実行を示すsource_warning）"]

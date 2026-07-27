@@ -80,7 +80,7 @@ const DEFAULT_PARAMS = {
   deskew_enabled: true,
 };
 
-function renderView({ params = DEFAULT_PARAMS, preview = null, uiState } = {}) {
+function renderView({ params = DEFAULT_PARAMS, preview = null, uiState, saveStatus, configHistory } = {}) {
   return renderToString(
     React.createElement(PreprocessView, {
       projectId: "p",
@@ -127,6 +127,10 @@ function renderView({ params = DEFAULT_PARAMS, preview = null, uiState } = {}) {
       setPredictPsm: noop,
       predictWhitelist: "",
       setPredictWhitelist: noop,
+      saveStatus,
+      onSaveConfirmedConfig: noop,
+      onRestoreConfirmedConfig: noop,
+      configHistory: configHistory || [],
     })
   );
 }
@@ -221,4 +225,55 @@ test("手動マスク: 前段/後段の適用位置が明示される", () => {
   const html = renderView({ uiState: { mode: "advanced", openSections: ["shape"] } });
   assert.ok(html.includes("前段マスク（二値化より前に適用）"));
   assert.ok(html.includes("後段マスク（二値化の後に適用）"));
+});
+
+test("前処理設定保存: ボタンとプリセットは別の操作として両方表示される", () => {
+  const html = renderView();
+  assert.ok(html.includes("前処理設定保存"));
+  assert.ok(html.includes("プリセット保存"));
+  assert.ok(html.includes("プリセット読込"));
+});
+
+test("前処理設定保存: 一度も保存されていない場合の表示", () => {
+  const html = renderView({ saveStatus: { status: "never_saved", label: "学習用設定は未保存です", version: null, savedAt: "-" } });
+  assert.ok(html.includes("学習用設定は未保存です"));
+  assert.ok(html.includes("学習データセットを作成する前に"));
+  assert.ok(!html.includes("保存時の設定に戻す"));
+});
+
+test("前処理設定保存: 保存済みで一致する場合はVersion・保存日時を表示し、復元ボタンは出さない", () => {
+  const html = plain(
+    renderView({
+      saveStatus: { status: "saved", label: "保存済み", version: 4, savedAt: "2026-07-27 19:10:00" },
+    })
+  );
+  assert.ok(html.includes("保存済み"));
+  assert.ok(html.includes("Version 4"));
+  assert.ok(html.includes("2026-07-27 19:10:00"));
+  assert.ok(!html.includes("保存時の設定に戻す"));
+});
+
+test("前処理設定保存: 未保存の変更がある場合は警告と「保存時の設定に戻す」ボタンを表示する", () => {
+  const html = renderView({
+    saveStatus: { status: "changed", label: "未保存の変更があります", version: 4, savedAt: "2026-07-27 19:10:00" },
+  });
+  assert.ok(html.includes("未保存の変更があります"));
+  assert.ok(html.includes("最後に保存した学習用設定と異なります"));
+  assert.ok(html.includes("保存時の設定に戻す"));
+});
+
+test("前処理設定保存: 保存履歴が読み取り専用で表示され、現在使用中のVersionが区別される", () => {
+  const html = plain(
+    renderView({
+      saveStatus: { status: "saved", label: "保存済み", version: 4, savedAt: "2026-07-27 19:10:00" },
+      configHistory: [
+        { version: 4, savedAt: "2026-07-27 19:10:00", hash: "sha256:abc123", isCurrent: true },
+        { version: 3, savedAt: "2026-07-25 16:30:00", hash: "sha256:def456", isCurrent: false },
+      ],
+    })
+  );
+  assert.ok(html.includes("保存履歴（2件・読み取り専用）"));
+  assert.ok(html.includes("現在使用中"));
+  assert.ok(html.includes("Version 3"));
+  assert.ok(html.includes("sha256:def456"));
 });

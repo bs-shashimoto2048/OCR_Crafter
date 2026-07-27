@@ -407,6 +407,14 @@ export default function ModelsView({
 
   async function deleteModels(names) {
     if (names.length === 0) return;
+    // 現在の推論使用モデルが削除対象に含まれる場合は個別に警告する
+    // （削除後は保存済みinference_model.jsonもクリアされ推論モデルが未選択になる）
+    if (inferenceInUseModel && names.includes(inferenceInUseModel)) {
+      const okInference = window.confirm(
+        "このモデルは現在、推論使用モデルに設定されています。\n\n削除すると推論モデルが未選択になります。\n削除しますか？"
+      );
+      if (!okInference) return;
+    }
     const previewList = names.slice(0, 3).join(", ");
     const hasMore = names.length > 3 ? ` ほか${names.length - 3}件` : "";
     const ok = window.confirm(

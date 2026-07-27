@@ -31,6 +31,8 @@ EXPECTED_MATRIX = {
     "deployment_export": "operator",  # ViewerはExport不可（仕様確定）
     "report_generate": "operator",  # レポート生成
     "report_delete": "operator",  # レポート削除
+    "preprocess_config_save": "operator",  # 「前処理設定保存」（学習用確定設定の新規保存）
+    "preprocess_config_restore": "operator",  # 確定済み前処理設定への復元
     # Approver以上
     "release_promote": "approver",
     "release_rollback": "approver",

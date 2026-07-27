@@ -13,6 +13,17 @@ class PreprocessRequest(BaseModel):
     overrides: Optional[dict[str, Any]] = None
 
 
+class PreprocessSavedConfigRequest(BaseModel):
+    project_id: Optional[str] = "default"
+
+
+class InferenceModelSaveRequest(BaseModel):
+    project_id: Optional[str] = "default"
+    engine: str
+    model: str
+    model_id: Optional[str] = None
+
+
 class LabelUpdateRequest(BaseModel):
     label: str
 

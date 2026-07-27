@@ -156,6 +156,81 @@ export function summarizePreprocessRun(params = {}) {
   return lines;
 }
 
+// normalizePreprocessOverrides の逆変換: 解決済み設定（{ratio_threshold, operations}。
+// 保存済み設定の復元=training_preprocess_to_config の戻り値）→ UIパラメータ（preprocessParams）へ。
+// 「保存時の設定に戻す」で、プリセット読込のようにUI表示ではなく実際のプロジェクト前処理設定へ
+// 反映する際に使う（新しい設定構造・正規化ロジックは追加しない。既存normalizeの対称のみ）
+export function denormalizePreprocessOperations(cfg = {}) {
+  const ops = (cfg && cfg.operations) || {};
+  const manualMask = ops.manual_mask || {};
+  const illumination = ops.illumination || {};
+  const threshold = ops.threshold || {};
+  const clahe = ops.clahe || {};
+  const sharpen = ops.sharpen || {};
+  const gamma = ops.gamma || {};
+  const morph = ops.morph || {};
+  const unsharp = ops.unsharp || {};
+  const bilateral = ops.bilateral || {};
+  const localContrast = ops.local_contrast || {};
+  const cropMargin = ops.crop_margin || {};
+  const histEqualize = ops.hist_equalize || {};
+  const strokeBoost = ops.stroke_boost || {};
+  const denoise = ops.denoise || {};
+  const deskew = ops.deskew || {};
+  const resize = ops.resize || {};
+
+  return {
+    ratio_threshold: num(cfg.ratio_threshold, 1.6),
+    manual_mask_enabled: Boolean(manualMask.enabled),
+    manual_mask_fill: manualMask.fill || "white",
+    manual_mask_timing: manualMask.timing || "post",
+    illumination_enabled: Boolean(illumination.enabled),
+    illumination_method: illumination.method || "gaussian",
+    illumination_background_size: num(illumination.background_size, 81),
+    illumination_strength: num(illumination.strength, 1.0),
+    threshold_type: threshold.type || "binary",
+    threshold_value: num(threshold.value, 128),
+    threshold_block_size: num(threshold.block_size, 35),
+    threshold_c: num(threshold.c, 11),
+    clahe_clip_limit: num(clahe.clip_limit, 1.0),
+    clahe_tile_grid_size: num(clahe.tile_grid_size, 2),
+    sharpen_enabled: Boolean(sharpen.enabled),
+    sharpen_amount: num(sharpen.amount, 0.2),
+    sharpen_sigma: num(sharpen.sigma, 0.5),
+    gamma_enabled: Boolean(gamma.enabled),
+    gamma_value: num(gamma.value, 1.0),
+    morph_enabled: Boolean(morph.enabled),
+    morph_method: morph.method || "close",
+    morph_ksize: num(morph.ksize, 3),
+    morph_iterations: num(morph.iterations, 1),
+    unsharp_enabled: Boolean(unsharp.enabled),
+    unsharp_amount: num(unsharp.amount, 0.8),
+    unsharp_radius: num(unsharp.radius, 1.0),
+    unsharp_threshold: num(unsharp.threshold, 0),
+    bilateral_enabled: Boolean(bilateral.enabled),
+    bilateral_diameter: num(bilateral.diameter, 5),
+    bilateral_sigma_color: num(bilateral.sigma_color, 50),
+    bilateral_sigma_space: num(bilateral.sigma_space, 50),
+    local_contrast_enabled: Boolean(localContrast.enabled),
+    local_contrast_clip_limit: num(localContrast.clip_limit, 2.0),
+    local_contrast_tile_grid_size: num(localContrast.tile_grid_size, 8),
+    crop_margin_enabled: Boolean(cropMargin.enabled),
+    crop_margin_threshold: num(cropMargin.threshold, 245),
+    crop_margin_margin: num(cropMargin.margin, 2),
+    hist_equalize_enabled: Boolean(histEqualize.enabled),
+    stroke_boost_enabled: Boolean(strokeBoost.enabled),
+    stroke_boost_method: strokeBoost.method || "close",
+    stroke_boost_ksize: num(strokeBoost.ksize, 1),
+    stroke_boost_iterations: num(strokeBoost.iterations, 1),
+    denoise_method: denoise.method || "gaussian",
+    denoise_ksize: num(denoise.ksize, 1),
+    deskew_enabled: Boolean(deskew.enabled),
+    single_size: num(resize.single, 64),
+    wide_height: num(resize.wide_height, 48),
+    wide_keep_ratio: Boolean(resize.keep_ratio),
+  };
+}
+
 // window.confirm 等で使う要約テキスト（注意文つき）
 export function preprocessRunConfirmText(params) {
   const lines = summarizePreprocessRun(params)

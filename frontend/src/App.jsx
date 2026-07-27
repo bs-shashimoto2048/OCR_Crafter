@@ -36,9 +36,11 @@ import { lowercaseToggleApplicable } from "./lib/lowercase";
 import {
   buildPreprocessPreviewPayload,
   buildPreprocessRunPayload,
+  denormalizePreprocessOperations,
   normalizePreprocessOverrides,
   preprocessRunConfirmText,
 } from "./lib/preprocessRequest";
+import { buildPreprocessSaveStatus, buildPreprocessConfigHistoryDisplay } from "./lib/preprocessConfigStatus";
 import {
   DEFAULT_PREPROCESS_PREDICT_SETTINGS,
   DEFAULT_PREPROCESS_UI_STATE,
@@ -537,6 +539,13 @@ export default function App() {
   const [inferEasyOcrLangs, setInferEasyOcrLangs] = useState(["en"]);
   const [inferPaddleModel, setInferPaddleModel] = useState("latest");
   const [inferTesseractModel, setInferTesseractModel] = useState("latest");
+  // 推論使用モデルの永続化（プロジェクト単位）: 復元が完了するまでは選択変更を保存しない
+  // （復元前の初期値=latest/customを誤って保存してしまうのを防ぐため）。
+  // inferenceModelSuppressSaveRef: 復元によるstate変更を「利用者の選択変更」として
+  // 再保存してしまわないようにするフラグ
+  const [inferenceModelRestored, setInferenceModelRestored] = useState(false);
+  const inferenceModelSuppressSaveRef = useRef(false);
+  const inferenceModelRestoreAttemptedProjectRef = useRef("");
   // 推論前処理モード（Tesseract）。""=自動（学習時前処理の記録があればtraining=既定 / なければ従来動作）
   const [inferPreprocessMode, setInferPreprocessMode] = useState("");
   // 「latest」選択時に実際に使われるTesseractモデル（学習時前処理の記録有無の判定用）
@@ -610,6 +619,11 @@ export default function App() {
   const [evalResult, setEvalResult] = useState(null);
 
   const [preprocessParams, setPreprocessParams] = useState(DEFAULT_PREPROCESS_PARAMS);
+  // 「前処理設定保存」（学習に使用する確定済み設定）: 保存済み設定の履歴・保存中/復元中フラグ
+  // （現在設定・保存済み設定・一致判定はocrPreprocessCurrentConfigを共用する）
+  const [preprocessConfigHistory, setPreprocessConfigHistory] = useState([]);
+  const [savingConfirmedConfig, setSavingConfirmedConfig] = useState(false);
+  const [restoringConfirmedConfig, setRestoringConfirmedConfig] = useState(false);
   const [preprocessImage, setPreprocessImage] = useState("");
   const [preprocessPredictEngine, setPreprocessPredictEngine] = useState("easyocr");
   const [preprocessPredictModel, setPreprocessPredictModel] = useState("latest");
@@ -955,6 +969,41 @@ export default function App() {
     setModelTypes(mergedTypes);
     setOfficialPaddleModels(Array.isArray(officialData?.items) ? officialData.items : []);
 
+    // 推論使用モデルの復元（プロジェクト読込・モデル一覧取得完了時。モデル一覧取得より先に
+    // 設定値を取得していても、ここでモデル一覧が揃った後に復元する）。プロジェクトごとに
+    // 1回のみ試みる（手動更新での再取得時に、利用者がその後変更した選択を上書きしない）
+    if (inferenceModelRestoreAttemptedProjectRef.current !== targetProjectId) {
+      inferenceModelRestoreAttemptedProjectRef.current = targetProjectId;
+      try {
+        const savedData = await request(`/api/ocr/inference/model?project_id=${pid}`);
+        const savedModel = savedData?.inference_model || null;
+        if (savedModel?.model) {
+          if (infoMap[savedModel.model]) {
+            inferenceModelSuppressSaveRef.current = true;
+            const engine = String(savedModel.engine || "custom");
+            if (engine === "tesseract") {
+              setInferEngine("tesseract");
+              setInferTesseractModel(savedModel.model);
+            } else if (engine === "paddleocr") {
+              setInferEngine("paddleocr");
+              setInferPaddleModel(savedModel.model);
+            } else {
+              setInferEngine("custom");
+              setInferModel(savedModel.model);
+            }
+          } else {
+            // 保存されているモデルが削除済み・移動済みで見つからない場合は、勝手に
+            // 別モデルへ置き換えず警告のみ行う（保存済みinference_model.jsonはそのまま）
+            notify("error", "前回使用していた推論モデルが見つかりません。別のモデルを選択してください。");
+          }
+        }
+      } catch {
+        // 推論モデル復元の失敗は他画面の利用を妨げない（機能を独立させる）
+      } finally {
+        setInferenceModelRestored(true);
+      }
+    }
+
     const latestAny = await request(`/models/latest?project_id=${pid}`)
       .then((r) => r.model || "")
       .catch(() => "");
@@ -1100,6 +1149,9 @@ export default function App() {
   }, [projectId, preprocessParams]);
 
   useEffect(() => {
+    // 推論使用モデルの復元は毎回プロジェクトごとに1回だけ行う（loadModels内で実施）。
+    // 復元完了までは選択変更の保存を止める（初期値=latest/customの誤保存を防ぐため）
+    setInferenceModelRestored(false);
     if (!projectId) {
       refreshAll("").catch((error) => notify("error", error.message));
       return;
@@ -1111,6 +1163,29 @@ export default function App() {
     setSelectedIndex(0);
     refreshAll(projectId).catch((error) => notify("error", error.message));
   }, [projectId]);
+
+  // 推論使用モデルの保存: 選択（エンジン・モデル）が変わるたびに即時保存する
+  // （モデル選択→UIを即時更新→プロジェクト設定へ保存。保存のための別ボタンは無い）。
+  // 復元処理そのものによる変更は保存しない（inferenceModelSuppressSaveRefで判別）
+  useEffect(() => {
+    if (!inferenceModelRestored) return;
+    if (inferenceModelSuppressSaveRef.current) {
+      inferenceModelSuppressSaveRef.current = false;
+      return;
+    }
+    if (!projectId) return;
+    const name = inferEngine === "tesseract" ? inferTesseractModel : inferEngine === "paddleocr" ? inferPaddleModel : inferModel;
+    if (!name) return;
+    const modelId = String(modelInfos?.[name]?.model_id || "");
+    request("/api/ocr/inference/model", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project_id: projectId, engine: inferEngine, model: name, model_id: modelId }),
+    }).catch(() => {
+      // 推論モデル保存の失敗は他画面の利用を妨げない（機能を独立させる）
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inferEngine, inferModel, inferPaddleModel, inferTesseractModel, inferenceModelRestored, projectId]);
 
   useEffect(() => {
     setWorkflowState({
@@ -2215,7 +2290,10 @@ export default function App() {
     }
   }
 
-  // 「現在の前処理設定」タブ表示用: 次回 /preprocess/run 実行時に使用される設定を取得する（読み取り専用・編集不可）
+  // 「現在の前処理設定」表示用: 次回 /preprocess/run 実行時に使用される設定を取得する（読み取り専用・編集不可）。
+  // 学習前処理タブ・前処理設定画面の両方で共用する（saved_config/is_savedは「前処理設定保存」の
+  // 未保存変更判定にも使う。既存の正式なHash比較=バックエンド側で実施済みの結果をそのまま使い、
+  // React state同士の単純比較やJSON文字列比較はしない）
   async function loadOcrPreprocessCurrentConfig(pid = projectId) {
     if (!pid) {
       setOcrPreprocessCurrentConfig(null);
@@ -2226,9 +2304,81 @@ export default function App() {
       setOcrPreprocessCurrentConfig({
         current_preprocess: data?.current_preprocess ?? null,
         current_preprocess_hash: data?.current_preprocess_hash ?? null,
+        saved_config: data?.saved_config ?? null,
+        is_saved: Boolean(data?.is_saved),
       });
     } catch {
       setOcrPreprocessCurrentConfig(null);
+    }
+  }
+
+  // 前処理画面の保存履歴（読み取り専用）
+  async function loadPreprocessConfigHistory(pid = projectId) {
+    if (!pid) {
+      setPreprocessConfigHistory([]);
+      return;
+    }
+    try {
+      const data = await request(`/api/ocr/preprocess/saved-config?project_id=${encodeURIComponent(pid)}`);
+      setPreprocessConfigHistory(Array.isArray(data?.history) ? data.history : []);
+    } catch {
+      setPreprocessConfigHistory([]);
+    }
+  }
+
+  // 「前処理設定保存」押下時: 現在の解決済み設定を学習用の確定済み設定として保存する
+  // （全画像への前処理再実行は行わない。実画像への適用はDataset作成時に行う）
+  async function saveConfirmedPreprocessConfig() {
+    if (!projectId) {
+      notify("error", "プロジェクトを作成または選択してください");
+      return;
+    }
+    setSavingConfirmedConfig(true);
+    try {
+      const data = await request("/api/ocr/preprocess/saved-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_id: projectId }),
+      });
+      await Promise.all([loadOcrPreprocessCurrentConfig(projectId), loadPreprocessConfigHistory(projectId)]);
+      notify(
+        "success",
+        data?.created ? `学習用の前処理設定を保存しました（Version ${data?.saved_config?.version}）` : "現在の設定はすでに保存されています。"
+      );
+    } catch (error) {
+      notify("error", error.message);
+    } finally {
+      setSavingConfirmedConfig(false);
+    }
+  }
+
+  // 「保存時の設定に戻す」押下時: 保存済みconfigを読み込み、実際のプロジェクト前処理設定へ反映する
+  // （プリセット読込とは異なる。preprocess_config.jsonへ即時保存され、次回プレビュー・
+  // Dataset作成のいずれにも反映される。全画像への前処理再実行は行わない）
+  async function restoreConfirmedPreprocessConfig() {
+    if (!projectId) {
+      notify("error", "プロジェクトを作成または選択してください");
+      return;
+    }
+    if (!window.confirm("現在の未保存変更を破棄し、\n最後に保存した前処理設定へ戻しますか？")) {
+      return;
+    }
+    setRestoringConfirmedConfig(true);
+    try {
+      const data = await request("/api/ocr/preprocess/saved-config/restore", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_id: projectId }),
+      });
+      if (data?.overrides) {
+        setPreprocessParams((prev) => ({ ...prev, ...denormalizePreprocessOperations(data.overrides) }));
+      }
+      await loadOcrPreprocessCurrentConfig(projectId);
+      notify("success", `保存時の設定（Version ${data?.restored_version}）へ戻しました`);
+    } catch (error) {
+      notify("error", error.message);
+    } finally {
+      setRestoringConfirmedConfig(false);
     }
   }
 
@@ -2276,6 +2426,10 @@ export default function App() {
       loadOcrTrainingPreprocessCurrent(projectId);
       loadOcrPreprocessCurrentConfig(projectId);
       loadLatestOcrDataset(projectId);
+    }
+    if (activeView === "preprocess") {
+      loadOcrPreprocessCurrentConfig(projectId);
+      loadPreprocessConfigHistory(projectId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeView, projectId]);
@@ -2569,18 +2723,54 @@ export default function App() {
         output_dir: null,
         overwrite: false,
       };
+      // 学習データセットは必ず「保存済みの学習用前処理設定」を使用する（現在画面の未保存設定を
+      // 暗黙に学習へ使わない）。まず保存状態を確認し、未保存の場合はDataset作成を開始しない
+      const statusData = await request(`/api/ocr/preprocess/current-config?project_id=${encodeURIComponent(projectId)}`);
+      const savedConfig = statusData?.saved_config || null;
+      if (!savedConfig) {
+        notify(
+          "error",
+          "学習用の前処理設定が保存されていません。\n\n前処理画面で設定内容を確認し、「前処理設定保存」を実行してください。"
+        );
+        return;
+      }
+      if (!statusData?.is_saved) {
+        const wantsSave = window.confirm(
+          "前処理設定に未保存の変更があります。\n\n現在の設定を保存するか、\n保存時の設定へ戻してから学習データセットを作成してください。\n\n" +
+            "OK: 現在の設定を保存して続行 / キャンセル: 次の選択肢へ"
+        );
+        if (wantsSave) {
+          await saveConfirmedPreprocessConfig();
+        } else {
+          const wantsRestore = window.confirm(
+            "保存時の設定に戻してから学習データセットを作成しますか？\n\nOK: 保存時の設定に戻して続行 / キャンセル: 学習データセットの作成を中止"
+          );
+          if (!wantsRestore) {
+            return;
+          }
+          await restoreConfirmedPreprocessConfig();
+        }
+        // 保存/復元後の最新状態を取得し直す（competing編集を避けるため再確認する）
+        const refreshed = await request(`/api/ocr/preprocess/current-config?project_id=${encodeURIComponent(projectId)}`);
+        if (!refreshed?.is_saved) {
+          notify("error", "前処理設定の保存/復元に失敗したため、学習データセットの作成を中止しました。");
+          return;
+        }
+        savedConfig.overrides = refreshed.saved_config?.overrides;
+      }
+
       setOcrRatioError("");
       setOcrDatasetCreating(true);
       setOcrDatasetCreateFailed(false);
-      // 設計変更: 学習データセットは必ず「現在の前処理設定を反映したprocessed更新」の後に作成する
-      // （既存の /preprocess/run をそのまま再利用。前処理ロジックは複製しない。overrides省略で
-      // プロジェクト保存値=現在の前処理設定が自動的に使われる）。新しい「前処理を実行」ボタンは
-      // 追加せず、このボタン1つの内部で2段階を自動実行する
+      // 設計変更: 学習データセットは必ず「保存済みの学習用前処理設定を反映したprocessed更新」の
+      // 後に作成する（既存の /preprocess/run をそのまま再利用。前処理ロジックは複製しない）。
+      // 保存済みconfigを明示的にoverridesへ渡す（現在設定を暗黙取得するだけの方式にしない）。
+      // 新しい「前処理を実行」ボタンは追加せず、このボタン1つの内部で2段階を自動実行する
       setOcrDatasetCreatePhase("preprocess");
       await request("/preprocess/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project_id: projectId }),
+        body: JSON.stringify({ project_id: projectId, overrides: savedConfig.overrides }),
       });
       setOcrDatasetCreatePhase("dataset");
       const data = await request("/api/ocr/dataset/create", {
@@ -3713,6 +3903,17 @@ export default function App() {
       .map(({ result, name }) => ({ name, reason: String(result.reason?.message || result.reason || "unknown") }));
     const okCount = names.length - failed.length;
 
+    // 削除に成功したモデルが現在の推論使用モデルだった場合、フロント側の選択もリセットする
+    // （保存済みinference_model.jsonはバックエンド側で既にクリア済み）
+    const currentInferenceModelName =
+      inferEngine === "tesseract" ? inferTesseractModel : inferEngine === "paddleocr" ? inferPaddleModel : inferModel;
+    const okNames = names.filter((name) => !failed.some((f) => f.name === name));
+    if (currentInferenceModelName && okNames.includes(currentInferenceModelName)) {
+      if (inferEngine === "tesseract") setInferTesseractModel("latest");
+      else if (inferEngine === "paddleocr") setInferPaddleModel("latest");
+      else setInferModel("latest");
+    }
+
     try {
       await loadModels(projectId);
     } catch {
@@ -3891,6 +4092,18 @@ export default function App() {
         setPredictPsm={setPreprocessPredictPsm}
         predictWhitelist={preprocessPredictWhitelist}
         setPredictWhitelist={setPreprocessPredictWhitelist}
+        saveStatus={buildPreprocessSaveStatus({
+          savedConfig: ocrPreprocessCurrentConfig?.saved_config,
+          isSaved: ocrPreprocessCurrentConfig?.is_saved,
+        })}
+        onSaveConfirmedConfig={saveConfirmedPreprocessConfig}
+        onRestoreConfirmedConfig={restoreConfirmedPreprocessConfig}
+        savingConfirmedConfig={savingConfirmedConfig}
+        restoringConfirmedConfig={restoringConfirmedConfig}
+        configHistory={buildPreprocessConfigHistoryDisplay(
+          preprocessConfigHistory,
+          ocrPreprocessCurrentConfig?.saved_config?.version ?? null
+        )}
       />
     );
   }
