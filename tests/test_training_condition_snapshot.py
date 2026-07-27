@@ -329,6 +329,51 @@ class TestTrainingPreprocessCurrentEndpoint:
         assert data["processed_image_count"] == 3
 
 
+class TestOcrPreprocessCurrentConfigEndpoint:
+    """GET /api/ocr/preprocess/current-config: 現在保存されている前処理設定（読み取り専用）。"""
+
+    def test_returns_settings_yaml_defaults_when_no_project_overrides_saved(self, temp_projects):
+        """プロジェクト保存値（preprocess_config.json）が無い場合はsettings.yaml既定を返す（推測補完ではない）。"""
+        client = TestClient(main_module.app)
+        resp = client.get("/api/ocr/preprocess/current-config", params={"project_id": "p_no_overrides"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["project_id"] == "p_no_overrides"
+        assert data["current_preprocess"] is not None
+        assert data["current_preprocess_hash"] is not None
+        assert "wide" in data["current_preprocess"]["steps"]
+        grayscale = next(s for s in data["current_preprocess"]["steps"]["wide"] if s["name"] == "grayscale")
+        assert grayscale["enabled"] is True
+
+    def test_reflects_saved_project_overrides(self, temp_projects):
+        """プロジェクト保存値（前回のoverrides）を反映する（次回 /preprocess/run 実行時に使われる設定と一致）。"""
+        project_id = "p_with_overrides"
+        # run_preprocessの呼び出し（raw画像なし・only_files=[]相当）でoverridesだけを保存させる
+        _make_raw_images(temp_projects, project_id, count=1)
+        run_preprocess(project_id=project_id, overrides={"operations": {"threshold": {"type": "binary", "value": 77}}})
+        client = TestClient(main_module.app)
+        resp = client.get("/api/ocr/preprocess/current-config", params={"project_id": project_id})
+        data = resp.json()
+        threshold = next(s for s in data["current_preprocess"]["steps"]["wide"] if s["name"] == "threshold")
+        assert threshold["params"]["type"] == "binary"
+        assert threshold["params"]["value"] == 77
+
+    def test_does_not_execute_preprocessing_or_write_snapshot(self, temp_projects):
+        """読み取り専用: processed/生成・snapshot保存を一切行わない（前処理ロジック・Snapshot仕様は変更禁止）。"""
+        from src.app.project_paths import ensure_project_directories
+        from src.app.services.preprocess_snapshot import snapshot_file_path
+
+        project_id = "p_readonly_check"
+        _make_raw_images(temp_projects, project_id, count=2)
+        client = TestClient(main_module.app)
+        resp = client.get("/api/ocr/preprocess/current-config", params={"project_id": project_id})
+        assert resp.status_code == 200
+        paths = ensure_project_directories(project_id)
+        assert not snapshot_file_path(paths.root).is_file()
+        assert not (paths.processed / "wide" / "images").exists()
+        assert not (paths.processed / "single" / "images").exists()
+
+
 class TestTrainStartCapturesSnapshotAtCreation:
     def test_tesseract_train_start_stores_snapshot_on_job(self, temp_projects, monkeypatch, tmp_path):
         monkeypatch.setattr(db_module, "_db_path", lambda: tmp_path / "app.db")

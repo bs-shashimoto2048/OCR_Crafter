@@ -1797,6 +1797,33 @@ def api_training_preprocess_current(project_id: Optional[str] = Query(default="d
     }
 
 
+@app.get("/api/ocr/preprocess/current-config")
+def api_ocr_preprocess_current_config(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+    """現在保存されている前処理設定（次回 /preprocess/run 実行時に使用される設定）を返す（読み取り専用・何も実行しない）。
+
+    「学習前処理」タブの「現在の前処理設定」欄が参照する。既存の設定保存値
+    （プロジェクト保存値=`preprocess_config.json`。無ければsettings.yaml既定）から
+    実効パラメータを組み立てるのみで、前処理の実行・processed生成・スナップショット保存は
+    行わない。学習時前処理（training-preprocess/current）と同一の構造
+    （build_preprocess_snapshot→build_training_preprocess）を再利用し、
+    フロント側の表示ロジック（lib/preprocessCompare.js）をそのまま共用できるようにする。
+    """
+    from .services.preprocess import load_project_preprocess_overrides
+    from .services.preprocess_snapshot import build_preprocess_snapshot, build_training_preprocess, compute_training_preprocess_hash
+
+    resolved = _resolve_project_id(project_id)
+    paths = ensure_project_directories(resolved)
+    overrides = load_project_preprocess_overrides(paths.root)
+    cfg = build_preprocess_config(overrides)
+    snapshot = build_preprocess_snapshot(cfg, source="current_config")
+    current_preprocess = build_training_preprocess(snapshot, ["single", "wide"], None)
+    return {
+        "project_id": resolved,
+        "current_preprocess": current_preprocess,
+        "current_preprocess_hash": compute_training_preprocess_hash(current_preprocess),
+    }
+
+
 @app.post("/preprocess/run")
 def preprocess(req: PreprocessRequest, request: Request) -> dict[str, Any]:
     _enforce_role(request, "preprocess_run")

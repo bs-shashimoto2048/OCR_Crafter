@@ -1,7 +1,7 @@
 # 06. API リファレンス
 
 すべてのルートは `src/app/main.py` に定義されている（`APIRouter` / `include_router` は不使用）。
-リクエストスキーマは `src/app/schemas.py` を参照。**全120エンドポイント**（GET 60 / POST 49 / PUT 4 / PATCH 3 / DELETE 4）。
+リクエストスキーマは `src/app/schemas.py` を参照。**全121エンドポイント**（GET 61 / POST 49 / PUT 4 / PATCH 3 / DELETE 4）。
 
 - アプリ定義: `FastAPI(title="OCR Crafter API", version=APP_VERSION)`（`src/app/version.py`。現行 1.0.0）
 - ベースURL（開発時）: `http://127.0.0.1:8000`
@@ -81,6 +81,7 @@
 | POST `/api/ocr/train/start` | `OcrTrainStartRequest`（`engine`, `dataset_dir`, `device`, worker/AMP設定等） | `job_id`, `engine: paddleocr` | PaddleOCR学習ジョブ開始（paddleocrのみ許可）。同一プロジェクトでアクティブなOCRジョブがある場合は **409 Conflict**。**v1.0.0で追加**: Job作成時点で`dataset_dir`のmeta.jsonから学習前処理・オーグメンテーションのスナップショットを組み立て、`training_jobs.training_condition_snapshot` JSON列へ確定保存する（学習中の設定変更・失敗Jobでも当時の実行条件を追跡できるようにするため。§下記参照）。**v1.0.0で追加**: `dataset_dir`が空文字は**400**、ディレクトリが存在しない場合は**404**（Tesseract側の既存チェックと揃え、学習データ未作成のまま学習が開始されるのを防ぐ） |
 | POST `/api/tesseract/train/start` | `TesseractTrainStartRequest`（`dataset_dir`, `charset`, `max_iterations`, `base_lang`, `psm`, 任意: `experiment_name` / `parent_model_id` / `training_note`） | `job_id`, `engine: tesseract` | Tesseract LSTM fine-tune 開始。二重実行は **409 Conflict**。実験情報はジョブ（`training_jobs.experiment_meta` JSON列）経由でモデルメタへ保存（未指定=従来動作）。学習完了時にデータセット meta.json の `training_preprocess` / `training_preprocess_hash` / `source_image_state` を `.tess.json` へそのまま引き継ぐ（未記録=null）。**v1.0.0で追加**: Job作成時点でのスナップショット確定保存（上記`/api/ocr/train/start`と同様）＋学習完了時は**Jobに保存されたスナップショットを優先**して`.tess.json`へ引き継ぐ（`training_preprocess`/`training_preprocess_hash`/`augmentation_config`/`augmentation_hash`/`training_input_pipeline_hash`。Jobスナップショットが無い場合[旧フロー等]はデータセットmeta.jsonから直接導出=従来動作にフォールバック） |
 | GET `/api/ocr/training-preprocess/current` | Query: `project_id?` | `{project_id, training_preprocess, training_preprocess_hash, executed, executed_at, processed_image_count}` | **v1.0.0で追加**。「次回学習の設定」学習前処理タブが参照する、プロジェクトの現在の前処理スナップショット（`load_preprocess_snapshot`＋`build_training_preprocess`。学習実行前の確認表示専用で新規設定の保存はしない）。一度も前処理を実行していないプロジェクトは`training_preprocess: null`（推測補完しない）。**v1.0.0で追加**: `executed`（前処理スナップショットの有無=`/preprocess/run`実行済みか）・`executed_at`（スナップショットの`created_at`＝最終実行日時）・`processed_image_count`（`processed/{single,wide}/images/`配下の実ファイル数を都度カウント。永続カウンタは持たない）。「学習前処理は終わっているか」を学習データ画面で一目確認できるようにするための表示専用フィールド |
+| GET `/api/ocr/preprocess/current-config` | Query: `project_id?` | `{project_id, current_preprocess, current_preprocess_hash}` | **v1.0.0で追加**。「次回 `/preprocess/run` 実行時に使用される現在の前処理設定」を返す読み取り専用API（プロジェクト保存値`preprocess_config.json`が無ければsettings.yaml既定を使用。`build_preprocess_config`→`build_preprocess_snapshot`→`build_training_preprocess`で、上記`training-preprocess/current`の`training_preprocess`と**同一のstructure**を構築するが、既存の学習履歴（前処理実行時に確定保存されたスナップショット）とは別概念のためフィールド名を`current_preprocess`/`current_preprocess_hash`へ分離している。前処理の実行・processed生成・スナップショット保存は一切行わない（完全に副作用なしの読み取り専用）。学習画面「学習前処理」タブの「現在の前処理設定」欄（編集不可・表示専用）が参照する |
 | GET `/api/ocr/train/active` | Query: `project_id?` | `{project_id, job}` | プロジェクトのアクティブ（queued/running）なOCR学習ジョブを返す（無ければ `job: null`）。画面再読込時の再接続用 |
 | GET `/api/ocr/train/status/{job_id}` | Path | ジョブ状態 | OCR学習状態取得 |
 | POST `/api/ocr/train/stop/{job_id}` | Query: `delete_artifacts?` | 停止結果 | OCR学習停止 |

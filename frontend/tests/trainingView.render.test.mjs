@@ -293,6 +293,87 @@ test("学習前処理タブ③: 記録があれば表示名・専門パラメー
   assert.ok(html.includes("項目有効"));
 });
 
+const CURRENT_CONFIG_PREPROCESS = {
+  schema_version: 1,
+  image_types: ["single", "wide"],
+  steps: {
+    wide: [
+      { name: "grayscale", enabled: true, params: {} },
+      { name: "clahe", enabled: false, params: { clip_limit: 2.0, tile_grid_size: 8 } },
+      { name: "threshold", enabled: true, params: { type: "adaptive", value: 128, block_size: 35, c: 11 } },
+      { name: "denoise", enabled: true, params: { method: "median", ksize: 3 } },
+      { name: "resize", enabled: true, params: { wide_height: 48, keep_ratio: true } },
+    ],
+  },
+  ocr_input_normalization: { channels: 3, target_height: 48, canvas_width: 320 },
+};
+
+test("現在の前処理設定①: 現在設定が表示される（ユーザー向け表示名・ON/OFF）", () => {
+  const html = render({
+    initialSettingsTab: "preprocess",
+    ocrPreprocessCurrentConfig: { current_preprocess: CURRENT_CONFIG_PREPROCESS, current_preprocess_hash: "sha256:current123" },
+  }).replaceAll("<!-- -->", "");
+  assert.ok(html.includes("現在の前処理設定"));
+  // 内部キー(grayscale/clahe等)ではなくユーザー向け表示名で表示する
+  assert.ok(html.includes("グレースケール"));
+  assert.ok(html.includes("CLAHE"));
+  assert.ok(html.includes("リサイズ"));
+  assert.ok(html.includes("（現在保存されている設定です"));
+});
+
+test("現在の前処理設定②: 設定未保存（取得できない）時の表示", () => {
+  const html = render({ initialSettingsTab: "preprocess", ocrPreprocessCurrentConfig: null }).replaceAll("<!-- -->", "");
+  assert.ok(html.includes("現在の前処理設定"));
+  assert.ok(html.includes("取得できませんでした"));
+});
+
+test("現在の前処理設定③: 学習履歴（今回学習で使用した前処理）と同時に表示する", () => {
+  const html = render({
+    initialSettingsTab: "preprocess",
+    ocrPreprocessCurrentConfig: { current_preprocess: CURRENT_CONFIG_PREPROCESS, current_preprocess_hash: "sha256:current123" },
+    ocrTrainingPreprocessCurrent: {
+      training_preprocess: {
+        schema_version: 1,
+        image_types: ["wide"],
+        steps: { wide: [{ name: "grayscale", enabled: true, params: {} }, { name: "threshold", enabled: true, params: { type: "otsu", value: 128, block_size: 35, c: 11 } }] },
+        ocr_input_normalization: { channels: 3, target_height: 48, canvas_width: 320 },
+      },
+      training_preprocess_hash: "sha256:history456",
+    },
+  }).replaceAll("<!-- -->", "");
+  assert.ok(html.includes("現在の前処理設定"));
+  assert.ok(html.includes("今回学習で使用した前処理"));
+  // 現在設定のセクションが学習履歴セクションより前に出現する
+  assert.ok(html.indexOf("現在の前処理設定") < html.indexOf("今回学習で使用した前処理"));
+});
+
+test("現在の前処理設定④⑤: 旧プロジェクト（設定記録なし）・新プロジェクト（前処理画像なし）のどちらでも独立して表示される", () => {
+  const withCurrentConfig = { current_preprocess: CURRENT_CONFIG_PREPROCESS, current_preprocess_hash: "sha256:current123" };
+  // 旧プロジェクト（processedあり・snapshotなし）でも「現在の前処理設定」は独立して表示される
+  const htmlLegacy = render({
+    initialSettingsTab: "preprocess",
+    ocrPreprocessCurrentConfig: withCurrentConfig,
+    ocrTrainingPreprocessCurrent: {
+      training_preprocess: null,
+      training_preprocess_hash: null,
+      executed: false,
+      executed_at: "",
+      processed_image_count: 1000,
+    },
+  }).replaceAll("<!-- -->", "");
+  assert.ok(htmlLegacy.includes("現在の前処理設定"));
+  assert.ok(htmlLegacy.includes("設定記録なし"));
+
+  // 新プロジェクト（前処理画像なし）でも「現在の前処理設定」は独立して表示される
+  const htmlNew = render({
+    initialSettingsTab: "preprocess",
+    ocrPreprocessCurrentConfig: withCurrentConfig,
+    ocrTrainingPreprocessCurrent: null,
+  }).replaceAll("<!-- -->", "");
+  assert.ok(htmlNew.includes("現在の前処理設定"));
+  assert.ok(htmlNew.includes("前処理画像なし"));
+});
+
 test("旧タブID（data-split / training-params）が保存されていても安全に学習設定タブへ移行し、タブを開ける", () => {
   for (const legacyId of ["data-split", "training-params"]) {
     const html = render({ initialSettingsTab: legacyId }).replaceAll("<!-- -->", "");

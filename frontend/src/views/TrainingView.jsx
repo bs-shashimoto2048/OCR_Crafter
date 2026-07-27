@@ -82,6 +82,7 @@ export default function TrainingView({
   ocrAugmentation,
   setOcrAugmentation,
   ocrTrainingPreprocessCurrent = null,
+  ocrPreprocessCurrentConfig = null,
   ocrAugPreview,
   ocrAugPreviewLoading,
   onPreviewAugmentation,
@@ -459,6 +460,16 @@ export default function TrainingView({
   const trainingPreprocessBuilt = useMemo(
     () => buildEffectiveTrainingPreprocess(ocrTrainingPreprocessCurrent || {}),
     [ocrTrainingPreprocessCurrent]
+  );
+  // 「現在の前処理設定」（次回 /preprocess/run 実行時に使用される設定。編集不可・表示専用）。
+  // 学習履歴（trainingPreprocessBuilt）とは別概念のため、フィールド名を読み替えて同じ組み立て関数を再利用する
+  const currentPreprocessBuilt = useMemo(
+    () =>
+      buildEffectiveTrainingPreprocess({
+        training_preprocess: ocrPreprocessCurrentConfig?.current_preprocess ?? null,
+        training_preprocess_hash: ocrPreprocessCurrentConfig?.current_preprocess_hash ?? null,
+      }),
+    [ocrPreprocessCurrentConfig]
   );
   // 次回学習の設定のカテゴリサマリー表示用ラベル
   const engineDisplayLabel = ocrEngine === "paddleocr" ? "PaddleOCR" : ocrEngine === "tesseract" ? "Tesseract" : "EasyOCR";
@@ -996,6 +1007,31 @@ export default function TrainingView({
 
                           {settingsTab === "preprocess" ? (
                             <div role="tabpanel" id="settings-panel-preprocess" aria-labelledby="settings-tab-preprocess" className="space-y-3">
+                              <div>
+                                <p className="text-sm font-semibold text-text">現在の前処理設定</p>
+                                {currentPreprocessBuilt.recorded ? (
+                                  <>
+                                    <div className="mt-1 divide-y divide-border/50 rounded-lg border border-border/70 bg-card/40 px-3">
+                                      {currentPreprocessBuilt.items.map((item) => (
+                                        <div key={item.key} className="flex items-center justify-between gap-3 py-1.5 text-[12px]">
+                                          <span className={item.enabled ? "text-text" : "text-muted"}>{item.label}</span>
+                                          <span className={`tabular-nums ${item.enabled ? "font-semibold text-accent" : "text-muted"}`}>
+                                            {item.value}
+                                            {item.unit ? ` ${item.unit}` : ""}
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                    <p className="mt-1 text-[11px] text-muted">
+                                      （現在保存されている設定です。次回「前処理設定」画面で実行した際に使用されます。編集はこの画面ではできません。設定変更は「前処理設定」画面で行ってください。）
+                                    </p>
+                                  </>
+                                ) : (
+                                  <p className="mt-1 text-[12px] text-muted">現在の前処理設定を取得できませんでした。</p>
+                                )}
+                              </div>
+                              <div className="border-t border-border/60" />
+                              <p className="text-sm font-semibold text-text">今回学習で使用した前処理</p>
                               {(() => {
                                 const built = trainingPreprocessBuilt;
                                 if (!built.recorded) {

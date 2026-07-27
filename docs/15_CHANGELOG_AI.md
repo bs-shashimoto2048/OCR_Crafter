@@ -14,12 +14,26 @@ timeline
     07-17 : CER中心の評価体系（マイクロ平均・混同集計・改善/悪化） : モデルカルテ/比較ダッシュボード : モデル管理No（M0001） : モデル識別色 : Unicode特殊文字表示 : 一覧バッジ削除と右ペイン拡張
     07-18〜 : 学習条件比較・条件差分・次回学習提案 : サイドバーのOCR開発フロー順再編 : 性能サマリー省スペース化と比較カード短縮名
     07-24 : ダッシュボード「プロジェクト一覧」テーブル拡張 : 同カードビュー化（Health Badge・Exact Match） : カードへBenchmark性能指標追加（Balance Score・P95・Healthのreasons） : カードUI/UXブラッシュアップ（文字拡大・3列化・Primary/Secondary・Production独立表示） : 学習前処理・オーグメンテーションの実効値スナップショット保存と学習条件比較の2セクション化・推論使用モデルの一覧強調
-    07-27 : 学習データ作成フローの明確化（事前作成の可視化・準備状況サマリー・評価データとの違いの明記） : 学習前処理の実行タイミング調査と前処理未実行時の警告・実行状況表示の追加 : 学習前処理ステータスの3状態化（旧プロジェクトの誤表示を是正）
+    07-27 : 学習データ作成フローの明確化（事前作成の可視化・準備状況サマリー・評価データとの違いの明記） : 学習前処理の実行タイミング調査と前処理未実行時の警告・実行状況表示の追加 : 学習前処理ステータスの3状態化（旧プロジェクトの誤表示を是正） : 現在の前処理設定の可視化（GET /api/ocr/preprocess/current-config 追加）
 ```
 
 ---
 
 ## 2026-07
+
+### 現在の前処理設定の可視化（GET /api/ocr/preprocess/current-config 追加）
+
+**背景**: 「学習前処理（履歴）＝モデル学習時に実際に使用した前処理設定」と「前処理設定画面＝次回前処理実行時に使用される現在の設定」の2種類の情報は既にあったが、「今どんな設定になっているか」を学習画面から確認する場所が無く、現在の設定値と学習済みモデルで使われた設定値を見比べられなかった。
+
+**API調査**: 現在保存されている前処理設定（次回`/preprocess/run`実行時に使用される設定）を返す既存APIは無かった。設定自体は`services/preprocess.py`の`load_project_preprocess_overrides`（プロジェクト保存値=`preprocess_config.json`。無ければ`config/settings.yaml`既定）→`build_preprocess_config`で解決されるが、これを外部から取得するエンドポイントが存在しなかったため、`GET /api/ocr/preprocess/current-config`を新設した。
+
+**実装**: 新設エンドポイントは`build_preprocess_config(load_project_preprocess_overrides(...))`で実効設定を組み立てた後、既存の`build_preprocess_snapshot`（純粋関数・ファイル書き込みなし）→`build_training_preprocess`にそのまま通し、学習履歴側（`training-preprocess/current`の`training_preprocess`）と**同一のstructure**（`steps`/`pipelines`/`ocr_input_normalization`等）を返す。これにより、フロント側の表示ロジック（`lib/preprocessCompare.js buildEffectiveTrainingPreprocess`・`PREPROCESS_COMPARISON_ROWS`のユーザー向け表示名・単位・ON/OFF表記）をそのまま再利用でき、内部キー（`grayscale`/`clahe`等）ではなく表示名（グレースケール/CLAHE/適応二値化等）で一覧表示できる。学習履歴と概念が異なる（「次回実行される設定」であり「過去に実際に使われた設定の記録」ではない）ため、フィールド名は`current_preprocess`/`current_preprocess_hash`として明確に分離した。
+
+**UI**: 学習前処理タブを「現在の前処理設定」（新規・編集不可の一覧）→区切り線→「今回学習で使用した前処理」（既存の学習履歴表示。3状態はそのまま維持）の2段構成へ変更。前処理の実行・processed生成・スナップショット保存は一切行わない完全な読み取り専用API・表示。
+
+**制約**: 前処理ロジック・processed生成・Dataset生成・Snapshot・Hash・学習ロジック・既存API互換はすべて無変更（新規エンドポイントの追加のみ。既存の`training-preprocess/current`のレスポンス形も変更していない）。
+
+**テスト**: バックエンド3件追加（設定未保存時はsettings.yaml既定を返す・プロジェクト保存値[前回のoverrides]を反映する・読み取り専用でprocessed生成やsnapshot保存を行わないことを確認）。フロントエンド4件追加（現在設定の表示・取得失敗時の表示・学習履歴との同時表示・旧プロジェクト/新プロジェクトいずれでも独立して表示されることを確認）→フロント438件・`npm run build`成功。バックエンドは全件回帰で確認。
 
 ### 学習前処理ステータスの3状態化（旧プロジェクトが「未実行」と誤表示される問題の是正）
 

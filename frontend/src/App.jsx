@@ -644,6 +644,8 @@ export default function App() {
   const [releasesLoading, setReleasesLoading] = useState(false);
   // 次回学習の設定「学習前処理」タブ用: プロジェクトの現在の前処理スナップショット（確認表示専用）
   const [ocrTrainingPreprocessCurrent, setOcrTrainingPreprocessCurrent] = useState(null);
+  // 「現在の前処理設定」表示用: 次回 /preprocess/run 実行時に使用される設定（編集不可・表示専用）
+  const [ocrPreprocessCurrentConfig, setOcrPreprocessCurrentConfig] = useState(null);
   // ジョブ管理（Job Management）。一覧・状態はサーバー保存（data/jobs/jobs.json）・JOB-000001形式
   const [jobs, setJobs] = useState([]);
   const [jobsLoading, setJobsLoading] = useState(false);
@@ -2209,6 +2211,23 @@ export default function App() {
     }
   }
 
+  // 「現在の前処理設定」タブ表示用: 次回 /preprocess/run 実行時に使用される設定を取得する（読み取り専用・編集不可）
+  async function loadOcrPreprocessCurrentConfig(pid = projectId) {
+    if (!pid) {
+      setOcrPreprocessCurrentConfig(null);
+      return;
+    }
+    try {
+      const data = await request(`/api/ocr/preprocess/current-config?project_id=${encodeURIComponent(pid)}`);
+      setOcrPreprocessCurrentConfig({
+        current_preprocess: data?.current_preprocess ?? null,
+        current_preprocess_hash: data?.current_preprocess_hash ?? null,
+      });
+    } catch {
+      setOcrPreprocessCurrentConfig(null);
+    }
+  }
+
   // 学習データ画面表示時: ディスク上のmeta.jsonから最後に作成した学習データセットを復元する
   // （ocrDatasetInfo/ocrDatasetDirはReact stateのみで保持しており、ページ再読み込みで失われるため）
   async function loadLatestOcrDataset(pid = projectId) {
@@ -2251,6 +2270,7 @@ export default function App() {
     }
     if (activeView === "ocr-training") {
       loadOcrTrainingPreprocessCurrent(projectId);
+      loadOcrPreprocessCurrentConfig(projectId);
       loadLatestOcrDataset(projectId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3948,6 +3968,7 @@ export default function App() {
         ocrAugmentation={ocrAugmentation}
         setOcrAugmentation={setOcrAugmentation}
         ocrTrainingPreprocessCurrent={ocrTrainingPreprocessCurrent}
+        ocrPreprocessCurrentConfig={ocrPreprocessCurrentConfig}
         ocrAugPreview={ocrAugPreview}
         ocrAugPreviewLoading={ocrAugPreviewLoading}
         onPreviewAugmentation={previewOcrAugmentation}
