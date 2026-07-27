@@ -14,11 +14,22 @@ timeline
     07-17 : CER中心の評価体系（マイクロ平均・混同集計・改善/悪化） : モデルカルテ/比較ダッシュボード : モデル管理No（M0001） : モデル識別色 : Unicode特殊文字表示 : 一覧バッジ削除と右ペイン拡張
     07-18〜 : 学習条件比較・条件差分・次回学習提案 : サイドバーのOCR開発フロー順再編 : 性能サマリー省スペース化と比較カード短縮名
     07-24 : ダッシュボード「プロジェクト一覧」テーブル拡張 : 同カードビュー化（Health Badge・Exact Match） : カードへBenchmark性能指標追加（Balance Score・P95・Healthのreasons） : カードUI/UXブラッシュアップ（文字拡大・3列化・Primary/Secondary・Production独立表示） : 学習前処理・オーグメンテーションの実効値スナップショット保存と学習条件比較の2セクション化・推論使用モデルの一覧強調
+    07-27 : 学習データ作成フローの明確化（事前作成の可視化・準備状況サマリー・評価データとの違いの明記）
 ```
 
 ---
 
 ## 2026-07
+
+### 学習データ作成フローの明確化（事前作成の可視化・評価データとの違いの明記）
+
+**調査で判明した現状**: 評価データには「正解CSVを作成」という明確な作成操作があるのに対し、学習データ側は「作成・確定した」と分かる操作・表示が乏しかった。実装前に現仕様を調査し次を確認した——①学習データセットは`POST /api/ocr/dataset/create`（新規）/`POST /api/ocr/dataset/from_logs`（OCRログ由来）で**事前作成**され、学習開始時に自動生成される仕組みではない（両エンドポイントとも学習開始APIから呼ばれておらず、フロントも「学習データを作成」ボタンのクリックを経ないと学習開始ボタン自体が現れない）。②Train/Validation/Testの実体は`data/projects/<id>/outputs/ocr_dataset/<タイムスタンプ>/{train,val,test}/images/`＋`{train,val,test}.txt`へ保存され、`meta.json`が作成完了マーカー（作成中に失敗した場合はmeta.jsonが無く、モデル登録・学習前処理参照の対象にならない）。③Dataset IDに相当する連番の永続IDは存在せず、作成順のタイムスタンプフォルダ名のみが識別子。④「分割枚数を確認」は`POST /api/ocr/dataset/split-preview`のみを呼ぶ**プレビュー専用**操作で、ファイルは一切作成しない（`preview_ocr_dataset_split`は`dataset_root`を返さない）。⑤学習Jobは`training_jobs.dataset_dir`列（Job作成時にフロントの`ocrDatasetDir`から渡される絶対パス）で参照するデータセットを特定するが、フロント側の`ocrDatasetDir`/`ocrDatasetInfo`は素の`useState`のみで永続化されず、ページ再読み込みでディスク上にデータセットが実在するにもかかわらず「未作成」表示に戻ってしまうバグを確認した。
+
+**バックエンド変更**（`services/ocr_pipeline.py`）: ①`_collect_ocr_candidates`を5-tuple（`candidates, skipped, input_count, target_count, labeled_count`）へ拡張し、`_label_reject_reason`（空/charset外/長さ超過を判別する共通関数。`_sanitize_text`もこれに委譲する挙動保存のリファクタリング）を新設。`skipped`辞書へ`empty_label`/`charset_invalid`/`length_exceeded`の内訳を追加（既存の`invalid_label`は3者の合算値として後方互換を維持）。`preview_ocr_dataset_split`のレスポンスへ`target_count`（選択画像種別に一致する行数）・`labeled_count`（うちラベル入力済みの行数）を追加。②`find_latest_ocr_dataset(project_id)`（新規・読み取り専用）を追加し、`outputs/ocr_dataset`・`outputs/ocr_dataset_from_logs`配下の`meta.json`から`created_at`最新の1件を復元する。永続的な連番IDは新設せず、表示用に`DS-<フォルダ名>`という導出値のみを返す（Dataset Formatは変更しない）。`GET /api/ocr/dataset/latest`（新規）で公開。③`POST /api/ocr/train/start`（PaddleOCR）に`dataset_dir`必須チェックを追加（空文字=400・ディレクトリ不在=404）。Tesseract側の`/api/tesseract/train/start`は既にこのチェックを持っていたが、PaddleOCR側は`Field(...)`必須文字列でも空文字を許容してしまい、学習データ未作成のまま学習が開始され得る非対称なガードだった（パリティ修正）。分割計算・Split Seed・Dataset Format・評価データ形式・既存API互換は無変更（新フィールドは全て追加のみ）。
+
+**フロントエンド変更**: ①`lib/ocrDatasetStatus.js`（新規）に`deriveOcrDatasetId`/`deriveOcrDatasetStatus`/`buildOcrDatasetDisplay`/`buildOcrDatasetSummary`を純粋関数として集約（split=通常のTrain/Val/Test分割データセット、unsplit=OCRログ由来の非分割データセットの両方に対応）。②`App.jsx`に`ocrDatasetCreating`/`ocrDatasetCreateFailed`state（作成中/失敗の追跡。従来は成功時のみ`ocrDatasetInfo`を更新しローディング状態自体が存在しなかった）と`loadLatestOcrDataset`（学習画面表示時に`GET /api/ocr/dataset/latest`でディスク上の実体から`ocrDatasetDir`/`ocrDatasetInfo`を復元し、上記の再読み込み後「未作成」に戻るバグを解消）を追加。③`TrainingView.jsx`「次回学習の設定→学習設定タブ→データ分割」: 「学習データ」ラベルへ評価データとの違いを説明するツールチップ（`HELP_TEXTS.trainingVsEvalData`）を追加し、学習データサマリーカード（`buildOcrDatasetSummary`。例:「1,000件（Train 700 / Validation 200 / Test 100）準備済み」/未作成・作成中・失敗はすべて「未準備」）を新設。「分割枚数を確認」プレビュー結果へ「プレビューのみ（このデータセット自体はまだ作成されていません）」の明示・対象画像数・ラベル済み件数・charset外/長さ超過の内訳・Split Seed・作成予定の保存先を追加（ボタン名は事前作成フローのため変更不要と判断——学習開始時自動生成の仕様ではないため）。「作成済みデータ」欄を状態バッジ（未作成/作成中/作成済み/失敗）付きへ拡張し、作成済み時はDataset ID・作成日時・件数（split/unsplit両対応）・文字セット・Split Seed・前処理Hash・保存先を表示。
+
+**テスト**: バックエンド`tests/test_ocr_dataset_workflow.py`10件（対象画像数・ラベル済み件数・charset外内訳の分離・画像0件・`find_latest_ocr_dataset`の単一/複数最新選択/未作成/エンドポイント経由・PaddleOCR train/startのdataset_dir必須400/404・学習Jobが検証済みdataset_dirを正しく参照）+既存`test_dataset_split_augmentation.py`等の回帰確認→バックエンド453件全通過。フロント`lib/ocrDatasetStatus.js`用`ocrDatasetStatus.test.mjs`7件（新規。package.jsonのtestスクリプトへ明示登録）+`trainingView.render.test.mjs`へ11件追加（ツールチップ・サマリー準備済み/未準備・プレビュー拡張フィールド・作成済みデータの4状態・split/unsplit両対応）→フロント424件全通過・`npm run build`成功。既知の制約: OCRログ由来データセット（`ocr_dataset_from_logs`）はTrain/Val/Testへ分割しない従来仕様のため、`find_latest_ocr_dataset`が返す`counts`はこの由来のデータセットでは常に0（`meta.json`に`counts`ではなく`count`単数フィールドしか無いため）——表示側は`buildOcrDatasetDisplay`の`mode: "unsplit"`判定でこれを吸収し合計件数のみを表示する（分割データの意味を持たせない）。
 
 ### 学習前処理・オーグメンテーションの実効値スナップショット保存と学習条件比較の再構成、推論使用モデルの一覧強調
 

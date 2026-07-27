@@ -135,4 +135,8 @@ export const HELP_TEXTS = {
     title: "Job Worker",
     body: "バックグラウンドジョブを順番に実行する常駐処理です。\n停止中でもJob作成時に自動起動します。\nBackend再起動時、実行中だったJobは「中断（再起動）」となり再実行で復旧できます。",
   },
+  trainingVsEvalData: {
+    title: "学習データと評価データの違い",
+    body: "学習データはモデル学習に使用し、Train / Validation / Testへ分割されます。\n評価データは学習には使用せず、モデルの性能評価・比較に使用する独立データセットです。",
+  },
 };

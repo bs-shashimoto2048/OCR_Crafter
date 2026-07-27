@@ -282,6 +282,104 @@ test("旧タブID（data-split / training-params）が保存されていても�
   }
 });
 
+test("データ分割: 学習データと評価データの違いを説明するツールチップを表示する", () => {
+  const html = render({ initialSettingsTab: "training-settings" }).replaceAll("<!-- -->", "");
+  assert.ok(html.includes('aria-label="学習データと評価データの違いのヘルプ"'));
+});
+
+test("データ分割: 学習データサマリーは未作成時「未準備」を表示する", () => {
+  const html = render({ initialSettingsTab: "training-settings", ocrDatasetInfo: null }).replaceAll("<!-- -->", "");
+  assert.ok(html.includes("未準備"));
+  assert.ok(html.includes("未作成"));
+});
+
+test("データ分割: 学習データサマリーは作成済み（件数>0）で「準備済み」とTrain/Validation/Test内訳を表示する", () => {
+  const html = render({
+    initialSettingsTab: "training-settings",
+    ocrDatasetInfo: { dataset_root: "/x/20260727_000000", counts: { train: 700, val: 200, test: 100 } },
+  }).replaceAll("<!-- -->", "");
+  assert.ok(html.includes("1,000件"));
+  assert.ok(html.includes("Train 700"));
+  assert.ok(html.includes("Validation 200"));
+  assert.ok(html.includes("Test 100"));
+  assert.ok(html.includes("準備済み"));
+});
+
+test("分割枚数を確認プレビュー: プレビュー専用の注記・対象画像数・ラベル済み件数・charset外内訳・Split Seed・保存先を表示する", () => {
+  const html = render({
+    initialSettingsTab: "training-settings",
+    ocrSplitSeed: 7,
+    ocrSplitPreview: {
+      input_count: 10,
+      target_count: 10,
+      labeled_count: 8,
+      valid_count: 6,
+      skipped: { type: 0, empty_label: 2, charset_invalid: 1, length_exceeded: 1, missing_source: 0 },
+      counts: { train: 4, val: 1, test: 1 },
+    },
+  }).replaceAll("<!-- -->", "");
+  assert.ok(html.includes("プレビューのみ"));
+  assert.ok(html.includes("対象画像数 10枚"));
+  assert.ok(html.includes("ラベル済み件数 8枚"));
+  assert.ok(html.includes("charset外によるスキップ 1"));
+  assert.ok(html.includes("長さ超過 1"));
+  assert.ok(html.includes("Split Seed: 7"));
+  assert.ok(html.includes("作成予定の保存先"));
+});
+
+test("作成済みデータ: 未作成・作成中でもない・失敗でもない場合は表示しない", () => {
+  const html = render({ ocrDatasetInfo: null, ocrDatasetCreating: false, ocrDatasetCreateFailed: false }).replaceAll(
+    "<!-- -->",
+    ""
+  );
+  assert.ok(!html.includes("作成済みデータ"));
+});
+
+test("作成済みデータ: 作成中は状態バッジ「作成中」を表示する", () => {
+  const html = render({ ocrDatasetInfo: null, ocrDatasetCreating: true }).replaceAll("<!-- -->", "");
+  assert.ok(html.includes("作成済みデータ"));
+  assert.ok(html.includes("作成中"));
+});
+
+test("作成済みデータ: 失敗時は状態バッジ「失敗」を表示する", () => {
+  const html = render({ ocrDatasetInfo: null, ocrDatasetCreateFailed: true }).replaceAll("<!-- -->", "");
+  assert.ok(html.includes("作成済みデータ"));
+  assert.ok(html.includes("失敗"));
+});
+
+test("作成済みデータ: 作成済みはDataset ID・作成日時・文字セット・Split Seed・前処理Hash・保存先・状態を表示する", () => {
+  const html = render({
+    ocrDatasetInfo: {
+      dataset_root: "C:/data/projects/p1/outputs/ocr_dataset/20260727_143022",
+      created_at: "2026-07-27T14:30:22",
+      charset: "AB0123456789",
+      seed: 42,
+      training_preprocess_hash: "sha256:abcdef",
+      counts: { train: 700, val: 200, test: 100 },
+    },
+  }).replaceAll("<!-- -->", "");
+  assert.ok(html.includes("作成済みデータ"));
+  assert.ok(html.includes("作成済み"));
+  assert.ok(html.includes("DS-20260727_143022"));
+  assert.ok(html.includes("2026-07-27 14:30:22"));
+  assert.ok(html.includes("AB0123456789"));
+  assert.ok(html.includes("42"));
+  assert.ok(html.includes("sha256:abcdef"));
+  assert.ok(html.includes("train/val/test: 700/200/100"));
+});
+
+test("作成済みデータ: OCRログ再学習データ（分割なし）はunsplit件数で表示する", () => {
+  const html = render({
+    ocrDatasetInfo: {
+      dataset_root: "C:/data/projects/p1/outputs/ocr_dataset_from_logs/20260727_150000",
+      created_at: "2026-07-27T15:00:00",
+      charset: "AB0123456789",
+      count: 42,
+    },
+  }).replaceAll("<!-- -->", "");
+  assert.ok(html.includes("42件"));
+});
+
 test("queued（学習準備中）で開始ボタンが無効化表示になる", () => {
   const html = render({ jobStatus: "queued", jobId: "j1", jobInfo: { created_at: "2026-07-15T13:00:00" } });
   assert.ok(html.includes("学習準備中"));

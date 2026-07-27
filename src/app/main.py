@@ -112,6 +112,7 @@ from .services.ocr_pipeline import (
     build_training_condition_snapshot,
     create_ocr_dataset_from_logs,
     create_ocr_dataset,
+    find_latest_ocr_dataset,
     preview_ocr_dataset_split,
     preview_ocr_augmentation,
     migrate_ocr_models_to_inference,
@@ -2643,6 +2644,19 @@ def _split_ratio_error_detail(train: float, val: float, test: float) -> Optional
     }
 
 
+@app.get("/api/ocr/dataset/latest")
+def api_ocr_dataset_latest(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+    """プロジェクト内で最後に作成された学習データセットの情報（読み取り専用・何も作成しない）。
+
+    フロント側のデータセット作成状態はブラウザのReact stateのみで保持されており
+    （ページ再読み込みで失われる）、この一覧はディスク上のmeta.jsonから実体を復元するために使う。
+    存在しない場合は `dataset: null`（推測補完しない）。
+    """
+    resolved = _resolve_project_id(project_id)
+    dataset = find_latest_ocr_dataset(resolved)
+    return {"project_id": resolved, "dataset": dataset}
+
+
 @app.post("/api/ocr/dataset/create")
 def api_ocr_dataset_create(req: OcrDatasetCreateRequest, request: Request) -> dict[str, Any]:
     _enforce_role(request, "dataset_create")
@@ -2750,6 +2764,13 @@ def api_ocr_train_start(req: OcrTrainStartRequest, background_tasks: BackgroundT
     engine = str(req.engine or "").strip().lower()
     if engine != "paddleocr":
         raise HTTPException(status_code=400, detail="Only paddleocr is trainable. EasyOCR is inference-only.")
+    # dataset_dir必須チェック（Tesseract側と揃える。既存データセット作成→学習開始という
+    # 事前作成フローで、データ未作成のまま学習が開始されるのを防ぐ）
+    dataset_dir = str(req.dataset_dir or "").strip()
+    if not dataset_dir:
+        raise HTTPException(status_code=400, detail="dataset_dir is required")
+    if not Path(dataset_dir).is_dir():
+        raise HTTPException(status_code=404, detail=f"dataset_dir not found: {dataset_dir}")
     settings = get_settings()
     ocr_cfg = settings.get("ocr_training", {}) if isinstance(settings.get("ocr_training"), dict) else {}
     system_info = _system_check_snapshot()
@@ -2845,7 +2866,7 @@ def api_ocr_train_start(req: OcrTrainStartRequest, background_tasks: BackgroundT
         "learning_rate": 0.0,
         "charset": req.charset,
         "max_text_length": req.max_text_length,
-        "dataset_dir": req.dataset_dir,
+        "dataset_dir": dataset_dir,
         "paddle_repo_dir": paddle_repo_dir,
         "image_shape": req.image_shape,
         "training_mode": training_mode,
@@ -2857,7 +2878,7 @@ def api_ocr_train_start(req: OcrTrainStartRequest, background_tasks: BackgroundT
         "worker_pid": None,
         "log_path": str(log_path),
         # 学習前処理・オーグメンテーションのスナップショット（Job作成時点で確定。学習中の設定変更・失敗Jobでも実行条件を追跡できるようにするため）
-        "training_condition_snapshot": build_training_condition_snapshot(str(req.dataset_dir or "")),
+        "training_condition_snapshot": build_training_condition_snapshot(dataset_dir),
         "created_at": now,
         "updated_at": now,
     }
@@ -2872,7 +2893,7 @@ def api_ocr_train_start(req: OcrTrainStartRequest, background_tasks: BackgroundT
     )
     _record_audit_safe(
         request, "training_start", project_id=project_id, target_type="training_job", target_id=job_id,
-        job_id=job_id, after={"engine": "paddleocr", "dataset_dir": str(req.dataset_dir or ""), "epochs": req.epochs},
+        job_id=job_id, after={"engine": "paddleocr", "dataset_dir": dataset_dir, "epochs": req.epochs},
     )
     return {"job_id": job_id, "project_id": project_id, "status": "queued", "training_family": "ocr", "engine": "paddleocr"}
 

@@ -300,15 +300,26 @@ def _resolve_source_image(project_root: Path, image_name: str, image_type: str) 
     return None
 
 
-def _sanitize_text(raw: str, charset: str, max_text_length: int, text_case: str = "upper") -> str:
+def _label_reject_reason(raw: str, charset: str, max_text_length: int, text_case: str = "upper") -> str:
+    """ラベルが学習対象にならない理由を分類する（空 / charset外 / 長さ超過 / 問題なしは空文字）。
+
+    `_sanitize_text`と同一の判定基準を共有し、`_collect_ocr_candidates`の除外内訳
+    （charset外によるスキップ件数等）を分類するために使う。判定基準そのものは変更しない。
+    """
     value = _apply_text_case(str(raw or "").strip(), text_case)
     if not value:
-        return ""
+        return "empty"
     if any(ch not in charset for ch in value):
-        return ""
+        return "charset"
     if len(value) > max_text_length:
+        return "too_long"
+    return ""
+
+
+def _sanitize_text(raw: str, charset: str, max_text_length: int, text_case: str = "upper") -> str:
+    if _label_reject_reason(raw, charset, max_text_length, text_case):
         return ""
-    return value
+    return _apply_text_case(str(raw or "").strip(), text_case)
 
 
 def preprocess_ocr_image(image: Any, image_shape: Optional[list[int]] = None, strong: bool = False) -> Image.Image:
@@ -918,17 +929,26 @@ def _collect_ocr_candidates(
     normalized_charset: str,
     max_text_length: int,
     text_case: str,
-) -> tuple[list[dict[str, Any]], dict[str, int], int]:
+) -> tuple[list[dict[str, Any]], dict[str, int], int, int, int]:
     """ラベル行から分割対象の有効サンプルを集める。
 
-    戻り値: (candidates, skipped内訳, 入力行数)。除外理由=対象外type / ラベル不正（空・charset外・長さ超過）/ 元画像なし。
+    戻り値: (candidates, skipped内訳, 入力行数, 対象画像数, ラベル済み件数)。
+    除外理由=対象外type / ラベル不正（空・charset外・長さ超過。内訳を分けて記録）/ 元画像なし。
+    対象画像数=選択した画像種別に一致する行数（ラベル有無を問わない）。
+    ラベル済み件数=そのうちラベル文字列が入力されている行数（charset外・長さ超過で後に除外される分も含む＝
+    「ラベル付けはしたが学習には使えない」件数を区別できるようにするため）。
+    分割対象（candidates）の判定基準・件数は従来どおり変更しない（内訳の分類のみ追加）。
     """
     rows = read_labels(paths.project_id)
     candidates: list[dict[str, Any]] = []
-    skipped_invalid_label = 0
     skipped_missing_source = 0
     skipped_type = 0
+    skipped_empty_label = 0
+    skipped_charset_label = 0
+    skipped_length_label = 0
     input_count = 0
+    target_count = 0
+    labeled_count = 0
     for row in rows:
         image_name = str(row.get("filename") or row.get("image") or "").strip()
         if not image_name:
@@ -938,10 +958,20 @@ def _collect_ocr_candidates(
         if image_type not in selected_types:
             skipped_type += 1
             continue
-        text = _sanitize_text(str(row.get("label") or ""), normalized_charset, int(max_text_length), text_case)
-        if not text:
-            skipped_invalid_label += 1
+        target_count += 1
+        raw_label = str(row.get("label") or "")
+        if str(raw_label or "").strip():
+            labeled_count += 1
+        reason = _label_reject_reason(raw_label, normalized_charset, int(max_text_length), text_case)
+        if reason:
+            if reason == "empty":
+                skipped_empty_label += 1
+            elif reason == "charset":
+                skipped_charset_label += 1
+            else:
+                skipped_length_label += 1
             continue
+        text = _sanitize_text(raw_label, normalized_charset, int(max_text_length), text_case)
         src = _resolve_source_image(paths.root, image_name, image_type)
         if src is None:
             skipped_missing_source += 1
@@ -953,10 +983,15 @@ def _collect_ocr_candidates(
         )
     skipped = {
         "type": skipped_type,
-        "invalid_label": skipped_invalid_label,
+        # 後方互換: 従来の合算値（空・charset外・長さ超過の合計）をそのまま維持する
+        "invalid_label": skipped_empty_label + skipped_charset_label + skipped_length_label,
         "missing_source": skipped_missing_source,
+        # v1.0.0で追加: ラベル不正の内訳（charset外を明示的に区別するため）
+        "empty_label": skipped_empty_label,
+        "charset_invalid": skipped_charset_label,
+        "length_exceeded": skipped_length_label,
     }
-    return candidates, skipped, input_count
+    return candidates, skipped, input_count, target_count, labeled_count
 
 
 def preview_ocr_dataset_split(
@@ -980,7 +1015,7 @@ def preview_ocr_dataset_split(
     _validate_split_ratios(train_ratio, val_ratio, test_ratio)
     normalized_charset = _normalize_charset(charset, text_case)
     paths = ensure_project_directories(project_id)
-    candidates, skipped, input_count = _collect_ocr_candidates(
+    candidates, skipped, input_count, target_count, labeled_count = _collect_ocr_candidates(
         paths, selected_types, normalized_charset, int(max_text_length), text_case
     )
     valid_count = len(candidates)
@@ -993,6 +1028,9 @@ def preview_ocr_dataset_split(
         "counts": counts,
         "split_method": "image",
         "ratios": {"train": float(train_ratio), "val": float(val_ratio), "test": float(test_ratio)},
+        # v1.0.0で追加: 対象画像数（選択した画像種別に一致する行数）・ラベル済み件数（うちラベルが入力済みの件数）
+        "target_count": target_count,
+        "labeled_count": labeled_count,
     }
 
 
@@ -1016,7 +1054,7 @@ def preview_ocr_augmentation(
     normalized_charset = _normalize_charset(charset, text_case)
     shape = _normalize_image_shape(image_shape)
     paths = ensure_project_directories(project_id)
-    candidates, _, _ = _collect_ocr_candidates(paths, selected_types, normalized_charset, int(max_text_length), text_case)
+    candidates, _, _, _, _ = _collect_ocr_candidates(paths, selected_types, normalized_charset, int(max_text_length), text_case)
     if not candidates:
         raise ValueError("No valid OCR samples found. Check labels/type/charset/max_text_length.")
     # seed未指定は毎回異なるサンプル・変換（強すぎる設定の発見が目的のため）
@@ -1074,7 +1112,7 @@ def create_ocr_dataset(
     aug_config = parse_augmentation_config(augmentation)
 
     paths = ensure_project_directories(project_id)
-    candidates, skipped, input_count = _collect_ocr_candidates(
+    candidates, skipped, input_count, _target_count, _labeled_count = _collect_ocr_candidates(
         paths, selected_types, normalized_charset, int(max_text_length), text_case
     )
 
@@ -1266,6 +1304,61 @@ def build_training_condition_snapshot(dataset_dir: str) -> Optional[dict[str, An
             "hash": dataset_meta.get("augmentation_hash"),
         },
         "trainingInputPipelineHash": dataset_meta.get("training_input_pipeline_hash"),
+    }
+
+
+# 学習データセットの保存先（新規作成・OCRログからの再学習作成の両方を対象に探索する）
+OCR_DATASET_PARENT_DIRS = ("ocr_dataset", "ocr_dataset_from_logs")
+
+
+def find_latest_ocr_dataset(project_id: Optional[str]) -> Optional[dict[str, Any]]:
+    """プロジェクト内で最後に作成されたOCR学習データセットの情報を返す（読み取り専用・何も作成しない）。
+
+    学習データセットはページのReact state（ocrDatasetDir等）でのみ「作成済み」を追跡しており、
+    ブラウザの再読み込みでその場限りの状態が失われる問題があった。この関数はディスク上の
+    meta.json（作成時点の確定値。Dataset Formatは変更しない）から実体の有無・内容を復元する。
+    複数存在する場合は created_at が最も新しいものを1件返す（タイムスタンプ文字列は
+    ISO8601のためそのまま文字列比較で新旧判定できる）。1件も無ければ None。
+    """
+    paths = ensure_project_directories(project_id)
+    found: list[tuple[str, Path, dict[str, Any]]] = []
+    for parent_name in OCR_DATASET_PARENT_DIRS:
+        parent = paths.outputs / parent_name
+        if not parent.is_dir():
+            continue
+        for child in sorted(parent.iterdir()):
+            if not child.is_dir():
+                continue
+            meta_path = child / "meta.json"
+            if not meta_path.is_file():
+                continue
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if isinstance(meta, dict):
+                found.append((parent_name, child, meta))
+    if not found:
+        return None
+
+    parent_name, folder, meta = max(found, key=lambda item: str(item[2].get("created_at") or ""))
+    counts = meta.get("counts") or {}
+    return {
+        # 連番のDataset IDは持たない（作成順のタイムスタンプフォルダ名がそのまま識別子）。
+        # 表示用に「DS-」を前置するのみで、保存形式・ファイル命名規則は変更しない
+        "dataset_id": f"DS-{folder.name}",
+        "dataset_root": str(folder.resolve()),
+        "source": "from_logs" if parent_name == "ocr_dataset_from_logs" else "new",
+        "created_at": str(meta.get("created_at") or ""),
+        "charset": str(meta.get("charset") or ""),
+        "seed": meta.get("seed"),
+        "counts": {
+            "train": int(counts.get("train", 0) or 0),
+            "val": int(counts.get("val", 0) or 0),
+            "test": int(counts.get("test", 0) or 0),
+        },
+        "training_preprocess_hash": meta.get("training_preprocess_hash"),
+        "augmentation_hash": meta.get("augmentation_hash"),
     }
 
 

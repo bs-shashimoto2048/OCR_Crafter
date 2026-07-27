@@ -10,6 +10,8 @@ import { buildEffectiveAugmentation } from "../lib/augmentation";
 import { buildEffectiveTrainingPreprocess } from "../lib/preprocessCompare";
 import { collectSettingsSnapshot, isSettingsDirty } from "../lib/trainingSettingsDraft";
 import { SETTINGS_TABS, normalizeSettingsTabId } from "../lib/trainingSettingsTabs";
+import { buildOcrDatasetDisplay, buildOcrDatasetSummary } from "../lib/ocrDatasetStatus";
+import { HELP_TEXTS } from "../lib/helpTexts";
 import {
   UI_TRAINING_STATE_LABELS,
   classifyLogLine,
@@ -121,6 +123,8 @@ export default function TrainingView({
   systemCheck,
   onApplyOcrTrainingPreset,
   ocrDatasetInfo,
+  ocrDatasetCreating = false,
+  ocrDatasetCreateFailed = false,
   onCreateSelectedOcrDataset,
   onPreprocess,
   onBuildDataset,
@@ -435,6 +439,15 @@ export default function TrainingView({
 
   const ocrHasInitModel = ocrInitSourceType === "scratch" || String(ocrInitSourceValue || "").trim() !== "";
   const ocrDatasetReady = String(ocrDatasetDir || "").trim() !== "";
+  // 学習データ作成状態（未作成/作成中/作成済み/失敗）と サマリー表示（準備済み/未準備）の派生値
+  const ocrDatasetDisplay = useMemo(
+    () => buildOcrDatasetDisplay(ocrDatasetInfo, { creating: ocrDatasetCreating, failed: ocrDatasetCreateFailed }),
+    [ocrDatasetInfo, ocrDatasetCreating, ocrDatasetCreateFailed]
+  );
+  const ocrDatasetSummary = useMemo(
+    () => buildOcrDatasetSummary({ datasetInfo: ocrDatasetInfo, creating: ocrDatasetCreating, failed: ocrDatasetCreateFailed }),
+    [ocrDatasetInfo, ocrDatasetCreating, ocrDatasetCreateFailed]
+  );
   // 学習前処理タブ・サマリーカード共通: プロジェクトの現在の前処理設定から実効値を組み立てる
   // （buildEffectiveTrainingPreprocess。学習前処理は「前処理設定」画面の値をそのまま使うため、
   // ここでは新たな設定値を作らず表示専用として利用する）
@@ -749,9 +762,27 @@ export default function TrainingView({
                                   <label className="app-label">
                                     学習データ
                                     <InfoTooltip title="学習データ" body="学習に使用するデータセットのディレクトリです。データ作成後に自動設定されます。" />
+                                    <InfoTooltip {...HELP_TEXTS.trainingVsEvalData} />
                                   </label>
                                   <input className="app-input" value={ocrDatasetDir} readOnly placeholder="データ作成後に自動設定されます" />
                                 </div>
+                              </div>
+                              <div className="rounded-lg border border-border/70 bg-card/45 px-2.5 py-2 text-[12px]">
+                                <p className="font-semibold text-text">学習データ</p>
+                                {ocrDatasetSummary.ready ? (
+                                  <p className="mt-0.5 tabular-nums text-text">
+                                    {ocrDatasetSummary.total.toLocaleString()}件
+                                    {ocrDatasetSummary.mode === "split"
+                                      ? `（Train ${ocrDatasetSummary.train.toLocaleString()} / Validation ${ocrDatasetSummary.val.toLocaleString()} / Test ${ocrDatasetSummary.test.toLocaleString()}）`
+                                      : ""}
+                                    <span className="ml-1 font-semibold text-emerald-300">{ocrDatasetSummary.headline}</span>
+                                  </p>
+                                ) : (
+                                  <p className="mt-0.5 text-amber-100">
+                                    {ocrDatasetSummary.headline}
+                                    <span className="ml-1 text-muted">（{ocrDatasetSummary.status.label}）</span>
+                                  </p>
+                                )}
                               </div>
                               <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                                 <div>
@@ -861,7 +892,7 @@ export default function TrainingView({
                                     className="h-9 whitespace-nowrap px-2.5 text-[12px]"
                                     disabled={Boolean(ocrSplitPreviewLoading)}
                                     onClick={() => onPreviewSplit?.()}
-                                    title="現在の条件（charset・比率）での入力/有効画像数と分割予定枚数を確認します"
+                                    title="現在の条件（charset・比率）での入力/有効画像数と分割予定枚数を確認します（プレビューのみ・データは作成されません）"
                                   >
                                     {ocrSplitPreviewLoading ? "確認中..." : "分割枚数を確認"}
                                   </Button>
@@ -871,6 +902,12 @@ export default function TrainingView({
                                     aria-live="polite"
                                     className="mt-2 rounded-lg border border-border/70 bg-card/55 px-2.5 py-2 text-[12px] tabular-nums"
                                   >
+                                    <p className="text-[11px] font-semibold text-muted">
+                                      プレビューのみ（このデータセット自体はまだ作成されていません）
+                                    </p>
+                                    <p className="mt-1 text-text">
+                                      対象画像数 {ocrSplitPreview.target_count ?? "--"}枚 / ラベル済み件数 {ocrSplitPreview.labeled_count ?? "--"}枚
+                                    </p>
                                     <p className="text-text">
                                       入力画像数 {ocrSplitPreview.input_count}枚 / 有効画像数 {ocrSplitPreview.valid_count}枚
                                       {ocrSplitPreview.input_count - ocrSplitPreview.valid_count > 0
@@ -879,8 +916,10 @@ export default function TrainingView({
                                     </p>
                                     {ocrSplitPreview.input_count - ocrSplitPreview.valid_count > 0 ? (
                                       <p className="text-muted">
-                                        除外内訳: 対象外タイプ {ocrSplitPreview.skipped?.type ?? 0} / ラベル不正（charset外・空）{" "}
-                                        {ocrSplitPreview.skipped?.invalid_label ?? 0} / 元画像なし{" "}
+                                        除外内訳: 対象外タイプ {ocrSplitPreview.skipped?.type ?? 0} / ラベル未入力{" "}
+                                        {ocrSplitPreview.skipped?.empty_label ?? 0} / charset外によるスキップ{" "}
+                                        {ocrSplitPreview.skipped?.charset_invalid ?? 0} / 長さ超過{" "}
+                                        {ocrSplitPreview.skipped?.length_exceeded ?? 0} / 元画像なし{" "}
                                         {ocrSplitPreview.skipped?.missing_source ?? 0}
                                       </p>
                                     ) : null}
@@ -895,6 +934,10 @@ export default function TrainingView({
                                     </p>
                                     <p className="text-muted">
                                       分割方式: 画像単位（設定比率と実枚数比率は端数処理でわずかに異なる場合があります）
+                                    </p>
+                                    <p className="text-muted">Split Seed: {ocrSplitSeed ?? 42}</p>
+                                    <p className="truncate text-muted" title={`data/projects/${projectId || "<project>"}/outputs/ocr_dataset/`}>
+                                      作成予定の保存先: data/projects/{projectId || "<project>"}/outputs/ocr_dataset/&lt;作成時刻&gt;
                                     </p>
                                   </div>
                                 ) : null}
@@ -1908,15 +1951,54 @@ export default function TrainingView({
                       ) : null}
                     </div>
 
-                    {ocrDatasetInfo ? (
-                      // 1行表示で左ペインの固定領域を節約（フルパスはTooltipで確認できる）
+                    {ocrDatasetInfo || ocrDatasetCreating || ocrDatasetCreateFailed ? (
                       <div className="shrink-0 rounded-xl border border-accent/30 bg-accent/10 px-3 py-2 text-xs text-blue-100">
-                        <p className="truncate" title={String(ocrDatasetInfo.dataset_root || "-")}>
-                          作成済みデータ: {String(ocrDatasetInfo.dataset_root || "-").split(/[\\/]/).slice(-1)[0] || "-"}
-                          {ocrDatasetInfo.counts
-                            ? `（train/val/test: ${ocrDatasetInfo.counts?.train ?? 0}/${ocrDatasetInfo.counts?.val ?? 0}/${ocrDatasetInfo.counts?.test ?? 0}）`
-                            : `（件数: ${ocrDatasetInfo.count ?? 0}）`}
+                        <p className="flex items-center gap-1.5 font-semibold text-text">
+                          作成済みデータ
+                          <span
+                            className={`rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${
+                              ocrDatasetDisplay.status.key === "created"
+                                ? "border-emerald-400/40 text-emerald-200"
+                                : ocrDatasetDisplay.status.key === "failed"
+                                  ? "border-red-400/40 text-red-200"
+                                  : ocrDatasetDisplay.status.key === "creating"
+                                    ? "border-amber-400/40 text-amber-200"
+                                    : "border-slate-500/40 text-slate-300"
+                            }`}
+                          >
+                            {ocrDatasetDisplay.status.label}
+                          </span>
                         </p>
+                        {ocrDatasetInfo ? (
+                          <div className="mt-1 grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 tabular-nums">
+                            <span className="text-muted">Dataset ID</span>
+                            <span className="truncate font-mono" title={ocrDatasetDisplay.datasetId}>
+                              {ocrDatasetDisplay.datasetId}
+                            </span>
+                            <span className="text-muted">作成日時</span>
+                            <span>{ocrDatasetDisplay.createdAt}</span>
+                            <span className="text-muted">件数</span>
+                            <span>
+                              {ocrDatasetDisplay.mode === "split"
+                                ? `train/val/test: ${ocrDatasetDisplay.counts.train}/${ocrDatasetDisplay.counts.val}/${ocrDatasetDisplay.counts.test}`
+                                : `${ocrDatasetDisplay.unsplitCount}件`}
+                            </span>
+                            <span className="text-muted">文字セット</span>
+                            <span className="truncate font-mono" title={ocrDatasetDisplay.charset}>
+                              {ocrDatasetDisplay.charset}
+                            </span>
+                            <span className="text-muted">Split Seed</span>
+                            <span>{ocrDatasetDisplay.seed}</span>
+                            <span className="text-muted">前処理Hash</span>
+                            <span className="truncate font-mono" title={ocrDatasetDisplay.trainingPreprocessHash}>
+                              {ocrDatasetDisplay.trainingPreprocessHash}
+                            </span>
+                            <span className="text-muted">保存先</span>
+                            <span className="truncate" title={ocrDatasetDisplay.datasetRoot}>
+                              {ocrDatasetDisplay.datasetRoot}
+                            </span>
+                          </div>
+                        ) : null}
                       </div>
                     ) : null}
                   </>

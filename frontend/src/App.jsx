@@ -465,6 +465,9 @@ export default function App() {
   const [ocrDatasetDir, setOcrDatasetDir] = useState("");
   const [ocrDatasetCreateMode, setOcrDatasetCreateMode] = useState("new");
   const [ocrDatasetInfo, setOcrDatasetInfo] = useState(null);
+  // 学習データセットの作成中/失敗状態（作成成功でocrDatasetInfoが入るため、失敗は次回作成開始でクリアする）
+  const [ocrDatasetCreating, setOcrDatasetCreating] = useState(false);
+  const [ocrDatasetCreateFailed, setOcrDatasetCreateFailed] = useState(false);
   const [ocrFromLogsOnlyInvalid, setOcrFromLogsOnlyInvalid] = useState(true);
   const [ocrFromLogsIncludeCorrected, setOcrFromLogsIncludeCorrected] = useState(true);
   const [ocrInitSourceType, setOcrInitSourceType] = useState("scratch");
@@ -2203,6 +2206,21 @@ export default function App() {
     }
   }
 
+  // 学習データ画面表示時: ディスク上のmeta.jsonから最後に作成した学習データセットを復元する
+  // （ocrDatasetInfo/ocrDatasetDirはReact stateのみで保持しており、ページ再読み込みで失われるため）
+  async function loadLatestOcrDataset(pid = projectId) {
+    if (!pid) return;
+    try {
+      const data = await request(`/api/ocr/dataset/latest?project_id=${encodeURIComponent(pid)}`);
+      if (data?.dataset) {
+        setOcrDatasetInfo(data.dataset);
+        setOcrDatasetDir(data.dataset.dataset_root || "");
+      }
+    } catch {
+      // 読み取り専用の復元処理。失敗してもUIは「未作成」表示のまま（推測補完しない）
+    }
+  }
+
   // 実験カルテの更新（タグ・★・メモ等）→ 一覧を差し替え
   async function updateExperiment(experimentId, patch) {
     try {
@@ -2230,6 +2248,7 @@ export default function App() {
     }
     if (activeView === "ocr-training") {
       loadOcrTrainingPreprocessCurrent(projectId);
+      loadLatestOcrDataset(projectId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeView, projectId]);
@@ -2524,6 +2543,8 @@ export default function App() {
         overwrite: false,
       };
       setOcrRatioError("");
+      setOcrDatasetCreating(true);
+      setOcrDatasetCreateFailed(false);
       const data = await request("/api/ocr/dataset/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2543,7 +2564,10 @@ export default function App() {
       if (structured) {
         setOcrRatioError(structured);
       }
+      setOcrDatasetCreateFailed(true);
       notify("error", structured || error.message);
+    } finally {
+      setOcrDatasetCreating(false);
     }
   }
 
@@ -2653,6 +2677,8 @@ export default function App() {
         text_case: isTesseract ? "keep" : "upper",
         image_shape: imageShape,
       };
+      setOcrDatasetCreating(true);
+      setOcrDatasetCreateFailed(false);
       const data = await request("/api/ocr/dataset/from_logs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2674,7 +2700,10 @@ export default function App() {
       }
       notify("success", "OCRログから再学習データを作成しました");
     } catch (error) {
+      setOcrDatasetCreateFailed(true);
       notify("error", error.message);
+    } finally {
+      setOcrDatasetCreating(false);
     }
   }
 
@@ -3929,6 +3958,8 @@ export default function App() {
         ocrDatasetCreateMode={ocrDatasetCreateMode}
         setOcrDatasetCreateMode={setOcrDatasetCreateMode}
         ocrDatasetInfo={ocrDatasetInfo}
+        ocrDatasetCreating={ocrDatasetCreating}
+        ocrDatasetCreateFailed={ocrDatasetCreateFailed}
         ocrFromLogsOnlyInvalid={ocrFromLogsOnlyInvalid}
         setOcrFromLogsOnlyInvalid={setOcrFromLogsOnlyInvalid}
         ocrFromLogsIncludeCorrected={ocrFromLogsIncludeCorrected}
