@@ -267,7 +267,7 @@ def source_state_of_path(path: Path, project_root: Path) -> str:
 
 
 def summarize_source_states(states: list[str]) -> dict[str, Any]:
-    """由来の集計と全体状態（processed / mixed / raw 等）。混在時は警告文を返す。"""
+    """由来の集計と全体状態（processed / mixed / raw 等）。混在時・全未実行時に警告文を返す。"""
     counts: dict[str, int] = {}
     for state in states:
         counts[state] = counts.get(state, 0) + 1
@@ -280,5 +280,12 @@ def summarize_source_states(states: list[str]) -> dict[str, Any]:
             warning = (
                 f"一部画像（{non_processed}枚）がprocessedではなく他の場所（interim/raw）から取得されています。"
                 "学習入力条件が統一されていない可能性があります。"
+            )
+        elif non_processed and not counts.get("processed"):
+            # v1.0.0で追加: 1件もprocessedが無い（前処理を一度も実行していない）場合の警告。
+            # 従来はmixed（一部processed）時のみ警告しており、全件未実行はこれまで無警告だった
+            warning = (
+                f"対象画像（{non_processed}枚）はすべて前処理未実行の状態です（interim/rawを使用）。"
+                "「前処理設定」画面で実行してからデータセットを作成することを推奨します。"
             )
     return {"overall": overall, "counts": counts, "warning": warning}

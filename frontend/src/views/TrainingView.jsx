@@ -10,7 +10,7 @@ import { buildEffectiveAugmentation } from "../lib/augmentation";
 import { buildEffectiveTrainingPreprocess } from "../lib/preprocessCompare";
 import { collectSettingsSnapshot, isSettingsDirty } from "../lib/trainingSettingsDraft";
 import { SETTINGS_TABS, normalizeSettingsTabId } from "../lib/trainingSettingsTabs";
-import { buildOcrDatasetDisplay, buildOcrDatasetSummary } from "../lib/ocrDatasetStatus";
+import { buildOcrDatasetDisplay, buildOcrDatasetSummary, buildTrainingPreprocessStatus } from "../lib/ocrDatasetStatus";
 import { HELP_TEXTS } from "../lib/helpTexts";
 import {
   UI_TRAINING_STATE_LABELS,
@@ -448,6 +448,11 @@ export default function TrainingView({
     () => buildOcrDatasetSummary({ datasetInfo: ocrDatasetInfo, creating: ocrDatasetCreating, failed: ocrDatasetCreateFailed }),
     [ocrDatasetInfo, ocrDatasetCreating, ocrDatasetCreateFailed]
   );
+  // 前処理設定の実行状況（実行済みか一目で分かるようにするための表示専用サマリー）
+  const trainingPreprocessStatus = useMemo(
+    () => buildTrainingPreprocessStatus(ocrTrainingPreprocessCurrent),
+    [ocrTrainingPreprocessCurrent]
+  );
   // 学習前処理タブ・サマリーカード共通: プロジェクトの現在の前処理設定から実効値を組み立てる
   // （buildEffectiveTrainingPreprocess。学習前処理は「前処理設定」画面の値をそのまま使うため、
   // ここでは新たな設定値を作らず表示専用として利用する）
@@ -784,6 +789,24 @@ export default function TrainingView({
                                   </p>
                                 )}
                               </div>
+                              <div className="rounded-lg border border-border/70 bg-card/45 px-2.5 py-2 text-[12px]">
+                                <p className="flex items-center gap-1.5 font-semibold text-text">
+                                  学習前処理
+                                  <InfoTooltip
+                                    title="学習前処理の実行状況"
+                                    body="「前処理設定」画面で実行済みかどうかの確認です。未実行の場合、学習データは元画像（未加工）から作成されます。"
+                                  />
+                                </p>
+                                <p className={`mt-0.5 ${trainingPreprocessStatus.executed ? "text-emerald-300" : "text-amber-100"}`}>
+                                  {trainingPreprocessStatus.executed ? "✔" : "○"} {trainingPreprocessStatus.label}
+                                  {trainingPreprocessStatus.executed ? (
+                                    <span className="ml-1 tabular-nums text-muted">
+                                      （処理画像数: {trainingPreprocessStatus.processedImageCount.toLocaleString()} / 処理日時:{" "}
+                                      {trainingPreprocessStatus.executedAt}）
+                                    </span>
+                                  ) : null}
+                                </p>
+                              </div>
                               <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                                 <div>
                                   <label className="app-label">学習データ作成方法</label>
@@ -939,6 +962,11 @@ export default function TrainingView({
                                     <p className="truncate text-muted" title={`data/projects/${projectId || "<project>"}/outputs/ocr_dataset/`}>
                                       作成予定の保存先: data/projects/{projectId || "<project>"}/outputs/ocr_dataset/&lt;作成時刻&gt;
                                     </p>
+                                    {ocrSplitPreview.source_warning ? (
+                                      <p className="mt-1 rounded border border-amber-400/40 bg-amber-400/10 px-2 py-1 text-amber-100">
+                                        {ocrSplitPreview.source_warning}
+                                      </p>
+                                    ) : null}
                                   </div>
                                 ) : null}
                               </div>
@@ -1998,6 +2026,11 @@ export default function TrainingView({
                               {ocrDatasetDisplay.datasetRoot}
                             </span>
                           </div>
+                        ) : null}
+                        {ocrDatasetInfo?.source_warning ? (
+                          <p className="mt-1 rounded border border-amber-400/40 bg-amber-400/10 px-2 py-1 text-amber-100">
+                            {ocrDatasetInfo.source_warning}
+                          </p>
                         ) : null}
                       </div>
                     ) : null}

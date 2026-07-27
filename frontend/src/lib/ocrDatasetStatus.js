@@ -71,3 +71,17 @@ export function buildOcrDatasetSummary({ datasetInfo, creating = false, failed =
     headline: ready ? "準備済み" : "未準備",
   };
 }
+
+// 学習前処理（前処理設定画面）の実行状況サマリー。「前処理は終わっているか」を一目で
+// 確認できるようにするための表示専用の派生値（GET /api/ocr/training-preprocess/current の
+// executed/executed_at/processed_image_countから組み立てる。新規の設定・判定基準は追加しない）
+export function buildTrainingPreprocessStatus(current) {
+  const executed = Boolean(current?.executed);
+  const executedAtRaw = String(current?.executed_at || "");
+  return {
+    executed,
+    label: executed ? "実行済み" : "未実行",
+    processedImageCount: Number(current?.processed_image_count ?? 0) || 0,
+    executedAt: executedAtRaw ? executedAtRaw.replace("T", " ").slice(0, 19) : "-",
+  };
+}

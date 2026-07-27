@@ -1020,6 +1020,9 @@ def preview_ocr_dataset_split(
     )
     valid_count = len(candidates)
     counts = compute_split_counts(valid_count, train_ratio, val_ratio, test_ratio)
+    # v1.0.0で追加: 学習ソース画像の由来（processed/interim/raw）。作成前に前処理未実行を警告するため
+    # （create_ocr_datasetのsource_image_state/source_warningと同一のロジックを共用）
+    source_summary = summarize_source_states([str(c.get("source_state") or "") for c in candidates])
     return {
         "project_id": paths.project_id,
         "input_count": input_count,
@@ -1031,6 +1034,9 @@ def preview_ocr_dataset_split(
         # v1.0.0で追加: 対象画像数（選択した画像種別に一致する行数）・ラベル済み件数（うちラベルが入力済みの件数）
         "target_count": target_count,
         "labeled_count": labeled_count,
+        "source_image_state": source_summary["overall"],
+        "source_state_counts": source_summary["counts"],
+        "source_warning": source_summary["warning"],
     }
 
 

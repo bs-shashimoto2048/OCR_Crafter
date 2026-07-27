@@ -2200,6 +2200,9 @@ export default function App() {
       setOcrTrainingPreprocessCurrent({
         training_preprocess: data?.training_preprocess ?? null,
         training_preprocess_hash: data?.training_preprocess_hash ?? null,
+        executed: Boolean(data?.executed),
+        executed_at: String(data?.executed_at || ""),
+        processed_image_count: Number(data?.processed_image_count ?? 0) || 0,
       });
     } catch {
       setOcrTrainingPreprocessCurrent(null);

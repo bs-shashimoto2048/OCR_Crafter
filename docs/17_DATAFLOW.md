@@ -16,6 +16,7 @@ flowchart TD
     IMPORT --> OPP["OCR前処理<br/>preprocess.py（settings.yaml pipelines）<br/>grayscale→照明ムラ補正→…→手動マスク→二値化→…"]
     OPP --> INTERIM["interim/ 中間画像"]
     OPP --> PROC["processed/ 最終画像（single / wide）"]
+    OPP --> PPCUR["前処理実行状況（読み取り専用）<br/>GET /api/ocr/training-preprocess/current<br/>（executed・処理画像数・処理日時）"]
 
     PROC --> OCR["OCR推論<br/>POST /preprocess/preview・/predict<br/>EasyOCR / PaddleOCR / Tesseract / カスタム"]
     OCR --> DICT["辞書近似候補<br/>candidateDictionary.js<br/>（重み付きLevenshtein・表示のみ）"]
@@ -26,7 +27,7 @@ flowchart TD
     LABEL --> DS["OCRデータセット作成<br/>POST /api/ocr/dataset/create<br/>（path\ttext 形式）"]
     FIX["OCR修正ログ<br/>POST /api/ocr/log/save<br/>outputs/ocr_logs/predictions.jsonl"] --> DS2["ログ由来データセット<br/>POST /api/ocr/dataset/from_logs"]
     OCR --> FIX
-    DS -.-> SPLITP["分割プレビュー（作成前・保存なし）<br/>POST /api/ocr/dataset/split-preview<br/>（対象画像数/ラベル済み件数/入力/有効/除外内訳＋最大剰余法の予定枚数）"]
+    DS -.-> SPLITP["分割プレビュー（作成前・保存なし）<br/>POST /api/ocr/dataset/split-preview<br/>（対象画像数/ラベル済み件数/入力/有効/除外内訳＋最大剰余法の予定枚数<br/>＋前処理未実行を示すsource_warning）"]
     DS -.-> DSLATEST["作成済みデータセット復元（読み取り専用）<br/>GET /api/ocr/dataset/latest<br/>（meta.jsonから最新1件を復元。画面再読込対策）"]
     DS2 -.-> DSLATEST
     DS --> TRAIN["学習ジョブ（別プロセス）<br/>POST /api/ocr/train/start (PaddleOCR・dataset_dir必須=400/404)<br/>POST /api/tesseract/train/start<br/>（実験名・親モデル・学習メモをメタへ）"]

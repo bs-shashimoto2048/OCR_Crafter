@@ -327,6 +327,72 @@ test("分割枚数を確認プレビュー: プレビュー専用の注記・対
   assert.ok(html.includes("作成予定の保存先"));
 });
 
+test("分割枚数を確認プレビュー: 前処理未実行の警告があれば表示する", () => {
+  const html = render({
+    initialSettingsTab: "training-settings",
+    ocrSplitPreview: {
+      input_count: 3,
+      target_count: 3,
+      labeled_count: 3,
+      valid_count: 3,
+      skipped: { type: 0, empty_label: 0, charset_invalid: 0, length_exceeded: 0, missing_source: 0 },
+      counts: { train: 2, val: 1, test: 0 },
+      source_warning: "対象画像（3枚）はすべて前処理未実行の状態です（interim/rawを使用）。",
+    },
+  }).replaceAll("<!-- -->", "");
+  assert.ok(html.includes("前処理未実行の状態です"));
+});
+
+test("分割枚数を確認プレビュー: 前処理未実行の警告が無ければ表示しない", () => {
+  const html = render({
+    initialSettingsTab: "training-settings",
+    ocrSplitPreview: {
+      input_count: 3,
+      target_count: 3,
+      labeled_count: 3,
+      valid_count: 3,
+      skipped: { type: 0, empty_label: 0, charset_invalid: 0, length_exceeded: 0, missing_source: 0 },
+      counts: { train: 2, val: 1, test: 0 },
+      source_warning: "",
+    },
+  }).replaceAll("<!-- -->", "");
+  assert.ok(!html.includes("前処理未実行の状態です"));
+});
+
+test("データ分割: 学習前処理の実行状況（未実行）を表示する", () => {
+  const html = render({ initialSettingsTab: "training-settings", ocrTrainingPreprocessCurrent: null }).replaceAll(
+    "<!-- -->",
+    ""
+  );
+  assert.ok(html.includes("学習前処理"));
+  assert.ok(html.includes("未実行"));
+});
+
+test("データ分割: 学習前処理の実行状況（実行済み・処理画像数・処理日時）を表示する", () => {
+  const html = render({
+    initialSettingsTab: "training-settings",
+    ocrTrainingPreprocessCurrent: {
+      executed: true,
+      executed_at: "2026-07-27T12:18:00",
+      processed_image_count: 1024,
+    },
+  }).replaceAll("<!-- -->", "");
+  assert.ok(html.includes("実行済み"));
+  assert.ok(html.includes("1,024"));
+  assert.ok(html.includes("2026-07-27 12:18:00"));
+});
+
+test("作成済みデータ: 前処理未実行によるsource_warningがあれば表示する", () => {
+  const html = render({
+    ocrDatasetInfo: {
+      dataset_root: "/x/20260727_000000",
+      counts: { train: 2, val: 1, test: 0 },
+      source_warning: "対象画像（3枚）はすべて前処理未実行の状態です（interim/rawを使用）。",
+    },
+  }).replaceAll("<!-- -->", "");
+  assert.ok(html.includes("前処理未実行の状態です"));
+});
+
 test("作成済みデータ: 未作成・作成中でもない・失敗でもない場合は表示しない", () => {
   const html = render({ ocrDatasetInfo: null, ocrDatasetCreating: false, ocrDatasetCreateFailed: false }).replaceAll(
     "<!-- -->",

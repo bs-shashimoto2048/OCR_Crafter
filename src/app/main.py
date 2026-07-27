@@ -1779,10 +1779,21 @@ def api_training_preprocess_current(project_id: Optional[str] = Query(default="d
     snapshot = load_preprocess_snapshot(paths.root)
     training_preprocess = build_training_preprocess(snapshot, ["single", "wide"], None) if snapshot else None
     training_preprocess_hash = compute_training_preprocess_hash(training_preprocess)
+    # v1.0.0で追加: 「前処理は終わっているか」を一目で確認できるようにするための実行状況サマリー。
+    # 処理画像数はディスク上のprocessed/実体を都度数える（run_preprocessは呼び出しのたびに
+    # raw/全件を処理するため、処理済み件数の永続カウンタは別途持たず実体をそのまま数える）
+    processed_image_count = 0
+    for image_type in ("single", "wide"):
+        images_dir = paths.processed / image_type / "images"
+        if images_dir.is_dir():
+            processed_image_count += sum(1 for _ in images_dir.glob("*.png"))
     return {
         "project_id": resolved,
         "training_preprocess": training_preprocess,
         "training_preprocess_hash": training_preprocess_hash,
+        "executed": snapshot is not None,
+        "executed_at": str((snapshot or {}).get("created_at") or ""),
+        "processed_image_count": processed_image_count,
     }
 
 

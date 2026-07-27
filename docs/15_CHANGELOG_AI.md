@@ -14,12 +14,27 @@ timeline
     07-17 : CER中心の評価体系（マイクロ平均・混同集計・改善/悪化） : モデルカルテ/比較ダッシュボード : モデル管理No（M0001） : モデル識別色 : Unicode特殊文字表示 : 一覧バッジ削除と右ペイン拡張
     07-18〜 : 学習条件比較・条件差分・次回学習提案 : サイドバーのOCR開発フロー順再編 : 性能サマリー省スペース化と比較カード短縮名
     07-24 : ダッシュボード「プロジェクト一覧」テーブル拡張 : 同カードビュー化（Health Badge・Exact Match） : カードへBenchmark性能指標追加（Balance Score・P95・Healthのreasons） : カードUI/UXブラッシュアップ（文字拡大・3列化・Primary/Secondary・Production独立表示） : 学習前処理・オーグメンテーションの実効値スナップショット保存と学習条件比較の2セクション化・推論使用モデルの一覧強調
-    07-27 : 学習データ作成フローの明確化（事前作成の可視化・準備状況サマリー・評価データとの違いの明記）
+    07-27 : 学習データ作成フローの明確化（事前作成の可視化・準備状況サマリー・評価データとの違いの明記） : 学習前処理の実行タイミング調査と前処理未実行時の警告・実行状況表示の追加
 ```
 
 ---
 
 ## 2026-07
+
+### 学習前処理の実行タイミング調査と、前処理未実行時の警告・実行状況表示の追加
+
+**調査依頼**: 「前処理設定」の値が実際にどこで画像へ適用されているかを調査し、もし学習データセット作成時に呼ばれていないなら「学習データセットを作成→元画像→前処理設定適用→train/val/test生成」という仕様へ変更し、その時点で`training_preprocess`/`training_preprocess_hash`/`training_input_pipeline_hash`を`meta.json`へ保存する——という提案を検討する依頼だった。
+
+**調査結果**: `services/preprocess.py`の`run_preprocess`は`POST /preprocess/run`（前処理設定画面の実行ボタン）・画像取込直後・画像回転後・その3経路のバックグラウンドJob版から呼ばれ、`preprocess_image_for_model`（同じ核処理を共用）はOCR推論・モデル評価時に保存済みスナップショットから都度オンザフライ適用される。一方、`services/ocr_pipeline.py`の`create_ocr_dataset`は`preprocess.py`を一切import・呼び出ししておらず、**データセット作成時には前処理が実行されない**。これは見落としではなく`services/preprocess_snapshot.py`のモジュールdocstringに明記された意図的な設計（「processed/ 画像は既にスナップショット適用済みのため、データセット作成では再適用しない（二重前処理防止）」）で、データセットは`_resolve_source_image`で`processed/<type>/images/`（既に前処理設定画面の実行済み結果）を優先ソースとして使う。さらに、提案されていた`training_preprocess`/`training_preprocess_hash`/`training_input_pipeline_hash`の`meta.json`保存は、本セッション内の別タスク（学習前処理・オーグメンテーションの実効値スナップショット保存、07-24）で**既に実装済み**だった。
+
+**採用した対応**: 元画像から都度前処理を再実行する提案は採用しなかった——ラベル付け画面は`processed/`画像を表示しており、もしデータセット作成時に前処理をやり直すと、前処理設定を変更したのに`/preprocess/run`の再実行を忘れた場合に「ラベル付けで確認した画像」と「実際の学習画像」がズレるリスクがあるため（現行方式はこのズレを構造的に防いでいる）。代わりに、ユーザーとの相談の結果、次の2点を追加した。
+
+1. **前処理未実行時の警告**（`services/preprocess_snapshot.py`の`summarize_source_states`を拡張）: 従来は「一部processed・一部raw/interimの混在」時のみ警告しており、対象画像が**1件もprocessedでない**（前処理を一度も実行していない）場合は無警告だった。この場合も「対象画像（n枚）はすべて前処理未実行の状態です（interim/rawを使用）。「前処理設定」画面で実行してからデータセットを作成することを推奨します。」という警告を追加し、`POST /api/ocr/dataset/split-preview`（作成前）と`POST /api/ocr/dataset/create`（作成後・`meta.json`の`source_warning`経由）の両方でフロントへ表示する。既存の「混在時」警告の文言・条件は変更していない。
+2. **学習前処理の実行状況の可視化**（ユーザーからの追加依頼）: `GET /api/ocr/training-preprocess/current`へ`executed`（前処理スナップショットの有無）・`executed_at`（最終実行日時）・`processed_image_count`（`processed/{single,wide}/images/`の実ファイル数を都度カウント。永続カウンタは持たない）を追加し、学習データ画面のデータ分割セクションへ「学習前処理: ✔ 実行済み（処理画像数: n / 処理日時: …）」または「○ 未実行」のカードを新設した（`lib/ocrDatasetStatus.js buildTrainingPreprocessStatus`）。「前処理は終わっているか」を一目で確認できるようにするための表示専用情報で、新たな設定値・判定基準は追加していない。
+
+**制約**: 学習ロジック・分割計算・Split Seed・Dataset Format・評価データ形式・既存プロジェクト・既存API互換は変更していない（新フィールドはすべて追加のみ）。
+
+**テスト**: バックエンド6件追加（`summarize_source_states`の全未処理/混在/全処理3パターン、`preview_ocr_dataset_split`の`source_warning`表示・非表示2パターン、`training-preprocess/current`の`executed`/`processed_image_count`実行後1パターン）→バックエンド453件→**459件**全通過。フロントエンド`lib/ocrDatasetStatus.js`へ`buildTrainingPreprocessStatus`を追加しテスト2件、`trainingView.render.test.mjs`へ5件追加（前処理未実行警告の表示/非表示・実行状況カードの未実行/実行済み表示）→フロント431件全通過、`npm run build`成功。
 
 ### 学習データ作成フローの明確化（事前作成の可視化・評価データとの違いの明記）
 

@@ -285,6 +285,16 @@ class TestRegisterTesseractModelUsesJobSnapshot:
         assert meta["training_input_pipeline_hash"] == dataset_meta["training_input_pipeline_hash"]
 
 
+def _make_raw_images(temp_projects, project_id: str, count: int) -> None:
+    """raw/へ画像を配置する（run_preprocess実行前の状態を再現するため）。"""
+    raw = temp_projects["projects_dir"] / project_id / "raw"
+    raw.mkdir(parents=True, exist_ok=True)
+    for i in range(count):
+        arr = np.full((32, 96), 200, dtype=np.uint8)
+        arr[:, 10 + i * 5 : 14 + i * 5] = 30
+        Image.fromarray(arr, mode="L").save(raw / f"img_{i:04d}.png")
+
+
 class TestTrainingPreprocessCurrentEndpoint:
     def test_returns_none_when_never_preprocessed(self, temp_projects):
         client = TestClient(main_module.app)
@@ -293,6 +303,10 @@ class TestTrainingPreprocessCurrentEndpoint:
         data = resp.json()
         assert data["training_preprocess"] is None
         assert data["training_preprocess_hash"] is None
+        # v1.0.0で追加: 前処理状態サマリー（実行済みか一目で分かるようにするため）
+        assert data["executed"] is False
+        assert data["executed_at"] == ""
+        assert data["processed_image_count"] == 0
 
     def test_returns_snapshot_after_preprocess_run(self, temp_projects):
         project_id = _setup_labeled_project(temp_projects, 5, project_id="p_current")
@@ -302,6 +316,17 @@ class TestTrainingPreprocessCurrentEndpoint:
         data = resp.json()
         assert data["training_preprocess"] is not None
         assert data["training_preprocess_hash"] is not None
+
+    def test_executed_flag_and_processed_image_count_after_real_run(self, temp_projects):
+        project_id = "p_real_run"
+        _make_raw_images(temp_projects, project_id, count=3)
+        run_preprocess(project_id=project_id, overrides={})
+        client = TestClient(main_module.app)
+        resp = client.get("/api/ocr/training-preprocess/current", params={"project_id": project_id})
+        data = resp.json()
+        assert data["executed"] is True
+        assert data["executed_at"] != ""
+        assert data["processed_image_count"] == 3
 
 
 class TestTrainStartCapturesSnapshotAtCreation:

@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import {
   buildOcrDatasetDisplay,
   buildOcrDatasetSummary,
+  buildTrainingPreprocessStatus,
   deriveOcrDatasetId,
   deriveOcrDatasetStatus,
 } from "../src/lib/ocrDatasetStatus.js";
@@ -100,4 +101,24 @@ test("buildOcrDatasetSummary: 未作成/作成中/失敗/件数0はすべて未�
     buildOcrDatasetSummary({ datasetInfo: { counts: { train: 0, val: 0, test: 0 } } }).headline,
     "未準備"
   );
+});
+
+test("buildTrainingPreprocessStatus: 未実行時は「未実行」・件数0・日時プレースホルダを返す", () => {
+  const status = buildTrainingPreprocessStatus(null);
+  assert.equal(status.executed, false);
+  assert.equal(status.label, "未実行");
+  assert.equal(status.processedImageCount, 0);
+  assert.equal(status.executedAt, "-");
+});
+
+test("buildTrainingPreprocessStatus: 実行済みは処理画像数・処理日時を整形して返す", () => {
+  const status = buildTrainingPreprocessStatus({
+    executed: true,
+    executed_at: "2026-07-27T12:18:00.123456",
+    processed_image_count: 1024,
+  });
+  assert.equal(status.executed, true);
+  assert.equal(status.label, "実行済み");
+  assert.equal(status.processedImageCount, 1024);
+  assert.equal(status.executedAt, "2026-07-27 12:18:00");
 });

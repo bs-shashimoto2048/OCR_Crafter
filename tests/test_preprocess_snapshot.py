@@ -16,7 +16,7 @@ import pytest
 from PIL import Image
 
 from src.app.services.model_registry import list_model_infos, resolve_model_training_preprocess
-from src.app.services.ocr_pipeline import create_ocr_dataset
+from src.app.services.ocr_pipeline import create_ocr_dataset, preview_ocr_dataset_split
 from src.app.services.ocr_evaluation import (
     TRAINING_PREPROCESS_MISSING_MESSAGE,
     resolve_evaluation_preprocess_plan,
@@ -31,6 +31,7 @@ from src.app.services.preprocess_snapshot import (
     load_preprocess_snapshot,
     save_preprocess_snapshot,
     snapshot_file_path,
+    summarize_source_states,
 )
 from src.app.services.tesseract_pipeline import register_tesseract_model
 from src.app.project_paths import ensure_project_directories
@@ -179,6 +180,63 @@ def test_create_ocr_dataset_warns_on_mixed_sources(temp_projects):
     assert result["source_image_state"] == "mixed"
     assert result["source_state_counts"] == {"processed": 3, "raw": 2}
     assert "raw" in result["source_warning"] or "processed" in result["source_warning"]
+
+
+def test_summarize_source_states_warns_when_all_unprocessed():
+    """1件もprocessedが無い（前処理を一度も実行していない）場合の警告（v1.0.0で追加）。"""
+    result = summarize_source_states(["raw", "raw", "interim"])
+    assert result["overall"] == "mixed"
+    assert result["counts"] == {"raw": 2, "interim": 1}
+    assert "前処理未実行" in result["warning"]
+
+
+def test_summarize_source_states_all_processed_has_no_warning():
+    result = summarize_source_states(["processed", "processed"])
+    assert result["overall"] == "processed"
+    assert result["warning"] == ""
+
+
+def test_summarize_source_states_mixed_processed_and_raw_keeps_existing_warning():
+    """既存の混在（一部processed）警告は文言・条件とも変更しない。"""
+    result = summarize_source_states(["processed", "processed", "raw"])
+    assert result["overall"] == "mixed"
+    assert "処理されていない" not in result["warning"]
+    assert "他の場所" in result["warning"]
+
+
+def test_preview_ocr_dataset_split_reports_processed_source_without_warning(temp_projects):
+    project_id = _make_labeled_processed_project(temp_projects, project_id="p_preview_ok", count=5)
+    preview = preview_ocr_dataset_split(
+        project_id=project_id, image_types=["wide"], charset="AB0123456789", max_text_length=8,
+        train_ratio=0.8, val_ratio=0.1, test_ratio=0.1,
+    )
+    assert preview["source_image_state"] == "processed"
+    assert preview["source_state_counts"] == {"processed": 5}
+    assert preview["source_warning"] == ""
+
+
+def test_preview_ocr_dataset_split_warns_when_never_preprocessed(temp_projects):
+    """データセット作成前のプレビューでも、前処理未実行を検出して警告する（v1.0.0で追加）。"""
+    project_id = "p_preview_unprocessed"
+    root = temp_projects["projects_dir"] / project_id
+    raw = root / "raw"
+    raw.mkdir(parents=True, exist_ok=True)
+    lines = ["filename,label,type"]
+    for i in range(3):
+        name = f"img_{i:04d}.png"
+        Image.fromarray(np.full((32, 96), 200, dtype=np.uint8), mode="L").save(raw / name)
+        lines.append(f"{name},AB{i},wide")
+    annotations = root / "annotations"
+    annotations.mkdir(parents=True, exist_ok=True)
+    (annotations / "master.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    preview = preview_ocr_dataset_split(
+        project_id=project_id, image_types=["wide"], charset="AB0123456789", max_text_length=8,
+        train_ratio=0.8, val_ratio=0.1, test_ratio=0.1,
+    )
+    assert preview["source_image_state"] == "raw"
+    assert preview["source_state_counts"] == {"raw": 3}
+    assert "前処理未実行" in preview["source_warning"]
 
 
 # ---------- 二重前処理防止 ----------
