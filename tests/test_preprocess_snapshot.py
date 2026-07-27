@@ -166,6 +166,32 @@ def test_create_ocr_dataset_without_snapshot_records_none(temp_projects):
     assert result["source_image_state"] == "processed"
 
 
+def test_legacy_project_migrates_to_recorded_history_via_run_preprocess_then_dataset_recreation(temp_projects):
+    """設計変更の検証（refactor: synchronize OCR preprocessing during dataset creation）。
+
+    データセット作成フローは必ず run_preprocess() → create_ocr_dataset() の順で実行される
+    （フロント側 App.jsx の createOcrDataset() がこの順で2つの既存APIを呼ぶ）。
+    旧プロジェクト（processed済みだがスナップショット未保存）でも、この順序で呼び出せば
+    以後は「設定記録あり」（training_preprocess記録あり）へ移行することを確認する。
+    """
+    project_id = _make_labeled_processed_project(temp_projects, project_id="p_legacy_migrate", count=5)
+
+    # 移行前: 従来どおりスナップショット未保存のため設定記録なし
+    before = create_ocr_dataset(
+        project_id=project_id, image_types=["wide"], seed=1, output_dir=str(temp_projects["tmp"] / "ds_before")
+    )
+    assert before["training_preprocess"] is None
+    assert before["training_preprocess_hash"] is None
+
+    # 新フロー: run_preprocess()を実行してからDatasetを再作成すると設定記録ありへ移行する
+    run_preprocess(project_id=project_id, overrides={})
+    after = create_ocr_dataset(
+        project_id=project_id, image_types=["wide"], seed=1, output_dir=str(temp_projects["tmp"] / "ds_after")
+    )
+    assert after["training_preprocess"] is not None
+    assert after["training_preprocess_hash"] is not None
+
+
 def test_create_ocr_dataset_warns_on_mixed_sources(temp_projects):
     """processed が無く raw から取得する画像が混在する場合は警告する。"""
     project_id = _make_labeled_processed_project(temp_projects, project_id="p_mix", count=5)

@@ -265,8 +265,9 @@ test("学習前処理タブ②: 前処理済み画像はあるが設定記録が
   assert.ok(html.includes("設定記録なし"));
   assert.ok(html.includes("履歴保存機能導入前"));
   assert.ok(html.includes("グレースケール"));
-  assert.ok(html.includes("再度前処理を実行"));
+  assert.ok(html.includes("現在の前処理設定で学習データセットを再作成すると、設定履歴が更新されます。"));
   assert.ok(!html.includes("未実行"));
+  assert.ok(!html.includes("前処理設定画面で再度前処理を実行"));
 });
 
 test("学習前処理タブ③: 記録があれば表示名・専門パラメータ名・現在値・単位・説明を表示する", () => {
@@ -511,6 +512,45 @@ test("作成済みデータ: 前処理未実行によるsource_warningがあれ�
     },
   }).replaceAll("<!-- -->", "");
   assert.ok(html.includes("前処理未実行の状態です"));
+});
+
+test("データセット作成進捗①: 新規作成中は「1/2 前処理中」をボタンに表示し、ボタンを無効化する", () => {
+  const html = render({
+    ocrDatasetDir: "",
+    ocrDatasetCreating: true,
+    ocrDatasetCreatePhase: "preprocess",
+  }).replaceAll("<!-- -->", "");
+  assert.ok(html.includes("1/2 前処理中"));
+  assert.ok(!html.includes("新規学習データを作成"));
+});
+
+test("データセット作成進捗②: Dataset生成中は「2/2 Dataset作成中」をボタンに表示する", () => {
+  const html = render({
+    ocrDatasetDir: "",
+    ocrDatasetCreating: true,
+    ocrDatasetCreatePhase: "dataset",
+  }).replaceAll("<!-- -->", "");
+  assert.ok(html.includes("2/2 Dataset作成中"));
+});
+
+test("データセット作成進捗③: 作成中でなければ通常のボタンラベルへ戻る", () => {
+  const html = render({ ocrDatasetDir: "", ocrDatasetCreating: false, ocrDatasetCreatePhase: null }).replaceAll(
+    "<!-- -->",
+    ""
+  );
+  assert.ok(html.includes("新規学習データを作成"));
+  assert.ok(!html.includes("1/2 前処理中"));
+  assert.ok(!html.includes("2/2 Dataset作成中"));
+});
+
+test("データセット作成進捗④: 「データを再作成」ボタンも作成中は進捗ラベルを表示し無効化する", () => {
+  const html = render({
+    ocrDatasetDir: "C:/dataset",
+    ocrDatasetCreating: true,
+    ocrDatasetCreatePhase: "preprocess",
+  }).replaceAll("<!-- -->", "");
+  assert.ok(html.includes("1/2 前処理中"));
+  assert.ok(!html.includes("データを再作成"));
 });
 
 test("作成済みデータ: 未作成・作成中でもない・失敗でもない場合は表示しない", () => {

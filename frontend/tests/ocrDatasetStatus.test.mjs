@@ -3,6 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildDatasetCreateProgressLabel,
   buildOcrDatasetDisplay,
   buildOcrDatasetSummary,
   buildTrainingPreprocessStatus,
@@ -145,4 +146,12 @@ test("buildTrainingPreprocessStatus: 記録ありは処理画像数・処理日�
   // training_preprocess_hashのみでも記録ありと判定する
   const status3 = buildTrainingPreprocessStatus({ training_preprocess_hash: "sha256:abc", processed_image_count: 5 });
   assert.equal(status3.status, "recorded");
+});
+
+test("buildDatasetCreateProgressLabel: データセット作成フローの2段階進捗ラベル", () => {
+  assert.equal(buildDatasetCreateProgressLabel("preprocess"), "1/2 前処理中");
+  assert.equal(buildDatasetCreateProgressLabel("dataset"), "2/2 Dataset作成中");
+  assert.equal(buildDatasetCreateProgressLabel(null), null);
+  assert.equal(buildDatasetCreateProgressLabel(undefined), null);
+  assert.equal(buildDatasetCreateProgressLabel("unknown"), null);
 });

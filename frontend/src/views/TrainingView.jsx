@@ -10,7 +10,12 @@ import { buildEffectiveAugmentation } from "../lib/augmentation";
 import { buildEffectiveTrainingPreprocess } from "../lib/preprocessCompare";
 import { collectSettingsSnapshot, isSettingsDirty } from "../lib/trainingSettingsDraft";
 import { SETTINGS_TABS, normalizeSettingsTabId } from "../lib/trainingSettingsTabs";
-import { buildOcrDatasetDisplay, buildOcrDatasetSummary, buildTrainingPreprocessStatus } from "../lib/ocrDatasetStatus";
+import {
+  buildDatasetCreateProgressLabel,
+  buildOcrDatasetDisplay,
+  buildOcrDatasetSummary,
+  buildTrainingPreprocessStatus,
+} from "../lib/ocrDatasetStatus";
 import { HELP_TEXTS } from "../lib/helpTexts";
 import {
   UI_TRAINING_STATE_LABELS,
@@ -126,6 +131,7 @@ export default function TrainingView({
   ocrDatasetInfo,
   ocrDatasetCreating = false,
   ocrDatasetCreateFailed = false,
+  ocrDatasetCreatePhase = null,
   onCreateSelectedOcrDataset,
   onPreprocess,
   onBuildDataset,
@@ -449,6 +455,8 @@ export default function TrainingView({
     () => buildOcrDatasetSummary({ datasetInfo: ocrDatasetInfo, creating: ocrDatasetCreating, failed: ocrDatasetCreateFailed }),
     [ocrDatasetInfo, ocrDatasetCreating, ocrDatasetCreateFailed]
   );
+  // データセット作成フローの進捗（1/2 前処理中 → 2/2 Dataset作成中。新しいボタンは追加しない）
+  const datasetCreateProgressLabel = buildDatasetCreateProgressLabel(ocrDatasetCreatePhase);
   // 前処理設定の実行状況（実行済みか一目で分かるようにするための表示専用サマリー）
   const trainingPreprocessStatus = useMemo(
     () => buildTrainingPreprocessStatus(ocrTrainingPreprocessCurrent),
@@ -1044,10 +1052,7 @@ export default function TrainingView({
                                           履歴保存機能導入前に処理された画像のため、グレースケール・CLAHE・二値化などの設定内容は確認できません。
                                         </p>
                                         <p className="mt-2 text-[12px] leading-5 text-muted">
-                                          設定履歴を残すには、前処理設定画面で再度前処理を実行してください。
-                                        </p>
-                                        <p className="mt-1 text-[11px] leading-5 text-amber-100">
-                                          ※再実行するとprocessed画像が更新されるため、必要に応じて学習データセットも再作成してください。
+                                          現在の前処理設定で学習データセットを再作成すると、設定履歴が更新されます。
                                         </p>
                                       </div>
                                     );
@@ -1926,9 +1931,18 @@ export default function TrainingView({
                           variant="secondary"
                           className="w-full"
                           onClick={onCreateSelectedOcrDataset}
-                          disabled={settingsLocked}
+                          disabled={settingsLocked || ocrDatasetCreating}
                         >
-                          {ocrDatasetCreateMode === "from_logs" ? "再学習データを作成" : "新規学習データを作成"}
+                          {ocrDatasetCreating ? (
+                            <>
+                              <span className="mr-1 inline-block animate-spin" aria-hidden="true">↻</span>
+                              {datasetCreateProgressLabel || "作成中..."}
+                            </>
+                          ) : ocrDatasetCreateMode === "from_logs" ? (
+                            "再学習データを作成"
+                          ) : (
+                            "新規学習データを作成"
+                          )}
                         </Button>
                       ) : uiTrainingState === "preparing" ? (
                         <Button className="w-full" disabled>
@@ -2044,10 +2058,17 @@ export default function TrainingView({
                           variant="secondary"
                           className="w-full"
                           onClick={onCreateSelectedOcrDataset}
-                          disabled={settingsLocked}
-                          title={settingsLocked ? "学習実行中はデータを再作成できません。" : "学習データを作り直します"}
+                          disabled={settingsLocked || ocrDatasetCreating}
+                          title={settingsLocked ? "学習実行中はデータを再作成できません。" : "現在の前処理設定を反映してから学習データを作り直します"}
                         >
-                          データを再作成
+                          {ocrDatasetCreating ? (
+                            <>
+                              <span className="mr-1 inline-block animate-spin" aria-hidden="true">↻</span>
+                              {datasetCreateProgressLabel || "作成中..."}
+                            </>
+                          ) : (
+                            "データを再作成"
+                          )}
                         </Button>
                       ) : null}
                     </div>

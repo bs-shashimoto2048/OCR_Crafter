@@ -468,6 +468,10 @@ export default function App() {
   // 学習データセットの作成中/失敗状態（作成成功でocrDatasetInfoが入るため、失敗は次回作成開始でクリアする）
   const [ocrDatasetCreating, setOcrDatasetCreating] = useState(false);
   const [ocrDatasetCreateFailed, setOcrDatasetCreateFailed] = useState(false);
+  // データセット作成フローの進捗段階（null | "preprocess" | "dataset"）。
+  // データセットは必ず「現在の前処理設定でprocessed更新→Dataset生成」の2段階で作成されるため
+  // （新規作成ボタン1つの内部で自動実行。新しい「前処理を実行」ボタンは追加しない）
+  const [ocrDatasetCreatePhase, setOcrDatasetCreatePhase] = useState(null);
   const [ocrFromLogsOnlyInvalid, setOcrFromLogsOnlyInvalid] = useState(true);
   const [ocrFromLogsIncludeCorrected, setOcrFromLogsIncludeCorrected] = useState(true);
   const [ocrInitSourceType, setOcrInitSourceType] = useState("scratch");
@@ -2568,6 +2572,17 @@ export default function App() {
       setOcrRatioError("");
       setOcrDatasetCreating(true);
       setOcrDatasetCreateFailed(false);
+      // 設計変更: 学習データセットは必ず「現在の前処理設定を反映したprocessed更新」の後に作成する
+      // （既存の /preprocess/run をそのまま再利用。前処理ロジックは複製しない。overrides省略で
+      // プロジェクト保存値=現在の前処理設定が自動的に使われる）。新しい「前処理を実行」ボタンは
+      // 追加せず、このボタン1つの内部で2段階を自動実行する
+      setOcrDatasetCreatePhase("preprocess");
+      await request("/preprocess/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_id: projectId }),
+      });
+      setOcrDatasetCreatePhase("dataset");
       const data = await request("/api/ocr/dataset/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2577,7 +2592,7 @@ export default function App() {
       setOcrDatasetDir(data.dataset_root || "");
       resetTrainingLog("OCRデータセットを作成します");
       pushLog(
-        `OCRデータ作成: train=${data?.counts?.train ?? 0}, val=${data?.counts?.val ?? 0}, test=${data?.counts?.test ?? 0}` +
+        `前処理を実行してからOCRデータ作成: train=${data?.counts?.train ?? 0}, val=${data?.counts?.val ?? 0}, test=${data?.counts?.test ?? 0}` +
           (data?.augmentation_generated ? `, aug=${data.augmentation_generated}` : "")
       );
       notify("success", "OCRデータセットを作成しました");
@@ -2591,6 +2606,7 @@ export default function App() {
       notify("error", structured || error.message);
     } finally {
       setOcrDatasetCreating(false);
+      setOcrDatasetCreatePhase(null);
     }
   }
 
@@ -3984,6 +4000,7 @@ export default function App() {
         ocrDatasetInfo={ocrDatasetInfo}
         ocrDatasetCreating={ocrDatasetCreating}
         ocrDatasetCreateFailed={ocrDatasetCreateFailed}
+        ocrDatasetCreatePhase={ocrDatasetCreatePhase}
         ocrFromLogsOnlyInvalid={ocrFromLogsOnlyInvalid}
         setOcrFromLogsOnlyInvalid={setOcrFromLogsOnlyInvalid}
         ocrFromLogsIncludeCorrected={ocrFromLogsIncludeCorrected}

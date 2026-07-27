@@ -97,3 +97,14 @@ export function buildTrainingPreprocessStatus(current) {
   }
   return { status: "not_processed", label: "前処理画像なし", processedImageCount: 0, executedAt: "-" };
 }
+
+// 学習データセット作成フローの進捗表示（v1.0.0で追加）。
+// データセット作成は必ず「現在の前処理設定を反映したprocessed更新（/preprocess/run）→Dataset生成」の
+// 2段階で実行される（設計変更: 従来のprocessed/をそのまま使うだけの挙動から変更）。
+// 新しい「前処理を実行」ボタンは追加せず、既存のデータセット作成ボタン1つの内部で自動実行するため、
+// 利用者にはこの2段階の進捗のみを表示する。
+export function buildDatasetCreateProgressLabel(phase) {
+  if (phase === "preprocess") return "1/2 前処理中";
+  if (phase === "dataset") return "2/2 Dataset作成中";
+  return null;
+}

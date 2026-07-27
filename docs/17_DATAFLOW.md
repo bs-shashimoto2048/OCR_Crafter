@@ -24,8 +24,9 @@ flowchart TD
     DICT --> LABEL
     CAND --> LABEL["ラベル保存<br/>PUT /labels/{name}<br/>annotations/master.csv"]
 
-    LABEL --> DS["OCRデータセット作成<br/>POST /api/ocr/dataset/create<br/>（path\ttext 形式）"]
-    FIX["OCR修正ログ<br/>POST /api/ocr/log/save<br/>outputs/ocr_logs/predictions.jsonl"] --> DS2["ログ由来データセット<br/>POST /api/ocr/dataset/from_logs"]
+    LABEL --> AUTOPP["自動前処理更新<br/>POST /preprocess/run（現在の前処理設定・overrides省略）<br/>v1.0.0で追加: 学習データ作成ボタン内部で自動実行"]
+    AUTOPP --> DS["OCRデータセット作成<br/>POST /api/ocr/dataset/create<br/>（path\ttext 形式）"]
+    FIX["OCR修正ログ<br/>POST /api/ocr/log/save<br/>outputs/ocr_logs/predictions.jsonl"] --> DS2["ログ由来データセット<br/>POST /api/ocr/dataset/from_logs<br/>（自動前処理の対象外。ログ参照画像パスは前処理と独立）"]
     OCR --> FIX
     DS -.-> SPLITP["分割プレビュー（作成前・保存なし）<br/>POST /api/ocr/dataset/split-preview<br/>（対象画像数/ラベル済み件数/入力/有効/除外内訳＋最大剰余法の予定枚数<br/>＋前処理未実行を示すsource_warning）"]
     DS -.-> DSLATEST["作成済みデータセット復元（読み取り専用）<br/>GET /api/ocr/dataset/latest<br/>（meta.jsonから最新1件を復元。画面再読込対策）"]

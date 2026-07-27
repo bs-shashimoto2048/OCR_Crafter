@@ -14,12 +14,32 @@ timeline
     07-17 : CER中心の評価体系（マイクロ平均・混同集計・改善/悪化） : モデルカルテ/比較ダッシュボード : モデル管理No（M0001） : モデル識別色 : Unicode特殊文字表示 : 一覧バッジ削除と右ペイン拡張
     07-18〜 : 学習条件比較・条件差分・次回学習提案 : サイドバーのOCR開発フロー順再編 : 性能サマリー省スペース化と比較カード短縮名
     07-24 : ダッシュボード「プロジェクト一覧」テーブル拡張 : 同カードビュー化（Health Badge・Exact Match） : カードへBenchmark性能指標追加（Balance Score・P95・Healthのreasons） : カードUI/UXブラッシュアップ（文字拡大・3列化・Primary/Secondary・Production独立表示） : 学習前処理・オーグメンテーションの実効値スナップショット保存と学習条件比較の2セクション化・推論使用モデルの一覧強調
-    07-27 : 学習データ作成フローの明確化（事前作成の可視化・準備状況サマリー・評価データとの違いの明記） : 学習前処理の実行タイミング調査と前処理未実行時の警告・実行状況表示の追加 : 学習前処理ステータスの3状態化（旧プロジェクトの誤表示を是正） : 現在の前処理設定の可視化（GET /api/ocr/preprocess/current-config 追加）
+    07-27 : 学習データ作成フローの明確化（事前作成の可視化・準備状況サマリー・評価データとの違いの明記） : 学習前処理の実行タイミング調査と前処理未実行時の警告・実行状況表示の追加 : 学習前処理ステータスの3状態化（旧プロジェクトの誤表示を是正） : 現在の前処理設定の可視化（GET /api/ocr/preprocess/current-config 追加） : OCR Dataset作成フローの見直し（Dataset作成時に必ずrun_preprocess()を自動実行する設計へ変更）
 ```
 
 ---
 
 ## 2026-07
+
+### OCR Dataset作成フローの見直し（Dataset作成時に必ずrun_preprocess()を自動実行する設計へ変更）
+
+**発端**: 直前のタスクで「設定履歴を残すには、前処理設定画面で再度前処理を実行してください」という案内文を実装したが、実際には「前処理設定」画面（`PreprocessView.jsx`）に前処理を実行するボタンが存在しないことが判明した（別タスクで調査・報告済み）。`POST /preprocess/run`を呼べるのは実験的な分類モデル学習画面（`cls-training`）の「前処理を実行」ボタンのみで、OCR学習フローには前処理を明示的に再実行する手段が無かった。
+
+**設計上の根本原因**: コード調査の結果、①`create_ocr_dataset`（`services/ocr_pipeline.py`）は`services/preprocess.py`を一切importせず、既存の`processed/`とスナップショットを読み取るだけ、②`run_preprocess()`（スナップショット生成の唯一の呼び出し元）はDataset作成時にも学習開始時にも呼ばれない、③つまり「前処理設定変更→Dataset作成」というOCRフローには、現在の設定が`processed/`へ反映される保証が構造的に無かった——これが「設定記録なし」状態が生じる根本原因であり、案内文の修正だけでは解決しない設計上の不整合だった。
+
+**方針転換**: 案内文の修正ではなく、OCR Dataset作成フロー自体を「Dataset作成時は必ず現在設定でprocessed/を更新してから生成する」設計へ変更した。新しい「前処理を実行」ボタンは追加せず、既存の学習データセット作成ボタン（「新規学習データを作成」「再学習データを作成」「データを再作成」）の内部で、`POST /preprocess/run`（既存API・overrides省略でプロジェクト保存値=現在の前処理設定を自動使用）→`POST /api/ocr/dataset/create`（既存API・無変更）の順に自動実行するよう`App.jsx createOcrDataset()`を変更した。
+
+**実装箇所・順序**: `run_preprocess()`を呼ぶ位置はフロントエンド（`App.jsx`の`createOcrDataset()`）で、既存の`POST /preprocess/run`エンドポイントをそのまま呼び出す（バックエンドの前処理ロジック・`create_ocr_dataset`・スナップショット生成ロジックはいずれも複製・変更していない）。実行順序は必ず「①`POST /preprocess/run`（processed/更新＋`preprocess_snapshot.json`保存）→②`POST /api/ocr/dataset/create`（`create_ocr_dataset`が直後に更新された`processed/`とスナップショットを読み取ってDataset生成）」。Snapshot保存タイミングは①の内部（`run_preprocess`→`save_preprocess_snapshot`、Dataset作成のたびに毎回上書き保存される）。**OCRログ由来データセット（`from_logs`）は対象外**——ログが参照する画像パスは`processed/`の現在状態と無関係（OCR推論時点の実際の入力パスをそのまま参照する）ため、前処理の再実行に意味が無い。
+
+**UI進捗表示**: `lib/ocrDatasetStatus.js`に`buildDatasetCreateProgressLabel(phase)`を追加し、データセット作成ボタンが実行中は「1/2 前処理中」→「2/2 Dataset作成中」（スピナー付き）へラベルが切り替わり、ボタンは`disabled`になる。ジョブ/ポーリング機構は新設せず、フロントエンドが2つの既存APIを実際に順番にawaitすることで実時間の進捗を表現している。
+
+**案内文の修正**: 学習前処理タブ「設定記録なし」状態の案内文を、実在しないボタンへ誘導していた「設定履歴を残すには、前処理設定画面で再度前処理を実行してください。」（＋「※再実行するとprocessed画像が更新されるため、必要に応じて学習データセットも再作成してください。」）から、「現在の前処理設定で学習データセットを再作成すると、設定履歴が更新されます。」へ変更した（新しい設計と一致する、実際に押せるボタンへの案内）。
+
+**確認事項**: Dataset作成前に必ず`run_preprocess()`が呼ばれる（フロントの呼び出し順序で保証）／`preprocess_snapshot.json`は`run_preprocess()`実行のたびに毎回上書き保存される（既存の`save_preprocess_snapshot`の挙動どおり）／Datasetは直後に更新された`processed/`から生成される（`create_ocr_dataset`が都度ディスクから読み取るため）／旧プロジェクト（processed済みだがスナップショット未保存）も、この新フローでDatasetを再作成すれば「設定記録あり」へ移行する（バックエンドテストで検証）／画像取込（`/images/import`）・回転（`/images/{name}/rotate`）・分類モデル学習画面の既存の前処理呼び出し経路はいずれも無変更（バックエンドコードを一切変更していないため、既存の全回帰テストで担保）。
+
+**制約**: `create_ocr_dataset`・`run_preprocess`・`save_preprocess_snapshot`・学習ロジック・既存API（`POST /preprocess/run`・`POST /api/ocr/dataset/create`とも既存の契約は不変）はすべて無変更。フロントエンドの呼び出し順序変更のみで設計上の不整合を解消した。
+
+**テスト**: バックエンド1件追加（旧プロジェクトが`run_preprocess()`→`create_ocr_dataset()`の順で再作成すると`training_preprocess`が記録される移行契約の検証。既存の`test_create_ocr_dataset_without_snapshot_records_none`は単独呼び出し時の従来動作として維持）→バックエンド全件回帰で確認。フロントエンド6件追加（進捗ラベルの純関数テスト・データセット作成中/Dataset作成中/通常時のボタン表示切替・「データを再作成」ボタンの進捗表示・修正後の案内文表示）→フロント443件全通過、`npm run build`成功。
 
 ### 現在の前処理設定の可視化（GET /api/ocr/preprocess/current-config 追加）
 
