@@ -15,12 +15,26 @@ timeline
     07-18〜 : 学習条件比較・条件差分・次回学習提案 : サイドバーのOCR開発フロー順再編 : 性能サマリー省スペース化と比較カード短縮名
     07-24 : ダッシュボード「プロジェクト一覧」テーブル拡張 : 同カードビュー化（Health Badge・Exact Match） : カードへBenchmark性能指標追加（Balance Score・P95・Healthのreasons） : カードUI/UXブラッシュアップ（文字拡大・3列化・Primary/Secondary・Production独立表示） : 学習前処理・オーグメンテーションの実効値スナップショット保存と学習条件比較の2セクション化・推論使用モデルの一覧強調
     07-27 : 学習データ作成フローの明確化（事前作成の可視化・準備状況サマリー・評価データとの違いの明記） : 学習前処理の実行タイミング調査と前処理未実行時の警告・実行状況表示の追加 : 学習前処理ステータスの3状態化（旧プロジェクトの誤表示を是正） : 現在の前処理設定の可視化（GET /api/ocr/preprocess/current-config 追加） : OCR Dataset作成フローの見直し（Dataset作成時に必ずrun_preprocess()を自動実行する設計へ変更） : 推論使用モデルの永続化と学習用前処理設定の保存管理（Version・履歴・未保存変更ガード）
-    07-28 : Dataset Manager・Model Lineage機能追加（Dataset資産管理・Dataset⇔Model双方向リンク・再現性向上） : Experiment Manager機能強化（既存Experiment Trackingを唯一の実験管理基盤として拡張。新規Manager・新IDは作らず） : Benchmark Center追加（既存Benchmarkは「Benchmark Runner」へ改名し実行ツールとして温存、Benchmark Centerは既存資産を実行せず横断比較する別画面として新設）
+    07-28 : Dataset Manager・Model Lineage機能追加（Dataset資産管理・Dataset⇔Model双方向リンク・再現性向上） : Experiment Manager機能強化（既存Experiment Trackingを唯一の実験管理基盤として拡張。新規Manager・新IDは作らず） : Benchmark Center追加（既存Benchmarkは「Benchmark Runner」へ改名し実行ツールとして温存、Benchmark Centerは既存資産を実行せず横断比較する別画面として新設） : 推論モデル切替不具合修正（保存トリガーを常時監視effectから明示呼び出しの一本道へ）
 ```
 
 ---
 
 ## 2026-07
+
+### 推論モデル切替不具合修正（保存トリガーを常時監視effectから明示呼び出しの一本道へ）
+
+**症状**: モデル管理で「推論に使用」を一度設定すると、その後別モデルへ切り替えても保存されない（1回目のみ有効）という報告。
+
+**調査（原因特定）**: バックエンド（`services/inference_model.py`の`save_inference_model`・`GET/POST /api/ocr/inference/model`）を直接呼び出して3回連続で異なるモデルを保存する検証を行ったところ、**バックエンドは全く問題なく毎回正しく置換更新できる**ことを確認した（「未設定時のみ保存」のような分岐は無く、`atomic_write_json`による単一dictの置換書き込みのみ）。したがって原因はフロントエンドに限定された。
+
+`App.jsx`側を精査したところ、推論使用モデルの保存は「`inferEngine`/`inferModel`/`inferPaddleModel`/`inferTesseractModel`のいずれかが変化するたびに発火する常時監視`useEffect`」として実装されていた。ところが、この4つのstateは「推論に使用」ボタン以外からも変更されていた: ①モデル一覧再取得後に選択中モデルが一覧から消えていれば`"latest"`へ戻す無効選択リセットeffect、②画面（`ocr-inference`/`cls-inference`）遷移時にengineを強制同期するeffect。保存effectはこれらとdependencies配列を共有していたため、**「推論に使用」以外の要因でこれらのstateが変化した場合にも無条件で保存が発火してしまう**構造になっており、復元直後・一覧再取得直後などのタイミング次第で、直前の選択を静かに上書きしてしまう経路が存在した（`inferenceModelSuppressSaveRef`/`inferenceModelRestored`という2つの補助stateで一部のケース——復元直後の誤保存——のみを個別に抑制していたが、保存トリガー自体が複数effectに分散している設計そのものが本質的な不安定要因だった）。再現性の高い単一のバグ行を切り出すよりも、**保存のトリガーを1箇所に確定させる**ことが「場当たり的な修正」を避けた正しい対処と判断した。
+
+**修正内容**: 常時監視effect（保存）と2つの補助state（`inferenceModelSuppressSaveRef`・`inferenceModelRestored`）を廃止し、`App.jsx`に`switchInferenceModel(name)`という明示関数を新設。「推論に使用」ボタンはこの関数だけを呼ぶ。処理順序: ①（既に別モデルが設定されている場合のみ）確認ダイアログ「現在の推論使用モデル〈旧〉↓〈新〉へ変更します。よろしいですか？」を表示 ②Reactのstate（`inferEngine`＋`inferXxxModel`）を即時更新（画面更新を待たない。一覧の「推論使用中」表示・ボタン活性/非活性は同じstateから導出されるため、旧モデルの表示は同時に自動解除され、複数モデルが同時に「推論使用中」になることは構造上ない）③保存API（`POST /api/ocr/inference/model`）を呼び出し、常に置換更新する。復元処理（プロジェクトごとに1回だけ試みる既存の仕組み・`inferenceModelRestoreAttemptedProjectRef`）はそのまま維持し、抑制フラグが不要になった分だけ単純化した。確認ダイアログの要否判定・文言組み立ては`lib/inferenceModel.js`（新規）の純関数`shouldConfirmSwitch`/`buildSwitchConfirmMessage`/`resolveInferenceEngine`へ切り出し、単体テストで担保した。モデル削除時に推論使用モデルをクリアする既存処理（バックエンドの`clear_inference_model`・フロントの削除確認）は無変更（新しい保存経路と競合しないことを確認済み）。
+
+**テスト**: バックエンド`tests/test_preprocess_config_store.py`へ4件追加（サービス層の連続更新・API層の連続更新・JSON保存が置換であり追記でないことの直接確認）→全件回帰通過（バックエンドは元々正しかったため既存524件+新規4件）。フロントエンド`lib/inferenceModel.js`の単体テスト7件を新規追加→全件通過、`npm run build`成功。**注記**: このリポジトリにはブラウザ実操作テストの仕組み（インタラクティブなクリック・確認ダイアログ操作を伴うテスト基盤）が無く、本セッションの環境にもブラウザ自動操作ツールが無かったため、実ブラウザでの目視確認は行っていない。修正の妥当性は、保存トリガー箇所を静的解析で1箇所に確定させたこと・バックエンドの連続更新を直接検証したこと・切替判定ロジックを純関数化してユニットテストで担保したことの組み合わせで担保している。
+
+---
 
 ### Benchmark Center追加（既存Benchmarkは「Benchmark Runner」へ改名し実行ツールとして温存）
 

@@ -35,6 +35,7 @@ import { charCodepoints, confusionLabel } from "./lib/confusionFormat";
 import { buildAugmentationPayload, defaultAugmentationState } from "./lib/augmentation";
 import { viewBoundaryKey } from "./lib/viewKey";
 import { lowercaseToggleApplicable } from "./lib/lowercase";
+import { buildSwitchConfirmMessage, resolveInferenceEngine, shouldConfirmSwitch } from "./lib/inferenceModel";
 import {
   buildPreprocessPreviewPayload,
   buildPreprocessRunPayload,
@@ -543,12 +544,13 @@ export default function App() {
   const [inferEasyOcrLangs, setInferEasyOcrLangs] = useState(["en"]);
   const [inferPaddleModel, setInferPaddleModel] = useState("latest");
   const [inferTesseractModel, setInferTesseractModel] = useState("latest");
-  // 推論使用モデルの永続化（プロジェクト単位）: 復元が完了するまでは選択変更を保存しない
-  // （復元前の初期値=latest/customを誤って保存してしまうのを防ぐため）。
-  // inferenceModelSuppressSaveRef: 復元によるstate変更を「利用者の選択変更」として
-  // 再保存してしまわないようにするフラグ
-  const [inferenceModelRestored, setInferenceModelRestored] = useState(false);
-  const inferenceModelSuppressSaveRef = useRef(false);
+  // 推論使用モデルの永続化（プロジェクト単位）。v1.0.0で修正: 以前は「関連state（inferEngine
+  // 等）が変化するたびに保存する」常時監視effectだったため、モデル一覧再取得後の無効選択
+  // リセットeffectや画面遷移時のエンジン同期effectなど、ユーザーの意図しない変更まで保存対象に
+  // 巻き込まれ、タイミング次第で直前の選択を「latest」へ静かに上書きしてしまう不具合があった
+  // （2回目以降の切替が保存されない原因）。保存は switchInferenceModel() からの明示呼び出しのみで
+  // 行う一本道にし、常時監視effect・抑制用ref（旧 inferenceModelSuppressSaveRef /
+  // inferenceModelRestored）は廃止した（保存のトリガーが1箇所に確定するため再発しない）
   const inferenceModelRestoreAttemptedProjectRef = useRef("");
   // 推論前処理モード（Tesseract）。""=自動（学習時前処理の記録があればtraining=既定 / なければ従来動作）
   const [inferPreprocessMode, setInferPreprocessMode] = useState("");
@@ -985,7 +987,6 @@ export default function App() {
         const savedModel = savedData?.inference_model || null;
         if (savedModel?.model) {
           if (infoMap[savedModel.model]) {
-            inferenceModelSuppressSaveRef.current = true;
             const engine = String(savedModel.engine || "custom");
             if (engine === "tesseract") {
               setInferEngine("tesseract");
@@ -1005,8 +1006,6 @@ export default function App() {
         }
       } catch {
         // 推論モデル復元の失敗は他画面の利用を妨げない（機能を独立させる）
-      } finally {
-        setInferenceModelRestored(true);
       }
     }
 
@@ -1170,28 +1169,44 @@ export default function App() {
     refreshAll(projectId).catch((error) => notify("error", error.message));
   }, [projectId]);
 
-  // 推論使用モデルの保存: 選択（エンジン・モデル）が変わるたびに即時保存する
-  // （モデル選択→UIを即時更新→プロジェクト設定へ保存。保存のための別ボタンは無い）。
-  // 復元処理そのものによる変更は保存しない（inferenceModelSuppressSaveRefで判別）
-  useEffect(() => {
-    if (!inferenceModelRestored) return;
-    if (inferenceModelSuppressSaveRef.current) {
-      inferenceModelSuppressSaveRef.current = false;
-      return;
+  // 推論使用モデルの切替（v1.0.0で修正: 常時監視effectをやめ、明示呼び出しの一本道にした）。
+  // ①（2回目以降のみ）確認ダイアログ ②Reactstateを即時更新（画面更新を待たない）
+  // ③プロジェクト設定へ保存（常に置換更新。未設定時のみ保存のような分岐はしない）
+  async function switchInferenceModel(name) {
+    const info = modelInfos?.[name] || {};
+    const nextEngine = resolveInferenceEngine(info);
+
+    const currentName =
+      inferEngine === "tesseract" ? inferTesseractModel : inferEngine === "paddleocr" ? inferPaddleModel : inferModel;
+    const currentDisplayName = currentName && currentName !== "latest" ? modelAliases[currentName] || currentName : "";
+    const nextDisplayName = modelAliases[name] || name;
+
+    // 既に別モデルが推論使用モデルに設定されている場合のみ確認する（初回設定時は確認不要）
+    if (shouldConfirmSwitch(currentDisplayName, nextDisplayName)) {
+      const confirmed = window.confirm(buildSwitchConfirmMessage(currentDisplayName, nextDisplayName));
+      if (!confirmed) return;
     }
+
+    // 画面更新を待たず即時に選択状態を反映（一覧の「推論使用中」表示・ボタン活性/非活性も
+    // 同じstateから導出されるため、旧モデルの表示は同時に自動で解除される）
+    if (nextEngine === "tesseract") setInferTesseractModel(name);
+    else if (nextEngine === "paddleocr") setInferPaddleModel(name);
+    else setInferModel(name);
+    setInferEngine(nextEngine);
+    notify("success", `推論使用モデルを ${nextDisplayName} に設定しました`);
+
     if (!projectId) return;
-    const name = inferEngine === "tesseract" ? inferTesseractModel : inferEngine === "paddleocr" ? inferPaddleModel : inferModel;
-    if (!name) return;
-    const modelId = String(modelInfos?.[name]?.model_id || "");
-    request("/api/ocr/inference/model", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project_id: projectId, engine: inferEngine, model: name, model_id: modelId }),
-    }).catch(() => {
-      // 推論モデル保存の失敗は他画面の利用を妨げない（機能を独立させる）
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inferEngine, inferModel, inferPaddleModel, inferTesseractModel, inferenceModelRestored, projectId]);
+    const modelId = String(info.model_id || "");
+    try {
+      await request("/api/ocr/inference/model", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_id: projectId, engine: nextEngine, model: name, model_id: modelId }),
+      });
+    } catch (error) {
+      notify("error", `推論使用モデルの保存に失敗しました: ${error.message}`);
+    }
+  }
 
   useEffect(() => {
     setWorkflowState({
@@ -4337,21 +4352,7 @@ export default function App() {
         evalHistory={modelEvalHistory}
         inferenceInUseModel={inferenceInUseModel}
         inferenceInUseEngine={inferEngine}
-        onUseForInference={(name) => {
-          const engine = String(modelInfos?.[name]?.engine || "");
-          const family = String(modelInfos?.[name]?.training_family || "classification");
-          if (engine === "tesseract") {
-            setInferEngine("tesseract");
-            setInferTesseractModel(name);
-          } else if (family === "ocr") {
-            setInferEngine("paddleocr");
-            setInferPaddleModel(name);
-          } else {
-            setInferEngine("custom");
-            setInferModel(name);
-          }
-          notify("success", `推論使用モデルを ${modelAliases[name] || name} に設定しました`);
-        }}
+        onUseForInference={switchInferenceModel}
         onOpenEvaluation={(name) => {
           if (String(modelInfos?.[name]?.engine || "") === "tesseract") {
             setOcrEvalTrainedModel(name);

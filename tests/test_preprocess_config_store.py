@@ -267,6 +267,49 @@ def test_inference_model_store_roundtrip(temp_projects):
     assert load_inference_model(root) is None
 
 
+def test_inference_model_store_update_replaces_previous_value(temp_projects):
+    """推論モデル切替不具合修正: 更新保存は置換であり、旧モデルの情報を残さない。"""
+    project_id = "p_inf_update"
+    root = temp_projects["projects_dir"] / project_id
+    root.mkdir(parents=True, exist_ok=True)
+    save_inference_model(root, engine="tesseract", model="ModelA.tess.json", model_id="M0001")
+    save_inference_model(root, engine="tesseract", model="ModelB.tess.json", model_id="M0002")
+
+    loaded = load_inference_model(root)
+    assert loaded["model"] == "ModelB.tess.json"
+    assert loaded["inference_model_id"] == "M0002"
+    assert "ModelA" not in json.dumps(loaded)
+
+
+def test_inference_model_store_supports_three_or_more_updates(temp_projects):
+    """推論モデル切替不具合修正: 3回以上の切替がすべて反映され、最後の選択だけが残る。"""
+    project_id = "p_inf_multi"
+    root = temp_projects["projects_dir"] / project_id
+    root.mkdir(parents=True, exist_ok=True)
+    for name, model_id in [("ModelA", "M0001"), ("ModelB", "M0002"), ("ModelC", "M0003"), ("ModelD", "M0004")]:
+        save_inference_model(root, engine="tesseract", model=f"{name}.tess.json", model_id=model_id)
+        # 各更新の直後に、その時点の選択が正しく反映されていること（途中経過も検証）
+        assert load_inference_model(root)["model"] == f"{name}.tess.json"
+
+    final = load_inference_model(root)
+    assert final["model"] == "ModelD.tess.json"
+    assert final["inference_model_id"] == "M0004"
+
+
+def test_inference_model_json_file_replaced_not_appended(temp_projects):
+    """推論モデル切替不具合修正: 保存先ファイルは常に単一dict（置換）であり、追記された配列等にならない。"""
+    project_id = "p_inf_replace"
+    root = temp_projects["projects_dir"] / project_id
+    root.mkdir(parents=True, exist_ok=True)
+    save_inference_model(root, engine="tesseract", model="ModelA.tess.json")
+    save_inference_model(root, engine="tesseract", model="ModelB.tess.json")
+    save_inference_model(root, engine="tesseract", model="ModelC.tess.json")
+
+    raw = json.loads((root / "inference_model.json").read_text(encoding="utf-8"))
+    assert isinstance(raw, dict)  # 配列（追記形式）ではなく単一dict
+    assert raw["model"] == "ModelC.tess.json"
+
+
 def test_inference_model_api_get_and_set(temp_projects):
     client = TestClient(main_module.app)
     empty = client.get("/api/ocr/inference/model", params={"project_id": "p_inf_api"}).json()
@@ -281,6 +324,36 @@ def test_inference_model_api_get_and_set(temp_projects):
     assert saved["inference_model"]["engine"] == "tesseract"
     assert saved["inference_model"]["model"] == "eng.traineddata"
     assert saved["inference_model"]["inference_model_id"] == "M0003"
+
+
+def test_inference_model_api_supports_repeated_updates(temp_projects):
+    """推論モデル切替不具合修正: APIレベルでもA→B→Cの切替がすべて正しく反映される
+    （「未設定時のみ保存」のような分岐が無いことをAPI経由で確認）。"""
+    client = TestClient(main_module.app)
+    project_id = "p_inf_api_multi"
+
+    resp_a = client.post(
+        "/api/ocr/inference/model",
+        json={"project_id": project_id, "engine": "tesseract", "model": "ModelA.tess.json", "model_id": "M0001"},
+    )
+    assert resp_a.status_code == 200
+    assert client.get("/api/ocr/inference/model", params={"project_id": project_id}).json()["inference_model"]["model"] == "ModelA.tess.json"
+
+    resp_b = client.post(
+        "/api/ocr/inference/model",
+        json={"project_id": project_id, "engine": "tesseract", "model": "ModelB.tess.json", "model_id": "M0002"},
+    )
+    assert resp_b.status_code == 200
+    assert client.get("/api/ocr/inference/model", params={"project_id": project_id}).json()["inference_model"]["model"] == "ModelB.tess.json"
+
+    resp_c = client.post(
+        "/api/ocr/inference/model",
+        json={"project_id": project_id, "engine": "tesseract", "model": "ModelC.tess.json", "model_id": "M0003"},
+    )
+    assert resp_c.status_code == 200
+    final = client.get("/api/ocr/inference/model", params={"project_id": project_id}).json()["inference_model"]
+    assert final["model"] == "ModelC.tess.json"
+    assert final["inference_model_id"] == "M0003"
 
 
 def test_inference_model_different_projects_are_independent(temp_projects):
