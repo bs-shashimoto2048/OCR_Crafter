@@ -10,7 +10,8 @@
 
 | あなたは… | 最初に読む | 次に読む |
 |---|---|---|
-| 初めて利用する方 | [QUICK_START.md](QUICK_START.md) | [USER_GUIDE.md](USER_GUIDE.md) |
+| 初めて利用する方 | [QUICK_START.md](QUICK_START.md) | [manual/01_はじめに.md](manual/01_はじめに.md) → [USER_GUIDE.md](USER_GUIDE.md) |
+| 操作しながら学びたい方 | [tutorial/01_Tesseractチュートリアル.md](tutorial/01_Tesseractチュートリアル.md) | [manual/](manual/01_はじめに.md) 各章 |
 | 導入・環境構築を行う方 | [INSTALLATION_GUIDE.md](INSTALLATION_GUIDE.md) | [ADMIN_GUIDE.md](ADMIN_GUIDE.md) |
 | 日常運用・保守を行う方 | [ADMIN_GUIDE.md](ADMIN_GUIDE.md) | [BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md) / [UPDATE_GUIDE.md](UPDATE_GUIDE.md) |
 | 問題が発生した方 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | [FAQ.md](FAQ.md) |
@@ -18,6 +19,40 @@
 | 開発・保守担当者 | [09_AI_DEVELOPMENT_GUIDE.md](09_AI_DEVELOPMENT_GUIDE.md) | 下記「詳細仕様書」一覧 |
 
 ## 目的別ドキュメント一覧
+
+### マニュアル（manual/）— 初めて使う方向けの教育コンテンツ
+
+`USER_GUIDE.md`が全画面の網羅的な仕様説明であるのに対し、`manual/`は開発フロー（Dataset→Preprocess→Training→Experiment→Model→Evaluation→Benchmark）に沿って要点だけを説明する教育コンテンツです。実装済みの内容のみを記載しています。
+
+| ドキュメント | 内容 |
+|---|---|
+| [manual/01_はじめに.md](manual/01_はじめに.md) | OCR Crafterとは・対応エンジン・出来ること・開発フロー全体図 |
+| [manual/02_学習データ作成.md](manual/02_学習データ作成.md) | Dataset・Dataset Manager・作成手順・画像/ラベル形式 |
+| [manual/03_評価データ作成.md](manual/03_評価データ作成.md) | 評価Datasetの作り方・学習Datasetとの違い |
+| [manual/04_Tesseract学習.md](manual/04_Tesseract学習.md) | 学習画面の使い方・パラメータ・保存先 |
+| [manual/05_モデル評価.md](manual/05_モデル評価.md) | 評価の実行方法・Benchmark Runner/Centerとの関係 |
+| [manual/06_評価結果の見方.md](manual/06_評価結果の見方.md) | CER等の指標を初心者向けに概念で説明 |
+| [manual/07_モデル管理.md](manual/07_モデル管理.md) | Model Manager・推論使用モデル・推論モデル切替 |
+| [manual/08_FAQ.md](manual/08_FAQ.md) | よくあるトラブル（コードから確認できる内容のみ） |
+
+### チュートリアル（tutorial/）— 操作しながら学ぶ
+
+| ドキュメント | 内容 |
+|---|---|
+| [tutorial/01_Tesseractチュートリアル.md](tutorial/01_Tesseractチュートリアル.md) | サンプル画像で学習→評価→推論モデル登録まで操作する |
+| [tutorial/02_PaddleOCRチュートリアル.md](tutorial/02_PaddleOCRチュートリアル.md) | 同上（PaddleOCR。モデル評価画面は現時点では未対応） |
+| [tutorial/03_EasyOCRチュートリアル.md](tutorial/03_EasyOCRチュートリアル.md) | 推論のみ（学習は現時点では未実装） |
+
+### サンプル（examples/）— データ構造の実例
+
+実データは含まず、Markdownによる構造説明のみです。
+
+| ドキュメント | 内容 |
+|---|---|
+| [examples/README.md](examples/README.md) | サンプル一覧の案内 |
+| [examples/SampleDataset.md](examples/SampleDataset.md) | Datasetのフォルダ構成・meta.json項目 |
+| [examples/SampleEvaluation.md](examples/SampleEvaluation.md) | 評価Datasetの構成・Evaluation Profile |
+| [examples/SampleExperiment.md](examples/SampleExperiment.md) | 実験カルテの記録項目・Modelとの関連 |
 
 ### 利用者向け
 
