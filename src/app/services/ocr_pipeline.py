@@ -23,6 +23,7 @@ from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 from ..project_paths import ensure_project_directories, safe_rmtree
 from .labels import read_labels
 from .model_registry import resolve_ocr_model_meta
+from .dataset_registry import resolve_dataset_id_safe, scan_ocr_dataset_folders
 from .preprocess_config_store import load_saved_preprocess_config
 from .preprocess_snapshot import (
     build_training_preprocess,
@@ -1332,10 +1333,6 @@ def build_training_condition_snapshot(dataset_dir: str) -> Optional[dict[str, An
     }
 
 
-# 学習データセットの保存先（新規作成・OCRログからの再学習作成の両方を対象に探索する）
-OCR_DATASET_PARENT_DIRS = ("ocr_dataset", "ocr_dataset_from_logs")
-
-
 def find_latest_ocr_dataset(project_id: Optional[str]) -> Optional[dict[str, Any]]:
     """プロジェクト内で最後に作成されたOCR学習データセットの情報を返す（読み取り専用・何も作成しない）。
 
@@ -1346,23 +1343,9 @@ def find_latest_ocr_dataset(project_id: Optional[str]) -> Optional[dict[str, Any
     ISO8601のためそのまま文字列比較で新旧判定できる）。1件も無ければ None。
     """
     paths = ensure_project_directories(project_id)
-    found: list[tuple[str, Path, dict[str, Any]]] = []
-    for parent_name in OCR_DATASET_PARENT_DIRS:
-        parent = paths.outputs / parent_name
-        if not parent.is_dir():
-            continue
-        for child in sorted(parent.iterdir()):
-            if not child.is_dir():
-                continue
-            meta_path = child / "meta.json"
-            if not meta_path.is_file():
-                continue
-            try:
-                meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                continue
-            if isinstance(meta, dict):
-                found.append((parent_name, child, meta))
+    # 探索ロジックはdataset_registry.pyと共有する（Dataset Manager機能のlist_all_datasetsと
+    # 同一のスキャンを重複実装しない）
+    found = scan_ocr_dataset_folders(paths)
     if not found:
         return None
 
@@ -1764,6 +1747,11 @@ def _register_ocr_model(
             "enabled": bool(dataset_meta.get("use_augmentation")) if "use_augmentation" in dataset_meta else None,
             "strength": int(dataset_meta.get("aug_strength", 0)) if "aug_strength" in dataset_meta else None,
         },
+        # v1.0.0で追加（Dataset Manager / Model Lineage）: 学習に使用したDatasetの追跡情報。
+        # Dataset自体が削除されてもモデル側に来歴が残るよう、登録時点で確定保存する
+        "dataset_id": resolve_dataset_id_safe(project_id, str(dataset_root)),
+        "dataset_name": str(dataset_meta.get("display_name") or dataset_root.name),
+        "dataset_created_at": str(dataset_meta.get("created_at") or ""),
         "created_at": datetime.now().isoformat(),
     }
     model_meta_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")

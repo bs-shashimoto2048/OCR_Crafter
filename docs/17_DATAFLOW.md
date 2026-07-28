@@ -38,13 +38,16 @@ flowchart TD
     DS2 -.-> DSLATEST
     DS --> TRAIN["学習ジョブ（別プロセス）<br/>POST /api/ocr/train/start (PaddleOCR・dataset_dir必須=400/404)<br/>POST /api/tesseract/train/start<br/>（実験名・親モデル・学習メモをメタへ）"]
     DS2 --> TRAIN
-    TRAIN --> MODEL["モデル登録<br/>models/*.ocr.json（+inference export）<br/>models/*.tess.json"]
+    TRAIN --> MODEL["モデル登録<br/>models/*.ocr.json（+inference export）<br/>models/*.tess.json<br/>v1.0.0で追加: dataset_id/dataset_name/dataset_created_atを確定保存"]
     MODEL --> MID2["管理No採番<br/>GET /models/info 時に作成日時順で一括採番<br/>data/model_ids.json（削除後も再利用しない）"]
     MODEL --> OCR
     MODEL --> EVAL["モデル評価（CER主指標）<br/>POST /api/ocr/evaluate<br/>学習前後を同一入力で比較（case-sensitive・NFC）"]
     EVAL --> HIST["評価履歴保存<br/>localStorage ocr_model_eval_history_by_project_v1<br/>＋評価CSV出力（管理No・コードポイント列付き）"]
     HIST --> MGMT["モデル管理（カルテ）<br/>モデル比較（性能サマリー・学習条件比較・<br/>条件差分・次回学習提案）"]
     MGMT --> OCR
+    DS -.-> DSMGR["Dataset Manager<br/>GET/POST /api/ocr/datasets*<br/>v1.0.0で追加: Dataset ID（DS0001）・使用モデル数はlist_model_infosとのライブ集計"]
+    DS2 -.-> DSMGR
+    DSMGR <-.-> MGMT
 ```
 
 ## 補足（フロー上の重要な不変条件）
@@ -83,6 +86,7 @@ flowchart TD
 | ラベル | `master.csv` が唯一の正解。評価でGTを大文字化しない（case-sensitive） | `labels.py`, `ocr_evaluation.py` |
 | 学習ジョブ | APIプロセスと分離（`job_runner.py` をPopen）。状態は SQLite `training_jobs` | `main.py`, `db.py` |
 | 推論モデル | export済み（inference）モデルのみ使用可（`STRICT_OCR_EXPORT_REQUIRED=True`） | `predict.py` |
+| Dataset Manager（Dataset⇔Model Lineage） | 「モデル学習登録時（`register_tesseract_model`/`_register_ocr_model`）に`dataset_id`（DS0001形式・`resolve_dataset_id_safe`で解決）・`dataset_name`・`dataset_created_at`をモデル自身のmetadataへ**確定保存**（Dataset自体が後で削除されても来歴が残る）→ Dataset⇔Modelのリンクは永続的な逆引きインデックスを持たず、`list_all_datasets`が`list_model_infos`の`dataset_root`/`ocr_dataset_root`と都度ライブ集計→ モデル削除時は`delete_model`が元々Dataset側のファイルに触れないため、リンク解除の追加処理は不要（次回集計で自動的に外れる）」。Dataset ID（`DS0001`形式・`data/dataset_ids.json`）は既存の`GET /api/ocr/dataset/latest`が返す表示専用ID（`DS-<フォルダ名>`）とは別概念で共存する | `dataset_registry.py` / `model_registry.py` / `tesseract_pipeline.py` / `ocr_pipeline.py` |
 
 ## 永続化ポイント一覧
 
@@ -99,6 +103,7 @@ flowchart LR
     DB[("outputs/app.db<br/>training_jobs (SQLite)")]
     LS[("ブラウザ localStorage<br/>前処理パラメータ・辞書・UI設定")]
     MID[("data/model_ids.json<br/>モデル管理No登録簿（全プロジェクト共通）")]
+    DSID[("data/dataset_ids.json<br/>Dataset管理No登録簿（全プロジェクト共通・v1.0.0で追加）")]
     JOBS[("data/jobs/<br/>jobs.json・events/*.jsonl・logs/*.log")]
 ```
 
@@ -115,5 +120,9 @@ flowchart LR
 - `data/jobs/`（全プロジェクト共通・Job Management）: `jobs.json`=`{"counter": 通算採番数, "items": [Job...], "config": {"benchmark_concurrency": 1}}`。Job IDは JOB-000001形式・システム全体で一意・再利用しない。`events/JOB-xxxxxx.jsonl`=進捗イベント（追記型・1行1イベント。将来SSEでも同一形式）。`logs/JOB-xxxxxx.log`=スタックトレース等の内部ログ（画面へ出さない）。詳細は `docs/18_JOB_MANAGEMENT.md`
 
 - `data/model_ids.json`: モデル管理No（M0001形式）の登録簿。`{"counter": 通算採番数, "models": {"<project_id>/<モデル名>": "M0001"}}`。`/models/info` の一覧取得時に未登録モデルを**作成日時順**で一括採番して追記する（既存モデルの初回移行も同じ経路）。**モデルを削除してもエントリは残し、番号を再利用しない**（OCR Crafter全体で一意）。ファイルが無い・壊れている場合は counter=0 から再構築される
+
+- `data/dataset_ids.json`（v1.0.0で追加・Dataset Manager）: Dataset管理No（DS0001形式）の登録簿。`{"counter": 通算採番数, "datasets": {"<project_id>/<フォルダ名>": "DS0001"}}`。`model_ids.json`と全く同じ設計（作成日時順の一括採番・削除後も番号を再利用しない・ファイル破損時はcounter=0から再構築）を流用。既存の`GET /api/ocr/dataset/latest`が返す表示専用ID（`DS-<フォルダ名>`形式）とは別concept——後者は無変更のまま維持し、`DS0001`形式は資産管理・Model Lineage記録専用の安定IDとして新設した
+
+- Dataset自体のmetadata（`outputs/ocr_dataset*/<フォルダ名>/meta.json`）は従来「作成時に1回だけ書く完了マーカー」だったが、v1.0.0でDataset Manager用に**追加**フィールドを書き込めるようにした: `display_name`（コピー時の表示名変更用）・`comment`（複数行コメント）・`copied_from_dataset_folder`（コピー元フォルダ名。コピー時のみ）。いずれも既存フィールドの意味・階層構成は変更しない追加のみ
 
 - どの矢印がどのAPIかは `docs/06_API_REFERENCE.md`、ファイル形式は `docs/07_DATABASE.md` を参照。

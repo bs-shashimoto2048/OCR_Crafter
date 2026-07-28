@@ -29,7 +29,8 @@
 | ラベル | ラベル編集（OCR候補・辞書近似候補のクリック採用）、未編集フィルタ |
 | 学習 | PaddleOCR認識モデル学習 / Tesseract LSTM fine-tune / 分類モデル学習（実験機能）— いずれも非同期ジョブ。実験名・親モデル・学習メモをモデルメタへ保存可能 |
 | 評価 | OCRモデル評価（主指標=**CER**のマイクロ平均。文字正解率・完全一致率・改善/同等/悪化・混同TOP・CSV出力・評価履歴・学習データ重複チェック）、分類モデル評価 |
-| モデル管理 | 管理No（M0001形式・全プロジェクト横断で一意・削除後も再利用しない）、モデルカルテ、**モデル比較**（最大3件・固定色・性能サマリー/学習条件比較/条件差分/次回学習提案） |
+| モデル管理 | 管理No（M0001形式・全プロジェクト横断で一意・削除後も再利用しない）、モデルカルテ、**モデル比較**（最大3件・固定色・性能サマリー/学習条件比較/条件差分/次回学習提案）、モデルコメント |
+| Dataset Manager | 学習データセットの資産管理（Dataset ID=DS0001形式）。一覧（作成日時降順・ソート可能テーブル）、Dataset詳細（前処理Version/Hash・学習設定・使用モデル一覧）、Dataset⇔Model双方向リンク、コピー・削除（使用モデルがある場合は警告）、コメント、Dataset名・コメント・Charset・前処理Versionでの検索。詳細は `docs/16_SCREEN_SPEC.md` |
 | 実験管理 | 学習実行ごとの実験カルテ（EXP-0001形式・学習条件/前処理ハッシュ/Aug/評価/学習時間）、Experiment比較（条件差分の強調表示）、CER推移等のグラフ、簡易相関・ベスト条件・条件推薦、タグ・★・フィルタ・CSV出力、モデルカルテとの相互リンク |
 | リリース管理 | モデルのライフサイクル（Draft→Validated→Candidate→Production→Archived・Productionは1つだけ）、Release Note必須の昇格・バージョン採番・Release History・Rollback・本番比較・安全性警告、Model Card自動生成、Deployment Package（ZIP）Export |
 | 推論 | 単一推論・バッチ推論・YOLO検出+OCR複合推論。エンジン: custom / EasyOCR / PaddleOCR / Tesseract |
@@ -47,7 +48,7 @@
 データ準備       … OCR画像作成（画像指定・リサイズ / YOLO検出 / Bounding Box選択 / クロップ出力）
                    / 学習データ（画像 / 前処理設定 / ラベル編集）
                    / 評価データ（データセット作成）  ※3つの折りたたみグループ
-OCRモデル        … データ作成・学習 / モデル管理 / 実験管理 / リリース管理 / モデル評価 / 推論 / OCR修正 / バッチ推論
+OCRモデル        … データ作成・学習 / モデル管理 / Dataset Manager / 実験管理 / リリース管理 / モデル評価 / 推論 / OCR修正 / バッチ推論
 運用             … ジョブ管理 / Benchmark / レポート / 監査ログ / システム状態
 実験機能         … 分類学習 / 分類モデル管理 / 分類推論 / 分類評価
 ```
@@ -71,11 +72,11 @@ OCRモデル        … データ作成・学習 / モデル管理 / 実験管�
 
 | パス | 内容 |
 |---|---|
-| `src/app/` | FastAPIバックエンド（main.py に全118エンドポイント） |
+| `src/app/` | FastAPIバックエンド（main.py に全133エンドポイント） |
 | `src/app/services/` | 前処理・OCRパイプライン・モデル管理などのドメインロジック |
 | `frontend/` | React UI（views 20画面 / components / lib） |
 | `config/settings.yaml` | 全設定（前処理・学習・Tesseract等） |
-| `data/projects/<id>/` | プロジェクトデータ（gitignore対象）。`data/model_ids.json`=モデル管理No登録簿（全プロジェクト共通） |
+| `data/projects/<id>/` | プロジェクトデータ（gitignore対象）。`data/model_ids.json`=モデル管理No登録簿・`data/dataset_ids.json`=Dataset管理No登録簿（いずれも全プロジェクト共通） |
 | `models/`, `outputs/`, `external/` | モデル・出力・外部リポジトリ（gitignore対象） |
 | `tests/` | pytest テスト（37ファイル） |
 | `docs/` | ドキュメント |

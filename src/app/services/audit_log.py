@@ -53,6 +53,10 @@ AUDIT_ACTIONS = [
     "report_delete",  # レポートの削除
     "preprocess_config_save",  # 「前処理設定保存」（学習用確定設定の新規保存）
     "preprocess_config_restore",  # 確定済み前処理設定への復元
+    "dataset_delete",  # Dataset Manager: Dataset削除（再現性情報が失われるためadmin相当）
+    "dataset_copy",  # Dataset Manager: Datasetコピー
+    "dataset_comment",  # Dataset Manager: Datasetコメント保存
+    "model_comment",  # Dataset Manager: Modelコメント保存
 ]
 
 # 権限ロール（弱い順）と操作に必要な最低ロール
@@ -84,6 +88,10 @@ ACTION_MIN_ROLE = {
     "report_delete": "operator",
     "preprocess_config_save": "operator",
     "preprocess_config_restore": "operator",
+    "dataset_delete": "admin",
+    "dataset_copy": "operator",
+    "dataset_comment": "operator",
+    "model_comment": "operator",
 }
 
 # 保存禁止キー（部分一致・小文字比較）: パスワード・トークン・APIキー等の機密情報

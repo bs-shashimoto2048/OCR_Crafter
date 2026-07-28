@@ -100,6 +100,7 @@ export const SIDEBAR_SECTIONS = [
       // 学習→管理→評価（性能確認）→推論→修正→バッチの順
       { id: "ocr-training", label: "データ作成・学習" },
       { id: "ocr-models", label: "モデル管理" },
+      { id: "dataset-manager", label: "Dataset Manager" },
       { id: "experiments", label: "実験管理" },
       { id: "releases", label: "リリース管理" },
       { id: "ocr-eval", label: "モデル評価" },

@@ -17,6 +17,20 @@ class PreprocessSavedConfigRequest(BaseModel):
     project_id: Optional[str] = "default"
 
 
+class DatasetCommentRequest(BaseModel):
+    project_id: Optional[str] = "default"
+    comment: str = ""
+
+
+class DatasetCopyRequest(BaseModel):
+    project_id: Optional[str] = "default"
+
+
+class ModelCommentRequest(BaseModel):
+    project_id: Optional[str] = "default"
+    comment: str = ""
+
+
 class InferenceModelSaveRequest(BaseModel):
     project_id: Optional[str] = "default"
     engine: str

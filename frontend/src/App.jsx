@@ -10,6 +10,7 @@ import ImagesView from "./views/ImagesView";
 import LabelingView from "./views/LabelingView";
 import TrainingView from "./views/TrainingView";
 import ModelsView from "./views/ModelsView";
+import DatasetManagerView from "./views/DatasetManagerView";
 import InferenceView from "./views/InferenceView";
 import ExperimentsView from "./views/ExperimentsView";
 import ReleasesView from "./views/ReleasesView";
@@ -70,6 +71,7 @@ const viewMeta = {
   "cls-training": { title: "学習", subtitle: "実験機能（分割学習）: 前処理・データセット作成・学習" },
   models: { title: "モデル", subtitle: "保存済みモデル管理" },
   "ocr-models": { title: "モデル", subtitle: "OCR認識モデルの管理" },
+  "dataset-manager": { title: "Dataset Manager", subtitle: "学習データセットの資産管理・Model Lineage" },
   experiments: { title: "実験管理", subtitle: "学習条件・結果・考察の一元管理と実験比較" },
   releases: { title: "リリース管理", subtitle: "モデルのライフサイクル管理・本番適用・配布" },
   jobs: { title: "ジョブ管理", subtitle: "バックグラウンドジョブの一覧・進捗・キャンセル・再実行" },
@@ -657,6 +659,8 @@ export default function App() {
   const [focusExperimentId, setFocusExperimentId] = useState("");
   // 実験→生成モデルの遷移でモデル管理のカルテを開くためのリクエスト
   const [modelDetailRequest, setModelDetailRequest] = useState(null);
+  // Model詳細→「使用Dataset」からDataset Managerへ戻るリクエスト（{id, seq}。seq変化で詳細を開く）
+  const [datasetDetailRequest, setDatasetDetailRequest] = useState(null);
   // リリース管理（Model Release Management）。状態・履歴はサーバー保存（releases.json）
   const [releases, setReleases] = useState({ production: "", statuses: {}, history: [] });
   const [releasesLoading, setReleasesLoading] = useState(false);
@@ -4359,6 +4363,24 @@ export default function App() {
         }}
         detailRequest={modelDetailRequest}
         releaseStatuses={releases.statuses}
+        onOpenDataset={(datasetId) => {
+          setDatasetDetailRequest({ id: datasetId, seq: Date.now() });
+          setActiveView("dataset-manager");
+        }}
+      />
+    );
+  }
+
+  if (activeView === "dataset-manager") {
+    view = (
+      <DatasetManagerView
+        projectId={projectId}
+        notify={notify}
+        detailRequest={datasetDetailRequest}
+        onOpenModel={(name) => {
+          setModelDetailRequest({ name, seq: Date.now() });
+          setActiveView("ocr-models");
+        }}
       />
     );
   }
@@ -4736,6 +4758,7 @@ export default function App() {
     "cls-training",
     "models",
     "ocr-models",
+    "dataset-manager",
     "cls-models",
     "inference",
     "ocr-inference",

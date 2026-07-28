@@ -92,6 +92,20 @@
 | POST `/api/ocr/train/stop/{job_id}` | Query: `delete_artifacts?` | 停止結果 | OCR学習停止 |
 | GET `/api/ocr/train/log/{job_id}` | Query: `tail`（1〜5000） | `lines[]` | 学習ログのtail取得 |
 
+## Dataset Manager（Dataset資産管理 / Model Lineage）
+
+v1.0.0で追加。Datasetを一時生成物ではなく開発資産として扱い、「どの設定で作られ・どのモデルに使われたか」を追跡可能にする機能。Dataset ID（`DS0001`形式・作成日時順採番・`data/dataset_ids.json`へ永続化・削除後も再利用しない）は、既存の`GET /api/ocr/dataset/latest`が返す表示専用ID（`DS-<フォルダ名>`）とは**別概念**（後方互換のため後者は無変更のまま維持）。Dataset⇔Modelのリンクは永続的な逆引きインデックスを持たず、モデルmetadataの`dataset_root`（Tesseract）/`ocr_dataset_root`（PaddleOCR）と`list_model_infos`の結果を都度ライブ集計する（モデル削除時に別途リンク解除処理が不要になる設計）。
+
+| Method / Path | リクエスト | レスポンス主要キー | 概要 |
+|---|---|---|---|
+| GET `/api/ocr/datasets` | Query: `project_id?` | `{project_id, items[]}`（各item: `dataset_id, folder_name, name, dataset_root, source, created_at, input_count, counts{train,val,test}, charset, seed, preprocess_config_version, training_preprocess_hash, comment, copied_from_dataset_folder, model_count, model_names[]`） | Dataset Manager一覧（作成日時降順）。`outputs/ocr_dataset`・`outputs/ocr_dataset_from_logs`配下のmeta.jsonを走査（既存`find_latest_ocr_dataset`と走査ロジックを共用） |
+| GET `/api/ocr/datasets/{dataset_id}` | Query: `project_id?` | 基本情報＋`preprocess{version,saved_at,hash}`＋`training_settings{train_ratio,val_ratio,test_ratio,charset,rotation{enabled,max_degrees},input_count,excluded_count}`＋`counts`＋`models[{name,model_id}]` | Dataset詳細。存在しないIDは**404**。`rotation`はDataset作成時のオーグメンテーション回転設定（`meta.augmentation.rotation`）を指す（画像個別回転APIとは別概念） |
+| GET `/api/ocr/datasets/{dataset_id}/delete-impact` | Query: `project_id?` | `{model_count, model_names[]}` | Dataset削除前の影響確認専用API（削除は行わない）。使用モデルが存在する場合、フロントは「このDatasetから作成されたモデルが存在します。〈モデル名一覧〉削除すると再現性情報が失われます。削除しますか？」を表示（既定キャンセル） |
+| POST `/api/ocr/datasets/{dataset_id}/comment` | `DatasetCommentRequest`（`project_id?`, `comment`） | Dataset詳細 | 複数行コメントを保存（`meta.json`へ追加フィールドとして書き込む）。監査対象操作（`dataset_comment`・operator以上） |
+| POST `/api/ocr/datasets/{dataset_id}/copy` | `DatasetCopyRequest`（`project_id?`） | 複製後のDataset詳細 | Datasetを複製（実体ファイル一式＋metadataをコピー。表示名は`<元名>_Copy`、Dataset IDのみ新規発行、`copied_from_dataset_folder`で由来を記録）。監査対象操作（`dataset_copy`・operator以上） |
+| DELETE `/api/ocr/datasets/{dataset_id}` | Query: `project_id?` | `{project_id, dataset_id, deleted}` | Dataset削除（既存の`safe_rmtree`ガードを再利用。models配下等の安全性検証は変更しない）。存在しないIDは**404**。監査対象操作（`dataset_delete`・**admin以上**。再現性情報が失われるためモデル削除と同等の権限とした） |
+| GET `/api/ocr/preprocess/saved-config` | Query: `project_id?` | `{project_id, saved_config, history[]}` | **v1.0.0で拡張**（既存API）。`saved_config`・`history[]`各要素へ`dataset_usage_count`・`model_usage_count`（そのVersionを使用したDataset数・Model数のライブ集計）を追加。Version数分の全件再読込はせず、1回の`list_all_datasets`/`list_model_infos`結果を使い回す |
+
 ## 実験管理（Experiment Tracking）
 
 | Method / Path | リクエスト | レスポンス主要キー | 概要 |
@@ -181,13 +195,14 @@
 | Method / Path | リクエスト | レスポンス主要キー | 概要 |
 |---|---|---|---|
 | GET `/models` | Query: `project_id?` | `items` | 保存済みモデル一覧 |
-| GET `/models/info` | Query: `project_id?` | `items` | モデル詳細情報一覧（`model_size_mb`=モデル実体サイズMB。tesseract=traineddata・分類=.ptファイル。実体なし/PaddleOCRはnull=UIでは未記録表示。`model_id`=管理No「M0001」形式：作成日時順に自動採番・OCR Crafter全体で一意・削除後も再利用しない。`data/model_ids.json` へ永続化し未登録モデルは一覧取得時に一括採番。tesseractモデルは実験情報 `experiment_name` / `parent_model_id`（親モデルの管理No。ベース直学習は空）/ `training_note` / `training_duration_seconds`（秒・旧モデルはnull）を含む=学習条件比較で使用。旧メタは空値/nullで後方互換。**学習時前処理**: `training_preprocess`（前処理スナップショット。tesseract=.tess.json保存値 / PaddleOCR=.ocr.jsonまたはデータセットmeta由来）・`training_preprocess_hash`・`dataset_source_image_state` を含む=モデル比較「学習前処理比較」・評価/推論の学習時前処理再現で使用。旧モデルはnull/空=未記録表示。**v1.0.0で追加**: `augmentation_hash`（オーグメンテーション設定のハッシュ）・`training_input_pipeline_hash`（前処理+オーグメンテーションの結合ハッシュ）=モデル比較「オーグメンテーション比較」で使用。旧モデルは空文字=未記録表示） |
+| GET `/models/info` | Query: `project_id?` | `items` | モデル詳細情報一覧（`model_size_mb`=モデル実体サイズMB。tesseract=traineddata・分類=.ptファイル。実体なし/PaddleOCRはnull=UIでは未記録表示。`model_id`=管理No「M0001」形式：作成日時順に自動採番・OCR Crafter全体で一意・削除後も再利用しない。`data/model_ids.json` へ永続化し未登録モデルは一覧取得時に一括採番。tesseractモデルは実験情報 `experiment_name` / `parent_model_id`（親モデルの管理No。ベース直学習は空）/ `training_note` / `training_duration_seconds`（秒・旧モデルはnull）を含む=学習条件比較で使用。旧メタは空値/nullで後方互換。**学習時前処理**: `training_preprocess`（前処理スナップショット。tesseract=.tess.json保存値 / PaddleOCR=.ocr.jsonまたはデータセットmeta由来）・`training_preprocess_hash`・`dataset_source_image_state` を含む=モデル比較「学習前処理比較」・評価/推論の学習時前処理再現で使用。旧モデルはnull/空=未記録表示。**v1.0.0で追加**: `augmentation_hash`（オーグメンテーション設定のハッシュ）・`training_input_pipeline_hash`（前処理+オーグメンテーションの結合ハッシュ）=モデル比較「オーグメンテーション比較」で使用。旧モデルは空文字=未記録表示。**v1.0.0で追加（Dataset Manager / Model Lineage）**: `dataset_id`（学習に使用したDatasetの管理No「DS0001」形式）・`dataset_name`・`dataset_created_at`（いずれも学習登録時点で確定保存＝Dataset自体が後で削除されても残る）・`comment`（モデルコメント。tesseract/PaddleOCRのみ対応。旧モデル・分類モデルは空文字） |
 | GET `/models/latest` | Query: `model_type?`, `training_family`, `engine?` | `model` | 最新モデル名 |
 | GET `/model-types` | Query: `project_id?` | `items` | モデル種別一覧 |
-| DELETE `/models/{model_name}` | Query: `project_id?` | `deleted` | モデル削除（models配下限定の安全検証あり）。**v1.0.0で追加**: 削除対象が保存済みの推論使用モデル（`inference_model.json`）と一致する場合、保存済み選択を自動クリアする（削除済みモデルを指したままにしない。フロント側は削除前に「このモデルは現在、推論使用モデルに設定されています。削除すると推論モデルが未選択になります。削除しますか？」を確認表示） |
+| DELETE `/models/{model_name}` | Query: `project_id?` | `deleted` | モデル削除（models配下限定の安全検証あり）。**v1.0.0で追加**: 削除対象が保存済みの推論使用モデル（`inference_model.json`）と一致する場合、保存済み選択を自動クリアする（削除済みモデルを指したままにしない。フロント側は削除前に「このモデルは現在、推論使用モデルに設定されています。削除すると推論モデルが未選択になります。削除しますか？」を確認表示）。**モデル削除はDataset側のリンクを一切変更しない**（Dataset⇔Modelのリンクは`list_model_infos`とのライブ集計のため、モデルファイルが無くなれば自動的にDatasetの使用モデル数から外れる＝明示的な解除処理は不要） |
 | GET `/api/models/download/{model_name}` | Query: `project_id?` | FileResponse | `.pt` / `.traineddata` / inference ZIP のダウンロード |
 | POST `/api/ocr/models/export-migrate` | Query: `overwrite?`, `dry_run?` | 変換結果 | 学習済みOCRモデルを推論用へ一括変換 |
 | GET `/api/ocr/models/official` | なし | `items` | 公式PaddleOCR認識モデル一覧 |
+| POST `/api/models/{model_name}/comment` | `ModelCommentRequest`（`project_id?`, `comment`） | `{project_id, model, comment}` | **v1.0.0で追加（Dataset Manager / Model Lineage）**。モデルへ複数行コメントを保存（`.ocr.json`/`.tess.json`のmetadataへ追加フィールドとして書き込む）。`.pt`（分類モデル）は対象外＝**400**。監査対象操作（`model_comment`・operator以上） |
 
 ## 推論 / OCRログ
 

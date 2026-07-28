@@ -33,6 +33,9 @@ EXPECTED_MATRIX = {
     "report_delete": "operator",  # レポート削除
     "preprocess_config_save": "operator",  # 「前処理設定保存」（学習用確定設定の新規保存）
     "preprocess_config_restore": "operator",  # 確定済み前処理設定への復元
+    "dataset_copy": "operator",  # Dataset Manager: Datasetコピー
+    "dataset_comment": "operator",  # Dataset Manager: Datasetコメント保存
+    "model_comment": "operator",  # Dataset Manager: Modelコメント保存
     # Approver以上
     "release_promote": "approver",
     "release_rollback": "approver",
@@ -43,6 +46,7 @@ EXPECTED_MATRIX = {
     "backup_restore": "admin",
     "retention_cleanup": "admin",
     "restore_failed": "admin",
+    "dataset_delete": "admin",  # Dataset Manager: Dataset削除（再現性情報が失われるためadmin相当）
 }
 
 

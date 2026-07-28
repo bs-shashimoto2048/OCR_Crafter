@@ -15,11 +15,36 @@ timeline
     07-18〜 : 学習条件比較・条件差分・次回学習提案 : サイドバーのOCR開発フロー順再編 : 性能サマリー省スペース化と比較カード短縮名
     07-24 : ダッシュボード「プロジェクト一覧」テーブル拡張 : 同カードビュー化（Health Badge・Exact Match） : カードへBenchmark性能指標追加（Balance Score・P95・Healthのreasons） : カードUI/UXブラッシュアップ（文字拡大・3列化・Primary/Secondary・Production独立表示） : 学習前処理・オーグメンテーションの実効値スナップショット保存と学習条件比較の2セクション化・推論使用モデルの一覧強調
     07-27 : 学習データ作成フローの明確化（事前作成の可視化・準備状況サマリー・評価データとの違いの明記） : 学習前処理の実行タイミング調査と前処理未実行時の警告・実行状況表示の追加 : 学習前処理ステータスの3状態化（旧プロジェクトの誤表示を是正） : 現在の前処理設定の可視化（GET /api/ocr/preprocess/current-config 追加） : OCR Dataset作成フローの見直し（Dataset作成時に必ずrun_preprocess()を自動実行する設計へ変更） : 推論使用モデルの永続化と学習用前処理設定の保存管理（Version・履歴・未保存変更ガード）
+    07-28 : Dataset Manager・Model Lineage機能追加（Dataset資産管理・Dataset⇔Model双方向リンク・再現性向上）
 ```
 
 ---
 
 ## 2026-07
+
+### Dataset Manager・Model Lineage機能追加（Dataset資産管理・双方向リンク・再現性向上）
+
+**背景**: これまでOCR Crafterの学習データセット（`outputs/ocr_dataset*/`）は一時生成物として扱われ、「どの設定で作られ・どのモデルに使われたか」を後から追跡する手段が無かった（Datasetを削除するとどのモデルがそこから作られたか完全に失われ、モデル一覧からも「学習に使ったDataset」を辿れなかった）。社内標準のOCRモデル開発環境として長期間使う前提のため、「作れること」より「後から追跡・再現できること」を優先し、Dataset自体を開発資産として管理する画面を新設した。
+
+**1. Dataset ID（DS0001形式）は既存の表示専用IDと別概念で新設**: `GET /api/ocr/dataset/latest`は以前から`dataset_id: "DS-<フォルダ名>"`という導出値を返しているが、これは「直近作成したDatasetを画面再読込後も表示するための簡易値」であり、削除後の再利用不可・全プロジェクト横断での一意性・作成順の永続採番、といった資産管理IDに必要な性質を持たない。これを流用・変更せず（既存表示・テストへの影響を避けるため）、モデル管理No（`model_ids.json`／`assign_model_ids`）と全く同じ設計を`dataset_registry.py`へ複製して`data/dataset_ids.json`／`assign_dataset_ids`として新設した。2つのID形式が同一Datasetに対して共存する点は仕様として意図的な選択であり、画面ごとに役割が異なる（`dataset/latest`=作成直後の簡易確認、Dataset Manager=恒久的な資産管理ID）。
+
+**2. Dataset⇔Modelのリンクは永続的な逆引きインデックスを持たない設計にした**: 「Datasetにモデル一覧を保存する」「モデルにDataset一覧を保存する」という双方向の永続データを持つ案も検討したが、片方だけ更新されて食い違う（Dataset削除・モデル削除・手動ファイル操作等で同期が壊れる）リスクを避けるため、モデルmetadataが既に持つ`dataset_root`（Tesseract）／`ocr_dataset_root`（PaddleOCR。`_register_ocr_model`のペイロードに元から存在した`dataset_root`フィールドと同じ値を`list_model_infos`が`ocr_dataset_root`のキー名で返す）を、`list_all_datasets`／`get_dataset_detail`が`list_model_infos`の結果へ都度ライブ集計する設計にした。この設計により、**「7. Model削除時はDataset側のリンクだけ解除する」という要件はコード追加ゼロで自動的に満たされる**——`delete_model`はモデル自身のディレクトリ（`checkpoint_dir`/`inference_dir`/`tessdata_dir`/`model_dir`）しか操作せず`dataset_root`には一切触れないため（既存実装を確認済み）、モデルファイルが消えれば次回の一覧取得時に自動的にそのDatasetの使用モデル数から外れる。
+
+**3. Model Lineage情報（`dataset_id`/`dataset_name`/`dataset_created_at`）は学習登録時点で確定保存**: Dataset自体が将来削除されても来歴情報が残るよう、`_register_ocr_model`／`register_tesseract_model`が学習完了時にこれら3フィールドを**自分のmetadata（.ocr.json/.tess.json）へ直接書き込む**（読み取り専用の遅延解決ではない）。これは同じくデータセットmeta.jsonから情報を補完する既存の`_read_ocr_dataset_meta`（`training_preprocess_hash`等を一覧取得時に都度補完する仕組み）とは異なる設計判断で、後者は「Datasetが無くなれば空欄に戻ってよい」情報だが、Model Lineageの目的上こちらは失われてはならない情報のため、あえて登録時点でのスナップショットとして固定した。
+
+**4. Dataset作成処理・モデル学習処理・Hash管理・Version管理は重複実装せず流用**: 新規追加した`dataset_registry.py`は`scan_ocr_dataset_folders`（`find_latest_ocr_dataset`の走査ロジックを抽出・共用）・`resolve_dataset_id_safe`（Tesseract/PaddleOCR両登録経路から共通利用）のみを提供し、Dataset本体の作成・分割・前処理Hash計算・前処理Version管理は既存の`create_ocr_dataset`／`preprocess_config_store.py`をそのまま使う。「使用回数表示」（前処理Version毎のDataset/Model使用数）も新規の集計処理を作らず、`GET /api/ocr/preprocess/saved-config`の応答へ`list_all_datasets`/`list_model_infos`の結果を1回だけ使い回して`dataset_usage_count`/`model_usage_count`を追加するのみに留めた（Version数分の全件再読込はしない）。
+
+**5. Dataset detail「Rotation」の解釈**: 要求仕様のDataset詳細「学習設定」に含まれる項目名だが、既存スキーマにDataset単位の回転設定は無い（画像個別回転は`/images/{name}/rotate`という別APIの別概念）。最も近い既存概念であるDataset作成時のオーグメンテーション回転設定（`meta.augmentation.rotation.{enabled,max_degrees}`）を割り当てた——これは仕様の字面から一意に決まらない解釈であり、意図的な判断として明記する。
+
+**6. Datasetのmeta.jsonを部分的に可変へ変更**: 従来`meta.json`はDataset作成時に1回だけ書く「完了マーカー」だったが、Dataset Managerのコメント・コピー機能のために`display_name`／`comment`／`copied_from_dataset_folder`の3フィールドを追加可能にした。既存フィールドの意味・書き込みタイミングは変更していない（作成時点で書かれる他のフィールドは従来どおり不変のまま）。
+
+**7. モデルコメント機能は分類モデル（.pt）を対象外とした**: `.pt`は学習チェックポイント本体（torch.save形式）であり、後付けでフィールドを追記するには`torch.load`→変更→`torch.save`という書き戻しが必要で、チェックポイント破損のリスクと実装コストに対して分類モデル側での需要（Dataset ManagerはOCR系Dataset専用機能）が薄いと判断し、`.ocr.json`/`.tess.json`のみサポートとした（`.pt`への呼び出しは400）。
+
+**制約遵守**: ディレクトリ構成は変更していない（新規ファイルは`dataset_registry.py`のみ・`meta.json`への追加フィールドのみ）。学習画像は元画像からの切り出し・検出前処理と学習画像の分離・OCR前処理とYOLO検出前処理の独立、といった既存の絶対仕様には触れていない。`safe_rmtree`の安全ガード（models配下限定検証と同種の`paths.outputs`限定検証）はDataset削除でもそのまま再利用し、弱めていない。
+
+**API追加・変更**: `GET /api/ocr/datasets`・`GET /api/ocr/datasets/{dataset_id}`・`GET /api/ocr/datasets/{dataset_id}/delete-impact`・`POST /api/ocr/datasets/{dataset_id}/comment`・`POST /api/ocr/datasets/{dataset_id}/copy`・`DELETE /api/ocr/datasets/{dataset_id}`・`POST /api/models/{model_name}/comment`（いずれも新規）。`GET /models/info`へ`dataset_id`/`dataset_name`/`dataset_created_at`/`comment`を追加。`GET /api/ocr/preprocess/saved-config`へ`dataset_usage_count`/`model_usage_count`を追加。監査アクションへ`dataset_delete`（admin。再現性情報が失われるためモデル削除と同等の権限とした）・`dataset_copy`／`dataset_comment`／`model_comment`（operator）を追加（計30種）。
+
+**テスト**: バックエンド`tests/test_dataset_registry.py`15件（一覧・詳細・コメント・コピー・削除・削除影響確認・モデル削除時の自動リンク解除・Tesseract/PaddleOCR両登録経路のLineage記録）・`tests/test_dataset_manager_api.py`10件（API層）を新規追加し、既存の監査アクション数・権限マトリクステスト（`test_audit_operations.py`・`test_permission_matrix.py`）を30種へ更新→バックエンド全件回帰506件通過。フロントエンド`lib/datasetSearch.js`（新規。検索・ソートの純粋関数）9件・`datasetManagerView.render.test.mjs`（新規）3件・`ModelsView`の列定義/`Sidebar`構成テストを更新→フロント471件全通過、`npm run build`成功。
 
 ### 推論使用モデルの永続化と学習用前処理設定の保存管理（Version・履歴・未保存変更ガード）
 

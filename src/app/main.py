@@ -47,7 +47,10 @@ from .schemas import (
     AnalyzeMaskRegionRequest,
     AppShutdownRequest,
     DatasetBuildRequest,
+    DatasetCommentRequest,
+    DatasetCopyRequest,
     ManualMasksUpdateRequest,
+    ModelCommentRequest,
     DirectorySelectRequest,
     EvaluateRequest,
     BackupCreateRequest,
@@ -107,6 +110,15 @@ from .services.model_registry import (
     resolve_model_training_preprocess,
     resolve_ocr_model_meta,
     resolve_tesseract_model_meta,
+    set_model_comment,
+)
+from .services.dataset_registry import (
+    check_dataset_delete_impact,
+    copy_dataset,
+    delete_dataset,
+    get_dataset_detail,
+    list_all_datasets,
+    set_dataset_comment,
 )
 from .services.ocr_tuning import export_ocr_training_data
 from .services.ocr_pipeline import (
@@ -1872,6 +1884,26 @@ def api_ocr_preprocess_saved_config(project_id: Optional[str] = Query(default="d
     paths = ensure_project_directories(resolved)
     saved = load_saved_preprocess_config(paths.root)
     history = list_preprocess_config_history(paths.root)
+
+    # v1.0.0で追加（Dataset Manager機能13.）: Version毎のDataset/Model使用数を1回のスキャンで集計する
+    # （Version数分の全件JSON再読込は避け、list_all_datasets/list_model_infosの結果を使い回す）
+    datasets = list_all_datasets(resolved)
+    models = list_model_infos(resolved)
+    for entry in history:
+        version = entry.get("version")
+        config_hash = str(entry.get("config_hash") or "")
+        entry["dataset_usage_count"] = sum(1 for d in datasets if d.get("preprocess_config_version") == version)
+        entry["model_usage_count"] = sum(
+            1 for m in models if config_hash and str(m.get("training_preprocess_hash") or "") == config_hash
+        )
+    if isinstance(saved, dict):
+        saved_version = saved.get("version")
+        saved_hash = str(saved.get("config_hash") or "")
+        saved["dataset_usage_count"] = sum(1 for d in datasets if d.get("preprocess_config_version") == saved_version)
+        saved["model_usage_count"] = sum(
+            1 for m in models if saved_hash and str(m.get("training_preprocess_hash") or "") == saved_hash
+        )
+
     return {
         "project_id": resolved,
         "saved_config": saved,
@@ -2926,6 +2958,95 @@ def api_ocr_dataset_from_logs(req: OcrDatasetFromLogsRequest) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+# --- Dataset Manager（Dataset資産管理 / Model Lineage） ---
+
+
+@app.get("/api/ocr/datasets")
+def api_ocr_datasets_list(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+    """Dataset Manager一覧（作成日時降順・使用モデル数はlist_model_infosとのライブ集計）。"""
+    resolved = _resolve_project_id(project_id)
+    return {"project_id": resolved, "items": list_all_datasets(resolved)}
+
+
+@app.get("/api/ocr/datasets/{dataset_id}")
+def api_ocr_dataset_detail(dataset_id: str, project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+    resolved = _resolve_project_id(project_id)
+    detail = get_dataset_detail(resolved, dataset_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"dataset not found: {dataset_id}")
+    return detail
+
+
+@app.get("/api/ocr/datasets/{dataset_id}/delete-impact")
+def api_ocr_dataset_delete_impact(dataset_id: str, project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+    """Dataset削除前の影響確認（使用モデル数・モデル名一覧。削除は行わない）。"""
+    resolved = _resolve_project_id(project_id)
+    impact = check_dataset_delete_impact(resolved, dataset_id)
+    if impact is None:
+        raise HTTPException(status_code=404, detail=f"dataset not found: {dataset_id}")
+    return impact
+
+
+@app.post("/api/ocr/datasets/{dataset_id}/comment")
+def api_ocr_dataset_comment(dataset_id: str, req: DatasetCommentRequest, request: Request) -> dict[str, Any]:
+    _enforce_role(request, "dataset_comment")
+    resolved = _resolve_project_id(req.project_id)
+    detail = set_dataset_comment(resolved, dataset_id, req.comment)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"dataset not found: {dataset_id}")
+    _record_audit_safe(
+        request, "dataset_comment", project_id=resolved, target_type="dataset", target_id=dataset_id,
+    )
+    return detail
+
+
+@app.post("/api/ocr/datasets/{dataset_id}/copy")
+def api_ocr_dataset_copy(dataset_id: str, req: DatasetCopyRequest, request: Request) -> dict[str, Any]:
+    """Datasetを複製する（実体・metadataをコピー。Dataset IDのみ新規発行）。"""
+    _enforce_role(request, "dataset_copy")
+    resolved = _resolve_project_id(req.project_id)
+    copied = copy_dataset(resolved, dataset_id)
+    if copied is None:
+        raise HTTPException(status_code=404, detail=f"dataset not found: {dataset_id}")
+    _record_audit_safe(
+        request, "dataset_copy", project_id=resolved, target_type="dataset", target_id=dataset_id,
+        after={"copied_dataset_id": copied.get("dataset_id")},
+    )
+    return copied
+
+
+@app.delete("/api/ocr/datasets/{dataset_id}")
+def api_ocr_dataset_delete(dataset_id: str, request: Request, project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+    _enforce_role(request, "dataset_delete")
+    resolved = _resolve_project_id(project_id)
+    impact = check_dataset_delete_impact(resolved, dataset_id)
+    if impact is None:
+        raise HTTPException(status_code=404, detail=f"dataset not found: {dataset_id}")
+    deleted = delete_dataset(resolved, dataset_id)
+    _record_audit_safe(
+        request, "dataset_delete", project_id=resolved, target_type="dataset", target_id=dataset_id,
+        before={"model_count": impact["model_count"], "model_names": impact["model_names"]},
+        after={"deleted": deleted},
+    )
+    return {"project_id": resolved, "dataset_id": dataset_id, "deleted": deleted}
+
+
+@app.post("/api/models/{model_name}/comment")
+def api_model_comment(model_name: str, req: ModelCommentRequest, request: Request) -> dict[str, Any]:
+    _enforce_role(request, "model_comment")
+    resolved = _resolve_project_id(req.project_id)
+    try:
+        set_model_comment(project_id=resolved, model_name=model_name, comment=req.comment)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    _record_audit_safe(
+        request, "model_comment", project_id=resolved, target_type="model", target_id=model_name,
+    )
+    return {"project_id": resolved, "model": model_name, "comment": req.comment}
 
 
 @app.post("/api/ocr/train/start")

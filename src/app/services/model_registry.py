@@ -226,6 +226,11 @@ def list_model_infos(project_id: Optional[str] = None) -> list[dict]:
                         "test": _safe_int(counts.get("test", 0)),
                     },
                     "ocr_dataset_root": str(payload.get("dataset_root") or ""),
+                    # v1.0.0で追加（Dataset Manager / Model Lineage）: 登録時点で確定保存された来歴情報をそのまま表示する
+                    "dataset_id": str(payload.get("dataset_id") or ""),
+                    "dataset_name": str(payload.get("dataset_name") or ""),
+                    "dataset_created_at": str(payload.get("dataset_created_at") or ""),
+                    "comment": str(payload.get("comment") or ""),
                     "ocr_training_params": {
                         "max_iterations": _safe_int(payload.get("max_iterations", 0)),
                         "training_mode": "finetune",
@@ -338,6 +343,11 @@ def list_model_infos(project_id: Optional[str] = None) -> list[dict]:
                     "ocr_checkpoint_dir": checkpoint_dir,
                     "ocr_inference_ready": bool(inference_ready),
                     "ocr_dataset_root": dataset_root,
+                    # v1.0.0で追加（Dataset Manager / Model Lineage）: 登録時点で確定保存された来歴情報をそのまま表示する
+                    "dataset_id": str(payload.get("dataset_id") or ""),
+                    "dataset_name": str(payload.get("dataset_name") or ""),
+                    "dataset_created_at": str(payload.get("dataset_created_at") or ""),
+                    "comment": str(payload.get("comment") or ""),
                     "ocr_dataset_counts": dataset_counts,
                     "ocr_dataset_meta_created_at": str(dataset_meta.get("created_at") or ""),
                     # 分割・オーグメンテーション情報（学習条件比較用。旧データセットはNone/空=未記録）
@@ -458,6 +468,10 @@ def list_model_infos(project_id: Optional[str] = None) -> list[dict]:
                     "charset": "",
                     "max_text_length": 0,
                     "model_dir": "",
+                    "dataset_id": "",
+                    "dataset_name": "",
+                    "dataset_created_at": "",
+                    "comment": "",
                 }
             )
     assign_model_ids(paths.project_id, items)
@@ -628,6 +642,33 @@ def delete_model(project_id: Optional[str], model_name: str) -> str:
     logger.info("delete_model: removing model meta: %s", target)
     target.unlink()
     return safe_name
+
+
+def set_model_comment(project_id: Optional[str], model_name: str, comment: str) -> None:
+    """モデルへコメントを保存する（.ocr.json/.tess.json metadataへ追加フィールドとして書き込む。複数行対応）。
+
+    分類モデル（.pt）は学習チェックポイント本体のため対象外
+    （Dataset Manager機能が対象とするOCR/Tesseractモデルのみサポートする）。
+    """
+    from .atomic_io import atomic_write_json
+
+    paths = ensure_project_directories(project_id)
+    safe_name = Path(model_name).name
+    if safe_name != model_name:
+        raise ValueError("invalid model name")
+    suffixes = Path(safe_name).suffixes
+    is_ocr_meta = len(suffixes) >= 2 and suffixes[-2:] == [".ocr", ".json"]
+    is_tess_meta = len(suffixes) >= 2 and suffixes[-2:] == [".tess", ".json"]
+    if not is_ocr_meta and not is_tess_meta:
+        raise ValueError("only .ocr.json and .tess.json models support comments")
+
+    target = paths.models / safe_name
+    if not target.exists() or not target.is_file():
+        raise FileNotFoundError(f"model not found: {safe_name}")
+
+    payload = _safe_load_json(target)
+    payload["comment"] = str(comment or "")
+    atomic_write_json(target, payload)
 
 
 def list_ocr_model_meta_files(project_id: Optional[str], engine: Optional[str] = None) -> list[Path]:

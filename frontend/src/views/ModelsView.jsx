@@ -5,7 +5,7 @@ import Button from "../components/Button";
 import EmptyState from "../components/EmptyState";
 import InfoTooltip from "../components/InfoTooltip";
 import ModelIdBadge from "../components/ModelIdBadge";
-import { API_BASE } from "../lib/api";
+import { API_BASE, request } from "../lib/api";
 import { HELP_TEXTS } from "../lib/helpTexts";
 import { historyPreprocessLabel } from "../lib/evalHistory";
 import {
@@ -108,7 +108,7 @@ function parseDownloadFilename(contentDisposition, fallback) {
 // （モデル名の視認性向上（15px表示）のため他列を詰めて名前列へ幅を配分。最小合計847px=
 // 1920px時の左ペインへ内部横スクロールなしで収まる。モデル名は上限420pxで余った幅
 // いっぱいまで伸ばさず、Engine列との間に大きな空白を作らない）
-export const MODEL_LIST_GRID_COLUMNS = "32px minmax(300px, 420px) 80px 85px 140px 140px 70px";
+export const MODEL_LIST_GRID_COLUMNS = "32px minmax(300px, 420px) 80px 85px 130px 140px 140px 70px";
 
 const ENGINE_LABELS = { tesseract: "Tesseract", easyocr: "EasyOCR", custom: "カスタム" };
 
@@ -290,6 +290,8 @@ export default function ModelsView({
   detailRequest = null,
   // リリース管理: モデル別のStatus/Version（{model: {status, version}}。未設定=Draft相当で非表示）
   releaseStatuses = {},
+  // Dataset Manager連携: 「学習Dataset」列クリックでDataset詳細を開く（datasetIdを渡す）
+  onOpenDataset,
 }) {
   const latestAny = basename(latest.any || "");
   const latestByType = latest.byType || {};
@@ -309,6 +311,8 @@ export default function ModelsView({
   const [filterFamily, setFilterFamily] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
   const [aliasDraft, setAliasDraft] = useState("");
+  const [commentDraft, setCommentDraft] = useState("");
+  const [savingComment, setSavingComment] = useState(false);
 
   useEffect(() => {
     setSelectedModels((prev) => prev.filter((name) => models.includes(name)));
@@ -317,7 +321,23 @@ export default function ModelsView({
 
   useEffect(() => {
     setAliasDraft(detailModel ? aliases[detailModel] || "" : "");
-  }, [detailModel, aliases]);
+    setCommentDraft(detailModel ? infoOf(detailModel).comment || "" : "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailModel, aliases, modelInfos]);
+
+  async function saveModelComment(name, comment) {
+    setSavingComment(true);
+    try {
+      await request(`/api/models/${encodeURIComponent(name)}/comment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_id: projectId, comment }),
+      });
+      onRefresh?.();
+    } finally {
+      setSavingComment(false);
+    }
+  }
 
   function infoOf(name) {
     return modelInfos?.[name] || {};
@@ -352,6 +372,19 @@ export default function ModelsView({
     return infoOf(name).model_id || "";
   }
 
+  // Dataset Manager連携: このモデルの学習に使用したDataset（登録時点で確定保存。未記録は空）
+  function datasetNameOf(name) {
+    return infoOf(name).dataset_name || "";
+  }
+
+  function datasetIdOf(name) {
+    return infoOf(name).dataset_id || "";
+  }
+
+  function commentOf(name) {
+    return infoOf(name).comment || "";
+  }
+
   // 管理No表示チップ（共通 ModelIdBadge のラッパー。ホバーで「管理No：M0004 / モデル名」）
   function ModelIdChip({ name, size = "sm", className = "" }) {
     const id = modelIdOf(name);
@@ -374,8 +407,16 @@ export default function ModelsView({
 
   const filteredModels = useMemo(() => {
     return models.filter((name) => {
-      // モデル名・別名に加えて管理No（M0004等）でも検索可能
-      if (!matchesModelSearch(filterSearch, { name, alias: aliases[name], modelId: modelIdOf(name) })) {
+      // モデル名・別名・管理No（M0004等）に加え、学習Dataset名・コメントでも検索可能
+      if (
+        !matchesModelSearch(filterSearch, {
+          name,
+          alias: aliases[name],
+          modelId: modelIdOf(name),
+          datasetName: datasetNameOf(name),
+          comment: commentOf(name),
+        })
+      ) {
         return false;
       }
       if (filterEngine !== "all" && engineLabelOf(engineName(name), trainingFamily(name)) !== filterEngine) {
@@ -770,6 +811,22 @@ export default function ModelsView({
             </div>
             <SpecRow label="Engine" value={engineLabelOf(engineName(name), trainingFamily(name))} />
             <SpecRow label="方式" value={familyLabelOf(trainingFamily(name))} />
+            {/* 学習Dataset（Dataset Manager連携。登録時点で確定保存された来歴。未記録=旧モデル） */}
+            <div className="flex items-start justify-between gap-3 py-0.5">
+              <span className="flex shrink-0 items-center text-[13px] text-muted">学習Dataset</span>
+              {datasetIdOf(name) ? (
+                <button
+                  type="button"
+                  className="max-w-[60%] truncate text-[13px] text-blue-200 underline-offset-2 hover:underline"
+                  onClick={() => onOpenDataset?.(datasetIdOf(name))}
+                  title="このモデルの学習に使用したDatasetをDataset Managerで開きます"
+                >
+                  {datasetNameOf(name)}
+                </button>
+              ) : (
+                <span className="text-[13px] font-semibold text-muted">未記録</span>
+              )}
+            </div>
             <SpecRow label="ベースモデル" value={info.base_lang || "-"} help={HELP_TEXTS.baseModel} />
             <SpecRow label="Charset" value={info.charset || "-"} />
             <SpecRow label="Iteration" value={iterationText(name)} help={HELP_TEXTS.iteration} />
@@ -813,6 +870,29 @@ export default function ModelsView({
               </Button>
             </div>
           </div>
+
+          {isOcrFamily(name) ? (
+            <div className="rounded-lg border border-border bg-card/45 px-3 py-2.5">
+              <p className="mb-1 text-[13px] font-semibold text-text">コメント（複数行対応）</p>
+              <textarea
+                value={commentDraft}
+                onChange={(e) => setCommentDraft(e.target.value)}
+                placeholder={"例: 認識率95%\n高圧VT向け\nOCR誤認識改善版"}
+                className="app-input min-h-[64px] w-full text-xs"
+              />
+              <div className="mt-1.5 flex justify-end">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="h-7 px-2 text-[11px]"
+                  disabled={savingComment}
+                  onClick={() => saveModelComment(name, commentDraft)}
+                >
+                  {savingComment ? "保存中..." : "保存"}
+                </Button>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         {/* ⑥ 評価履歴: 残り高を使って内部スクロール（ヘッダーはsticky固定） */}
@@ -1889,6 +1969,7 @@ export default function ModelsView({
               <span className="px-2 py-2 font-medium">モデル名</span>
               <span className="px-2 py-2 font-medium">Engine</span>
               <span className="px-2 py-2 font-medium">方式</span>
+              <span className="px-2 py-2 font-medium">学習Dataset</span>
               <span className="px-2 py-2 font-medium">作成日</span>
               <span className="px-2 py-2 font-medium">評価</span>
               <span className="px-2 py-2 font-medium">状態</span>
@@ -1946,6 +2027,23 @@ export default function ModelsView({
                   </span>
                   <span className="px-2 py-2 text-muted">{engineLabelOf(engineName(name), trainingFamily(name))}</span>
                   <span className="px-2 py-2 text-muted">{familyLabelOf(trainingFamily(name))}</span>
+                  <span className="min-w-0 px-2 py-2">
+                    {datasetIdOf(name) ? (
+                      <button
+                        type="button"
+                        className="max-w-full truncate text-blue-300 hover:underline"
+                        title={datasetNameOf(name)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpenDataset?.(datasetIdOf(name));
+                        }}
+                      >
+                        {datasetNameOf(name)}
+                      </button>
+                    ) : (
+                      <span className="text-muted">-</span>
+                    )}
+                  </span>
                   <span className="whitespace-nowrap px-2 py-2 text-muted">{formatDateTime(createdAt(name))}</span>
                   <span className="min-w-0 px-2 py-2">
                     <ListEvalCell latest={latestEvalOf(evalHistory, name)} />

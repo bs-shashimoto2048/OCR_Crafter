@@ -24,6 +24,7 @@ from PIL import Image
 
 from ..config import get_settings
 from ..project_paths import ensure_project_directories
+from .dataset_registry import resolve_dataset_id_safe
 
 # 学習対象文字セット: 学習データに含めてよい文字（unicharsetが覚えるべき集合）
 TESSERACT_TARGET_CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt+-"
@@ -462,6 +463,12 @@ def register_tesseract_model(
         "training_input_pipeline_hash": str(snapshot_pipeline_hash) if snapshot_pipeline_hash else None,
         # 学習データの由来（processed=取込前処理適用済み画像から作成）
         "dataset_source_image_state": str(dataset_meta.get("source_image_state") or ""),
+        # v1.0.0で追加（Dataset Manager / Model Lineage）: 学習に使用したDatasetの追跡情報。
+        # Dataset自体が削除されてもモデル側に来歴が残るよう、登録時点で確定保存する
+        # （推測補完しない。dataset_idはservices/dataset_registry.pyの安定採番を再利用）
+        "dataset_id": resolve_dataset_id_safe(project_id, dataset_root),
+        "dataset_name": str(dataset_meta.get("display_name") or Path(dataset_root).name),
+        "dataset_created_at": str(dataset_meta.get("created_at") or ""),
     }
     meta_path = paths.models / f"{lang}{TESSERACT_MODEL_SUFFIX}"
     # モデルメタ（=正式登録の完了マーカー）は原子的に書き込む。学習途中で失敗した場合
