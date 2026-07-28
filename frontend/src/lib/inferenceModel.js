@@ -24,3 +24,21 @@ export function shouldConfirmSwitch(currentDisplayName, nextDisplayName) {
 export function buildSwitchConfirmMessage(currentDisplayName, nextDisplayName) {
   return `現在の推論使用モデル\n${currentDisplayName}\n\n↓\n\n${nextDisplayName}\n\nへ変更します。\nよろしいですか？`;
 }
+
+// 保存済み推論使用モデル（GET /api/ocr/inference/model の応答）から、復元時に
+// 適用すべきstate（engine・model名）を決定する。App.jsxのloadModels()内の復元処理から
+// 呼ばれる（副作用=setState自体はApp.jsx側で行う）。
+// - 保存が無い/モデル名が空 → null（何もしない）
+// - 保存されたモデルが現在の一覧（infoMap）に存在しない（削除・移動済み）→ found:false
+//   （勝手に別モデルへ置き換えない。呼び出し側は警告表示のみ行う）
+// - 存在する → found:true と、適用すべきengine/model
+export function resolveRestoredInferenceSelection(savedModel, infoMap) {
+  const modelName = String(savedModel?.model || "").trim();
+  if (!modelName) return null;
+  if (!infoMap || !infoMap[modelName]) {
+    return { found: false, model: modelName };
+  }
+  const savedEngine = String(savedModel?.engine || "custom");
+  const engine = savedEngine === "tesseract" ? "tesseract" : savedEngine === "paddleocr" ? "paddleocr" : "custom";
+  return { found: true, engine, model: modelName };
+}

@@ -35,7 +35,12 @@ import { charCodepoints, confusionLabel } from "./lib/confusionFormat";
 import { buildAugmentationPayload, defaultAugmentationState } from "./lib/augmentation";
 import { viewBoundaryKey } from "./lib/viewKey";
 import { lowercaseToggleApplicable } from "./lib/lowercase";
-import { buildSwitchConfirmMessage, resolveInferenceEngine, shouldConfirmSwitch } from "./lib/inferenceModel";
+import {
+  buildSwitchConfirmMessage,
+  resolveInferenceEngine,
+  resolveRestoredInferenceSelection,
+  shouldConfirmSwitch,
+} from "./lib/inferenceModel";
 import {
   buildPreprocessPreviewPayload,
   buildPreprocessRunPayload,
@@ -549,8 +554,8 @@ export default function App() {
   // リセットeffectや画面遷移時のエンジン同期effectなど、ユーザーの意図しない変更まで保存対象に
   // 巻き込まれ、タイミング次第で直前の選択を「latest」へ静かに上書きしてしまう不具合があった
   // （2回目以降の切替が保存されない原因）。保存は switchInferenceModel() からの明示呼び出しのみで
-  // 行う一本道にし、常時監視effect・抑制用ref（旧 inferenceModelSuppressSaveRef /
-  // inferenceModelRestored）は廃止した（保存のトリガーが1箇所に確定するため再発しない）
+  // 行う一本道にし、常時監視effectと復元完了フラグ用の補助stateは廃止した
+  // （保存のトリガーが1箇所に確定するため再発しない。詳細は docs/15_CHANGELOG_AI.md 参照）
   const inferenceModelRestoreAttemptedProjectRef = useRef("");
   // 推論前処理モード（Tesseract）。""=自動（学習時前処理の記録があればtraining=既定 / なければ従来動作）
   const [inferPreprocessMode, setInferPreprocessMode] = useState("");
@@ -984,25 +989,22 @@ export default function App() {
       inferenceModelRestoreAttemptedProjectRef.current = targetProjectId;
       try {
         const savedData = await request(`/api/ocr/inference/model?project_id=${pid}`);
-        const savedModel = savedData?.inference_model || null;
-        if (savedModel?.model) {
-          if (infoMap[savedModel.model]) {
-            const engine = String(savedModel.engine || "custom");
-            if (engine === "tesseract") {
-              setInferEngine("tesseract");
-              setInferTesseractModel(savedModel.model);
-            } else if (engine === "paddleocr") {
-              setInferEngine("paddleocr");
-              setInferPaddleModel(savedModel.model);
-            } else {
-              setInferEngine("custom");
-              setInferModel(savedModel.model);
-            }
+        const resolved = resolveRestoredInferenceSelection(savedData?.inference_model || null, infoMap);
+        if (resolved && resolved.found) {
+          if (resolved.engine === "tesseract") {
+            setInferEngine("tesseract");
+            setInferTesseractModel(resolved.model);
+          } else if (resolved.engine === "paddleocr") {
+            setInferEngine("paddleocr");
+            setInferPaddleModel(resolved.model);
           } else {
-            // 保存されているモデルが削除済み・移動済みで見つからない場合は、勝手に
-            // 別モデルへ置き換えず警告のみ行う（保存済みinference_model.jsonはそのまま）
-            notify("error", "前回使用していた推論モデルが見つかりません。別のモデルを選択してください。");
+            setInferEngine("custom");
+            setInferModel(resolved.model);
           }
+        } else if (resolved && !resolved.found) {
+          // 保存されているモデルが削除済み・移動済みで見つからない場合は、勝手に
+          // 別モデルへ置き換えず警告のみ行う（保存済みinference_model.jsonはそのまま）
+          notify("error", "前回使用していた推論モデルが見つかりません。別のモデルを選択してください。");
         }
       } catch {
         // 推論モデル復元の失敗は他画面の利用を妨げない（機能を独立させる）
@@ -1154,9 +1156,9 @@ export default function App() {
   }, [projectId, preprocessParams]);
 
   useEffect(() => {
-    // 推論使用モデルの復元は毎回プロジェクトごとに1回だけ行う（loadModels内で実施）。
-    // 復元完了までは選択変更の保存を止める（初期値=latest/customの誤保存を防ぐため）
-    setInferenceModelRestored(false);
+    // 推論使用モデルの復元は毎回プロジェクトごとに1回だけ行う（loadModels内・
+    // inferenceModelRestoreAttemptedProjectRefで判定。保存はswitchInferenceModel()からの
+    // 明示呼び出しのみのため、ここで復元完了フラグを管理する必要はない）
     if (!projectId) {
       refreshAll("").catch((error) => notify("error", error.message));
       return;

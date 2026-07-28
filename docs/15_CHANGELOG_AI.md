@@ -15,12 +15,28 @@ timeline
     07-18〜 : 学習条件比較・条件差分・次回学習提案 : サイドバーのOCR開発フロー順再編 : 性能サマリー省スペース化と比較カード短縮名
     07-24 : ダッシュボード「プロジェクト一覧」テーブル拡張 : 同カードビュー化（Health Badge・Exact Match） : カードへBenchmark性能指標追加（Balance Score・P95・Healthのreasons） : カードUI/UXブラッシュアップ（文字拡大・3列化・Primary/Secondary・Production独立表示） : 学習前処理・オーグメンテーションの実効値スナップショット保存と学習条件比較の2セクション化・推論使用モデルの一覧強調
     07-27 : 学習データ作成フローの明確化（事前作成の可視化・準備状況サマリー・評価データとの違いの明記） : 学習前処理の実行タイミング調査と前処理未実行時の警告・実行状況表示の追加 : 学習前処理ステータスの3状態化（旧プロジェクトの誤表示を是正） : 現在の前処理設定の可視化（GET /api/ocr/preprocess/current-config 追加） : OCR Dataset作成フローの見直し（Dataset作成時に必ずrun_preprocess()を自動実行する設計へ変更） : 推論使用モデルの永続化と学習用前処理設定の保存管理（Version・履歴・未保存変更ガード）
-    07-28 : Dataset Manager・Model Lineage機能追加（Dataset資産管理・Dataset⇔Model双方向リンク・再現性向上） : Experiment Manager機能強化（既存Experiment Trackingを唯一の実験管理基盤として拡張。新規Manager・新IDは作らず） : Benchmark Center追加（既存Benchmarkは「Benchmark Runner」へ改名し実行ツールとして温存、Benchmark Centerは既存資産を実行せず横断比較する別画面として新設） : 推論モデル切替不具合修正（保存トリガーを常時監視effectから明示呼び出しの一本道へ）
+    07-28 : Dataset Manager・Model Lineage機能追加（Dataset資産管理・Dataset⇔Model双方向リンク・再現性向上） : Experiment Manager機能強化（既存Experiment Trackingを唯一の実験管理基盤として拡張。新規Manager・新IDは作らず） : Benchmark Center追加（既存Benchmarkは「Benchmark Runner」へ改名し実行ツールとして温存、Benchmark Centerは既存資産を実行せず横断比較する別画面として新設） : 推論モデル切替不具合修正（保存トリガーを常時監視effectから明示呼び出しの一本道へ） : 同修正の削除漏れによる起動エラー対応（setInferenceModelRestored is not defined）
 ```
 
 ---
 
 ## 2026-07
+
+### 推論モデル切替修正後の起動エラー対応（setInferenceModelRestored is not defined）
+
+**症状**: 直前の「推論モデル切替不具合修正」の直後、ブラウザで `Uncaught ReferenceError: setInferenceModelRestored is not defined`（`App.jsx:1159`）が発生。あわせて`127.0.0.1:8000`への接続拒否（バックエンド未起動）も報告された。
+
+**原因**: 直前の修正で`inferenceModelRestored`/`setInferenceModelRestored`/`inferenceModelSuppressSaveRef`という3つの補助state/refを廃止したが、プロジェクト切替時の初期化`useEffect`内に`setInferenceModelRestored(false)`という呼び出しが1箇所だけ削除漏れとして残っていた。**この呼び出しは`useEffect`のコールバック内にあり、`npm run build`（Viteのバンドル処理）はJSXの未宣言変数参照を静的にはエラー扱いしない**（TypeScriptを使っていないため型・存在チェックが無く、実行時に初めてReferenceErrorとして顕在化する）。そのため直前の修正時に`npm run build`が成功していても、この削除漏れは検出されなかった。
+
+**修正内容**: 該当箇所（プロジェクト切替effect冒頭）から`setInferenceModelRestored(false)`を削除。復元処理自体（`GET /api/ocr/inference/model`の結果を各stateへ反映する処理・`inferenceModelRestoreAttemptedProjectRef`によるプロジェクト単位1回制御）は無変更で維持。あわせて、復元時の「保存データ→適用するengine/model」の判定ロジックを`lib/inferenceModel.js`へ`resolveRestoredInferenceSelection`として切り出し、純関数としてユニットテスト可能にした（保存モデルが現在の一覧に見つからない場合に警告のみ行い勝手に置き換えない、という既存動作を維持しつつテストで担保）。
+
+**再発防止**: `rg "inferenceModelRestored|setInferenceModelRestored|inferenceModelSuppressSaveRef" frontend/src`が0件であることを確認。加えて、この種の「`useEffect`内だけに残る未宣言変数参照」は`npm run build`はおろか`renderToString`によるSSRレンダリングテスト（effectを実行しない）でも検出できないため、`frontend/tests/appMount.test.mjs`へ**ソーステキストに廃止済み識別子が含まれていないことを直接検証する静的テスト**を追加した（`App.jsx`を対象にした先例=`preprocessRequest.test.mjs`の「旧のApp.jsx内組み立て関数が残っていない」パターンを踏襲）。同ファイルへ`<App />`のSSRマウントスモークテストも追加したが、これはrender本体の例外のみを検出するものであり、今回のようなeffect内エラーの検出は静的テストの役割であることを明記した。
+
+**バックエンド起動確認**: 作業時点で`http://127.0.0.1:8000/api/system/check`・`http://127.0.0.1:8000/projects`は既に200を返しており、フロントエンド開発サーバー（`http://localhost:5173/`、IPv6ループバック`::1`でリッスン）も稼働中で、修正後の`App.jsx`（廃止済み識別子への参照ゼロ）を配信していることを確認した（いずれも本タスクで新規に起動したものではなく、既存の起動中プロセスを確認した）。
+
+**テスト**: フロントエンド`frontend/tests/appMount.test.mjs`（新規）2件・`lib/inferenceModel.js`へ`resolveRestoredInferenceSelection`のユニットテスト5件を追加→フロント503件全通過、`npm run build`成功。バックエンドは無変更（本不具合はフロントエンドの削除漏れのみが原因のため）。
+
+---
 
 ### 推論モデル切替不具合修正（保存トリガーを常時監視effectから明示呼び出しの一本道へ）
 
