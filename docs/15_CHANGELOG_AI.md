@@ -15,12 +15,41 @@ timeline
     07-18〜 : 学習条件比較・条件差分・次回学習提案 : サイドバーのOCR開発フロー順再編 : 性能サマリー省スペース化と比較カード短縮名
     07-24 : ダッシュボード「プロジェクト一覧」テーブル拡張 : 同カードビュー化（Health Badge・Exact Match） : カードへBenchmark性能指標追加（Balance Score・P95・Healthのreasons） : カードUI/UXブラッシュアップ（文字拡大・3列化・Primary/Secondary・Production独立表示） : 学習前処理・オーグメンテーションの実効値スナップショット保存と学習条件比較の2セクション化・推論使用モデルの一覧強調
     07-27 : 学習データ作成フローの明確化（事前作成の可視化・準備状況サマリー・評価データとの違いの明記） : 学習前処理の実行タイミング調査と前処理未実行時の警告・実行状況表示の追加 : 学習前処理ステータスの3状態化（旧プロジェクトの誤表示を是正） : 現在の前処理設定の可視化（GET /api/ocr/preprocess/current-config 追加） : OCR Dataset作成フローの見直し（Dataset作成時に必ずrun_preprocess()を自動実行する設計へ変更） : 推論使用モデルの永続化と学習用前処理設定の保存管理（Version・履歴・未保存変更ガード）
-    07-28 : Dataset Manager・Model Lineage機能追加（Dataset資産管理・Dataset⇔Model双方向リンク・再現性向上） : Experiment Manager機能強化（既存Experiment Trackingを唯一の実験管理基盤として拡張。新規Manager・新IDは作らず）
+    07-28 : Dataset Manager・Model Lineage機能追加（Dataset資産管理・Dataset⇔Model双方向リンク・再現性向上） : Experiment Manager機能強化（既存Experiment Trackingを唯一の実験管理基盤として拡張。新規Manager・新IDは作らず） : Benchmark Center追加（既存Benchmarkは「Benchmark Runner」へ改名し実行ツールとして温存、Benchmark Centerは既存資産を実行せず横断比較する別画面として新設）
 ```
 
 ---
 
 ## 2026-07
+
+### Benchmark Center追加（既存Benchmarkは「Benchmark Runner」へ改名し実行ツールとして温存）
+
+**背景**: task.mdは「Benchmark Center」という機能を要求し、「Dataset Manager・Experiment Tracking・Evaluation・Model Managerを利用し、新しい評価ロジックは作らず既存機能を統合する」「Benchmarkは評価を実行する機能ではなく、既存評価結果を整理・比較・可視化する機能」と明記していた。しかしOCR Crafterには既に「Benchmark」という機能（`services/benchmark.py`・`BenchmarkView.jsx`・BM-0001形式）が存在し、これは**OCRエンジンを実際に実行して**cold start/warmup/推論時間を分離計測する**実行ツール**だった（`run_benchmark_job`が各エンジンのRunnerを構築し、画像ごとに`recognize()`を呼び出して結果を集計する設計を確認済み）。task.mdの前提（「評価を実行する機能ではない」）と既存実装（評価を実行する機能そのもの）が正面から矛盾するため、ユーザーへ確認したところ「両方とも残す。名称で明確に区別する（既存=Benchmark Runner、新規=Benchmark Center）。Benchmark RunnerをBenchmark Centerへ統合したり、ロジックをコピーしたりしない」という方針が明示された。
+
+**1. 既存Benchmarkの改名（ロジックは無変更）**: `App.jsx`の`viewMeta.benchmark`のタイトルと`Sidebar.jsx`の該当項目ラベルのみを「Benchmark」から「Benchmark Runner」へ変更した。`activeView`のid（`"benchmark"`）・APIパス（`/api/benchmarks*`）・保存先（`benchmarks.json`）・`services/benchmark.py`のロジックは一切変更していない（表示名の変更のみ）。
+
+**2. Benchmark Centerを別コード・別保存先として新設**: `services/benchmark_center.py`（新規）を作成し、`services/benchmark.py`とは物理的に別ファイルにした。Benchmark Centerは以下をクロス参照するだけで、独自の評価実行・独自DBは持たない:
+- Model Manager（`model_registry.list_model_infos`）: モデル名・Engine・モデルサイズ・Dataset来歴
+- Experiment Tracking（`experiment_tracker.list_experiments`）: 各モデルに紐づく最新Experiment・そこに保存済みのEvaluation（CER/文字正解率/完全一致率）・前処理Version
+- Dataset Manager（`dataset_registry.list_all_datasets`）: フィルタ用のDataset一覧
+
+モデル→Experimentの紐付けは「そのモデルが`models`リストに含まれる最後のExperiment」を採用しており、これは既存の`attach_evaluation`（評価アタッチ時に同じ規則で対象Experimentを選ぶ）と完全に同じ規則である（新しい紐付けロジックを作らず、既存の規則をそのまま踏襲した）。
+
+**3. Precision/Recall/F1/WER/推論速度は「未対応」表示**: task.mdの比較項目一覧にはこれらが含まれていたが、調査の結果、OCR Crafterのどの既存評価ロジック（`ocr_evaluation.py`・`experiment_tracker.py`）にもこれらを算出する処理が無いことを確認した。「新しい評価ロジックを作らない」という実装方針を優先し、これらの値を新規に計算することはせず、比較表では「未対応」と表示するに留めた（推測で埋めない）。レーダーチャートも要求仕様はAccuracy/Precision/Recall/F1の4軸だったが、実在する指標（完全一致率・CER精度・文字正解率）の3軸へ意図的に代替した（この解釈をコード内コメントと本記録に明記）。
+
+**4. 推薦は既存ロジックを再利用**: 「総合」推薦は`lib/modelCompare.js`の`recommendModel`（ModelsViewの既存モデル比較機能が使っている勝敗集計ロジック）をそのまま呼び出す。呼び出すために、Experiment由来の評価結果を`lib/modelEval.js`の`normalizeEvalEntry`が読める生データ形式へ変換するアダプター関数（`buildEvalHistoryFromRows`）のみを新設した——比較・勝敗判定・推奨のロジック自体は一切複製していない。「Accuracy重視」「CER重視」「軽量重視（モデルサイズ最小）」は単純な最良値抽出（新しいAIロジックではない）。
+
+**5. 比較条件のみ保存・評価結果は保存しない**: `data/projects/<id>/benchmark_center.json`（`BMC-0001`形式・`experiments.json`/`benchmarks.json`と同じプロジェクト単位カウンタ形式）には、対象Dataset・対象Model・対象Experiment・フィルタ・並び順のみを保存する。評価結果自体（CER等の数値）は一切保存せず、表示の都度Experiment Trackingから再取得する——Experiment Trackingを評価結果の唯一の情報源として維持するため。
+
+**6. 参加件数はAPI層で合成し、既存サービスをBenchmark Center非依存に保つ**: Dataset詳細（`GET /api/ocr/datasets/{id}`）・Experiment一覧（`GET /api/experiments`）へ`benchmark_center_count`を追加したが、`dataset_registry.py`/`experiment_tracker.py`自体にはBenchmark Centerを一切importさせず、`main.py`のエンドポイント層でレスポンスへ合成する設計にした。これにより既存の主要サービスが新機能の存在を知らないまま動作し続ける（依存が一方向になり、Benchmark Center側の変更が既存機能へ波及するリスクを下げる）。Experiment一覧は10000件規模を想定した既存要件があるため、比較件数の集計は「Experiment数×比較件数」のO(n×m)ループを避け、比較履歴を1回だけ走査してdict化する方式（O(n+m)）にした。モデルの参加件数は一覧取得時に全モデル分を計算せず、モデル詳細を開いた時にオンデマンドで1件だけ取得する専用API（`GET /api/benchmark-center/participation`）にした。
+
+**制約遵守**: Benchmark Runner（`benchmark.py`・`BenchmarkView.jsx`・`benchmarks.json`・BM-0001）のコード・API・保存先は無変更。Benchmark Centerは新しい評価ロジック・新しい推薦ロジックを実装していない（既存の`experiment_tracker.py`の評価結果と`lib/modelCompare.js`の比較・推薦ロジックをそのまま利用）。
+
+**API追加**: `GET /api/benchmark-center/models`・`GET /api/benchmark-center/missing-evaluations`・`GET/POST /api/benchmark-center/comparisons`・`GET /api/benchmark-center/comparisons/{id}`・`GET /api/benchmark-center/participation`（すべて新規）。`GET /api/ocr/datasets/{id}`・`GET /api/experiments`へ`benchmark_center_count`を追加。監査アクションへ`benchmark_center_save`（operator）を追加（計32種）。
+
+**テスト**: バックエンド`tests/test_benchmark_center.py`13件（比較可能モデル一覧・フィルタ・評価未実施検出・比較条件の保存/履歴/取得・参加件数集計・API層）を新規追加→バックエンド全件回帰524件通過。フロントエンド`lib/benchmarkCenter.js`のテスト10件（既存`modelCompare.js`/`modelEval.js`との連携・フィルタ・ソート・レーダー/推移データ・CSV/Markdown/JSON出力・推薦）・`BenchmarkCenterView`のレンダリングテスト2件を新規追加、`sidebar.render.test.mjs`をメニュー変更に合わせて更新→フロント489件全通過、`npm run build`成功。
+
+---
 
 ### Experiment Manager機能強化（既存Experiment Trackingを唯一の実験管理基盤として拡張）
 

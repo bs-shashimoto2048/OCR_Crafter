@@ -117,7 +117,8 @@ export const SIDEBAR_SECTIONS = [
     defaultOpen: false,
     items: [
       { id: "jobs", label: "ジョブ管理" },
-      { id: "benchmark", label: "Benchmark" },
+      { id: "benchmark", label: "Benchmark Runner" },
+      { id: "benchmark-center", label: "Benchmark Center" },
       { id: "reports", label: "レポート" },
       { id: "audit", label: "監査ログ" },
       { id: "operations", label: "システム状態" },

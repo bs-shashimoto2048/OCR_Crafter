@@ -58,6 +58,7 @@ AUDIT_ACTIONS = [
     "dataset_comment",  # Dataset Manager: Datasetコメント保存
     "model_comment",  # Dataset Manager: Modelコメント保存
     "experiment_delete",  # Experiment Manager: Experimentカルテ削除（Dataset/Model/Evaluationには影響しない）
+    "benchmark_center_save",  # Benchmark Center: 比較条件の保存（評価結果自体は保存しない）
 ]
 
 # 権限ロール（弱い順）と操作に必要な最低ロール
@@ -94,6 +95,7 @@ ACTION_MIN_ROLE = {
     "dataset_comment": "operator",
     "model_comment": "operator",
     "experiment_delete": "operator",
+    "benchmark_center_save": "operator",
 }
 
 # 保存禁止キー（部分一致・小文字比較）: パスワード・トークン・APIキー等の機密情報

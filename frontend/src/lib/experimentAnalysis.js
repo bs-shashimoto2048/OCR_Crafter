@@ -36,6 +36,8 @@ export function normalizeExperiment(raw = {}) {
     datasetId: String(raw.dataset_id || ""),
     datasetName: String(raw.dataset_name || ""),
     datasetHash: String(raw.dataset_hash || ""),
+    // v1.0.0で追加（Benchmark Center）: このExperimentを対象に含む保存済み比較件数
+    benchmarkCenterCount: num(raw.benchmark_center_count) || 0,
     iterations: num(training.iterations),
     splitRatioText: ratioText,
     splitSeed: num(training.split_seed),

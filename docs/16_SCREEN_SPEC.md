@@ -117,7 +117,7 @@ flowchart LR
    └ 評価データ                    … データセット作成（学習データと独立した評価データの作成・編集）
 🤖 OCRモデル（初期展開）           … データ作成・学習 → モデル管理 → Dataset Manager → 実験管理 → リリース管理 → モデル評価 → 推論 → OCR修正 → バッチ推論
                                      （学習後はまず評価→性能確認後に推論、の順）
-⚙ 運用（初期折りたたみ）           … ジョブ管理 → Benchmark → レポート → 監査ログ → システム状態
+⚙ 運用（初期折りたたみ）           … ジョブ管理 → Benchmark Runner → Benchmark Center → レポート → 監査ログ → システム状態
 🧪 実験機能（初期折りたたみ・最下部）… 分類モデルの学習/管理/推論/評価
 ```
 
@@ -392,7 +392,7 @@ OCRデータセット作成と学習ジョブの実行・監視（PaddleOCR / Te
   - **①最新評価**: **CERを画面中最大の32pxエメラルドで中央表示**（CER未記録の旧履歴は完全一致率を同サイズで色分け表示）→ 文字正解率バー → 文字正解率（18px太字）・完全一致率（18px太字・青系。正解/総数＋%）を左右2カラム → 誤認識（赤）・CER改善（学習前比。改善=緑/悪化=赤。pt差＋相対）
   - **②評価サマリー**: 改善（緑）/同等/悪化（赤）の3カード＋完全一致へ改善（緑）/から悪化（赤）の2カード。**数字（20px太字）をラベル（12px）より大きく**。未記録はmuted表示
   - **③混同TOP5**: 縦2行チップ（上段=組み合わせ14px太字・下段=件数11px）の横並び
-  - **④評価条件**（評価データセット・評価画像数・OCR前処理（学習時前処理モードは「学習時前処理」＋不一致時⚠）・Whitelist・評価日時）と**⑤モデル情報**（管理No・**学習Dataset**（v1.0.0で追加。Dataset Managerへのリンク。未記録＝旧モデルは「未記録」）・Engine・方式・ベースモデル・Charset・Iteration・学習画像数・Augmentation・**学習前処理**（スナップショット要約。旧モデル=未記録・?ヘルプ付き）・モデルサイズ・学習時間・学習日時・Export状態）は**ラベル13px muted / 値15px太字**でメリハリ
+  - **④評価条件**（評価データセット・評価画像数・OCR前処理（学習時前処理モードは「学習時前処理」＋不一致時⚠）・Whitelist・評価日時）と**⑤モデル情報**（管理No・**学習Dataset**（v1.0.0で追加。Dataset Managerへのリンク。未記録＝旧モデルは「未記録」）・Engine・方式・ベースモデル・Charset・Iteration・学習画像数・Augmentation・**学習前処理**（スナップショット要約。旧モデル=未記録・?ヘルプ付き）・モデルサイズ・学習時間・学習日時・Export状態・**Benchmark参加**（v1.0.0で追加。Benchmark Centerで保存された比較条件のうちこのモデルが対象に含まれる件数。詳細を開いた時にオンデマンド取得＝一覧取得時に全モデル分を計算しない））は**ラベル13px muted / 値15px太字**でメリハリ
   - **⑥評価履歴**: 日時/CER/文字/一致/正解/改善/悪化/前処理の表（12px・行高py-1.5。**残り高を使って内部スクロール・ヘッダーsticky固定**。CER列はエメラルド）
   - セクションタイトルは16px・セクション間は space-y-3・カード内は px-3 py-3 の余白。旧形式の履歴（詳細情報なし）は「未記録」表示
   - **?ヘルプアイコン**（共通 `InfoTooltip` コンポーネント・ホバーまたはクリックで表示・文言は `lib/helpTexts.js` の `HELP_TEXTS` に集約）: CER・文字正解率・完全一致率・CER改善・改善/同等/悪化・完全一致の増減・混同TOP5・Iteration・ベースモデル・Whitelist・OCR前処理に付与。説明パネルは **document.body へのポータル描画（position:fixed・最前面）** のため、比較テーブルの横スクロール枠・stickyセル・カードの overflow に埋もれない（**既定は対象要素の上部中央・上端に空間が無い場合のみ下側へ反転**・画面端では左右クランプ・スクロール時はトリガーへ追従）
@@ -446,6 +446,7 @@ OCRデータセット作成と学習ジョブの実行・監視（PaddleOCR / Te
   - 学習設定: Train率・Validation率・Test率・Charset・Rotation（Dataset作成時のオーグメンテーション回転設定。有効時は最大角度も表示）・入力画像数・除外画像数・Train/Val/Test件数
   - 使用モデル: 一覧表示（クリックでモデル管理の該当モデルカルテへ遷移＝Dataset⇔Modelの双方向リンク）
   - **使用Experiment**（v1.0.0で追加。Experiment Manager強化）: 一覧表示（クリックで実験管理へ遷移し該当Experimentを選択・スクロール＝Dataset⇔Experimentの双方向リンク。既存のExperiment Trackingとの連携のみで新しい実験保存の仕組みは追加していない）
+  - **Benchmark: N件**（v1.0.0で追加。Benchmark Center強化）: このDatasetを対象に含む保存済み比較件数（`GET /api/ocr/datasets/{id}`のレスポンスへAPI層で合成。dataset_registry.py自体はBenchmark Centerの存在を知らない）
   - コメント（複数行対応・保存ボタン）
 
 **主操作**
@@ -467,7 +468,7 @@ OCRデータセット作成と学習ジョブの実行・監視（PaddleOCR / Te
 「どの条件で学習し、何を変更し、結果がどう変わったか」を一元管理・比較し、OCRモデル改善のPDCAを高速化する。
 
 **表示内容**
-- **実験一覧**（実験カルテ。EXP-0001形式=等幅フォント表示・モデルIDとは独立）: ★お気に入り固定 / 実験ID / 日時 / 生成モデル（管理Noバッジ。クリックでモデル管理のカルテへ遷移）/ **Dataset**（v1.0.0で追加。学習に使用したDataset名。クリックでDataset Managerの詳細へ遷移）/ Iteration / Aug要約 / 前処理（要約＋ハッシュ8桁）/ CER / 文字正解率 / 完全一致率 / 自由タグ（最大20件。「+タグ / 編集」でカンマ区切り編集）/ 実験名・メモ（v1.0.0で追加: セルクリックで複数行テキストエリアへ切替・保存/キャンセル。Markdown不要のプレーンテキスト）/ **操作**（v1.0.0で追加。削除ボタン）
+- **実験一覧**（実験カルテ。EXP-0001形式=等幅フォント表示・モデルIDとは独立）: ★お気に入り固定 / 実験ID / 日時 / 生成モデル（管理Noバッジ。クリックでモデル管理のカルテへ遷移）/ **Dataset**（v1.0.0で追加。学習に使用したDataset名。クリックでDataset Managerの詳細へ遷移）/ Iteration / Aug要約 / 前処理（要約＋ハッシュ8桁）/ CER / 文字正解率 / 完全一致率 / 自由タグ（最大20件。「+タグ / 編集」でカンマ区切り編集）/ 実験名・メモ（v1.0.0で追加: セルクリックで複数行テキストエリアへ切替・保存/キャンセル。Markdown不要のプレーンテキスト）/ **Benchmark**（v1.0.0で追加。Benchmark Centerで保存された比較条件のうちこのExperimentが対象に含まれる件数。`GET /api/experiments`のレスポンスへAPI層で合成）/ **操作**（v1.0.0で追加。削除ボタン）
 - **列ソート**（v1.0.0で追加。Dataset Manager・モデル管理と統一感のあるテーブルUI）: 実験ID・日時（既定=降順）・Dataset・Iteration・CER・完全一致率の列見出しをクリックで昇順/降順切替
 - **フィルタ**: フリーテキスト（EXP・モデル・管理No・タグ・メモ・**Dataset名・Dataset ID**）/ Iteration範囲 / CER上限% / Augプリセット / 前処理ハッシュ / 日付範囲 / タグ / ★のみ
 - **CSV / Excel出力**: フィルタ中の実験をBOM付きUTF-8 CSVへ（Excelでそのまま開ける。タグ・★・評価要約・**Dataset情報・学習条件拡張項目・前処理Version**を含む）
@@ -612,10 +613,10 @@ OCR結果をキーボード中心で高速に確認・修正し、修正ログ�
 
 ---
 
-## Benchmark（benchmark / BenchmarkView）
+## Benchmark Runner（benchmark / BenchmarkView。旧称「Benchmark」）
 
 **目的**
-同一データ・同一条件で複数OCRエンジン（Tesseract登録モデル / Tesseract標準eng / PaddleOCR公式）を公平比較する。仕様詳細は `docs/19_BENCHMARK_SPEC.md`。
+同一データ・同一条件で複数OCRエンジン（Tesseract登録モデル / Tesseract標準eng / PaddleOCR公式）を**実際に実行**して公平比較する**実行ツール**。仕様詳細は `docs/19_BENCHMARK_SPEC.md`。v1.0.0でメニュー表示名を「Benchmark」から「Benchmark Runner」へ変更した（後述のBenchmark Centerと役割・命名を明確に区別するため。`activeView`のid・API・保存先はすべて無変更）。
 
 **表示内容**
 - **実行フォーム**: Benchmark名・データセットID・評価画像フォルダ・正解CSV・PSM/Whitelist（Tesseract系Engine Profile）・ウォームアップ回数、対象エンジンのチェックボックス（**未導入エンジンは選択不可＋「未導入・利用不可」バッジ**。登録モデルはselectで選択）。実行は「Job作成」（ジョブ管理で進捗監視）
@@ -633,6 +634,32 @@ OCR結果をキーボード中心で高速に確認・修正し、修正ログ�
 
 **関連画面**
 ジョブ管理（実行監視）、モデル評価（単一モデルの詳細評価はそちら）
+
+---
+
+## Benchmark Center（benchmark-center / BenchmarkCenterView。v1.0.0で追加）
+
+**目的**
+Dataset Manager・Experiment Tracking・Model Manager・既存の評価結果（Experimentへ紐付いたEvaluation）を横断して比較・分析する統合ビュー。**評価を実行する機能ではない**——既にOCR Crafter内に蓄積された情報を整理・比較・可視化するだけで、新しい評価ロジックは持たない。上のBenchmark Runner（OCRエンジンを実際に実行する測定ツール）とは名称・役割・コード（`services/benchmark_center.py`）・保存先（`data/projects/<id>/benchmark_center.json`）を完全に分離している。
+
+**表示内容**
+- **比較対象一覧**（テーブル形式・チェックボックスで比較対象を選択）: モデル名・Engine・Dataset・Experiment・前処理Version・モデルサイズ・Accuracy・CER。フィルタ: Dataset・Engine・前処理Version・Experiment・フリーテキスト検索
+- **評価結果確認**: 選択したモデルに評価結果（Experiment紐付きEvaluation）が存在するか確認するボタン。存在しない場合は「評価結果がありません」を表示し、既存のモデル評価画面（`ocr-eval`）へ遷移するボタンを提示（Benchmark Center自身は評価を実行しない）
+- **比較表**: Accuracy・CER・文字正解率・改善/悪化件数などの既存評価指標＋モデルサイズ・Engine・前処理Version・Dataset・Experimentを列挙。**各項目ごとに🏆最良値バッジ**（既存の`lib/modelCompare.js`の勝敗判定をそのまま再利用）。**Precision/Recall/F1/WER/推論速度は既存のどの評価ロジックにも算出処理が無いため「未対応」表示**（新しい評価ロジックを作らない方針のため。推測で埋めない）
+- **レーダーチャート**（SVG手書き・依存なし。ExperimentsViewと同じ方式）: 完全一致率・CER精度・文字正解率の3軸（要求仕様のPrecision/Recall/F1は算出不能なため実在指標で代替。意図的な代替と明記）
+- **推移グラフ**: Experiment ID順のAccuracy/CER推移
+- **モデル推薦**: 「総合」は既存の`recommendModel`（勝敗集計。ModelsViewの比較機能と同一ロジック）をそのまま利用。「Accuracy重視」「CER重視」「軽量重視（モデルサイズ最小）」は単純な最良値抽出（新しいAIロジックではない）
+- **レポート出力**: CSV / Markdown / JSON（クライアント側で組み立ててダウンロード。サーバーへの新規Export機構は追加していない）
+- **Benchmark履歴**（`BMC-0001`形式）: 保存した**比較条件のみ**（対象Dataset・対象Model・対象Experiment・フィルタ・並び順）。**評価結果自体は保存しない**——Experiment Trackingが唯一の評価結果の情報源であり続ける
+
+**主操作**
+- モデル選択（チェックボックス）/ 評価結果確認 / 比較条件の保存 / CSV・Markdown・JSON出力 / 更新
+
+**ショートカット**
+なし
+
+**関連画面**
+Dataset Manager・実験管理・モデル管理（いずれも「Benchmark参加/Benchmark N件」で相互リンク）、モデル評価（評価結果が無い場合の遷移先）
 
 ---
 

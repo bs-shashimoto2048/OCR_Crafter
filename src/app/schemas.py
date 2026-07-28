@@ -289,6 +289,18 @@ class JobRetryRequest(BaseModel):
     requested_by: str = Field(default="", description="再実行者（未指定=元Jobの実行者）")
 
 
+class BenchmarkComparisonSaveRequest(BaseModel):
+    """Benchmark Center: 比較条件の保存（評価結果自体は保存しない）。"""
+
+    project_id: Optional[str] = Field(default="default")
+    name: str = Field(default="", description="比較の表示名（任意）")
+    dataset_ids: list[str] = Field(default_factory=list, description="比較対象Dataset ID一覧")
+    model_names: list[str] = Field(default_factory=list, description="比較対象モデルファイル名一覧")
+    experiment_ids: list[str] = Field(default_factory=list, description="比較対象Experiment ID一覧（フィルタで絞った場合）")
+    filters: dict[str, Any] = Field(default_factory=dict, description="適用したフィルタ条件（engine/preprocess_version等）")
+    sort: dict[str, Any] = Field(default_factory=dict, description="並び順 {key, dir}")
+
+
 class BenchmarkCreateRequest(BaseModel):
     """OCR Benchmark実行（Job Management経由でjob_type=benchmarkを作成）。"""
 

@@ -415,6 +415,7 @@ export default function ExperimentsView({
                 <SortableTh label="一致" sortKey="accuracyPercent" current={sortKey} dir={sortDir} onSort={toggleSort} />
                 <th className="px-1.5 py-1.5 font-medium">タグ</th>
                 <th className="px-1.5 py-1.5 font-medium">実験名 / メモ</th>
+                <th className="px-1.5 py-1.5 font-medium" title="Benchmark Centerで保存された比較条件のうち、このExperimentが対象に含まれる件数">Benchmark</th>
                 <th className="px-1.5 py-1.5 font-medium">操作</th>
               </tr>
             </thead>
@@ -563,6 +564,7 @@ export default function ExperimentsView({
                       </button>
                     )}
                   </td>
+                  <td className="whitespace-nowrap px-1.5 py-1.5 text-muted">{e.benchmarkCenterCount}件</td>
                   <td className="whitespace-nowrap px-1.5 py-1.5">
                     <Button
                       size="sm"
@@ -583,7 +585,7 @@ export default function ExperimentsView({
               ))}
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={17}>
+                  <td colSpan={18}>
                     <EmptyState
                       compact
                       title={items.length === 0 ? "実験がありません" : "条件に一致する実験がありません"}

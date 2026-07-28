@@ -11,6 +11,7 @@ import LabelingView from "./views/LabelingView";
 import TrainingView from "./views/TrainingView";
 import ModelsView from "./views/ModelsView";
 import DatasetManagerView from "./views/DatasetManagerView";
+import BenchmarkCenterView from "./views/BenchmarkCenterView";
 import InferenceView from "./views/InferenceView";
 import ExperimentsView from "./views/ExperimentsView";
 import ReleasesView from "./views/ReleasesView";
@@ -75,7 +76,8 @@ const viewMeta = {
   experiments: { title: "実験管理", subtitle: "学習条件・結果・考察の一元管理と実験比較" },
   releases: { title: "リリース管理", subtitle: "モデルのライフサイクル管理・本番適用・配布" },
   jobs: { title: "ジョブ管理", subtitle: "バックグラウンドジョブの一覧・進捗・キャンセル・再実行" },
-  benchmark: { title: "Benchmark", subtitle: "複数OCRエンジンの公平比較（精度・速度・安定性）" },
+  benchmark: { title: "Benchmark Runner", subtitle: "複数OCRエンジンを実際に実行して公平比較（精度・速度・安定性）" },
+  "benchmark-center": { title: "Benchmark Center", subtitle: "Dataset・Experiment・Model・評価結果を横断比較する統合ビュー（評価は実行しません）" },
   reports: { title: "レポート", subtitle: "モデル開発レポートの生成・履歴（Markdown/PDF）" },
   audit: { title: "監査ログ", subtitle: "重要操作の追記型記録（削除不可）とBefore/After差分" },
   operations: { title: "システム状態", subtitle: "運用ダッシュボードとヘルスチェック" },
@@ -4543,6 +4545,19 @@ export default function App() {
         onRun={runBenchmark}
         onUpdateWeights={updateBenchmarkWeights}
         onOpenJobs={() => setActiveView("jobs")}
+      />
+    );
+  }
+
+  if (activeView === "benchmark-center") {
+    view = (
+      <BenchmarkCenterView
+        projectId={projectId}
+        notify={notify}
+        onOpenEvaluation={(name) => {
+          setOcrEvalTrainedModel(name);
+          setActiveView("ocr-eval");
+        }}
       />
     );
   }

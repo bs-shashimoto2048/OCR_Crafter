@@ -51,6 +51,9 @@ flowchart TD
     MODEL -.-> EXPMGR["実験管理（Experiment Tracking）<br/>GET/DELETE /api/experiments*<br/>v1.0.0で追加: dataset_id/dataset_name/dataset_hash・学習条件拡張（optimizer等）・前処理Versionを既存カルテへ追加"]
     DSMGR <-.-> EXPMGR
     EXPMGR <-.-> MGMT
+    DSMGR -.-> BMCTR["Benchmark Center<br/>GET/POST /api/benchmark-center/*<br/>v1.0.0で追加: 評価は実行せずDataset/Experiment/Modelを横断比較。<br/>比較条件（BMC-0001）のみ保存・評価結果自体は保存しない"]
+    EXPMGR -.-> BMCTR
+    MGMT -.-> BMCTR
 ```
 
 ## 補足（フロー上の重要な不変条件）
@@ -90,6 +93,7 @@ flowchart TD
 | 学習ジョブ | APIプロセスと分離（`job_runner.py` をPopen）。状態は SQLite `training_jobs` | `main.py`, `db.py` |
 | 推論モデル | export済み（inference）モデルのみ使用可（`STRICT_OCR_EXPORT_REQUIRED=True`） | `predict.py` |
 | Dataset Manager（Dataset⇔Model Lineage） | 「モデル学習登録時（`register_tesseract_model`/`_register_ocr_model`）に`dataset_id`（DS0001形式・`resolve_dataset_id_safe`で解決）・`dataset_name`・`dataset_created_at`をモデル自身のmetadataへ**確定保存**（Dataset自体が後で削除されても来歴が残る）→ Dataset⇔Modelのリンクは永続的な逆引きインデックスを持たず、`list_all_datasets`が`list_model_infos`の`dataset_root`/`ocr_dataset_root`と都度ライブ集計→ モデル削除時は`delete_model`が元々Dataset側のファイルに触れないため、リンク解除の追加処理は不要（次回集計で自動的に外れる）」。Dataset ID（`DS0001`形式・`data/dataset_ids.json`）は既存の`GET /api/ocr/dataset/latest`が返す表示専用ID（`DS-<フォルダ名>`）とは別概念で共存する | `dataset_registry.py` / `model_registry.py` / `tesseract_pipeline.py` / `ocr_pipeline.py` |
+| Benchmark Center（既存資産の横断比較。v1.0.0で追加） | 「既存のBenchmark（`benchmark.py`。OCRエンジンを実際に実行する測定ツール。v1.0.0でメニュー表示名を『Benchmark Runner』へ変更・ロジックは無変更）とは目的・データソースが異なる別画面として新設。Benchmark Centerは評価を実行せず、`model_registry.list_model_infos`（Model）×`experiment_tracker.list_experiments`（Experiment・そこに紐付いたEvaluation）×`dataset_registry.list_all_datasets`（Dataset）をクロス参照するだけ→ `services/benchmark_center.py`が比較可能モデル一覧を組み立て（CER/文字正解率/完全一致率は既存Experiment記録をそのまま使用。Precision/Recall/F1/WER/推論速度は既存のどの評価ロジックにも算出処理が無いため『未対応』表示）→ フロントは既存の`lib/modelCompare.js`（buildModelComparison/buildWinLoss/recommendModel）をそのまま再利用して比較表・🏆最良値・推奨モデルを組み立てる（新しい評価・推薦ロジックは実装していない）→ 比較条件（対象Dataset・対象Model・対象Experiment・フィルタ・並び順）のみを`BMC-0001`形式で`data/projects/<id>/benchmark_center.json`へ保存（評価結果自体は保存しない）→ Dataset/Model/Experiment詳細画面へ『Benchmark参加/Benchmark N件』を表示（API層で件数を合成。各サービス自体はBenchmark Centerの存在を知らない設計を維持）」。評価結果が存在しないモデルを選択した場合は「評価結果がありません。評価を実行しますか？」を表示し、既存のモデル評価画面（`ocr-eval`）へ遷移するのみ（Benchmark Center自身は評価を実行しない） | `benchmark_center.py` / `main.py` / `lib/benchmarkCenter.js` / `lib/modelCompare.js` / `BenchmarkCenterView.jsx` |
 
 ## 永続化ポイント一覧
 
@@ -112,7 +116,9 @@ flowchart LR
 
 - `data/projects/<id>/releases.json`（リリース管理）: `schema_version=2`（Migration Version）。`models{}`・`history[]`（各エントリへ `release_id`=REL-0001形式。旧データは初回参照時のMigrationで古い順にバックフィル）・`candidate_counter`・`release_counter`・`policy`（Release Gateルール）。詳細は `docs/20_RELEASE_POLICY.md`
 
-- `data/projects/<id>/benchmarks.json`（Benchmark Suite）: `{"counter": 採番数, "items": [Benchmark...], "config": {"balance_weights": {...}}}`。Benchmark IDは BM-0001形式・プロジェクト内一意。各itemへProfile（common+engines+hash）・エンジン別結果・画像単位casesを保存。詳細は `docs/19_BENCHMARK_SPEC.md`
+- `data/projects/<id>/benchmarks.json`（Benchmark Runner=旧称Benchmark Suite。OCRエンジンを実際に実行する測定ツール）: `{"counter": 採番数, "items": [Benchmark...], "config": {"balance_weights": {...}}}`。Benchmark IDは BM-0001形式・プロジェクト内一意。各itemへProfile（common+engines+hash）・エンジン別結果・画像単位casesを保存。詳細は `docs/19_BENCHMARK_SPEC.md`
+
+- `data/projects/<id>/benchmark_center.json`（Benchmark Center。v1.0.0で追加）: `{"counter": 採番数, "items": [{comparison_id, created_at, name, dataset_ids[], model_names[], experiment_ids[], filters{}, sort{}}]}`。Benchmark ID（比較条件ID）は `BMC-0001`形式・プロジェクト内一意・`experiments.json`/`benchmarks.json`と同じ採番方式。**評価結果自体は保存しない**（比較条件のみ）。`benchmarks.json`（Benchmark Runner）とは別ファイル・別ID体系で、コードも`services/benchmark_center.py`として完全に分離している
 
 - `data/backups/`（全プロジェクト共通・バックアップ）: `<BK-0001>_<pid>_<mode>_<日時>.zip`（metadata_only/full）＋ `index.json`（採番・一覧）。復元は既定で新Project IDへ。`data/retention.json`=データ保持設定（Job/監査ログ保持日数。null=無期限）。詳細は `docs/21_OPERATIONS_GUIDE.md`
 

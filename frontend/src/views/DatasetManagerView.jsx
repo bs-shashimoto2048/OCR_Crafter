@@ -293,6 +293,8 @@ export default function DatasetManagerView({ projectId, onOpenModel, onOpenExper
                 {detail.copied_from_dataset_folder ? (
                   <p className="text-muted">コピー元: {detail.copied_from_dataset_folder}</p>
                 ) : null}
+                {/* v1.0.0で追加（Benchmark Center） */}
+                <p className="text-muted">Benchmark: {detail.benchmark_center_count ?? 0}件</p>
               </div>
               <div className="rounded-lg border border-border bg-card/45 px-3 py-2 text-[12px]">
                 <p className="mb-1 font-semibold text-muted">使用した前処理</p>

@@ -37,6 +37,7 @@ EXPECTED_MATRIX = {
     "dataset_comment": "operator",  # Dataset Manager: Datasetコメント保存
     "model_comment": "operator",  # Dataset Manager: Modelコメント保存
     "experiment_delete": "operator",  # Experiment Manager: Experimentカルテ削除
+    "benchmark_center_save": "operator",  # Benchmark Center: 比較条件の保存
     # Approver以上
     "release_promote": "approver",
     "release_rollback": "approver",

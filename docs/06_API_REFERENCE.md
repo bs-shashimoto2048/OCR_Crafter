@@ -164,9 +164,9 @@ v1.0.0で追加。Datasetを一時生成物ではなく開発資産として扱�
 | POST `/api/jobs/{job_id}/retry` | `JobRetryRequest`（`requested_by?`） | `{job, deduplicated}` | 同一入力条件で新規Job作成（`retry_source_job_id` に元IDを保存）。アクティブJobの再実行は400 |
 | GET `/api/jobs/{job_id}/events` | - | `{events[]}` | 進捗イベント履歴（`ts` + `type: status|progress`）。現在はポーリング取得・**将来SSEでも同一形式を使用** |
 
-## Benchmark（OCR Benchmark Suite）
+## Benchmark Runner（OCR Benchmark Suite。旧称「Benchmark」）
 
-詳細仕様: `docs/19_BENCHMARK_SPEC.md`。実行はJob Management経由（`job_type=benchmark`）。
+詳細仕様: `docs/19_BENCHMARK_SPEC.md`。実行はJob Management経由（`job_type=benchmark`）。**OCRエンジンを実際に実行して測定する実行ツール**（v1.0.0でメニュー表示名のみ「Benchmark」→「Benchmark Runner」へ変更。API・保存先・IDは無変更）。下記「Benchmark Center」（既存資産を実行せず横断比較するだけの別ツール）とは責務・コードが完全に分離している。
 
 | Method / Path | リクエスト | レスポンス主要キー | 概要 |
 |---|---|---|---|
@@ -176,6 +176,21 @@ v1.0.0で追加。Datasetを一時生成物ではなく開発資産として扱�
 | PATCH `/api/benchmarks/config` | `BenchmarkConfigRequest`（`balance_weights{accuracy, speed, stability}`） | `{balance_weights}` | バランス最良スコアの重み設定（プロジェクト毎・合計1へ正規化。既定 70/20/10） |
 | GET `/api/benchmarks/{benchmark_id}` | Query: `project_id?` | `{item}` | 詳細（Leaderboard=CER昇順・同率はExactMatch降順→Failed昇順→MeanTime昇順 / 用途別ベスト＋バランス計算式 / 画像単位cases / Profile Hash）。存在しないIDは404 |
 | GET `/api/benchmarks/{benchmark_id}/export` | Query: `kind`=summary/cases/confusions, `project_id?` | CSV（BOM付きUTF-8） | **CSV（Excel対応）3種**: benchmark_summary / benchmark_cases / benchmark_confusions |
+
+## Benchmark Center（既存資産の横断比較。v1.0.0で追加）
+
+Dataset Manager・Experiment Tracking・Model Manager・既存の評価結果（Experimentへ紐付いたEvaluation）を**実行せずに**横断比較するだけの統合ビュー。新しい評価ロジックは実装していない（CER・完全一致率・文字正解率はすべて`experiment_tracker.py`のExperiment記録をそのまま読む）。上記Benchmark Runnerとはコード（`services/benchmark_center.py`）・保存先（`data/projects/<id>/benchmark_center.json`）・ID体系（`BMC-0001`形式）を完全に分離している。**保存するのは比較条件（対象Dataset・対象Model・対象Experiment・フィルタ・並び順）のみで、評価結果自体は保存しない**。
+
+| Method / Path | リクエスト | レスポンス主要キー | 概要 |
+|---|---|---|---|
+| GET `/api/benchmark-center/models` | Query: `project_id?`, `dataset_id?`, `engine?`, `preprocess_version?`, `experiment_id?`, `query?` | `{items:[{model_name, model_id, engine, model_size_mb, dataset_id, dataset_name, experiment_id, preprocess_version, evaluation}]}` | 比較可能なモデル一覧（Model Manager×Experiment Trackingのクロス参照。新規評価は実行しない）。`evaluation`は該当モデルの最新Experimentに紐付いた評価結果（`cer`/`char_accuracy`/`accuracy_percent`/`evaluated_at`。未評価は`null`=推測補完しない） |
+| GET `/api/benchmark-center/missing-evaluations` | Query: `model_names`（カンマ区切り）, `project_id?` | `{missing:[]}` | 指定モデルのうち評価結果が無いものを返す（Benchmark Center自身は評価を実行しない。フロントはこの結果が空でなければ「評価結果がありません。評価を実行しますか？」を表示し、既存のモデル評価画面へ誘導する） |
+| GET `/api/benchmark-center/comparisons` | Query: `project_id?` | `{items[]}` | 保存済み比較条件の履歴（`BMC-0001`形式・作成日時降順。評価結果自体は保存していない） |
+| POST `/api/benchmark-center/comparisons` | `BenchmarkComparisonSaveRequest`（`name?`, `dataset_ids[]`, `model_names[]`, `experiment_ids[]`, `filters{}`, `sort{}`） | `{item}` | 比較条件のみを保存（`data/projects/<id>/benchmark_center.json`。`experiments.json`/`benchmarks.json`と同じプロジェクト単位カウンタ形式）。監査対象操作（`benchmark_center_save`・operator以上） |
+| GET `/api/benchmark-center/comparisons/{comparison_id}` | Query: `project_id?` | `{item}` | 比較条件詳細。存在しないIDは**404** |
+| GET `/api/benchmark-center/participation` | Query: `project_id?`, `model_name` | `{count}` | モデル詳細画面の「Benchmark参加 N件」用（オンデマンド取得。一覧取得時に全モデル分を計算しない設計） |
+
+`GET /api/ocr/datasets/{dataset_id}`・`GET /api/experiments`は、それぞれ`benchmark_center_count`（このDataset/Experimentを対象に含む保存済み比較件数）をAPI層で合成して返す（`dataset_registry.py`/`experiment_tracker.py`自体はBenchmark Centerの存在を知らない設計を維持）。
 
 ## リリース管理（Model Release Management）
 

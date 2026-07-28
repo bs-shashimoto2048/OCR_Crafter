@@ -313,6 +313,9 @@ export default function ModelsView({
   const [aliasDraft, setAliasDraft] = useState("");
   const [commentDraft, setCommentDraft] = useState("");
   const [savingComment, setSavingComment] = useState(false);
+  // v1.0.0で追加（Benchmark Center）: モデル詳細を開いたときにオンデマンドで取得
+  // （一覧取得時に全モデル分をまとめて計算しない=パフォーマンス配慮）
+  const [benchmarkParticipation, setBenchmarkParticipation] = useState(null);
 
   useEffect(() => {
     setSelectedModels((prev) => prev.filter((name) => models.includes(name)));
@@ -324,6 +327,24 @@ export default function ModelsView({
     setCommentDraft(detailModel ? infoOf(detailModel).comment || "" : "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detailModel, aliases, modelInfos]);
+
+  useEffect(() => {
+    if (!detailModel) {
+      setBenchmarkParticipation(null);
+      return;
+    }
+    let cancelled = false;
+    request(`/api/benchmark-center/participation?project_id=${encodeURIComponent(projectId)}&model_name=${encodeURIComponent(detailModel)}`)
+      .then((data) => {
+        if (!cancelled) setBenchmarkParticipation(Number(data?.count || 0));
+      })
+      .catch(() => {
+        if (!cancelled) setBenchmarkParticipation(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detailModel, projectId]);
 
   async function saveModelComment(name, comment) {
     setSavingComment(true);
@@ -827,6 +848,8 @@ export default function ModelsView({
                 <span className="text-[13px] font-semibold text-muted">未記録</span>
               )}
             </div>
+            {/* v1.0.0で追加（Benchmark Center）: このモデルを対象に含む保存済み比較件数 */}
+            <SpecRow label="Benchmark参加" value={benchmarkParticipation === null ? "-" : `${benchmarkParticipation}件`} />
             <SpecRow label="ベースモデル" value={info.base_lang || "-"} help={HELP_TEXTS.baseModel} />
             <SpecRow label="Charset" value={info.charset || "-"} />
             <SpecRow label="Iteration" value={iterationText(name)} help={HELP_TEXTS.iteration} />

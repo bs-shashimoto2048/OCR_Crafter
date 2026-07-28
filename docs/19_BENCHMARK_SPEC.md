@@ -1,6 +1,8 @@
-# 19. OCR Benchmark Suite（複数エンジン公平比較）
+# 19. OCR Benchmark Suite（複数エンジン公平比較）＝Benchmark Runner
 
-同一データセット・同一条件で複数のOCRエンジン/モデルを一括実行し、精度・速度・安定性を比較する。実装は `src/app/services/benchmark.py`、画面は `frontend/src/views/BenchmarkView.jsx`（サイドバー「運用 > Benchmark」）。実行は必ず **Job Management（`job_type=benchmark`）経由**（`docs/18_JOB_MANAGEMENT.md`）。
+同一データセット・同一条件で複数のOCRエンジン/モデルを**実際に実行**し、精度・速度・安定性を比較する**実行ツール**。実装は `src/app/services/benchmark.py`、画面は `frontend/src/views/BenchmarkView.jsx`（サイドバー「運用 > **Benchmark Runner**」。v1.0.0でメニュー表示名を「Benchmark」から変更——後述のBenchmark Centerと役割を混同しないため。`activeView`のid・API・保存先はすべて無変更）。実行は必ず **Job Management（`job_type=benchmark`）経由**（`docs/18_JOB_MANAGEMENT.md`）。
+
+> **Benchmark Centerとの違い（v1.0.0で追加）**: このBenchmark Runnerは「OCRエンジンを実際に実行して測定する」ツール。既に蓄積されたDataset/Experiment/Model/評価結果を**実行せずに横断比較するだけ**の別画面「Benchmark Center」（`docs/16_SCREEN_SPEC.md`の該当セクション・`docs/06_API_REFERENCE.md`の`/api/benchmark-center/*`）とはコード・保存先・目的が完全に別。Benchmark RunnerをBenchmark Centerへ統合したり、ロジックを共有したりしない。
 
 ## 1. Benchmark ID・保存先
 

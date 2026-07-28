@@ -55,6 +55,7 @@ from .schemas import (
     EvaluateRequest,
     BackupCreateRequest,
     BackupRestoreRequest,
+    BenchmarkComparisonSaveRequest,
     BenchmarkConfigRequest,
     BenchmarkCreateRequest,
     FileSelectRequest,
@@ -2977,6 +2978,11 @@ def api_ocr_dataset_detail(dataset_id: str, project_id: Optional[str] = Query(de
     detail = get_dataset_detail(resolved, dataset_id)
     if detail is None:
         raise HTTPException(status_code=404, detail=f"dataset not found: {dataset_id}")
+    # v1.0.0で追加（Benchmark Center）: このDatasetを対象に含む保存済み比較件数
+    # （dataset_registry.py自体はBenchmark Centerの存在を知らない設計を維持し、API層で合成する）
+    from .services.benchmark_center import count_comparisons_for_dataset
+
+    detail["benchmark_center_count"] = count_comparisons_for_dataset(resolved, dataset_id)
     return detail
 
 
@@ -3350,8 +3356,17 @@ def api_experiments(project_id: Optional[str] = Query(default="default")) -> dic
 
     実験記録のない旧モデルは自動バックフィルされる（既定で分析対象外）。
     """
+    from .services.benchmark_center import build_experiment_participation_counts
+
     resolved = _resolve_project_id(project_id)
-    return {"project_id": resolved, "items": list_experiments(resolved)}
+    items = list_experiments(resolved)
+    # v1.0.0で追加（Benchmark Center）: このExperimentを対象に含む保存済み比較件数
+    # （experiment_tracker.py自体はBenchmark Centerの存在を知らない設計を維持し、API層で合成する。
+    # 一括計算のO(1)参照のため、Experiment件数×比較件数のO(n×m)にはしない）
+    counts = build_experiment_participation_counts(resolved)
+    for item in items:
+        item["benchmark_center_count"] = counts.get(str(item.get("experiment_id") or ""), 0)
+    return {"project_id": resolved, "items": items}
 
 
 @app.get("/api/experiments/comparable_groups")
@@ -3778,6 +3793,108 @@ def api_benchmark_export(
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# --- Benchmark Center（既存のDataset Manager / Experiment Tracking / Model Manager /
+#     評価結果を横断比較するだけの統合ビュー。評価の実行機能は持たない。実行ツールの
+#     Benchmark Runner=`/api/benchmarks*`とは責務・コードを分離する） ---
+
+
+@app.get("/api/benchmark-center/models")
+def api_benchmark_center_models(
+    project_id: Optional[str] = Query(default="default"),
+    dataset_id: str = Query(default=""),
+    engine: str = Query(default=""),
+    preprocess_version: Optional[int] = Query(default=None),
+    experiment_id: str = Query(default=""),
+    query: str = Query(default=""),
+) -> dict[str, Any]:
+    """比較可能なモデル一覧（Model Manager×Experiment Trackingのクロス参照。新規評価は実行しない）。"""
+    from .services.benchmark_center import list_comparable_models
+
+    resolved = _resolve_project_id(project_id)
+    items = list_comparable_models(
+        resolved,
+        dataset_id=dataset_id,
+        engine=engine,
+        preprocess_version=preprocess_version,
+        experiment_id=experiment_id,
+        query=query,
+    )
+    return {"project_id": resolved, "items": items}
+
+
+@app.get("/api/benchmark-center/missing-evaluations")
+def api_benchmark_center_missing_evaluations(
+    model_names: str = Query(default="", description="カンマ区切りのモデルファイル名"),
+    project_id: Optional[str] = Query(default="default"),
+) -> dict[str, Any]:
+    """指定モデルのうち評価結果が無いものを返す（Benchmark Center自身は評価を実行しない）。"""
+    from .services.benchmark_center import check_missing_evaluations
+
+    resolved = _resolve_project_id(project_id)
+    names = [name.strip() for name in model_names.split(",") if name.strip()]
+    return {"project_id": resolved, "missing": check_missing_evaluations(resolved, names)}
+
+
+@app.get("/api/benchmark-center/comparisons")
+def api_benchmark_center_comparisons_list(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+    """保存済み比較条件の履歴（BMC-0001形式・作成日時降順。評価結果自体は保存していない）。"""
+    from .services.benchmark_center import list_comparisons
+
+    resolved = _resolve_project_id(project_id)
+    return {"project_id": resolved, "items": list_comparisons(resolved)}
+
+
+@app.post("/api/benchmark-center/comparisons")
+def api_benchmark_center_comparisons_create(req: BenchmarkComparisonSaveRequest, request: Request) -> dict[str, Any]:
+    """比較条件（対象Dataset・対象Model・対象Experiment・フィルタ・並び順）のみを保存する。"""
+    from .services.benchmark_center import save_comparison
+
+    _enforce_role(request, "benchmark_center_save")
+    resolved = _resolve_project_id(req.project_id)
+    item = save_comparison(
+        resolved,
+        {
+            "name": req.name,
+            "dataset_ids": req.dataset_ids,
+            "model_names": req.model_names,
+            "experiment_ids": req.experiment_ids,
+            "filters": req.filters,
+            "sort": req.sort,
+        },
+    )
+    _record_audit_safe(
+        request, "benchmark_center_save", project_id=resolved, target_type="benchmark_center",
+        target_id=str(item.get("comparison_id") or ""),
+        after={"dataset_ids": item.get("dataset_ids"), "model_names": item.get("model_names")},
+    )
+    return {"project_id": resolved, "item": item}
+
+
+@app.get("/api/benchmark-center/comparisons/{comparison_id}")
+def api_benchmark_center_comparison_detail(
+    comparison_id: str, project_id: Optional[str] = Query(default="default")
+) -> dict[str, Any]:
+    from .services.benchmark_center import get_comparison
+
+    resolved = _resolve_project_id(project_id)
+    item = get_comparison(resolved, comparison_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"comparison not found: {comparison_id}")
+    return {"project_id": resolved, "item": item}
+
+
+@app.get("/api/benchmark-center/participation")
+def api_benchmark_center_participation(
+    project_id: Optional[str] = Query(default="default"),
+    model_name: str = Query(default=""),
+) -> dict[str, Any]:
+    """モデル詳細画面の「Benchmark参加 N件」用（オンデマンド取得。一覧取得時に全モデル分を計算しない）。"""
+    from .services.benchmark_center import count_comparisons_for_model
+
+    resolved = _resolve_project_id(project_id)
+    return {"project_id": resolved, "model_name": model_name, "count": count_comparisons_for_model(resolved, model_name)}
 
 
 @app.get("/models")

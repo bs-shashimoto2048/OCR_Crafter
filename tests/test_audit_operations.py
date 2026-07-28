@@ -22,8 +22,8 @@ def test_audit_actions_defined(temp_projects):
     # 基本13種＋バックアップ2種＋監査補完7種＋レポート2種＋前処理設定保存2種
     # （preprocess_config_save/preprocess_config_restore）＋Dataset Manager 4種
     # （dataset_delete/dataset_copy/dataset_comment/model_comment）＋Experiment Manager 1種
-    # （experiment_delete）=31種
-    assert len(AUDIT_ACTIONS) == 31
+    # （experiment_delete）＋Benchmark Center 1種（benchmark_center_save）=32種
+    assert len(AUDIT_ACTIONS) == 32
     assert "report_generate" in AUDIT_ACTIONS and "report_delete" in AUDIT_ACTIONS
     assert "backup_restore" in AUDIT_ACTIONS and "retention_cleanup" in AUDIT_ACTIONS
     for action in ["job_finished", "evaluation_run", "experiment_update", "analysis_toggle", "backup_create", "deployment_export", "restore_failed"]:
@@ -32,6 +32,7 @@ def test_audit_actions_defined(temp_projects):
     for action in ["dataset_delete", "dataset_copy", "dataset_comment", "model_comment"]:
         assert action in AUDIT_ACTIONS, f"Dataset Manager対象 {action} がない"
     assert "experiment_delete" in AUDIT_ACTIONS, "Experiment Manager対象 experiment_delete がない"
+    assert "benchmark_center_save" in AUDIT_ACTIONS, "Benchmark Center対象 benchmark_center_save がない"
     assert set(ACTION_MIN_ROLE) == set(AUDIT_ACTIONS)
 
 
