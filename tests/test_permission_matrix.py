@@ -36,6 +36,7 @@ EXPECTED_MATRIX = {
     "dataset_copy": "operator",  # Dataset Manager: Datasetコピー
     "dataset_comment": "operator",  # Dataset Manager: Datasetコメント保存
     "model_comment": "operator",  # Dataset Manager: Modelコメント保存
+    "experiment_delete": "operator",  # Experiment Manager: Experimentカルテ削除
     # Approver以上
     "release_promote": "approver",
     "release_rollback": "approver",

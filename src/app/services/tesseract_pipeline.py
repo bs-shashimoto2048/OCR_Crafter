@@ -495,6 +495,15 @@ def register_tesseract_model(
                 "parent_model_id": meta["parent_model_id"],
                 "note": meta["training_note"],
                 "operator": "",
+                # v1.0.0で追加（Experiment Manager強化）: Dataset Managerが既に確定保存した
+                # dataset_id/dataset_nameをそのまま流用する（新規解決・重複計算はしない）
+                "model_engine": "tesseract",
+                "dataset_id": meta["dataset_id"],
+                "dataset_name": meta["dataset_name"],
+                # dataset_hash: Dataset自体の内容ハッシュという独立概念は既存になかったため、
+                # 既存のtraining_input_pipeline_hash（前処理+オーグメンテーションの結合ハッシュ。
+                # Dataset作成時に確定保存済み）をそのまま再利用する（新しいハッシュ計算は追加しない）
+                "dataset_hash": str(meta.get("training_input_pipeline_hash") or ""),
                 "training": {
                     "iterations": int(max_iterations),
                     "charset": charset,
@@ -507,6 +516,14 @@ def register_tesseract_model(
                         "val": dataset_counts.get("val", counts.get("val")),
                         "test": dataset_counts.get("test"),
                     },
+                    # Tesseract LSTM fine-tuneにはoptimizer/scheduler/loss/learning_rate/batch_sizeの
+                    # 概念が無いためnull（推測で埋めない。PaddleOCR側は既存のocr_training_paramsに
+                    # batch_size/learning_rateがあるが、今回はExperiment記録の対象拡張は行わない）
+                    "optimizer": None,
+                    "scheduler": None,
+                    "loss": None,
+                    "learning_rate": None,
+                    "batch_size": None,
                 },
                 "preprocess": {
                     "hash": str(meta.get("training_preprocess_hash") or ""),
@@ -514,6 +531,13 @@ def register_tesseract_model(
                     if isinstance(meta.get("training_preprocess"), dict)
                     else "",
                     "summary": summarize_threshold_from_preprocess(meta.get("training_preprocess")),
+                    # v1.0.0で追加: 既存の「前処理設定保存」Versionとの連携強化（一致する場合のみ記録済み。
+                    # dataset_meta側の値をそのまま流用し、独自のVersion管理は作らない）
+                    "version": (
+                        int(dataset_meta["preprocess_config_version"])
+                        if isinstance(dataset_meta.get("preprocess_config_version"), (int, float))
+                        else None
+                    ),
                 },
                 "augmentation": {
                     "config": meta["augmentation_config"],

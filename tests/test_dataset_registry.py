@@ -130,6 +130,31 @@ def test_get_dataset_detail_full_fields(temp_projects):
     assert [m["name"] for m in detail["models"]] == ["m1.tess.json"]
 
 
+def test_get_dataset_detail_includes_linked_experiments(temp_projects):
+    """Experiment Manager強化: Dataset詳細へ「使用Experiment」一覧（experiments）が含まれる。"""
+    from src.app.services.tesseract_pipeline import register_tesseract_model
+
+    folder = _write_dataset("p1", "ds_a", "2026-07-01T00:00:00")
+    dataset_id = list_all_datasets("p1")[0]["dataset_id"]
+    paths = ensure_project_directories("p1")
+    register_tesseract_model(
+        project_id="p1",
+        lang="exp_model",
+        traineddata_path=paths.models / "exp_model.traineddata",
+        tessdata_dir=folder,
+        base_lang="eng",
+        charset="ABC",
+        dataset_root=str(folder),
+        counts={"train": 8, "val": 1},
+        job_id="job-exp",
+        max_iterations=1000,
+    )
+    detail = get_dataset_detail("p1", dataset_id)
+    assert len(detail["experiments"]) == 1
+    assert detail["experiments"][0]["models"] == ["exp_model.tess.json"]
+    assert detail["experiments"][0]["experiment_id"].startswith("EXP-")
+
+
 def test_get_dataset_detail_returns_none_for_unknown_id(temp_projects):
     assert get_dataset_detail("p1", "DS9999") is None
 

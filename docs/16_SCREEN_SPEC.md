@@ -25,6 +25,8 @@ flowchart LR
         LB --> TR["データ作成・学習<br/>(ocr-training)"]
         TR --> MD["モデル管理<br/>(ocr-models)"]
         MD <--> DM["Dataset Manager<br/>(dataset-manager)"]
+        MD <--> EXP["実験管理<br/>(experiments)"]
+        DM <--> EXP
         MD --> EV["モデル評価<br/>(ocr-eval)"]
         EV --> INF["推論<br/>(ocr-inference)"]
         INF --> RO["OCR修正<br/>(rapid-ocr)"]
@@ -443,6 +445,7 @@ OCRデータセット作成と学習ジョブの実行・監視（PaddleOCR / Te
   - 使用した前処理: Version・保存日時・Hash
   - 学習設定: Train率・Validation率・Test率・Charset・Rotation（Dataset作成時のオーグメンテーション回転設定。有効時は最大角度も表示）・入力画像数・除外画像数・Train/Val/Test件数
   - 使用モデル: 一覧表示（クリックでモデル管理の該当モデルカルテへ遷移＝Dataset⇔Modelの双方向リンク）
+  - **使用Experiment**（v1.0.0で追加。Experiment Manager強化）: 一覧表示（クリックで実験管理へ遷移し該当Experimentを選択・スクロール＝Dataset⇔Experimentの双方向リンク。既存のExperiment Trackingとの連携のみで新しい実験保存の仕組みは追加していない）
   - コメント（複数行対応・保存ボタン）
 
 **主操作**
@@ -454,7 +457,7 @@ OCRデータセット作成と学習ジョブの実行・監視（PaddleOCR / Te
 なし
 
 **関連画面**
-モデル（ocr-models）、学習
+モデル（ocr-models）、実験管理（相互リンク。v1.0.0で追加）、学習
 
 ---
 
@@ -464,13 +467,15 @@ OCRデータセット作成と学習ジョブの実行・監視（PaddleOCR / Te
 「どの条件で学習し、何を変更し、結果がどう変わったか」を一元管理・比較し、OCRモデル改善のPDCAを高速化する。
 
 **表示内容**
-- **実験一覧**（実験カルテ。EXP-0001形式=等幅フォント表示・モデルIDとは独立）: ★お気に入り固定 / 実験ID / 日時 / 生成モデル（管理Noバッジ。クリックでモデル管理のカルテへ遷移）/ Iteration / Aug要約 / 前処理（要約＋ハッシュ8桁）/ CER / 文字正解率 / 完全一致率 / 自由タグ（最大20件。「+タグ / 編集」でカンマ区切り編集）/ 実験名・メモ
-- **フィルタ**: フリーテキスト（EXP・モデル・管理No・タグ・メモ）/ Iteration範囲 / CER上限% / Augプリセット / 前処理ハッシュ / 日付範囲 / タグ / ★のみ
-- **CSV / Excel出力**: フィルタ中の実験をBOM付きUTF-8 CSVへ（Excelでそのまま開ける。タグ・★・評価要約を含む）
-- **Experiment比較**（一覧のチェックで最大4件選択）: Iteration / Split比率 / Split Seed / Train・Val・Test / 前処理 / Augmentation / Charset / ベース・親 / CER の条件差分テーブル。**変更された条件だけamber強調（●付き）・同じ値は薄く表示**（全て未記録は変更なし扱い）
+- **実験一覧**（実験カルテ。EXP-0001形式=等幅フォント表示・モデルIDとは独立）: ★お気に入り固定 / 実験ID / 日時 / 生成モデル（管理Noバッジ。クリックでモデル管理のカルテへ遷移）/ **Dataset**（v1.0.0で追加。学習に使用したDataset名。クリックでDataset Managerの詳細へ遷移）/ Iteration / Aug要約 / 前処理（要約＋ハッシュ8桁）/ CER / 文字正解率 / 完全一致率 / 自由タグ（最大20件。「+タグ / 編集」でカンマ区切り編集）/ 実験名・メモ（v1.0.0で追加: セルクリックで複数行テキストエリアへ切替・保存/キャンセル。Markdown不要のプレーンテキスト）/ **操作**（v1.0.0で追加。削除ボタン）
+- **列ソート**（v1.0.0で追加。Dataset Manager・モデル管理と統一感のあるテーブルUI）: 実験ID・日時（既定=降順）・Dataset・Iteration・CER・完全一致率の列見出しをクリックで昇順/降順切替
+- **フィルタ**: フリーテキスト（EXP・モデル・管理No・タグ・メモ・**Dataset名・Dataset ID**）/ Iteration範囲 / CER上限% / Augプリセット / 前処理ハッシュ / 日付範囲 / タグ / ★のみ
+- **CSV / Excel出力**: フィルタ中の実験をBOM付きUTF-8 CSVへ（Excelでそのまま開ける。タグ・★・評価要約・**Dataset情報・学習条件拡張項目・前処理Version**を含む）
+- **Experiment削除**（v1.0.0で追加）: 行の「削除」ボタン→確認ダイアログ（既定キャンセル）→`DELETE /api/experiments/{id}`。**Experimentカルテのみ削除**し、Dataset・Model・評価結果の実体には一切影響しない
+- **Experiment比較**（一覧のチェックで最大4件選択）: Iteration / Split比率 / Split Seed / Train・Val・Test / 前処理 / Augmentation / Charset / ベース・親 / CER に加え、**v1.0.0で追加**: Optimizer / Scheduler / Learning Rate / Batch Size（Tesseractは概念が無く「未記録」表示）/ 前処理Version の条件差分テーブル。**変更された条件だけamber強調（●付き）・同じ値は薄く表示**（全て未記録は変更なし扱い）
 - **推移グラフ**（SVG手書き・依存なし）: CER推移・完全一致率推移（Experiment順の折れ線・8件以下は値ラベル付き）／ Iteration×CER・Aug倍率×CER（散布図。なし=1.0倍）
 - **学習条件との相関（簡易分析）**: Iteration×CERの相関係数と★5段階（差分集計。統計学的検定はしない旨を明記）/ Augあり・なしの平均CER差（+pt）/ 前処理ハッシュ別の平均CER
-- **ベスト条件**: 最もCERが良かった実験の Iteration / Aug / 前処理 / Split / CER
+- **ベスト条件**: 最もCERが良かった実験の Iteration / Aug / 前処理 / Split / CER。**v1.0.0で追加**: 「🏆 Best Accuracy」（完全一致率最大の実験）と「🏆 Best CER」（従来のベスト条件と同一実験）を並べて自動表示（既存の`bestExperiment`とは独立指標として`bestExperimentByAccuracy`を追加。既存関数は変更しない）
 - **条件推薦**: 実験履歴からのルールベース推薦カード（例:「Iterationは10,000を推奨。理由: それ以上は平均CERが悪化（過学習傾向）」。AI推論ではない・性能向上を保証しない旨を明記）
 
 - **Experiment Validation（比較妥当性判定）**: 評価実行時に Evaluation Profile（データセットID・画像数・ラベル数・評価前処理識別子・エンジン・PSM・Whitelist・文字正規化・CERバージョン）を保存し、**Evaluation Hash**（sha256・評価日時除外）で同一条件評価を判定。**Comparable Group（CG-0001形式・色分けチップ＋グラフ凡例）**をHash単位で自動生成
@@ -480,17 +485,18 @@ OCRデータセット作成と学習ジョブの実行・監視（PaddleOCR / Te
 - **安全な推薦**: 「推薦根拠: Comparable Experiment N件」と「この推薦はN件の比較可能Experimentから生成されています。」を必ず表示。**5件未満は「参考値（データ不足）」バッジ**。ベスト条件はグループベスト＋全体ベスト（条件が異なる旨を付記）を分けて表示
 
 **データの流れ**
-学習完了時に自動記録（`register_tesseract_model`→`experiment_tracker.record_experiment`）。実験記録のない旧モデルは一覧取得時に自動バックフィル（既定で分析対象外）。評価実行時にフロントが `POST /api/experiments/attach-evaluation` で評価要約＋Evaluation Profileを自動保存。
+学習完了時に自動記録（`register_tesseract_model`→`experiment_tracker.record_experiment`）。実験記録のない旧モデルは一覧取得時に自動バックフィル（既定で分析対象外）。評価実行時にフロントが `POST /api/experiments/attach-evaluation` で評価要約＋Evaluation Profileを自動保存。**v1.0.0で追加**: 登録時にDataset Managerが確定保存した`dataset_id`/`dataset_name`をそのまま流用して記録する（新しい解決処理は追加しない）。
 
 **主操作**
-- 比較選択（最大4件）/ ★トグル / タグ編集（PATCH）/ CSV出力 / 更新
+- 比較選択（最大4件）/ ★トグル / タグ編集（PATCH）/ CSV出力 / 更新 / **削除**（v1.0.0で追加）/ **コメント編集**（v1.0.0で追加。セルクリックで複数行テキストエリア→PATCHの`note`をそのまま利用）
 - 生成モデル→モデル管理カルテへ遷移。モデルカルテの「Experiment」リンク→この画面へ遷移（該当実験を選択・スクロール）
+- **v1.0.0で追加**: Dataset列→Dataset Managerの詳細へ遷移。Dataset Manager詳細の「使用Experiment」→この画面へ遷移（該当実験を選択・スクロール。モデルカルテからの遷移と同じ`focusExperimentId`の仕組みを再利用）
 
 **ショートカット**
 なし
 
 **関連画面**
-モデル管理（相互リンク）、学習、モデル評価
+モデル管理（相互リンク）、Dataset Manager（相互リンク。v1.0.0で追加）、学習、モデル評価
 
 ---
 

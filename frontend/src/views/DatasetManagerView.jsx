@@ -31,7 +31,7 @@ function SortIndicator({ active, dir }) {
   return <span className="ml-1 text-[10px]">{dir === "asc" ? "▲" : "▼"}</span>;
 }
 
-export default function DatasetManagerView({ projectId, onOpenModel, detailRequest = null, notify = () => {} }) {
+export default function DatasetManagerView({ projectId, onOpenModel, onOpenExperiment, detailRequest = null, notify = () => {} }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
@@ -337,6 +337,29 @@ export default function DatasetManagerView({ projectId, onOpenModel, detailReque
                   </ul>
                 ) : (
                   <p className="text-muted">このDatasetを使用したモデルはまだありません</p>
+                )}
+              </div>
+              {/* v1.0.0で追加（Experiment Manager強化・10.Dataset側）: 使用Experiment一覧
+                  （既存のExperiment Trackingとのリンク。クリックで実験管理へ遷移） */}
+              <div className="rounded-lg border border-border bg-card/45 px-3 py-2 text-[12px]">
+                <p className="mb-1 font-semibold text-muted">使用Experiment（{detail.experiments?.length || 0}件）</p>
+                {detail.experiments && detail.experiments.length > 0 ? (
+                  <ul className="space-y-1">
+                    {detail.experiments.map((exp) => (
+                      <li key={exp.experiment_id}>
+                        <button
+                          type="button"
+                          className="model-id-font text-blue-300 hover:underline"
+                          onClick={() => onOpenExperiment?.(exp.experiment_id)}
+                          title="実験管理でこのExperimentを開く"
+                        >
+                          {exp.experiment_id}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-muted">このDatasetを使用したExperimentはまだありません</p>
                 )}
               </div>
               <div className="rounded-lg border border-border bg-card/45 px-3 py-2 text-[12px] xl:col-span-2">

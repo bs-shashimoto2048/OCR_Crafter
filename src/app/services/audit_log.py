@@ -57,6 +57,7 @@ AUDIT_ACTIONS = [
     "dataset_copy",  # Dataset Manager: Datasetコピー
     "dataset_comment",  # Dataset Manager: Datasetコメント保存
     "model_comment",  # Dataset Manager: Modelコメント保存
+    "experiment_delete",  # Experiment Manager: Experimentカルテ削除（Dataset/Model/Evaluationには影響しない）
 ]
 
 # 権限ロール（弱い順）と操作に必要な最低ロール
@@ -92,6 +93,7 @@ ACTION_MIN_ROLE = {
     "dataset_copy": "operator",
     "dataset_comment": "operator",
     "model_comment": "operator",
+    "experiment_delete": "operator",
 }
 
 # 保存禁止キー（部分一致・小文字比較）: パスワード・トークン・APIキー等の機密情報

@@ -10,6 +10,7 @@ import {
   analysisExclusionReason,
   augmentationImprovement,
   bestExperiment,
+  bestExperimentByAccuracy,
   buildExperimentDiff,
   buildExperimentRecommendations,
   buildGroupColorMap,
@@ -25,6 +26,7 @@ import {
   normalizeExperiment,
   preprocessGroups,
   resolveAnalysisScope,
+  sortExperiments,
 } from "../lib/experimentAnalysis";
 
 // Scientific Mode（比較可能Experimentのみ分析）の保存キー（プロジェクト別・既定ON）
@@ -140,6 +142,21 @@ function ScatterChart({ points, xFormat = (v) => v.toLocaleString("ja-JP"), fill
   );
 }
 
+// ソート可能な列見出し（Dataset Manager等と統一感のあるテーブルUI。クリックで昇順/降順切替）
+function SortableTh({ label, sortKey, current, dir, onSort }) {
+  const active = current === sortKey;
+  return (
+    <th
+      className="cursor-pointer select-none px-1.5 py-1.5 font-medium hover:text-text"
+      onClick={() => onSort(sortKey)}
+      aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : undefined}
+    >
+      {label}
+      {active ? <span className="ml-0.5 text-[10px]">{dir === "asc" ? "▲" : "▼"}</span> : null}
+    </th>
+  );
+}
+
 export default function ExperimentsView({
   projectId,
   experiments = [],
@@ -148,6 +165,8 @@ export default function ExperimentsView({
   onUpdateExperiment,
   onToggleAnalysis,
   onOpenModel,
+  onOpenDataset,
+  onDeleteExperiment,
   focusExperimentId = "",
 }) {
   const items = useMemo(() => experiments.map(normalizeExperiment), [experiments]);
@@ -179,9 +198,33 @@ export default function ExperimentsView({
     favoriteOnly: false,
   });
   const [selected, setSelected] = useState([]);
+  const [sortKey, setSortKey] = useState("createdAt");
+  const [sortDir, setSortDir] = useState("desc");
+  const [editingNoteId, setEditingNoteId] = useState("");
+  const [noteDraft, setNoteDraft] = useState("");
   const focusRef = useRef(null);
 
-  const filtered = useMemo(() => filterExperiments(items, filters), [items, filters]);
+  function toggleSort(key) {
+    if (sortKey === key) {
+      setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir(key === "createdAt" ? "desc" : "asc");
+    }
+  }
+
+  function startEditNote(experiment) {
+    setEditingNoteId(experiment.id);
+    setNoteDraft(experiment.note || "");
+  }
+
+  function saveNote(id) {
+    onUpdateExperiment?.(id, { note: noteDraft });
+    setEditingNoteId("");
+  }
+
+  const filteredUnsorted = useMemo(() => filterExperiments(items, filters), [items, filters]);
+  const filtered = useMemo(() => sortExperiments(filteredUnsorted, sortKey, sortDir), [filteredUnsorted, sortKey, sortDir]);
   const selectedExperiments = useMemo(
     () => selected.map((id) => items.find((e) => e.id === id)).filter(Boolean),
     [selected, items]
@@ -207,6 +250,8 @@ export default function ExperimentsView({
   const preGroups = useMemo(() => preprocessGroups(scopeItems), [scopeItems]);
   const best = useMemo(() => bestExperiment(scopeItems), [scopeItems]);
   const overallBest = useMemo(() => bestExperiment(items), [items]);
+  // v1.0.0で追加（9.ベスト表示）: Accuracy最大の実験もCERベストと並べて表示する
+  const bestAcc = useMemo(() => bestExperimentByAccuracy(scopeItems), [scopeItems]);
   const recommendations = useMemo(() => buildExperimentRecommendations(scopeItems), [scopeItems]);
   const recommendationInsufficient = scope.scientific && scope.basisCount < 5;
 
@@ -356,19 +401,21 @@ export default function ExperimentsView({
               <tr>
                 <th className="px-1.5 py-1.5 font-medium">比較</th>
                 <th className="px-1.5 py-1.5 font-medium">★</th>
-                <th className="px-1.5 py-1.5 font-medium">実験ID</th>
+                <SortableTh label="実験ID" sortKey="id" current={sortKey} dir={sortDir} onSort={toggleSort} />
                 <th className="px-1.5 py-1.5 font-medium" title="Comparable Group（Evaluation Hash単位の比較可能グループ）">CG</th>
                 <th className="px-1.5 py-1.5 font-medium" title="分析対象（推薦・相関へ使用。失敗・デバッグ実験はOFFにできます）">分析</th>
-                <th className="px-1.5 py-1.5 font-medium">日時</th>
+                <SortableTh label="日時" sortKey="createdAt" current={sortKey} dir={sortDir} onSort={toggleSort} />
                 <th className="px-1.5 py-1.5 font-medium">生成モデル</th>
-                <th className="px-1.5 py-1.5 font-medium">Iteration</th>
+                <SortableTh label="Dataset" sortKey="datasetName" current={sortKey} dir={sortDir} onSort={toggleSort} />
+                <SortableTh label="Iteration" sortKey="iterations" current={sortKey} dir={sortDir} onSort={toggleSort} />
                 <th className="px-1.5 py-1.5 font-medium">Aug</th>
                 <th className="px-1.5 py-1.5 font-medium">前処理</th>
-                <th className="px-1.5 py-1.5 font-medium">CER</th>
+                <SortableTh label="CER" sortKey="cer" current={sortKey} dir={sortDir} onSort={toggleSort} />
                 <th className="px-1.5 py-1.5 font-medium">文字</th>
-                <th className="px-1.5 py-1.5 font-medium">一致</th>
+                <SortableTh label="一致" sortKey="accuracyPercent" current={sortKey} dir={sortDir} onSort={toggleSort} />
                 <th className="px-1.5 py-1.5 font-medium">タグ</th>
                 <th className="px-1.5 py-1.5 font-medium">実験名 / メモ</th>
+                <th className="px-1.5 py-1.5 font-medium">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -445,6 +492,20 @@ export default function ExperimentsView({
                       </button>
                     ))}
                   </td>
+                  <td className="min-w-0 max-w-[8rem] whitespace-nowrap px-1.5 py-1.5">
+                    {e.datasetId ? (
+                      <button
+                        type="button"
+                        className="max-w-full truncate text-blue-300 hover:underline"
+                        onClick={() => onOpenDataset?.(e.datasetId)}
+                        title={`Dataset Managerでこのデータセットを開く: ${e.datasetName}`}
+                      >
+                        {e.datasetName || e.datasetId}
+                      </button>
+                    ) : (
+                      <span className="text-muted">未記録</span>
+                    )}
+                  </td>
                   <td className="px-1.5 py-1.5 text-text">{e.iterations === null ? "未記録" : e.iterations.toLocaleString("ja-JP")}</td>
                   <td className="min-w-0 max-w-[9rem] truncate px-1.5 py-1.5 text-muted" title={e.augSummary}>
                     {e.augSummary}
@@ -472,14 +533,57 @@ export default function ExperimentsView({
                       </button>
                     </span>
                   </td>
-                  <td className="min-w-0 max-w-[14rem] truncate px-1.5 py-1.5 text-muted" title={`${e.name} ${e.note}`}>
-                    {e.name || e.note || "-"}
+                  <td className="min-w-0 max-w-[16rem] px-1.5 py-1.5 text-muted">
+                    {editingNoteId === e.id ? (
+                      <div className="space-y-1">
+                        <textarea
+                          className="app-input min-h-[56px] w-full text-[11px]"
+                          value={noteDraft}
+                          onChange={(event) => setNoteDraft(event.target.value)}
+                          placeholder={"複数行のコメントを入力できます"}
+                          autoFocus
+                        />
+                        <div className="flex gap-1">
+                          <Button size="sm" variant="secondary" className="h-6 px-1.5 text-[10px]" onClick={() => saveNote(e.id)}>
+                            保存
+                          </Button>
+                          <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[10px]" onClick={() => setEditingNoteId("")}>
+                            キャンセル
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className="max-w-full truncate text-left hover:text-text"
+                        title={`${e.name} ${e.note}（クリックでコメント編集）`}
+                        onClick={() => startEditNote(e)}
+                      >
+                        {e.name || e.note || "コメントを追加"}
+                      </button>
+                    )}
+                  </td>
+                  <td className="whitespace-nowrap px-1.5 py-1.5">
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      className="h-6 px-1.5 text-[10px]"
+                      onClick={() => {
+                        const ok = window.confirm(
+                          `Experiment ${e.id} を削除します。Dataset・Model・評価結果には影響しません。削除しますか？`
+                        );
+                        if (ok) onDeleteExperiment?.(e.id);
+                      }}
+                      title="Experimentカルテのみ削除（Dataset・Modelは削除されません）"
+                    >
+                      削除
+                    </Button>
                   </td>
                 </tr>
               ))}
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={15}>
+                  <td colSpan={17}>
                     <EmptyState
                       compact
                       title={items.length === 0 ? "実験がありません" : "条件に一致する実験がありません"}
@@ -693,7 +797,32 @@ export default function ExperimentsView({
             </div>
           </Card>
 
-          <Card title="ベスト条件" subtitle="最もCERが良かった実験の条件（グループベスト / 全体ベスト）">
+          <Card title="ベスト条件" subtitle="最もCER/Accuracyが良かった実験の条件（グループベスト / 全体ベスト）">
+            {/* 9.ベスト表示: Accuracy最大とCER最小を並べて自動表示する */}
+            <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div className="rounded-lg border border-amber-400/40 bg-amber-400/5 px-2.5 py-2">
+                <p className="text-[11px] text-amber-200">🏆 Best Accuracy</p>
+                {bestAcc ? (
+                  <p className="text-[13px]">
+                    <span className="model-id-font text-blue-200">{bestAcc.id}</span>
+                    <span className="ml-2 font-semibold text-text">{bestAcc.accuracyPercent}%</span>
+                  </p>
+                ) : (
+                  <p className="text-[12px] text-muted">評価済みの実験がありません</p>
+                )}
+              </div>
+              <div className="rounded-lg border border-amber-400/40 bg-amber-400/5 px-2.5 py-2">
+                <p className="text-[11px] text-amber-200">🏆 Best CER</p>
+                {best ? (
+                  <p className="text-[13px]">
+                    <span className="model-id-font text-blue-200">{best.id}</span>
+                    <span className="ml-2 font-semibold text-emerald-300">{pct(best.cer)}</span>
+                  </p>
+                ) : (
+                  <p className="text-[12px] text-muted">評価済みの実験がありません</p>
+                )}
+              </div>
+            </div>
             {best ? (
               <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[13px]">
                 <span className="text-muted">{scientificMode ? `グループベスト（${scope.groupId}）` : "ベスト実験"}</span>

@@ -9,6 +9,7 @@ import { createServer } from "vite";
 import {
   augmentationImprovement,
   bestExperiment,
+  bestExperimentByAccuracy,
   buildExperimentDiff,
   buildExperimentRecommendations,
   buildScatter,
@@ -19,9 +20,21 @@ import {
   iterationCorrelation,
   normalizeExperiment,
   preprocessGroups,
+  sortExperiments,
 } from "../src/lib/experimentAnalysis.js";
 
-function makeRaw({ id, iterations = 1000, cer = null, aug = null, hash = "sha256:aaaa1111", created = "2026-07-20T10:00:00" } = {}) {
+function makeRaw({
+  id,
+  iterations = 1000,
+  cer = null,
+  accuracyPercent = 40,
+  aug = null,
+  hash = "sha256:aaaa1111",
+  created = "2026-07-20T10:00:00",
+  datasetId = "",
+  datasetName = "",
+  preprocessVersion = null,
+} = {}) {
   return {
     experiment_id: id,
     created_at: created,
@@ -33,6 +46,10 @@ function makeRaw({ id, iterations = 1000, cer = null, aug = null, hash = "sha256
     experiment_name: "",
     parent_model_id: "",
     note: "",
+    model_engine: "tesseract",
+    dataset_id: datasetId,
+    dataset_name: datasetName,
+    dataset_hash: "",
     training: {
       iterations,
       charset: "AB",
@@ -41,10 +58,16 @@ function makeRaw({ id, iterations = 1000, cer = null, aug = null, hash = "sha256
       split_seed: 42,
       split_method: "image",
       counts: { train: 80, val: 10, test: 10 },
+      optimizer: null,
+      scheduler: null,
+      loss: null,
+      learning_rate: null,
+      batch_size: null,
     },
-    preprocess: { hash, snapshot_id: "prep_x", summary: "Binary 128" },
+    preprocess: { hash, snapshot_id: "prep_x", summary: "Binary 128", version: preprocessVersion },
     augmentation: { config: aug, generated: aug ? 40 : null },
-    evaluation: cer === null ? null : { cer, char_accuracy: 1 - cer, accuracy_percent: 40, improved: 5, regressed: 1, evaluated_at: created, dataset: "ds" },
+    evaluation:
+      cer === null ? null : { cer, char_accuracy: 1 - cer, accuracy_percent: accuracyPercent, improved: 5, regressed: 1, evaluated_at: created, dataset: "ds" },
     tags: [],
     favorite: false,
     source: "training",
@@ -145,6 +168,68 @@ test("ベスト条件と条件推薦（過学習傾向の理由付き）", () =>
   assert.ok(byId.preprocess);
 });
 
+test("normalizeExperiment: Dataset来歴・学習条件拡張・前処理Versionを流用する（v1.0.0 Experiment Manager強化）", () => {
+  const raw = makeRaw({ id: "EXP-0020", cer: 0.2, datasetId: "DS0007", datasetName: "OCRDataset_v7", preprocessVersion: 5 });
+  raw.dataset_hash = "sha256:pipeline";
+  const e = normalizeExperiment(raw);
+  assert.equal(e.modelEngine, "tesseract");
+  assert.equal(e.datasetId, "DS0007");
+  assert.equal(e.datasetName, "OCRDataset_v7");
+  assert.equal(e.datasetHash, "sha256:pipeline");
+  assert.equal(e.preprocessVersion, 5);
+  // Tesseractは概念が無いためnull（推測で埋めない）
+  assert.equal(e.optimizer, null);
+  assert.equal(e.scheduler, null);
+  assert.equal(e.learningRate, null);
+  assert.equal(e.batchSize, null);
+});
+
+test("buildExperimentDiff: optimizer/scheduler/learning_rate/batch_size/前処理Versionが比較項目に含まれる", () => {
+  const a = normalizeExperiment(makeRaw({ id: "A", preprocessVersion: 3 }));
+  const b = normalizeExperiment(makeRaw({ id: "B", preprocessVersion: 4 }));
+  const rows = buildExperimentDiff([a, b]);
+  const byKey = Object.fromEntries(rows.map((r) => [r.key, r]));
+  for (const key of ["optimizer", "scheduler", "learningRate", "batchSize", "preprocessVersion"]) {
+    assert.ok(byKey[key], `${key} の比較行がない`);
+  }
+  assert.equal(byKey.preprocessVersion.changed, true);
+  assert.deepEqual(byKey.preprocessVersion.values, ["v3", "v4"]);
+  // Tesseractはoptimizer等が常にnullのため変更なし扱い
+  assert.equal(byKey.optimizer.changed, false);
+});
+
+test("bestExperimentByAccuracy: 完全一致率（Accuracy）最大の実験を返す（CERベストとは独立）", () => {
+  const items = [
+    normalizeExperiment(makeRaw({ id: "EXP-0001", cer: 0.3, accuracyPercent: 50 })),
+    normalizeExperiment(makeRaw({ id: "EXP-0002", cer: 0.1, accuracyPercent: 80 })), // CERベストでもある
+    normalizeExperiment(makeRaw({ id: "EXP-0003", cer: 0.5, accuracyPercent: 90 })), // Accuracyベスト
+  ];
+  const best = bestExperimentByAccuracy(items);
+  assert.equal(best.id, "EXP-0003");
+  assert.equal(bestExperiment(items).id, "EXP-0002");
+  assert.equal(bestExperimentByAccuracy([]), null);
+});
+
+test("sortExperiments: created_at降順（既定）・CER昇順・Dataset名昇順・未対応keyはそのまま", () => {
+  const items = [
+    normalizeExperiment(makeRaw({ id: "EXP-0001", created: "2026-07-01T00:00:00", cer: 0.3, datasetName: "b" })),
+    normalizeExperiment(makeRaw({ id: "EXP-0002", created: "2026-07-15T00:00:00", cer: 0.1, datasetName: "a" })),
+  ];
+  assert.deepEqual(sortExperiments(items, "createdAt", "desc").map((e) => e.id), ["EXP-0002", "EXP-0001"]);
+  assert.deepEqual(sortExperiments(items, "cer", "asc").map((e) => e.id), ["EXP-0002", "EXP-0001"]);
+  assert.deepEqual(sortExperiments(items, "datasetName", "asc").map((e) => e.id), ["EXP-0002", "EXP-0001"]);
+  assert.deepEqual(sortExperiments(items, "unknown_key").map((e) => e.id), ["EXP-0001", "EXP-0002"]);
+});
+
+test("filterExperiments: Dataset名・Dataset IDでも検索できる", () => {
+  const items = [
+    normalizeExperiment(makeRaw({ id: "EXP-0001", datasetId: "DS0001", datasetName: "OCRDataset_v1" })),
+    normalizeExperiment(makeRaw({ id: "EXP-0002", datasetId: "DS0002", datasetName: "OCRDataset_v2" })),
+  ];
+  assert.deepEqual(filterExperiments(items, { query: "v1" }).map((e) => e.id), ["EXP-0001"]);
+  assert.deepEqual(filterExperiments(items, { query: "ds0002" }).map((e) => e.id), ["EXP-0002"]);
+});
+
 test("CSV出力: ヘッダ＋実験行（タグ・★・評価を含む）", () => {
   const withTag = [{ ...EXPS[0], tags: ["Baseline", "OCR改善"], favorite: true }];
   const lines = experimentsToCsvLines(withTag);
@@ -226,6 +311,30 @@ test("ExperimentsView: 一覧・フィルタ・CSVボタン・グラフ・ベス
   assert.ok(html.includes("2件の比較可能Experiment"), "Recommendation Safetyの文言がない");
   assert.ok(html.includes("参考値（データ不足）"), "5件未満のデータ不足表示がない");
   assert.ok(html.includes("全Experimentを表示"), "CER推移の全件切替がない");
+});
+
+test("ExperimentsView: Dataset列・削除ボタン・ベストAccuracy/CERバナーを表示する（v1.0.0 Experiment Manager強化）", () => {
+  const raws = [
+    makeRaw({ id: "EXP-0001", iterations: 1000, cer: 0.382, accuracyPercent: 60, datasetId: "DS0001", datasetName: "OCRDataset_v1" }),
+    makeRaw({ id: "EXP-0002", iterations: 10000, cer: 0.296, accuracyPercent: 90, aug: WEAK, datasetId: "DS0002", datasetName: "OCRDataset_v2" }),
+  ];
+  const html = renderToString(
+    React.createElement(ExperimentsView, {
+      projectId: "p",
+      experiments: raws,
+      loading: false,
+      onRefresh: () => {},
+      onUpdateExperiment: () => {},
+      onOpenModel: () => {},
+      onOpenDataset: () => {},
+      onDeleteExperiment: () => {},
+    })
+  ).replaceAll("<!-- -->", "");
+  assert.ok(html.includes("OCRDataset_v1") && html.includes("OCRDataset_v2"), "Dataset列がない");
+  assert.ok(html.includes(">削除<"), "削除ボタンがない");
+  assert.ok(html.includes("Best Accuracy"), "Best Accuracyバナーがない");
+  assert.ok(html.includes("Best CER"), "Best CERバナーがない");
+  assert.ok(html.includes("90%"), "Accuracyベスト値（90%）が表示されていない");
 });
 
 // ---------- Experiment Validation（比較妥当性判定） ----------

@@ -169,6 +169,11 @@ def _experiment_from_model_meta(model_file: str, meta: dict[str, Any]) -> dict[s
         "parent_model_id": str(meta.get("parent_model_id") or ""),
         "note": str(meta.get("training_note") or ""),
         "operator": "",
+        # v1.0.0で追加: 旧モデルのmetadataに既に記録されている値のみ流用（無ければ空/null=未記録）
+        "model_engine": str(meta.get("engine") or "tesseract"),
+        "dataset_id": str(meta.get("dataset_id") or ""),
+        "dataset_name": str(meta.get("dataset_name") or ""),
+        "dataset_hash": str(meta.get("training_input_pipeline_hash") or ""),
         "training": {
             "iterations": int(meta.get("max_iterations") or 0) or None,
             "charset": str(meta.get("charset") or ""),
@@ -177,6 +182,11 @@ def _experiment_from_model_meta(model_file: str, meta: dict[str, Any]) -> dict[s
             "split_seed": meta.get("split_seed") if isinstance(meta.get("split_seed"), int) else None,
             "split_method": str(meta.get("split_method") or ""),
             "counts": dataset_counts,
+            "optimizer": None,
+            "scheduler": None,
+            "loss": None,
+            "learning_rate": None,
+            "batch_size": None,
         },
         "preprocess": {
             "hash": str(meta.get("training_preprocess_hash") or ""),
@@ -184,6 +194,7 @@ def _experiment_from_model_meta(model_file: str, meta: dict[str, Any]) -> dict[s
             if isinstance(meta.get("training_preprocess"), dict)
             else "",
             "summary": summarize_threshold_from_preprocess(meta.get("training_preprocess")),
+            "version": None,
         },
         "augmentation": {
             "config": meta.get("augmentation_config") if isinstance(meta.get("augmentation_config"), dict) else None,
@@ -465,6 +476,36 @@ def update_experiment(project_id: Optional[str], experiment_id: str, patch: dict
             _save_registry(paths.root, registry)
             return item
     raise FileNotFoundError(f"experiment not found: {experiment_id}")
+
+
+def delete_experiment(project_id: Optional[str], experiment_id: str) -> bool:
+    """Experimentカルテのみを削除する（Dataset・Model・Evaluationの実体には一切影響しない。
+
+    experiments.jsonから該当エントリを取り除くだけで、モデルファイル・データセットファイルは
+    削除しない。番号（experiment_id）は他のExperimentへ再利用されない（counterは減らさない）。
+    """
+    paths = ensure_project_directories(project_id)
+    with _EXPERIMENTS_LOCK:
+        registry = _load_registry(paths.root)
+        before = len(registry["items"])
+        registry["items"] = [item for item in registry["items"] if str(item.get("experiment_id")) != str(experiment_id)]
+        if len(registry["items"]) == before:
+            raise FileNotFoundError(f"experiment not found: {experiment_id}")
+        _save_registry(paths.root, registry)
+        return True
+
+
+def list_experiments_for_dataset(project_id: Optional[str], dataset_id: str) -> list[dict[str, Any]]:
+    """指定Dataset IDを使用したExperiment一覧（Dataset詳細画面の「使用Experiment」用）。
+
+    バックフィルは行わない（Dataset Manager表示専用の軽量参照。一覧取得APIとは別に
+    毎回バックフィルを走らせて全モデルを解析するコストを避ける）。
+    """
+    items = list_experiments(project_id, backfill=False)
+    target = str(dataset_id or "")
+    if not target:
+        return []
+    return [item for item in items if str(item.get("dataset_id") or "") == target]
 
 
 def attach_evaluation(project_id: Optional[str], model: str, evaluation: dict[str, Any]) -> Optional[dict[str, Any]]:

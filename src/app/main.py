@@ -162,6 +162,7 @@ from .services.experiment_tracker import (
     attach_evaluation,
     build_comparable_groups,
     build_recommendations,
+    delete_experiment,
     ensure_experiments_for_models,
     list_experiments,
     set_analysis_enabled,
@@ -3413,6 +3414,22 @@ def api_experiment_attach_evaluation(req: ExperimentEvaluationAttachRequest) -> 
     ensure_experiments_for_models(resolved)
     item = attach_evaluation(resolved, req.model, req.evaluation)
     return {"project_id": resolved, "attached": item is not None, "item": item}
+
+
+@app.delete("/api/experiments/{experiment_id}")
+def api_experiment_delete(experiment_id: str, request: Request, project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+    """Experimentカルテのみを削除する（Dataset・Model・Evaluationの実体には一切影響しない）。"""
+    _enforce_role(request, "experiment_delete")
+    resolved = _resolve_project_id(project_id)
+    try:
+        deleted = delete_experiment(resolved, experiment_id)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    _record_audit_safe(
+        request, "experiment_delete", project_id=resolved, target_type="experiment", target_id=experiment_id,
+        after={"deleted": deleted},
+    )
+    return {"project_id": resolved, "experiment_id": experiment_id, "deleted": deleted}
 
 
 @app.post("/api/jobs")

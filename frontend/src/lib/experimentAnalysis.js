@@ -31,6 +31,11 @@ export function normalizeExperiment(raw = {}) {
     parentModelId: String(raw.parent_model_id || ""),
     note: String(raw.note || ""),
     operator: String(raw.operator || ""),
+    // v1.0.0で追加（Experiment Manager強化）: Dataset Managerが確定保存した来歴情報をそのまま流用
+    modelEngine: String(raw.model_engine || ""),
+    datasetId: String(raw.dataset_id || ""),
+    datasetName: String(raw.dataset_name || ""),
+    datasetHash: String(raw.dataset_hash || ""),
     iterations: num(training.iterations),
     splitRatioText: ratioText,
     splitSeed: num(training.split_seed),
@@ -41,9 +46,16 @@ export function normalizeExperiment(raw = {}) {
     },
     charset: String(training.charset || ""),
     baseLang: String(training.base_lang || ""),
+    // v1.0.0で追加: 存在する学習条件のみ（Tesseractは概念が無くnull=「未記録」表示）
+    optimizer: training.optimizer === null || training.optimizer === undefined ? null : String(training.optimizer),
+    scheduler: training.scheduler === null || training.scheduler === undefined ? null : String(training.scheduler),
+    loss: training.loss === null || training.loss === undefined ? null : String(training.loss),
+    learningRate: num(training.learning_rate),
+    batchSize: num(training.batch_size),
     preprocessHash: String(preprocess.hash || ""),
     preprocessShort: String(preprocess.hash || "").replace(/^sha256:/, "").slice(0, 8),
     preprocessSummary: String(preprocess.summary || ""),
+    preprocessVersion: num(preprocess.version),
     snapshotId: String(preprocess.snapshot_id || ""),
     augPreset: augmentationPresetLabel(augConfig, augConfig ? true : null) || (augConfig ? "custom" : ""),
     augMultiplier: augConfig ? num(augConfig.multiplier) : null,
@@ -201,7 +213,18 @@ export function filterExperiments(experiments, filters = {}) {
     if (dateFrom && e.createdAt.slice(0, 10) < dateFrom) return false;
     if (dateTo && e.createdAt.slice(0, 10) > dateTo) return false;
     if (query) {
-      const haystack = [e.id, e.name, e.note, e.operator, ...e.models, ...e.modelIds, ...e.tags, e.preprocessSummary]
+      const haystack = [
+        e.id,
+        e.name,
+        e.note,
+        e.operator,
+        ...e.models,
+        ...e.modelIds,
+        ...e.tags,
+        e.preprocessSummary,
+        e.datasetName,
+        e.datasetId,
+      ]
         .join(" ")
         .toLowerCase();
       if (!haystack.includes(query)) return false;
@@ -231,7 +254,13 @@ export const EXPERIMENT_DIFF_ROWS = [
         : `${fmt(e.counts.train)} / ${fmt(e.counts.val)} / ${fmt(e.counts.test)}`,
   },
   { key: "charset", label: "Charset", category: "学習条件", value: (e) => fmt(e.charset) },
+  // v1.0.0で追加（Experiment Manager強化。比較画面の追加項目）
+  { key: "optimizer", label: "Optimizer", category: "学習条件", value: (e) => fmt(e.optimizer) },
+  { key: "scheduler", label: "Scheduler", category: "学習条件", value: (e) => fmt(e.scheduler) },
+  { key: "learningRate", label: "Learning Rate", category: "学習条件", value: (e) => fmt(e.learningRate) },
+  { key: "batchSize", label: "Batch Size", category: "学習条件", value: (e) => fmt(e.batchSize) },
   { key: "preprocess", label: "学習前処理", category: "前処理", value: (e) => (e.preprocessHash ? `${e.preprocessSummary || "記録あり"}（${e.preprocessShort}）` : "未記録") },
+  { key: "preprocessVersion", label: "前処理Version", category: "前処理", value: (e) => fmt(e.preprocessVersion === null ? null : `v${e.preprocessVersion}`) },
   { key: "augmentation", label: "Augmentation", category: "Aug", value: (e) => e.augSummary || "なし" },
   { key: "base", label: "ベース / 親", category: "モデル", value: (e) => `${e.baseLang || "未記録"}${e.parentModelId ? ` / ${e.parentModelId}` : ""}` },
   { key: "evalDataset", label: "評価データセット", category: "評価条件", value: (e) => fmt(e.evalProfile?.datasetId || e.evalDataset || "") },
@@ -364,6 +393,14 @@ export function bestExperiment(experiments) {
   return evaluated.reduce((best, e) => (e.cer < best.cer ? e : best), evaluated[0]);
 }
 
+// v1.0.0で追加（Experiment Manager強化・9.ベスト表示）: 完全一致率（Accuracy）最大の実験。
+// bestExperiment（CER最小）とは別軸の指標のため、既存関数と同型の素朴なreduceで独立実装する
+export function bestExperimentByAccuracy(experiments) {
+  const evaluated = (experiments || []).filter((e) => e.accuracyPercent !== null);
+  if (evaluated.length === 0) return null;
+  return evaluated.reduce((best, e) => (e.accuracyPercent > best.accuracyPercent ? e : best), evaluated[0]);
+}
+
 // ---------- 条件推薦（実験履歴からのルールベース。AI推論はしない） ----------
 
 export function buildExperimentRecommendations(experiments) {
@@ -413,6 +450,32 @@ export function buildExperimentRecommendations(experiments) {
   return cards;
 }
 
+// ---------- ソート（一覧の列見出しクリック。Dataset Managerと同様の統一感あるテーブルUI） ----------
+
+const SORT_ACCESSORS = {
+  id: (e) => e.id,
+  createdAt: (e) => e.createdAt,
+  cer: (e) => (e.cer === null ? Infinity : e.cer),
+  accuracyPercent: (e) => (e.accuracyPercent === null ? -Infinity : e.accuracyPercent),
+  iterations: (e) => (e.iterations === null ? -Infinity : e.iterations),
+  datasetName: (e) => e.datasetName.toLowerCase(),
+};
+
+// key未対応時は入力順のまま返す（不要な例外を出さない）
+export function sortExperiments(experiments, key, dir = "desc") {
+  const list = Array.isArray(experiments) ? [...experiments] : [];
+  const accessor = SORT_ACCESSORS[key];
+  if (!accessor) return list;
+  const factor = dir === "asc" ? 1 : -1;
+  return list.sort((a, b) => {
+    const av = accessor(a);
+    const bv = accessor(b);
+    if (av < bv) return -1 * factor;
+    if (av > bv) return 1 * factor;
+    return 0;
+  });
+}
+
 // ---------- CSV / Excel 出力 ----------
 
 export function experimentsToCsvLines(experiments) {
@@ -431,13 +494,22 @@ export function experimentsToCsvLines(experiments) {
     "experiment_name",
     "parent_model_id",
     "operator",
+    "model_engine",
+    "dataset_id",
+    "dataset_name",
+    "dataset_hash",
     "iterations",
+    "optimizer",
+    "scheduler",
+    "learning_rate",
+    "batch_size",
     "split_ratio",
     "split_seed",
     "train_count",
     "val_count",
     "test_count",
     "preprocess_hash",
+    "preprocess_version",
     "preprocess_summary",
     "snapshot_id",
     "augmentation",
@@ -468,13 +540,22 @@ export function experimentsToCsvLines(experiments) {
         e.name,
         e.parentModelId,
         e.operator,
+        e.modelEngine,
+        e.datasetId,
+        e.datasetName,
+        e.datasetHash,
         e.iterations ?? "",
+        e.optimizer ?? "",
+        e.scheduler ?? "",
+        e.learningRate ?? "",
+        e.batchSize ?? "",
         e.splitRatioText,
         e.splitSeed ?? "",
         e.counts.train ?? "",
         e.counts.val ?? "",
         e.counts.test ?? "",
         e.preprocessHash,
+        e.preprocessVersion ?? "",
         e.preprocessSummary,
         e.snapshotId,
         e.augSummary,

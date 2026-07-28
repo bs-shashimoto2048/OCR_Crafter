@@ -290,7 +290,29 @@ def get_dataset_detail(project_id: Optional[str], dataset_id: str) -> Optional[d
         "models": [
             {"name": str(info.get("name") or ""), "model_id": str(info.get("model_id") or "")} for info in linked_models
         ],
+        # v1.0.0で追加（Experiment Manager強化）: このDatasetを使用したExperiment一覧
+        # （既存のexperiment_tracker.list_experiments_for_datasetをそのまま再利用。
+        # Dataset⇔Experimentの逆引きインデックスは持たず、experiment側のdataset_idで
+        # 都度フィルタする＝Dataset⇔Modelと同じ設計方針を踏襲）
+        "experiments": _linked_experiments_for_dataset(resolved, dataset_id),
     }
+
+
+def _linked_experiments_for_dataset(project_id: str, dataset_id: str) -> list[dict[str, Any]]:
+    from .experiment_tracker import list_experiments_for_dataset
+
+    try:
+        items = list_experiments_for_dataset(project_id, dataset_id)
+    except Exception:  # noqa: BLE001
+        return []
+    return [
+        {
+            "experiment_id": str(item.get("experiment_id") or ""),
+            "created_at": str(item.get("created_at") or ""),
+            "models": [str(m) for m in (item.get("models") or [])],
+        }
+        for item in items
+    ]
 
 
 def set_dataset_comment(project_id: Optional[str], dataset_id: str, comment: str) -> Optional[dict[str, Any]]:

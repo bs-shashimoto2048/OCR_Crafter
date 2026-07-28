@@ -15,12 +15,46 @@ timeline
     07-18〜 : 学習条件比較・条件差分・次回学習提案 : サイドバーのOCR開発フロー順再編 : 性能サマリー省スペース化と比較カード短縮名
     07-24 : ダッシュボード「プロジェクト一覧」テーブル拡張 : 同カードビュー化（Health Badge・Exact Match） : カードへBenchmark性能指標追加（Balance Score・P95・Healthのreasons） : カードUI/UXブラッシュアップ（文字拡大・3列化・Primary/Secondary・Production独立表示） : 学習前処理・オーグメンテーションの実効値スナップショット保存と学習条件比較の2セクション化・推論使用モデルの一覧強調
     07-27 : 学習データ作成フローの明確化（事前作成の可視化・準備状況サマリー・評価データとの違いの明記） : 学習前処理の実行タイミング調査と前処理未実行時の警告・実行状況表示の追加 : 学習前処理ステータスの3状態化（旧プロジェクトの誤表示を是正） : 現在の前処理設定の可視化（GET /api/ocr/preprocess/current-config 追加） : OCR Dataset作成フローの見直し（Dataset作成時に必ずrun_preprocess()を自動実行する設計へ変更） : 推論使用モデルの永続化と学習用前処理設定の保存管理（Version・履歴・未保存変更ガード）
-    07-28 : Dataset Manager・Model Lineage機能追加（Dataset資産管理・Dataset⇔Model双方向リンク・再現性向上）
+    07-28 : Dataset Manager・Model Lineage機能追加（Dataset資産管理・Dataset⇔Model双方向リンク・再現性向上） : Experiment Manager機能強化（既存Experiment Trackingを唯一の実験管理基盤として拡張。新規Manager・新IDは作らず）
 ```
 
 ---
 
 ## 2026-07
+
+### Experiment Manager機能強化（既存Experiment Trackingを唯一の実験管理基盤として拡張）
+
+**背景**: task.mdは当初「Experiment Manager」という新機能として、`EXP0001`形式ID・`experiments/EXP0001.json`という1実験1ファイル構成の独自保存を要求していた。しかし調査の結果、これは既に実装済みの「実験管理（Experiment Tracking）」（`experiment_tracker.py`・`EXP-0001`形式・`data/projects/<id>/experiments.json`・`ExperimentsView.jsx`・Comparable Group・条件推薦・評価結果自動紐付け・モデル管理との相互リンク）と目的・データ構造がほぼ完全に重複していた。ユーザーへ確認したところ、「既存を拡張する」方針が明示的に選択され、「新しいExperiment Managerは作らず、既存のExperiment Trackingを強化してください」「以下を新規作成しないでください: 新Experiment Manager・新Experiment保存形式・experimentsフォルダ・EXP0001形式ID」という具体的な制約が提示された。本変更はその方針に従い、既存システムへの純粋な追加のみを行った。
+
+**維持したもの（無変更）**: Experiment ID形式（EXP-0001）・`experiments.json`・`experiment_tracker.py`の既存関数・`ExperimentsView.jsx`の既存機能・Comparable Group・条件推薦・評価結果自動紐付け（`attach_evaluation`）・既存API（`GET/PATCH /api/experiments*`）・既存metadata構造（フィールドの追加のみで意味変更なし）。
+
+**1. 学習条件の拡張（optimizer/scheduler/loss/learning_rate/batch_size）**: Tesseract LSTM fine-tuneにはこれらの概念が存在しないため、`tesseract_pipeline.py`の`record_experiment`呼び出しへ全てnullとして追加した（存在しない情報を推測で埋めない、という明示的な指示に従う）。PaddleOCR側（`_register_ocr_model`）は元々`record_experiment`を呼んでおらずExperiment Trackingの対象外だったため、今回は対象拡張を行わず、そのままの状態を維持した（ユーザー指示の対象範囲を超える構造変更を避けるため）。
+
+**2. Dataset情報（dataset_id/dataset_name/dataset_hash）**: `dataset_id`/`dataset_name`は、直前のDataset Manager機能追加で既にモデルmetadataへ確定保存されている値（`meta["dataset_id"]`/`meta["dataset_name"]`）をそのまま流用した（新規の解決処理は追加していない）。`dataset_hash`のみ既存に無かったため追加が必要だったが、「Dataset自体の内容ハッシュ」という独立した概念が既存のHash管理に存在しなかったため、既存の`training_input_pipeline_hash`（前処理+オーグメンテーションの結合ハッシュ。Dataset作成時に確定保存済み）をそのまま再利用する設計とした——新しいハッシュ計算ロジックは追加していない。
+
+**3. 前処理情報との連携強化**: 実験カルテの`preprocess`サブオブジェクトに`version`を追加し、Dataset側の`preprocess_config_version`（「前処理設定保存」機能のVersion番号。学習に実際使用したHashと保存済み設定のHashが一致する場合のみ記録済み）をそのまま引き継ぐようにした。既存の`preprocess.hash`/`snapshot_id`/`summary`は無変更。
+
+**4. Dataset⇔Experiment / Experiment⇔Dataset**: Dataset⇔Modelと全く同じ設計方針（永続的な逆引きインデックスを持たず、Experiment側の`dataset_id`フィールドで都度フィルタする）を踏襲し、`experiment_tracker.list_experiments_for_dataset`を新設。Dataset Manager詳細画面の「使用Experiment」からクリックで実験管理へ遷移し、実験管理の「Dataset」列からクリックでDataset Managerへ遷移する双方向リンクを実装した（モデルカルテ⇄実験管理の既存の相互リンクの仕組み=`focusExperimentId`/`datasetDetailRequest`をそのまま再利用し、新しいナビゲーション機構は作っていない）。
+
+**5. Experiment⇔Model**: 要求どおり、既存リンク（モデルカルテの「Experiment」行・実験管理の「生成モデル」列）をそのまま利用した。新しいリンク構造は一切追加していない。
+
+**6. 比較画面の拡張**: 既存のExperiment比較テーブル（`EXPERIMENT_DIFF_ROWS`）へ Optimizer・Scheduler・Learning Rate・Batch Size・前処理Version の5項目を追加した（要求どおりの項目のみ。既存の行・カテゴリ分類ロジックはそのまま）。
+
+**7. ベスト表示の拡張**: 既存の`bestExperiment`（CER最小）はそのまま維持し、新たに`bestExperimentByAccuracy`（完全一致率最大）を独立した関数として追加。両者を「🏆 Best Accuracy」「🏆 Best CER」として並べて表示するようにした（既存関数のロジックは変更せず、同型の素朴な実装を追加しただけ）。
+
+**8. コメント**: 実験カルテの`note`フィールドは既に`PATCH /api/experiments/{id}`で複数行文字列として保存可能だったが、UIには編集手段が無かった（タグ・お気に入り・実験名のみ編集可能）。バックエンドAPIは変更せず、一覧のメモセルをクリックすると複数行テキストエリアへ切り替わるインライン編集UIのみを追加した。
+
+**9. Experiment削除**: 既存に削除機能が無かったため新設した。`experiments.json`から該当エントリを取り除くだけの実装で、Dataset・Model・評価結果のファイルには一切触れない（`delete_experiment`）。監査アクション`experiment_delete`（operator以上）を追加。
+
+**10. 一覧のソート・検索**: Dataset Manager・モデル管理と統一感のあるテーブルUIとするため、実験一覧へ列見出しクリックでのソート（実験ID・日時・Dataset・Iteration・CER・完全一致率）を追加。既存のフリーテキスト検索へDataset名・Dataset IDも対象に含めた。列幅調整（リサイズ可能な列）は「望ましい」という優先度の低い要求のため、Dataset Managerと同様に今回は対象外とした。
+
+**11. model_engineフィールド**: 実験カルテへ`model_engine`を追加（現状は登録経路がTesseractのみのため常に`"tesseract"`）。将来PaddleOCR側もExperiment Trackingへ組み込む場合の拡張ポイントとして残した。
+
+**API追加・変更**: `DELETE /api/experiments/{experiment_id}`（新規。監査対象操作`experiment_delete`・operator以上）。`GET /api/experiments`のレスポンスへ`model_engine`/`dataset_id`/`dataset_name`/`dataset_hash`/`training.optimizer`/`scheduler`/`loss`/`learning_rate`/`batch_size`/`preprocess.version`を追加。`GET /api/ocr/datasets/{dataset_id}`のレスポンスへ`experiments[]`を追加。
+
+**テスト**: バックエンド`tests/test_experiments.py`へ6件（Dataset来歴・学習条件拡張フィールドの記録・`list_experiments_for_dataset`・`delete_experiment`・削除APIの404/200）を追加、`tests/test_dataset_registry.py`へ1件（Dataset詳細の`experiments`欄）を追加。監査アクション数を31種へ更新（`test_audit_operations.py`/`test_permission_matrix.py`）→バックエンド全件回帰511件通過。フロントエンド`lib/experimentAnalysis.js`のテストを6件追加（Dataset来歴の正規化・比較項目拡張・`bestExperimentByAccuracy`・`sortExperiments`・Dataset名/IDでの検索・ExperimentsViewの新UI要素）→フロント477件全通過、`npm run build`成功。
+
+---
 
 ### Dataset Manager・Model Lineage機能追加（Dataset資産管理・双方向リンク・再現性向上）
 

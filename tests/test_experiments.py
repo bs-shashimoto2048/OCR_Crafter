@@ -14,8 +14,10 @@ import pytest
 from src.app.project_paths import ensure_project_directories
 from src.app.services.experiment_tracker import (
     attach_evaluation,
+    delete_experiment,
     ensure_experiments_for_models,
     list_experiments,
+    list_experiments_for_dataset,
     record_experiment,
     summarize_threshold_from_preprocess,
     update_experiment,
@@ -102,6 +104,107 @@ def test_register_tesseract_model_records_experiment(temp_projects, tmp_path):
     assert exp["source"] == "training"
 
 
+def test_register_tesseract_model_records_dataset_lineage_and_training_fields(temp_projects, tmp_path):
+    """Experiment Manager強化: dataset_id/dataset_name/dataset_hash・model_engine・
+    preprocess.version（前処理設定保存Versionとの連携）・training内のoptimizer等（Tesseractは
+    概念が無いためnull）が記録されることを確認する。"""
+    project_id = "p_lineage"
+    dataset_root = tmp_path / "dataset_lineage"
+    dataset_root.mkdir()
+    (dataset_root / "meta.json").write_text(
+        json.dumps(
+            {
+                "display_name": "OCRDataset_v9",
+                "created_at": "2026-07-20T00:00:00",
+                "counts": {"train": 8, "val": 1, "test": 1},
+                "training_preprocess_hash": "sha256:preprocess",
+                "training_input_pipeline_hash": "sha256:pipeline",
+                "preprocess_config_version": 5,
+            }
+        ),
+        encoding="utf-8",
+    )
+    paths = ensure_project_directories(project_id)
+    traineddata = paths.models / "lineage_model.traineddata"
+    register_tesseract_model(
+        project_id=project_id,
+        lang="lineage_model",
+        traineddata_path=traineddata,
+        tessdata_dir=dataset_root,
+        base_lang="eng",
+        charset="AB",
+        dataset_root=str(dataset_root),
+        counts={"train": 8, "val": 1},
+        job_id="job-lineage",
+        max_iterations=1000,
+    )
+    exp = list_experiments(project_id, backfill=False)[0]
+    assert exp["model_engine"] == "tesseract"
+    assert exp["dataset_name"] == "OCRDataset_v9"
+    assert exp["dataset_id"] != ""
+    assert exp["dataset_hash"] == "sha256:pipeline"
+    assert exp["preprocess"]["version"] == 5
+    assert exp["preprocess"]["hash"] == "sha256:preprocess"
+    for key in ("optimizer", "scheduler", "loss", "learning_rate", "batch_size"):
+        assert exp["training"][key] is None
+
+
+def test_list_experiments_for_dataset(temp_projects, tmp_path):
+    project_id = "p_ds_link"
+    dataset_a = tmp_path / "ds_a"
+    dataset_a.mkdir()
+    (dataset_a / "meta.json").write_text(json.dumps({"created_at": "2026-07-01T00:00:00"}), encoding="utf-8")
+    dataset_b = tmp_path / "ds_b"
+    dataset_b.mkdir()
+    (dataset_b / "meta.json").write_text(json.dumps({"created_at": "2026-07-02T00:00:00"}), encoding="utf-8")
+
+    paths = ensure_project_directories(project_id)
+    for name, root in [("m1", dataset_a), ("m2", dataset_a), ("m3", dataset_b)]:
+        register_tesseract_model(
+            project_id=project_id,
+            lang=name,
+            traineddata_path=paths.models / f"{name}.traineddata",
+            tessdata_dir=root,
+            base_lang="eng",
+            charset="AB",
+            dataset_root=str(root),
+            counts={"train": 1, "val": 0},
+            job_id=f"job-{name}",
+            max_iterations=100,
+        )
+
+    all_items = list_experiments(project_id, backfill=False)
+    dataset_a_id = next(e["dataset_id"] for e in all_items if e["models"] == ["m1.tess.json"])
+    dataset_b_id = next(e["dataset_id"] for e in all_items if e["models"] == ["m3.tess.json"])
+    assert dataset_a_id != dataset_b_id
+
+    linked_to_a = list_experiments_for_dataset(project_id, dataset_a_id)
+    assert sorted(e["models"][0] for e in linked_to_a) == ["m1.tess.json", "m2.tess.json"]
+    linked_to_b = list_experiments_for_dataset(project_id, dataset_b_id)
+    assert [e["models"][0] for e in linked_to_b] == ["m3.tess.json"]
+    assert list_experiments_for_dataset(project_id, "DS9999") == []
+
+
+def test_delete_experiment_removes_only_the_experiment(temp_projects):
+    """Experiment削除はexperiments.jsonのエントリのみを取り除き、Dataset/Modelの実体には触れない。"""
+    project_id = "p_delete"
+    paths = ensure_project_directories(project_id)
+    model_path = paths.models / "keep.tess.json"
+    model_path.write_text(json.dumps({"created_at": "2026-07-01T00:00:00"}), encoding="utf-8")
+
+    first = record_experiment(project_id, {"models": ["keep.tess.json"]})
+    second = record_experiment(project_id, {"models": ["other.tess.json"]})
+
+    assert delete_experiment(project_id, first["experiment_id"]) is True
+    remaining = list_experiments(project_id, backfill=False)
+    assert [e["experiment_id"] for e in remaining] == [second["experiment_id"]]
+    # モデルファイルの実体は無傷
+    assert model_path.is_file()
+
+    with pytest.raises(FileNotFoundError):
+        delete_experiment(project_id, first["experiment_id"])
+
+
 def test_backfill_from_legacy_models(temp_projects):
     project_id = "p_legacy"
     paths = ensure_project_directories(project_id)
@@ -161,6 +264,24 @@ def test_attach_evaluation_by_model(temp_projects):
     assert items["EXP-0003"]["evaluation"]["dataset"] == "ds1"
     assert items["EXP-0002"]["evaluation"] is None  # 旧実験は上書きしない
     assert attach_evaluation("p_eval", "missing.tess.json", {"cer": 0.5}) is None
+
+
+def test_delete_experiment_api(temp_projects):
+    from fastapi.testclient import TestClient
+
+    import src.app.main as main_module
+
+    client = TestClient(main_module.app, raise_server_exceptions=False)
+    project_id = "p_api_delete"
+    record_experiment(project_id, {"models": ["a.tess.json"]})
+
+    resp = client.delete(f"/api/experiments/EXP-0001", params={"project_id": project_id})
+    assert resp.status_code == 200
+    assert resp.json()["deleted"] is True
+    assert list_experiments(project_id, backfill=False) == []
+
+    resp_missing = client.delete("/api/experiments/EXP-9999", params={"project_id": project_id})
+    assert resp_missing.status_code == 404
 
 
 def test_summarize_threshold_labels():

@@ -2417,6 +2417,20 @@ export default function App() {
     }
   }
 
+  // v1.0.0で追加（Experiment Manager強化・12.Experiment削除）: Experimentカルテのみ削除
+  // （Dataset・Model・評価結果には一切影響しない。一覧から取り除くだけで再取得は不要）
+  async function deleteExperiment(experimentId) {
+    try {
+      await request(`/api/experiments/${encodeURIComponent(experimentId)}?project_id=${encodeURIComponent(projectId)}`, {
+        method: "DELETE",
+      });
+      setExperiments((prev) => prev.filter((row) => row.experiment_id !== experimentId));
+      notify("success", `${experimentId} を削除しました`);
+    } catch (error) {
+      notify("error", `実験の削除に失敗しました: ${error.message}`);
+    }
+  }
+
 
   // 実験管理・モデル管理・リリース管理を開いたときに実験一覧を取得（判定・リンク用）
   useEffect(() => {
@@ -4381,6 +4395,10 @@ export default function App() {
           setModelDetailRequest({ name, seq: Date.now() });
           setActiveView("ocr-models");
         }}
+        onOpenExperiment={(experimentId) => {
+          setFocusExperimentId(experimentId);
+          setActiveView("experiments");
+        }}
       />
     );
   }
@@ -4413,6 +4431,12 @@ export default function App() {
           setModelDetailRequest({ name, seq: Date.now() });
           setActiveView("ocr-models");
         }}
+        onOpenDataset={(datasetId) => {
+          // Experiment → 使用Dataset（Dataset Managerの詳細を開く）
+          setDatasetDetailRequest({ id: datasetId, seq: Date.now() });
+          setActiveView("dataset-manager");
+        }}
+        onDeleteExperiment={deleteExperiment}
         focusExperimentId={focusExperimentId}
       />
     );
