@@ -13,6 +13,15 @@ export function resolveInferenceEngine(modelInfo = {}) {
   return "custom";
 }
 
+// 「推論に使用」ボタン3か所（推論使用モデルカード・最新モデルカード・モデル詳細パネル）で
+// 判定がバラバラにならないよう、対象モデルが現在の推論使用モデルかどうかの比較を1関数に集約する。
+// このアプリではモデルはfilename（name）で一意に識別される（Tesseract/PaddleOCR/分類モデルで
+// 拡張子・命名規則が異なり衝突しない。model_idは「管理No」という表示用の連番ラベルであり、
+// 実体の一致判定にはfilenameを使う既存設計に合わせる）
+export function isInferenceModelInUse(name, savedInferenceModel) {
+  return Boolean(name) && Boolean(savedInferenceModel) && name === savedInferenceModel;
+}
+
 // 既に別モデルが推論使用モデルに設定されている場合のみ確認が必要（初回設定は確認不要）
 export function shouldConfirmSwitch(currentDisplayName, nextDisplayName) {
   const current = String(currentDisplayName || "").trim();

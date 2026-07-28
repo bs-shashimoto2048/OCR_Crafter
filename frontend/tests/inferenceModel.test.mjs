@@ -4,6 +4,7 @@ import { test } from "node:test";
 
 import {
   buildSwitchConfirmMessage,
+  isInferenceModelInUse,
   resolveInferenceEngine,
   resolveRestoredInferenceSelection,
   shouldConfirmSwitch,
@@ -84,4 +85,25 @@ test("resolveRestoredInferenceSelection: engine未指定はcustomとして復元
 test("resolveRestoredInferenceSelection: 保存済みモデルが現在の一覧に無い（削除・移動済み）場合はfound:falseで、勝手に置き換えない", () => {
   const resolved = resolveRestoredInferenceSelection({ engine: "tesseract", model: "Deleted.tess.json" }, INFO_MAP);
   assert.deepEqual(resolved, { found: false, model: "Deleted.tess.json" });
+});
+
+// ---------- isInferenceModelInUse（「推論に使用」ボタン3か所の共通判定） ----------
+
+test("isInferenceModelInUse: 対象モデル名が保存済み推論使用モデルと一致すればtrue", () => {
+  assert.equal(isInferenceModelInUse("ModelA.tess.json", "ModelA.tess.json"), true);
+});
+
+test("isInferenceModelInUse: 対象モデル名が保存済み推論使用モデルと異なればfalse", () => {
+  assert.equal(isInferenceModelInUse("ModelB.tess.json", "ModelA.tess.json"), false);
+});
+
+test("isInferenceModelInUse: 保存済み推論使用モデルが未設定（空文字/null/undefined）なら常にfalse", () => {
+  assert.equal(isInferenceModelInUse("ModelA.tess.json", ""), false);
+  assert.equal(isInferenceModelInUse("ModelA.tess.json", null), false);
+  assert.equal(isInferenceModelInUse("ModelA.tess.json", undefined), false);
+});
+
+test("isInferenceModelInUse: 対象モデル名が空でも保存済み値と誤って一致しない（空文字同士でfalse）", () => {
+  assert.equal(isInferenceModelInUse("", ""), false);
+  assert.equal(isInferenceModelInUse("", "ModelA.tess.json"), false);
 });

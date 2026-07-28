@@ -2,6 +2,7 @@
 // viteのssrLoadModuleで実際にレンダリングし、一覧の簡素化（比較バッジ削除）と
 // 左右レイアウト（右ペイン最低幅・縦積み切替）のクラス構成を検証する。
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { after, before, test } from "node:test";
 
 import React from "react";
@@ -342,6 +343,128 @@ test("回帰ケース5（利用不可モデル）: 未Exportのモデルだけ�
     inferenceInUseModel: "",
   });
   assert.equal(available.disabled, false, "利用可能なModelAのボタンまで無効化されている（誤り）");
+});
+
+// 「推論に使用」ボタン3か所（推論使用モデルカード=A・最新モデルカード=B・モデル詳細パネル=C）の
+// 個別回帰テスト。各ボタンは自身の対象モデル（A=inferenceInUseModel自身・B=latest.any・
+// C=詳細表示中のモデル）と保存済み推論使用モデルを比較する必要があり、3か所とも同じ結果に
+// なってしまう誤り（例: disabled={Boolean(inferenceInUseModel)}）を防ぐことが目的。
+// 詳細パネル（C）はクリックで開くまで内部stateが空でSSRには出現しないため、
+// テスト専用のinitialDetailModelプロップ（本番コードでは未使用・省略時は従来どおり非表示）で開く。
+test("Aカード（推論使用モデル）: 表示中のモデルは常に「推論使用中」・無効", () => {
+  const html = renderToString(
+    React.createElement(
+      ModelsView,
+      baseProps({
+        models: THREE_MODELS,
+        modelInfos: THREE_MODEL_INFOS,
+        inferenceInUseModel: "model_a.tess.json",
+        latest: { any: "model_b.tess.json", byType: {} },
+      })
+    )
+  );
+  const [cardA] = extractInferenceButtons(html);
+  assert.equal(cardA.label, "推論使用中", "Aカードの対象（推論使用中のモデル自身）のラベルが誤っている");
+  assert.equal(cardA.disabled, true, "Aカードの対象（推論使用中のモデル自身）が無効化されていない");
+});
+
+test("Bカード（最新モデル）: 最新モデル=現在の推論使用モデルと同一なら無効「推論使用中」", () => {
+  const b = inferenceButtonFor("model_a.tess.json", { inferenceInUseModel: "model_a.tess.json" });
+  assert.equal(b.label, "推論使用中", "最新モデルが現在の推論使用モデルと同じ場合のラベルが誤っている");
+  assert.equal(b.disabled, true, "最新モデルが現在の推論使用モデルと同じ場合に無効化されていない");
+});
+
+test("Bカード（最新モデル）: 最新モデルが現在の推論使用モデルと異なるなら有効「推論に使用」", () => {
+  const b = inferenceButtonFor("model_b.tess.json", { inferenceInUseModel: "model_a.tess.json" });
+  assert.equal(b.label, "推論に使用", "最新モデルが別モデルの場合のラベルが誤っている");
+  assert.equal(b.disabled, false, "最新モデルが別モデルなのに無効化されている（誤り）");
+});
+
+test("Cパネル（モデル詳細）: 使用中モデルを選択している場合は無効「推論使用中」", () => {
+  const html = renderToString(
+    React.createElement(
+      ModelsView,
+      baseProps({
+        models: THREE_MODELS,
+        modelInfos: THREE_MODEL_INFOS,
+        inferenceInUseModel: "model_a.tess.json",
+        latest: { any: "model_c.tess.json", byType: {} },
+        initialDetailModel: "model_a.tess.json",
+      })
+    )
+  );
+  const buttons = extractInferenceButtons(html);
+  const detailButton = buttons[buttons.length - 1];
+  assert.equal(detailButton.label, "推論使用中", "詳細パネルで使用中モデルを選択してもラベルが誤っている");
+  assert.equal(detailButton.disabled, true, "詳細パネルで使用中モデルを選択しても無効化されていない");
+});
+
+test("Cパネル（モデル詳細）: 別モデルを選択している場合は有効「推論に使用」", () => {
+  const html = renderToString(
+    React.createElement(
+      ModelsView,
+      baseProps({
+        models: THREE_MODELS,
+        modelInfos: THREE_MODEL_INFOS,
+        inferenceInUseModel: "model_a.tess.json",
+        latest: { any: "model_c.tess.json", byType: {} },
+        initialDetailModel: "model_b.tess.json",
+      })
+    )
+  );
+  const buttons = extractInferenceButtons(html);
+  const detailButton = buttons[buttons.length - 1];
+  assert.equal(detailButton.label, "推論に使用", "詳細パネルで別モデルを選択してもラベルが誤っている");
+  assert.equal(detailButton.disabled, false, "詳細パネルで別モデルを選択しているのに無効化されている（誤り）");
+});
+
+test("Cパネル（モデル詳細）: 選択モデルが変わるとラベル・disabledも連動して切り替わる", () => {
+  const renderWithDetail = (initialDetailModel) => {
+    const html = renderToString(
+      React.createElement(
+        ModelsView,
+        baseProps({
+          models: THREE_MODELS,
+          modelInfos: THREE_MODEL_INFOS,
+          inferenceInUseModel: "model_a.tess.json",
+          latest: { any: "model_c.tess.json", byType: {} },
+          initialDetailModel,
+        })
+      )
+    );
+    const buttons = extractInferenceButtons(html);
+    return buttons[buttons.length - 1];
+  };
+
+  const onA = renderWithDetail("model_a.tess.json");
+  const onB = renderWithDetail("model_b.tess.json");
+  const onC = renderWithDetail("model_c.tess.json");
+
+  assert.equal(onA.label, "推論使用中");
+  assert.equal(onA.disabled, true);
+  assert.equal(onB.label, "推論に使用");
+  assert.equal(onB.disabled, false);
+  assert.equal(onC.label, "推論に使用");
+  assert.equal(onC.disabled, false);
+});
+
+test("3ボタンとも onClick は自身の対象モデルのみを渡す（保存済み推論使用モデルを渡さない）", async () => {
+  const source = await readFile(new URL("../src/views/ModelsView.jsx", import.meta.url), "utf-8");
+  // 禁止パターン: 対象モデルではなく保存済み推論使用モデル自体を渡してしまう誤り
+  assert.ok(!source.includes("onUseForInference?.(inferenceInUseModel)"), "onClickがinferenceInUseModelを引数に渡している（誤り）");
+  // SummaryCard（A・Bカードで共用）・詳細パネル（C）の2箇所とも、必ず自身のnameを渡している
+  const correctCallSites = source.match(/onClick=\{\(\) => onUseForInference\?\.\(name\)\}/g) || [];
+  assert.equal(correctCallSites.length, 2, "「推論に使用」ボタンのonClickがname引数を渡す形で2箇所（SummaryCard・詳細パネル）に無い");
+});
+
+test("3ボタンとも判定を共通関数 isInferenceModelInUse に集約している（個別に比較を書き直していない）", async () => {
+  const source = await readFile(new URL("../src/views/ModelsView.jsx", import.meta.url), "utf-8");
+  assert.ok(source.includes('import { isInferenceModelInUse } from "../lib/inferenceModel";'));
+  // 生の比較（name === inferenceInUseModel）が残っていない＝全箇所が共通関数経由
+  assert.ok(!/name === inferenceInUseModel/.test(source), "共通関数を使わない生の比較がまだ残っている");
+  const usageCount = (source.match(/isInferenceModelInUse\(/g) || []).length;
+  // import文1 + 呼び出し4箇所（disabledReason・statusOf・SummaryCardラベル・詳細パネルラベル・行強調）以上
+  assert.ok(usageCount >= 4, `isInferenceModelInUseの利用箇所が少なすぎる（${usageCount}件）`);
 });
 
 test("一覧の列定義: モデル名に最大幅400px・ヘッダーとデータ行が同じ列定義を共有", () => {

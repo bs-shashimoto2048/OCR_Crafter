@@ -7,6 +7,7 @@ import InfoTooltip from "../components/InfoTooltip";
 import ModelIdBadge from "../components/ModelIdBadge";
 import { API_BASE, request } from "../lib/api";
 import { HELP_TEXTS } from "../lib/helpTexts";
+import { isInferenceModelInUse } from "../lib/inferenceModel";
 import { historyPreprocessLabel } from "../lib/evalHistory";
 import {
   MODEL_BADGE_LABELS,
@@ -295,6 +296,10 @@ export default function ModelsView({
   releaseStatuses = {},
   // Dataset Manager連携: 「学習Dataset」列クリックでDataset詳細を開く（datasetIdを渡す）
   onOpenDataset,
+  // テスト用: モデル詳細パネルの初期表示モデル（本来は一覧クリック/detailRequestのみで開く。
+  // 詳細パネルはクリック後のstateに依存しSSRでは通常出現しないため、回帰テストでの
+  // レンダリング確認のためだけに用意。省略時は従来どおり空文字＝詳細パネル非表示）
+  initialDetailModel = "",
 }) {
   const latestAny = basename(latest.any || "");
   const latestByType = latest.byType || {};
@@ -304,7 +309,7 @@ export default function ModelsView({
   }
 
   const [selectedModels, setSelectedModels] = useState([]);
-  const [detailModel, setDetailModel] = useState("");
+  const [detailModel, setDetailModel] = useState(initialDetailModel || "");
   const [compareMode, setCompareMode] = useState(false);
   // 混同比較の全件展開（初期=TOP8のみ）
   const [confusionExpanded, setConfusionExpanded] = useState(false);
@@ -394,7 +399,7 @@ export default function ModelsView({
   // ①現在推論使用中の同一モデル ②切替API通信中 ③モデルが利用不可（未Export）の3つのみ
   // （他モデルが設定済み・設定ファイルが存在する等は無効化理由にしない）
   function inferenceButtonDisabledReason(name) {
-    if (name === inferenceInUseModel) return "すでに推論で使用中です";
+    if (isInferenceModelInUse(name, inferenceInUseModel)) return "すでに推論で使用中です";
     if (switchingInferenceModel) return "切替処理中です";
     if (!isModelAvailableForInference(name)) return "モデルファイルが見つかりません（未Export）";
     return "";
@@ -437,7 +442,7 @@ export default function ModelsView({
     // リリースステータス（Production/Candidate等）を最優先表示（Draftは従来表示のまま）
     const release = releaseStatuses?.[name]?.status;
     if (release && release !== "Draft") return release;
-    if (name && name === inferenceInUseModel) return "使用中";
+    if (isInferenceModelInUse(name, inferenceInUseModel)) return "使用中";
     if (latestNames.has(name)) return "最新";
     if (exportReady(name)) return "Export済";
     return "過去モデル";
@@ -602,7 +607,7 @@ export default function ModelsView({
                 onClick={() => onUseForInference?.(name)}
                 title={inferenceButtonDisabledReason(name) || "このモデルをOCR推論で使用します"}
               >
-                {name === inferenceInUseModel ? "推論使用中" : "推論に使用"}
+                {isInferenceModelInUse(name, inferenceInUseModel) ? "推論使用中" : "推論に使用"}
               </Button>
               <Button size="sm" variant="secondary" className="h-6 px-2 text-[11px]" onClick={() => onOpenEvaluation?.(name)}>
                 モデル評価
@@ -998,7 +1003,7 @@ export default function ModelsView({
               onClick={() => onUseForInference?.(name)}
               title={inferenceButtonDisabledReason(name) || "このモデルをOCR推論で使用します"}
             >
-              {name === inferenceInUseModel ? "推論使用中" : "推論に使用"}
+              {isInferenceModelInUse(name, inferenceInUseModel) ? "推論使用中" : "推論に使用"}
             </Button>
             <Button size="sm" variant="secondary" onClick={() => onOpenEvaluation?.(name)}>
               モデル評価
@@ -2023,7 +2028,7 @@ export default function ModelsView({
               const active = detailModel === name && !compareMode;
               // 推論使用中は行の常時強調表示（hoverしなくても判別可能）。比較選択（チェックボックス）・
               // 行が開いている状態（active=accent/青）とは独立した状態のため、シアン系の別色を使い併存させる
-              const isInference = Boolean(name) && name === inferenceInUseModel;
+              const isInference = isInferenceModelInUse(name, inferenceInUseModel);
               return (
                 <div
                   key={name}

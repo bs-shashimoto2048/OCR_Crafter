@@ -15,12 +15,30 @@ timeline
     07-18〜 : 学習条件比較・条件差分・次回学習提案 : サイドバーのOCR開発フロー順再編 : 性能サマリー省スペース化と比較カード短縮名
     07-24 : ダッシュボード「プロジェクト一覧」テーブル拡張 : 同カードビュー化（Health Badge・Exact Match） : カードへBenchmark性能指標追加（Balance Score・P95・Healthのreasons） : カードUI/UXブラッシュアップ（文字拡大・3列化・Primary/Secondary・Production独立表示） : 学習前処理・オーグメンテーションの実効値スナップショット保存と学習条件比較の2セクション化・推論使用モデルの一覧強調
     07-27 : 学習データ作成フローの明確化（事前作成の可視化・準備状況サマリー・評価データとの違いの明記） : 学習前処理の実行タイミング調査と前処理未実行時の警告・実行状況表示の追加 : 学習前処理ステータスの3状態化（旧プロジェクトの誤表示を是正） : 現在の前処理設定の可視化（GET /api/ocr/preprocess/current-config 追加） : OCR Dataset作成フローの見直し（Dataset作成時に必ずrun_preprocess()を自動実行する設計へ変更） : 推論使用モデルの永続化と学習用前処理設定の保存管理（Version・履歴・未保存変更ガード）
-    07-28 : Dataset Manager・Model Lineage機能追加（Dataset資産管理・Dataset⇔Model双方向リンク・再現性向上） : Experiment Manager機能強化（既存Experiment Trackingを唯一の実験管理基盤として拡張。新規Manager・新IDは作らず） : Benchmark Center追加（既存Benchmarkは「Benchmark Runner」へ改名し実行ツールとして温存、Benchmark Centerは既存資産を実行せず横断比較する別画面として新設） : 推論モデル切替不具合修正（保存トリガーを常時監視effectから明示呼び出しの一本道へ） : 同修正の削除漏れによる起動エラー対応（setInferenceModelRestored is not defined） : 「推論に使用」ボタン常時グレーアウト修正（本番の推論使用モデルと推論テスト画面の選択stateの混同を解消）
+    07-28 : Dataset Manager・Model Lineage機能追加（Dataset資産管理・Dataset⇔Model双方向リンク・再現性向上） : Experiment Manager機能強化（既存Experiment Trackingを唯一の実験管理基盤として拡張。新規Manager・新IDは作らず） : Benchmark Center追加（既存Benchmarkは「Benchmark Runner」へ改名し実行ツールとして温存、Benchmark Centerは既存資産を実行せず横断比較する別画面として新設） : 推論モデル切替不具合修正（保存トリガーを常時監視effectから明示呼び出しの一本道へ） : 同修正の削除漏れによる起動エラー対応（setInferenceModelRestored is not defined） : 「推論に使用」ボタン常時グレーアウト修正（本番の推論使用モデルと推論テスト画面の選択stateの混同を解消） : 「推論に使用」ボタン3か所（推論使用モデルカード・最新モデルカード・モデル詳細パネル）の判定を共通関数isInferenceModelInUseへ集約
 ```
 
 ---
 
 ## 2026-07
+
+### 「推論に使用」ボタン3か所（推論使用モデルカード・最新モデルカード・モデル詳細パネル）の判定を共通関数へ集約
+
+**症状**: モデル管理画面の「推論に使用」ボタン3か所（①推論使用モデルカード ②最新モデルカード ③モデル詳細パネル下部）すべてが「推論使用中」ラベルのままグレーアウトし、別モデルを選択しても切り替えられない、という報告。
+
+**調査**: 直前の「推論に使用ボタン常時グレーアウト修正」（本番state=`savedInferenceModel`と推論テスト画面の選択stateの分離）を適用済みのコードに対し、3ボタンそれぞれの実際の対象モデルを明確に区別した上でSSR（`renderToString`）による直接検証を行った——①推論使用モデルカードは`name=inferenceInUseModel`自身なので常に「使用中」で正しい、②最新モデルカードは`name=latest.any`、③詳細パネルは`name=`（クリックで開いたモデル）——結果、**3ボタンとも`disabled={name === inferenceInUseModel}`という既存の判定式そのものは、対象モデルが異なれば正しく異なる結果（有効/無効）を返すことを確認した**（例: 現在使用中=M0021のとき、最新モデル=M0017なら「推論に使用」有効、詳細パネルでM0002/M0017を選択してもそれぞれ「推論に使用」有効）。したがって、この時点のコードには「3ボタンが常に同じ結果になる」という新規の不具合は再現しなかった。
+
+一方で、task.mdが要求する「共通判定を1か所の関数へ集約する」「モデルIDがある場合はID比較を優先する」という設計要求自体は、当時のコードでは`name === inferenceInUseModel`という同一の比較式が3か所（`inferenceButtonDisabledReason`・`statusOf`・SummaryCardのラベル・詳細パネルのラベル・一覧行の強調表示の計5箇所）に生の形で重複しており、将来どこか1箇所だけ修正漏れが起きると3ボタンの整合性が崩れるリスクが構造的に残っていた。
+
+**修正内容**: `lib/inferenceModel.js`へ純関数`isInferenceModelInUse(name, savedInferenceModel)`を新設し（`Boolean(name) && Boolean(savedInferenceModel) && name === savedInferenceModel`。空文字同士の誤一致を避ける）、`ModelsView.jsx`内の生の比較5箇所すべてをこの関数呼び出しへ置換した。モデルIDでの比較優先については、このアプリではモデルは常にfilename（`name`）で一意に識別されており（Tesseract/PaddleOCR/分類モデルで拡張子・命名規則が異なり衝突しない）、`model_id`（"M0021"等）は「管理No」という表示用の連番ラベルに過ぎずlookupキーではないため、既存の識別方式（filename比較）をそのまま共通関数の判定基準として採用した（アーキテクチャ変更を伴うID比較への置き換えは行っていない）。
+
+あわせて、詳細パネル（③）はクリックで開くまで内部state（`detailModel`）が空でSSRには出現せず、これまで自動テストで検証できていなかったため、テスト専用の`initialDetailModel`プロップ（省略時は従来どおり空文字＝詳細パネル非表示。本番コードのApp.jsxからは渡されない）を追加し、SSRで3ボタンすべてを直接検証できるようにした。
+
+**テスト**: `frontend/tests/inferenceModel.test.mjs`へ`isInferenceModelInUse`の単体テスト4件、`frontend/tests/modelsView.render.test.mjs`へA/B/Cボタン個別の回帰テスト6件・共通関数への集約とonClick引数の静的検証2件、計12件を追加。フロント520件（既存508件+新規12件）全通過、`npm run build`成功。実データ確認として、稼働中バックエンド（`tube_20260710`プロジェクト）の`GET /api/ocr/inference/model`が実際に保存済み推論使用モデル（`tess_20260727_190812.tess.json`＝M0021）を返すこと・実モデル一覧7件を確認した上で、この実データと同型のフィクスチャ（M0021=使用中・M0002/M0017=別モデル）でSSR検証し、3ボタンとも仕様どおりの結果になることを確認した。バックエンドは無変更。
+
+**実ブラウザ確認**: 本セッションの環境にブラウザ自動操作ツールが無いため、目視でのクリック確認は行っていない。稼働中のVite開発サーバーへ修正後のソース（`ModelsView.jsx`・`lib/inferenceModel.js`）を配信させ、`curl`でエラーオーバーレイなく200で変換されることを確認した。
+
+---
 
 ### 「推論に使用」ボタン常時グレーアウト修正（本番の推論使用モデルと推論テスト画面の選択stateの混同を解消）
 
