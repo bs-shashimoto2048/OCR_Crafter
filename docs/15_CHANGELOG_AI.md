@@ -15,12 +15,30 @@ timeline
     07-18〜 : 学習条件比較・条件差分・次回学習提案 : サイドバーのOCR開発フロー順再編 : 性能サマリー省スペース化と比較カード短縮名
     07-24 : ダッシュボード「プロジェクト一覧」テーブル拡張 : 同カードビュー化（Health Badge・Exact Match） : カードへBenchmark性能指標追加（Balance Score・P95・Healthのreasons） : カードUI/UXブラッシュアップ（文字拡大・3列化・Primary/Secondary・Production独立表示） : 学習前処理・オーグメンテーションの実効値スナップショット保存と学習条件比較の2セクション化・推論使用モデルの一覧強調
     07-27 : 学習データ作成フローの明確化（事前作成の可視化・準備状況サマリー・評価データとの違いの明記） : 学習前処理の実行タイミング調査と前処理未実行時の警告・実行状況表示の追加 : 学習前処理ステータスの3状態化（旧プロジェクトの誤表示を是正） : 現在の前処理設定の可視化（GET /api/ocr/preprocess/current-config 追加） : OCR Dataset作成フローの見直し（Dataset作成時に必ずrun_preprocess()を自動実行する設計へ変更） : 推論使用モデルの永続化と学習用前処理設定の保存管理（Version・履歴・未保存変更ガード）
-    07-28 : Dataset Manager・Model Lineage機能追加（Dataset資産管理・Dataset⇔Model双方向リンク・再現性向上） : Experiment Manager機能強化（既存Experiment Trackingを唯一の実験管理基盤として拡張。新規Manager・新IDは作らず） : Benchmark Center追加（既存Benchmarkは「Benchmark Runner」へ改名し実行ツールとして温存、Benchmark Centerは既存資産を実行せず横断比較する別画面として新設） : 推論モデル切替不具合修正（保存トリガーを常時監視effectから明示呼び出しの一本道へ） : 同修正の削除漏れによる起動エラー対応（setInferenceModelRestored is not defined）
+    07-28 : Dataset Manager・Model Lineage機能追加（Dataset資産管理・Dataset⇔Model双方向リンク・再現性向上） : Experiment Manager機能強化（既存Experiment Trackingを唯一の実験管理基盤として拡張。新規Manager・新IDは作らず） : Benchmark Center追加（既存Benchmarkは「Benchmark Runner」へ改名し実行ツールとして温存、Benchmark Centerは既存資産を実行せず横断比較する別画面として新設） : 推論モデル切替不具合修正（保存トリガーを常時監視effectから明示呼び出しの一本道へ） : 同修正の削除漏れによる起動エラー対応（setInferenceModelRestored is not defined） : 「推論に使用」ボタン常時グレーアウト修正（本番の推論使用モデルと推論テスト画面の選択stateの混同を解消）
 ```
 
 ---
 
 ## 2026-07
+
+### 「推論に使用」ボタン常時グレーアウト修正（本番の推論使用モデルと推論テスト画面の選択stateの混同を解消）
+
+**症状**: モデル管理画面で、現在の推論使用モデル以外のモデルの「推論に使用」ボタンがグレーアウトしたままで押せない、という報告。
+
+**調査**: `ModelsView.jsx`の実際の`disabled`条件（`disabled={name === inferenceInUseModel}`）自体は、task.mdが警告する典型的な誤り（`disabled={Boolean(currentInferenceModel)}`等、現在値の存在自体を無効条件にする実装）には該当せず、構造上は「その名前のモデル自身が現在の推論使用モデルと一致する場合のみ無効化」という正しい形になっていた。一覧本体（`.map()`によるモデル一覧行）にはそもそも行内アクションボタンが無く、「推論に使用」ボタンは「推論使用モデル」「最新モデル」の2枚のサマリーカードと、行クリックで開く詳細パネルにのみ存在する構成であることも確認した。
+
+一致比較の対象である`inferenceInUseModel`（`App.jsx`側で算出）の由来を追ったところ、これが`inferEngine`/`inferModel`/`inferPaddleModel`/`inferTesseractModel`という4つのstateから導出されていたが、**この同じ4つのstateが「推論」「RapidOCR」「一括OCR」の3画面で、ユーザーが試し撃ち用にモデル・エンジンを自由に選ぶドロップダウンの選択状態としても共用されていた**ことが判明した。つまり、ユーザーが推論テスト画面で（本番設定を変更する意図なく）別のモデルやEasyOCRエンジンを一度選んだだけで、モデル管理画面へ戻ると`inferenceInUseModel`がそのテスト用の選択を「本番の推論使用モデル」と誤認し、そのモデルのボタンだけが無関係な理由不明のグレーアウトを起こす、という混同がここで発生していた。さらに、一度も「推論に使用」を明示実行していない新規プロジェクトでは`inferModel`が既定値`"latest"`のままで、この場合`toBase(latestModels.any)`（＝現在の最新学習済みモデル）へフォールバック解決されるため、**「最新モデル」カードに表示される、まさにユーザーが選びたいであろう最新モデルのボタンが、何も明示設定していないにもかかわらず常時「使用中」＝グレーアウトとして表示される**、という個別のフォールバック誤認も併せて確認した。
+
+**修正内容**: `App.jsx`に、推論テスト画面の選択state（`inferEngine`等、既存のまま）とは完全に独立した「本番の推論使用モデル」専用state（`savedInferenceEngine`・`savedInferenceModel`、既定値は空文字＝未設定）を新設。`GET /api/ocr/inference/model`による復元成功時と、`switchInferenceModel()`実行時のみこの2つのstateを更新する（推論テスト画面側のstateもプレビュー目的で従来どおり同時更新するが、逆方向＝テスト画面での選択が本番stateへ波及することは無くした）。`ModelsView`へ渡す`inferenceInUseModel`/`inferenceInUseEngine`はこの新stateから算出するよう変更し、`"latest"`という文字列を解決する分岐（`toBase(...)`によるフォールバック）自体を撤去した（保存済み値は常に具体的なモデル名のみを持つため不要になった）。プロジェクト切替時は`savedInferenceEngine`/`savedInferenceModel`を空文字へリセットしてから復元を試みる（前プロジェクトの値を持ち越さない）。確認ダイアログの要否判定（`shouldConfirmSwitch`）も、比較対象をテスト画面の選択stateから`savedInferenceModel`へ変更した。
+
+あわせて、以前の作業で追加済みだった`switchingInferenceModel`（切替API通信中フラグ）・`isModelAvailableForInference`（未Exportモデルの無効化）・`inferenceButtonDisabledReason`（無効理由の一元管理・tooltip表示）はそのまま活用し、ボタンラベルを状態に応じて「推論使用中」/「推論に使用」に切り替える表示も維持した。「EasyOCR（学習モデルを使用しない推論設定です）」という空表示文言は、実際にはバックエンドへ保存される概念が存在しない（EasyOCRは「推論に使用」ボタンの対象外＝モデル管理からは設定できない）ため、この混同の副産物だったと判断し、`inferenceInUseEngine`が`"easyocr"`になることは無くなった（未設定時は通常の「推論使用モデルが未設定です」文言に統一）。
+
+**テスト**: `frontend/tests/modelsView.render.test.mjs`へ回帰テスト5件を追加（①未設定でModelA/B双方が有効 ②ModelA使用中でA無効・B/C有効 ③ModelBへ切替後の反転 ④通信中は全ボタン無効化・完了後の復帰 ⑤未Exportモデルのみ無効化）。SSR（`renderToString`）で検証可能な唯一の箇所である「推論使用モデル」「最新モデル」の2枚のサマリーカードを対象に、`latest.any`を差し替えることで「使用中以外の任意モデル」のボタン状態を検証する方式にした（一覧行には専用ボタンが無く、詳細パネルはクリック後のstateに依存しSSRでは出現しないため）。フロント508件（既存503件+新規5件）全通過、`npm run build`成功。バックエンドは無変更（本不具合はフロントエンドのstate設計のみが原因のため）。
+
+**実ブラウザ確認**: 本セッションの環境にブラウザ自動操作ツールが無いため、目視でのクリック確認は行っていない。稼働中のVite開発サーバー（`http://localhost:5173/`）へ修正後のソースを配信させ、`curl`で対象モジュール（`App.jsx`・`ModelsView.jsx`）がエラーオーバーレイなく200で変換されること（構文エラーが無いこと）を確認した。
+
+---
 
 ### 推論モデル切替修正後の起動エラー対応（setInferenceModelRestored is not defined）
 

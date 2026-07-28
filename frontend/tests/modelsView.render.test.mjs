@@ -163,6 +163,187 @@ test("推論使用モデル: 比較選択チェックボックスと併用でき
   assert.ok(html.includes('aria-label="model_a.tess.json を比較・削除対象に選択"'));
 });
 
+// 「推論に使用」ボタンの回帰テスト（常時グレーアウト不具合修正）。
+// サマリーカード（「推論使用モデル」「最新モデル」）は name プロップのみでボタンが決まるため
+// SSRで検証できる唯一の箇所（一覧行には専用ボタンがなく、詳細パネルはクリック後のstateに
+// 依存しSSRでは出現しない）。「最新モデル」カードの latest.any を差し替えることで、
+// 「現在使用中のモデル以外」の任意モデルのボタン状態を検証する。
+const THREE_MODEL_INFOS = {
+  "model_a.tess.json": {
+    model_id: "M0001",
+    engine: "tesseract",
+    training_family: "tesseract",
+    created_at: "2026-07-15T10:00:00",
+    ocr_inference_ready: true,
+  },
+  "model_b.tess.json": {
+    model_id: "M0002",
+    engine: "tesseract",
+    training_family: "tesseract",
+    created_at: "2026-07-16T10:00:00",
+    ocr_inference_ready: true,
+  },
+  "model_c.tess.json": {
+    model_id: "M0003",
+    engine: "tesseract",
+    training_family: "tesseract",
+    created_at: "2026-07-17T10:00:00",
+    ocr_inference_ready: true,
+  },
+};
+const THREE_MODELS = ["model_a.tess.json", "model_b.tess.json", "model_c.tess.json"];
+
+// html中の「推論に使用」「推論使用中」ボタンをDOM出現順に抽出し、disabled有無・titleを返す
+function extractInferenceButtons(html) {
+  const re = /<button([^>]*)>(推論に使用|推論使用中)<\/button>/g;
+  const results = [];
+  let m;
+  while ((m = re.exec(html))) {
+    const attrs = m[1];
+    const titleMatch = attrs.match(/title="([^"]*)"/);
+    results.push({
+      label: m[2],
+      disabled: / disabled(=|>|\s)/.test(`${attrs} `),
+      title: titleMatch ? titleMatch[1] : "",
+    });
+  }
+  return results;
+}
+
+// 「最新モデル」カードのnameをtargetModelにして、そのモデル1件分のボタン状態だけを取り出す
+function inferenceButtonFor(targetModel, overrides = {}) {
+  const html = renderToString(
+    React.createElement(
+      ModelsView,
+      baseProps({
+        models: THREE_MODELS,
+        modelInfos: THREE_MODEL_INFOS,
+        ...overrides,
+        latest: { any: targetModel, byType: {} },
+      })
+    )
+  );
+  const buttons = extractInferenceButtons(html);
+  // inferenceInUseModelが空、または最新モデルと一致する場合は「推論使用モデル」カードの
+  // ボタンが出ない/最新モデルカードと同一モデルになるため、末尾（=最新モデルカード）を採用する
+  return buttons[buttons.length - 1];
+}
+
+test("回帰ケース1（未設定）: ModelA・ModelBともにボタンが有効", () => {
+  const a = inferenceButtonFor("model_a.tess.json", { inferenceInUseModel: "" });
+  const b = inferenceButtonFor("model_b.tess.json", { inferenceInUseModel: "" });
+  assert.equal(a.disabled, false, "未設定なのにModelAのボタンが無効化されている");
+  assert.equal(a.label, "推論に使用");
+  assert.equal(b.disabled, false, "未設定なのにModelBのボタンが無効化されている");
+  assert.equal(b.label, "推論に使用");
+});
+
+test("回帰ケース2（ModelAが推論使用中）: ModelAのみ無効「推論使用中」、ModelB・ModelCは有効「推論に使用」", () => {
+  const html = renderToString(
+    React.createElement(
+      ModelsView,
+      baseProps({
+        models: THREE_MODELS,
+        modelInfos: THREE_MODEL_INFOS,
+        inferenceInUseModel: "model_a.tess.json",
+        latest: { any: "model_b.tess.json", byType: {} },
+      })
+    )
+  );
+  const [cardA, cardB] = extractInferenceButtons(html);
+  assert.equal(cardA.disabled, true, "使用中のModelAのボタンが無効化されていない");
+  assert.equal(cardA.label, "推論使用中");
+  assert.equal(cardB.disabled, false, "別モデルのModelBのボタンが無効化されている（誤り）");
+  assert.equal(cardB.label, "推論に使用");
+
+  const c = inferenceButtonFor("model_c.tess.json", { inferenceInUseModel: "model_a.tess.json" });
+  assert.equal(c.disabled, false, "別モデルのModelCのボタンが無効化されている（誤り）");
+  assert.equal(c.label, "推論に使用");
+});
+
+test("回帰ケース3（ModelBへ切替後）: ModelBのみ無効、ModelA・ModelCは有効", () => {
+  const html = renderToString(
+    React.createElement(
+      ModelsView,
+      baseProps({
+        models: THREE_MODELS,
+        modelInfos: THREE_MODEL_INFOS,
+        inferenceInUseModel: "model_b.tess.json",
+        latest: { any: "model_a.tess.json", byType: {} },
+      })
+    )
+  );
+  const [cardB, cardA] = extractInferenceButtons(html);
+  assert.equal(cardB.disabled, true, "切替後のModelBのボタンが無効化されていない");
+  assert.equal(cardA.disabled, false, "切替後、ModelAのボタンが無効化されたままになっている");
+
+  const c = inferenceButtonFor("model_c.tess.json", { inferenceInUseModel: "model_b.tess.json" });
+  assert.equal(c.disabled, false, "切替後もModelCのボタンが無効化されている（誤り）");
+});
+
+test("回帰ケース4（通信中）: 全ての切替ボタンが一時無効化され、完了後は正しく復帰する", () => {
+  const duringHtml = renderToString(
+    React.createElement(
+      ModelsView,
+      baseProps({
+        models: THREE_MODELS,
+        modelInfos: THREE_MODEL_INFOS,
+        inferenceInUseModel: "model_a.tess.json",
+        switchingInferenceModel: true,
+        latest: { any: "model_b.tess.json", byType: {} },
+      })
+    )
+  );
+  const [duringA, duringB] = extractInferenceButtons(duringHtml);
+  assert.equal(duringA.disabled, true, "通信中にModelA（使用中）のボタンが無効化されていない");
+  assert.equal(duringB.disabled, true, "通信中に別モデルModelBのボタンが無効化されていない");
+  assert.equal(duringB.title, "切替処理中です");
+
+  const afterHtml = renderToString(
+    React.createElement(
+      ModelsView,
+      baseProps({
+        models: THREE_MODELS,
+        modelInfos: THREE_MODEL_INFOS,
+        inferenceInUseModel: "model_a.tess.json",
+        switchingInferenceModel: false,
+        latest: { any: "model_b.tess.json", byType: {} },
+      })
+    )
+  );
+  const [afterA, afterB] = extractInferenceButtons(afterHtml);
+  assert.equal(afterA.disabled, true, "通信完了後もModelA（使用中）は無効のままであるべき");
+  assert.equal(afterB.disabled, false, "通信完了後にModelBのボタンが正しく復帰していない");
+});
+
+test("回帰ケース5（利用不可モデル）: 未Exportのモデルだけが無効、他モデルは有効", () => {
+  const modelInfosWithUnavailable = {
+    ...THREE_MODEL_INFOS,
+    "model_d.tess.json": {
+      model_id: "M0004",
+      engine: "tesseract",
+      training_family: "tesseract",
+      created_at: "2026-07-18T10:00:00",
+      ocr_inference_ready: false,
+    },
+  };
+  const models = [...THREE_MODELS, "model_d.tess.json"];
+  const unavailable = inferenceButtonFor("model_d.tess.json", {
+    models,
+    modelInfos: modelInfosWithUnavailable,
+    inferenceInUseModel: "",
+  });
+  assert.equal(unavailable.disabled, true, "未Exportのモデルのボタンが有効になっている");
+  assert.equal(unavailable.title, "モデルファイルが見つかりません（未Export）");
+
+  const available = inferenceButtonFor("model_a.tess.json", {
+    models,
+    modelInfos: modelInfosWithUnavailable,
+    inferenceInUseModel: "",
+  });
+  assert.equal(available.disabled, false, "利用可能なModelAのボタンまで無効化されている（誤り）");
+});
+
 test("一覧の列定義: モデル名に最大幅400px・ヘッダーとデータ行が同じ列定義を共有", () => {
   // 共有定数: モデル名は minmax(300px,420px) の上限付き（余った幅いっぱいまで伸ばさない）
   assert.equal(MODEL_LIST_GRID_COLUMNS, "32px minmax(300px, 420px) 80px 85px 130px 140px 140px 70px");

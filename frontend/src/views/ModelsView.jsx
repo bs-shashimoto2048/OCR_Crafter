@@ -280,6 +280,9 @@ export default function ModelsView({
   evalHistory = {},
   inferenceInUseModel = "",
   inferenceInUseEngine = "",
+  // 推論使用モデル切替の通信中フラグ（true の間は全モデルの「推論に使用」ボタンを無効化。
+  // 連打による保存APIへの重複リクエスト・順序逆転を防ぐ）
+  switchingInferenceModel = false,
   onUseForInference,
   onOpenEvaluation,
   onCreateTrainingPlan,
@@ -378,6 +381,23 @@ export default function ModelsView({
 
   function exportReady(name) {
     return Boolean(infoOf(name).ocr_inference_ready);
+  }
+
+  // 推論に使用できるモデルか（canDownloadと同じ判定を再利用: OCR系はexport済みのみ、
+  // 分類モデルはexport済みの概念が無いため常に対象）。未Exportのモデルで「推論に使用」
+  // を押せてしまう見た目だけのボタンにしない
+  function isModelAvailableForInference(name) {
+    return !isOcrFamily(name) || exportReady(name);
+  }
+
+  // 「推論に使用」ボタンの無効化理由（空文字=有効）。無効にしてよいのは
+  // ①現在推論使用中の同一モデル ②切替API通信中 ③モデルが利用不可（未Export）の3つのみ
+  // （他モデルが設定済み・設定ファイルが存在する等は無効化理由にしない）
+  function inferenceButtonDisabledReason(name) {
+    if (name === inferenceInUseModel) return "すでに推論で使用中です";
+    if (switchingInferenceModel) return "切替処理中です";
+    if (!isModelAvailableForInference(name)) return "モデルファイルが見つかりません（未Export）";
+    return "";
   }
 
   function isOcrFamily(name) {
@@ -578,11 +598,11 @@ export default function ModelsView({
                 size="sm"
                 variant="secondary"
                 className="h-6 px-2 text-[11px]"
-                disabled={name === inferenceInUseModel}
+                disabled={Boolean(inferenceButtonDisabledReason(name))}
                 onClick={() => onUseForInference?.(name)}
-                title={name === inferenceInUseModel ? "すでに推論で使用中です" : "このモデルをOCR推論で使用します"}
+                title={inferenceButtonDisabledReason(name) || "このモデルをOCR推論で使用します"}
               >
-                推論に使用
+                {name === inferenceInUseModel ? "推論使用中" : "推論に使用"}
               </Button>
               <Button size="sm" variant="secondary" className="h-6 px-2 text-[11px]" onClick={() => onOpenEvaluation?.(name)}>
                 モデル評価
@@ -974,10 +994,11 @@ export default function ModelsView({
             <Button
               size="sm"
               variant="secondary"
-              disabled={name === inferenceInUseModel}
+              disabled={Boolean(inferenceButtonDisabledReason(name))}
               onClick={() => onUseForInference?.(name)}
+              title={inferenceButtonDisabledReason(name) || "このモデルをOCR推論で使用します"}
             >
-              推論に使用
+              {name === inferenceInUseModel ? "推論使用中" : "推論に使用"}
             </Button>
             <Button size="sm" variant="secondary" onClick={() => onOpenEvaluation?.(name)}>
               モデル評価

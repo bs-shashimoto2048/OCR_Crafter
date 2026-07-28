@@ -549,6 +549,18 @@ export default function App() {
   const [inferEasyOcrLangs, setInferEasyOcrLangs] = useState(["en"]);
   const [inferPaddleModel, setInferPaddleModel] = useState("latest");
   const [inferTesseractModel, setInferTesseractModel] = useState("latest");
+  // 「推論に使用（本番の推論使用モデル）」設定は、推論テスト画面（推論/RapidOCR/一括OCR）が
+  // 試し撃ち用に自由に切り替えるinferEngine/inferModel等とは完全に別のstateで管理する。
+  // 以前はinferEngine/inferModelを両方の用途で共用しており、テスト画面で別モデルを試しに
+  // 選んだだけで、モデル管理画面の「推論に使用」ボタンの無効化判定（=inferenceInUseModel）まで
+  // 意図せず変化してしまっていた（テストで選んだモデルが「使用中」と誤認され、
+  // 本来切替可能なはずの別モデルのボタンが理由不明のまま押せなくなる不具合の真因）。
+  // 空文字="まだ本番の推論使用モデルが確定していない"（復元成功 or 切替実行で初めて値が入る）
+  const [savedInferenceEngine, setSavedInferenceEngine] = useState("");
+  const [savedInferenceModel, setSavedInferenceModel] = useState("");
+  // 推論使用モデル切替の通信中フラグ（一覧の切替ボタンを一時無効化し、連打による
+  // 保存APIへの重複リクエスト・順序逆転を防ぐ）
+  const [switchingInferenceModel, setSwitchingInferenceModel] = useState(false);
   // 推論使用モデルの永続化（プロジェクト単位）。v1.0.0で修正: 以前は「関連state（inferEngine
   // 等）が変化するたびに保存する」常時監視effectだったため、モデル一覧再取得後の無効選択
   // リセットeffectや画面遷移時のエンジン同期effectなど、ユーザーの意図しない変更まで保存対象に
@@ -987,10 +999,15 @@ export default function App() {
     // 1回のみ試みる（手動更新での再取得時に、利用者がその後変更した選択を上書きしない）
     if (inferenceModelRestoreAttemptedProjectRef.current !== targetProjectId) {
       inferenceModelRestoreAttemptedProjectRef.current = targetProjectId;
+      // 別プロジェクトへの切替時、前プロジェクトの本番推論使用モデルを持ち越さない
+      // （このプロジェクトで復元が成功するまでは「まだ何も設定されていない」扱いにする）
+      setSavedInferenceEngine("");
+      setSavedInferenceModel("");
       try {
         const savedData = await request(`/api/ocr/inference/model?project_id=${pid}`);
         const resolved = resolveRestoredInferenceSelection(savedData?.inference_model || null, infoMap);
         if (resolved && resolved.found) {
+          // 推論テスト画面（推論/RapidOCR/一括OCR）の初期選択も、本番の推論使用モデルに合わせておく
           if (resolved.engine === "tesseract") {
             setInferEngine("tesseract");
             setInferTesseractModel(resolved.model);
@@ -1001,6 +1018,8 @@ export default function App() {
             setInferEngine("custom");
             setInferModel(resolved.model);
           }
+          setSavedInferenceEngine(resolved.engine);
+          setSavedInferenceModel(resolved.model);
         } else if (resolved && !resolved.found) {
           // 保存されているモデルが削除済み・移動済みで見つからない場合は、勝手に
           // 別モデルへ置き換えず警告のみ行う（保存済みinference_model.jsonはそのまま）
@@ -1175,12 +1194,13 @@ export default function App() {
   // ①（2回目以降のみ）確認ダイアログ ②Reactstateを即時更新（画面更新を待たない）
   // ③プロジェクト設定へ保存（常に置換更新。未設定時のみ保存のような分岐はしない）
   async function switchInferenceModel(name) {
+    if (switchingInferenceModel) return; // 通信中の連打は無視（重複POST防止）
     const info = modelInfos?.[name] || {};
     const nextEngine = resolveInferenceEngine(info);
 
-    const currentName =
-      inferEngine === "tesseract" ? inferTesseractModel : inferEngine === "paddleocr" ? inferPaddleModel : inferModel;
-    const currentDisplayName = currentName && currentName !== "latest" ? modelAliases[currentName] || currentName : "";
+    // 確認要否は本番の推論使用モデル（savedInferenceModel）と比較する。推論テスト画面
+    // （推論/RapidOCR/一括OCR）で試しに選んでいるモデル（inferModel等）とは無関係
+    const currentDisplayName = savedInferenceModel ? modelAliases[savedInferenceModel] || savedInferenceModel : "";
     const nextDisplayName = modelAliases[name] || name;
 
     // 既に別モデルが推論使用モデルに設定されている場合のみ確認する（初回設定時は確認不要）
@@ -1189,8 +1209,11 @@ export default function App() {
       if (!confirmed) return;
     }
 
-    // 画面更新を待たず即時に選択状態を反映（一覧の「推論使用中」表示・ボタン活性/非活性も
-    // 同じstateから導出されるため、旧モデルの表示は同時に自動で解除される）
+    // 画面更新を待たず即時に選択状態を反映。本番の推論使用モデル（savedInferenceModel/Engine）と、
+    // 推論テスト画面の初期選択（inferModel等）の両方を更新する（後者はプレビュー用途で、
+    // ユーザーがその後テスト画面で別モデルを選んでも本番設定＝ボタンの無効化判定は変化しない）
+    setSavedInferenceEngine(nextEngine);
+    setSavedInferenceModel(name);
     if (nextEngine === "tesseract") setInferTesseractModel(name);
     else if (nextEngine === "paddleocr") setInferPaddleModel(name);
     else setInferModel(name);
@@ -1199,6 +1222,7 @@ export default function App() {
 
     if (!projectId) return;
     const modelId = String(info.model_id || "");
+    setSwitchingInferenceModel(true);
     try {
       await request("/api/ocr/inference/model", {
         method: "POST",
@@ -1207,6 +1231,8 @@ export default function App() {
       });
     } catch (error) {
       notify("error", `推論使用モデルの保存に失敗しました: ${error.message}`);
+    } finally {
+      setSwitchingInferenceModel(false);
     }
   }
 
@@ -4325,22 +4351,11 @@ export default function App() {
             },
           }
         : latestModels;
-    // 現在OCR推論で使用中のモデル名を解決（"latest" 指定時は実体のモデル名へ）
-    const toBase = (value) => String(value || "").split("/").pop();
-    const inferenceInUseModel =
-      inferEngine === "tesseract"
-        ? inferTesseractModel === "latest"
-          ? toBase(latestModels.ocrTesseract)
-          : inferTesseractModel
-        : inferEngine === "paddleocr"
-          ? inferPaddleModel === "latest"
-            ? toBase(latestModels.ocrPaddle)
-            : inferPaddleModel
-          : inferEngine === "custom"
-            ? inferModel === "latest"
-              ? toBase(latestModels.any)
-              : inferModel
-            : "";
+    // 現在OCR推論で使用中（本番）のモデル名。savedInferenceModelは復元成功時・
+    // switchInferenceModel実行時のみ設定される実モデル名（"latest"は入らない）で、
+    // 推論テスト画面（推論/RapidOCR/一括OCR）でユーザーが試しに選んでいるモデル
+    // （inferModel等）とは独立している
+    const inferenceInUseModel = savedInferenceModel || "";
     view = (
       <ModelsView
         projectId={projectId}
@@ -4353,7 +4368,8 @@ export default function App() {
         onAliasChange={persistModelAlias}
         evalHistory={modelEvalHistory}
         inferenceInUseModel={inferenceInUseModel}
-        inferenceInUseEngine={inferEngine}
+        switchingInferenceModel={switchingInferenceModel}
+        inferenceInUseEngine={savedInferenceEngine}
         onUseForInference={switchInferenceModel}
         onOpenEvaluation={(name) => {
           if (String(modelInfos?.[name]?.engine || "") === "tesseract") {
