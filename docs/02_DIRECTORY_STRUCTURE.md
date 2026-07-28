@@ -8,11 +8,12 @@ ocr_crafter/
 │   └── settings.yaml            # 全設定（前処理・学習・Tesseract・CORS等）
 ├── src/
 │   └── app/
-│       ├── main.py              # FastAPI本体（全55エンドポイント、約2460行）
+│       ├── main.py              # FastAPI本体（全140エンドポイント、約4830行）
 │       ├── schemas.py           # Pydanticリクエストスキーマ
 │       ├── config.py            # settings.yaml 読込（lru_cache）
 │       ├── paths.py             # リポジトリパス定数
 │       ├── project_paths.py     # プロジェクトdir構造・安全削除・ID検証
+│       ├── version.py           # アプリバージョン定数
 │       ├── db.py                # SQLite（training_jobsテーブル）
 │       ├── train.py             # 分類モデル学習（CLIあり）
 │       ├── predict.py           # 4エンジン推論（CLIあり）
@@ -21,7 +22,7 @@ ocr_crafter/
 │       ├── ocr_tuning.py        # OCR学習データ出力CLIラッパー
 │       ├── migrate_legacy_data.py   # 旧データ移行CLI
 │       ├── migrate_ocr_models.py    # OCRモデルinference変換CLI
-│       └── services/
+│       └── services/            # ドメインロジック（34モジュール）
 │           ├── preprocess.py            # OCR前処理パイプライン本体
 │           ├── ocr_preprocess.py        # 軽量前処理ユーティリティ
 │           ├── manual_mask.py           # 手動マスク補正（行RLE）
@@ -32,11 +33,27 @@ ocr_crafter/
 │           ├── dataset_builder.py       # 分類データセット分割
 │           ├── training_image_builder.py# YOLO検出・クロップ出力
 │           ├── model_registry.py        # モデル一覧・解決・安全削除
-│           ├── ocr_pipeline.py          # PaddleOCR学習・登録・ログ・検証（約1850行）
+│           ├── ocr_pipeline.py          # PaddleOCR学習・登録・ログ・検証（約2400行）
 │           ├── tesseract_pipeline.py    # Tesseract学習・認識
 │           ├── ocr_tuning.py            # EasyOCR/PaddleOCR学習データ出力
 │           ├── ocr_evaluation.py        # OCRモデル評価（Tesseract）
+│           ├── ocr_preview_cache.py     # OCRプレビューのキャッシュ
 │           ├── evaluation.py            # 分類モデル評価
+│           ├── evaluation_dataset.py    # 評価データセット管理
+│           ├── preprocess_config_store.py  # 前処理設定の保存・履歴
+│           ├── preprocess_snapshot.py   # 前処理実効パラメータのスナップショット
+│           ├── dataset_registry.py      # Dataset Manager（DS0001採番・一覧・Dataset⇔Model連携）
+│           ├── experiment_tracker.py    # 実験管理（EXP-0001・実験カルテ・比較・推薦）
+│           ├── benchmark.py             # Benchmark Runner（BM-0001・エンジン実行比較）
+│           ├── benchmark_center.py      # Benchmark Center（BMC-0001・横断比較・実行なし）
+│           ├── release_manager.py       # リリース管理（Draft→Production・Rollback）
+│           ├── release_gate.py          # Release Policy判定（PASS/CONDITIONAL_PASS/FAIL）
+│           ├── job_manager.py           # ジョブ管理（JOB-000001・状態遷移・進捗）
+│           ├── audit_log.py             # 監査ログ（追記型・32操作）
+│           ├── report_generator.py      # レポート生成（RPT-0001・Markdown/PDF）
+│           ├── operations.py            # 運用ダッシュボード・ヘルスチェック
+│           ├── backup_manager.py        # バックアップ（BK-0001・metadata_only/full）
+│           ├── inference_model.py       # 推論モデル永続化（GET/POST /api/ocr/inference/model）
 │           ├── latin_case.py            # 小文字出力制御の共通判定
 │           └── dialogs.py               # ネイティブのファイル/フォルダ選択
 ├── frontend/
@@ -47,15 +64,17 @@ ocr_crafter/
 │   ├── package.json             # scripts: dev/build/preview/test
 │   ├── src/
 │   │   ├── main.jsx             # Reactエントリ（StrictMode）
-│   │   ├── App.jsx              # 全状態管理・view切替（約3300行）
+│   │   ├── App.jsx              # 全状態管理・view切替（約4920行）
 │   │   ├── index.css            # Tailwind + カスタムクラス
-│   │   ├── views/               # 12画面（下表）
-│   │   ├── components/          # 共通UI 14種
-│   │   └── lib/                 # api.js / candidateDictionary.js 等 5種
-│   └── tests/                   # node:test（2ファイル）
-├── tests/                       # pytest（10ファイル + conftest.py）
+│   │   ├── views/               # 22画面（下表）
+│   │   ├── components/          # 共通UI 20種
+│   │   └── lib/                 # 純粋ロジック（api.js 等 45種）
+│   └── tests/                   # node:test（56ファイル、依存追加不要。`npm test`で全件実行）
+├── tests/                       # pytest（44ファイル + conftest.py）
 ├── docs/                        # ドキュメント
 ├── data/projects/<project_id>/  # ※gitignore。プロジェクトデータ（下記）
+├── data/model_ids.json          # モデル管理No（M0001形式）の登録簿（全プロジェクト共通）
+├── data/dataset_ids.json        # Dataset管理No（DS0001形式）の登録簿（全プロジェクト共通）
 ├── models/                      # ※gitignore。tessdata_best / yolo 等
 ├── outputs/                     # ※gitignore。app.db（SQLite）等
 ├── external/                    # ※gitignore。PaddleOCRリポジトリ
@@ -63,9 +82,9 @@ ocr_crafter/
 ├── requirements-ci.txt          # CI最小依存
 ├── requirements-dev.txt         # pytest
 ├── requirements-ocr-tuning.txt  # OCRチューニング任意依存
-├── Pipfile                      # pipenv定義（python 3.9）
-├── readme.md                    # セットアップ・API概要
-├── CHANGELOG.md                 # v1.0.0（未リリース）変更履歴
+├── Pipfile                      # pipenv定義
+├── readme.md                    # セットアップ・API概要・Quick Start
+├── CHANGELOG.md                 # 変更履歴
 └── yolo11n.pt                   # YOLOモデル（リポジトリ直下）
 ```
 
@@ -82,37 +101,59 @@ ocr_crafter/
 | `dataset/` | 分類用データセット（train/val/test） |
 | `models/` | 学習済みモデル（`*.pt` / `*.ocr.json` / `*.tess.json` / `ocr_runs/<job_id>/`） |
 | `logs/` | 学習ログ |
-| `outputs/` | 評価・プレビュー・OCRログ（`ocr_logs/predictions.jsonl`）・OCRデータセット等 |
+| `outputs/` | 評価・プレビュー・OCRログ（`ocr_logs/predictions.jsonl`）・OCRデータセット（`ocr_dataset*/<フォルダ>/meta.json`＝Dataset Managerが走査する実体）等 |
+| `experiments.json` | 実験カルテ（EXP-0001形式） |
+| `releases.json` | リリース管理の状態・履歴（REL-0001形式） |
+| `benchmarks.json` | Benchmark Runnerの実行結果（BM-0001形式） |
+| `benchmark_center.json` | Benchmark Centerの比較条件（BMC-0001形式。評価結果自体は保存しない） |
+| `inference_model.json` | 推論モデル永続化（現在の「推論に使用」選択。`GET/POST /api/ocr/inference/model`） |
 
-## フロントエンド画面（views/）
+## フロントエンド画面（views/、22画面）
 
 | ファイル | 画面 |
 |---|---|
 | `DashboardView.jsx` | ダッシュボード（プロジェクト管理・進捗） |
 | `ImagesView.jsx` | 画像取り込み・一覧（仮想スクロール・回転） |
+| `TrainingImageBuilderView.jsx` | データ作成 Step1〜4（YOLO検出〜クロップ出力） |
 | `PreprocessView.jsx` | 前処理設定・プレビュー・手動マスク・比較スロット |
 | `LabelingView.jsx` | ラベル編集（OCR候補・辞書近似候補） |
+| `EvaluationDatasetBuilder.jsx` | 評価データセット作成 |
 | `TrainingView.jsx` | 学習（OCR/分類/Tesseract共通） |
-| `ModelsView.jsx` | モデル管理 |
+| `ModelsView.jsx` | モデル管理（管理No・カルテ・比較・推論モデル切替） |
+| `DatasetManagerView.jsx` | Dataset Manager（学習データセットの資産管理） |
+| `ExperimentsView.jsx` | 実験管理（EXP-0001・条件推薦） |
+| `ReleasesView.jsx` | リリース管理（Draft→Production・Rollback） |
+| `OcrEvaluationView.jsx` | OCRモデル評価 |
 | `InferenceView.jsx` | 単一推論 |
 | `RapidOCRView.jsx` | OCR修正（キーボード中心） |
 | `OcrBatchView.jsx` | バッチ推論 |
-| `OcrEvaluationView.jsx` | OCRモデル評価 |
+| `JobsView.jsx` | ジョブ管理 |
+| `BenchmarkView.jsx` | Benchmark Runner（実行して比較。旧称「Benchmark」） |
+| `BenchmarkCenterView.jsx` | Benchmark Center（既存結果を横断比較・実行なし） |
+| `ReportsView.jsx` | レポート生成 |
+| `AuditView.jsx` | 監査ログ |
+| `OperationsView.jsx` | システム状態（ヘルスチェック・バックアップ） |
 | `EvaluationView.jsx` | 分類モデル評価（実験機能） |
-| `TrainingImageBuilderView.jsx` | データ作成 Step1〜4（YOLO検出〜クロップ出力） |
 
-## 主要な共通コンポーネント（components/）
+## 主要な共通コンポーネント（components/、20種）
 
 | ファイル | 役割 |
 |---|---|
 | `Sidebar.jsx` / `Header.jsx` / `WorkflowProgress.jsx` | ナビゲーション・ヘッダー・工程表示 |
 | `Button.jsx` / `Card.jsx` | 基本UI（variant定義） |
+| `EmptyState.jsx` | データなし表示の共通形式（アイコン＋タイトル＋説明＋導線） |
+| `ViewErrorBoundary.jsx` | 画面単位のエラー境界 |
+| `SetupWizard.jsx` | 初回セットアップウィザード（モーダル） |
+| `ProjectCreateModal.jsx` | 新規プロジェクト作成（テンプレート選択） |
 | `PreprocessPanel.jsx` | 前処理パラメータパネル（アコーディオン） |
+| `AugmentationSettingsPanel.jsx` | オーグメンテーション設定パネル |
 | `ManualMaskEditor.jsx` | 手動マスク編集（座標正規化） |
 | `CharHeatmap.jsx` / `EditableHeatmap.jsx` | 文字別確信度ヒートマップ（閲覧用/編集用） |
+| `ModelIdBadge.jsx` | 管理No（M0001等）の共通表示バッジ |
+| `InfoTooltip.jsx` | 用語説明ツールチップ（「?」アイコン） |
 | `ImagePreview.jsx` / `ResultBadge.jsx` / `LowercaseToggle.jsx` / `ExperimentalNotice.jsx` | 補助表示 |
 
-## lib/（フロント共通ロジック）
+## lib/（フロント共通ロジック、45種の一部を抜粋）
 
 | ファイル | 役割 |
 |---|---|
@@ -121,3 +162,14 @@ ocr_crafter/
 | `labelNavigation.js` | 「保存して次へ」の次画像決定 |
 | `lowercase.js` | 小文字出力設定の言語判定 |
 | `paddleocrOfficialTooltip.js` | 公式モデル説明文 |
+| `inferenceModel.js` | 推論モデル切替・永続化の純ロジック（`isInferenceModelInUse`等） |
+| `datasetSearch.js` | Dataset Manager一覧の検索・絞り込み |
+| `experimentAnalysis.js` | 実験管理の相関・ベスト条件・条件推薦 |
+| `benchmarkLogic.js` | Benchmark Runnerの集計・Leaderboardロジック |
+| `benchmarkCenter.js` | Benchmark Centerの比較・推薦ロジック |
+| `releaseLogic.js` / `releaseGate.js` | リリース管理・Release Gate判定の純ロジック |
+| `auditDiff.js` | 監査ログBefore/After差分の整形 |
+| `modelCompare.js` / `modelEval.js` | モデル比較・評価表示の純ロジック |
+| `trainingCompare.js` / `preprocessCompare.js` | 学習条件・前処理比較の純ロジック |
+
+他に `augmentation.js`・`augmentationSettings.js`・`bboxSelection.js`・`confidence.js`・`confusionFormat.js`・`dashboardProjectList.js`・`detectModel.js`・`evalHistory.js`・`evalOcrRun.js`・`evalOcrSettings.js`・`evalPreprocess.js`・`evaluationBuilder.js`・`helpTexts.js`・`labelAlign.js`・`ocrCandidates.js`・`ocrDatasetStatus.js`・`preprocessConfigStatus.js`・`preprocessRequest.js`・`preprocessSchema.js`・`preprocessUiState.js`・`previewCache.js`・`ratio.js`・`setupWizard.js`・`tooltipPosition.js`・`trainingLog.js`・`trainingSettingsDraft.js`・`trainingSettingsTabs.js`・`viewKey.js` 等が存在する。

@@ -692,7 +692,7 @@ Dataset Manager・実験管理・モデル管理（いずれも「Benchmark参�
 - レポート生成: 種別/対象モデル/比較モデル（複数選択）/出力形式（Markdown・PDF・両方）/実験履歴件数/画像掲載有無/生成ボタン
 - レポート履歴: Report ID・種別・対象・形式・状態・作成日時・操作者・Job ID（行クリック/Enterで詳細・Empty Stateあり）
 - レポート詳細: メタデータ・出力ファイルとSHA-256・Markdown/PDFダウンロード（形式明記）・再生成・削除（確認つき）・閉じる（Esc）
-- 監査: 生成=report_generate / 削除=report_delete を記録（計24操作）
+- 監査: 生成=report_generate / 削除=report_delete を記録（監査対象は全32操作）
 
 **セキュリティ**: 外部通信なし・出力先をdata/reports配下へ限定・ファイル名サニタイズ（トラバーサル防止）・失敗例画像はレポート同梱ディレクトリへのローカルコピーのみ
 

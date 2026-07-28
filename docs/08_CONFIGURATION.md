@@ -66,6 +66,12 @@
 | `training.models.square.image_size` | [64, 64] |
 | `training.models.wide.image_size` | [96, 48] |
 
+### security（認証未設定モード）
+
+| キー | 既定値 | 意味 |
+|---|---|---|
+| `security.allow_unauthenticated_admin` | `true` | 開発・移行用の「認証未設定モード」。`X-Role`未指定時にAdmin互換で全操作を許可する。本番配備時は`false`にする（`X-Operator`なし=401・不正Role=403・ロール未指定=viewer扱い）。環境変数`OCRC_ALLOW_UNAUTHENTICATED_ADMIN`が優先される。詳細は`docs/22_SECURITY_AND_AUDIT.md` |
+
 ### ocr_training（PaddleOCR学習）
 
 | キー | 既定値 |

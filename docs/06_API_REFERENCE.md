@@ -1,7 +1,7 @@
 # 06. API リファレンス
 
 すべてのルートは `src/app/main.py` に定義されている（`APIRouter` / `include_router` は不使用）。
-リクエストスキーマは `src/app/schemas.py` を参照。**全126エンドポイント**（GET 63 / POST 52 / PUT 4 / PATCH 3 / DELETE 4）。
+リクエストスキーマは `src/app/schemas.py` を参照。**全140エンドポイント**（GET 71 / POST 56 / PUT 4 / PATCH 3 / DELETE 6）。
 
 - アプリ定義: `FastAPI(title="OCR Crafter API", version=APP_VERSION)`（`src/app/version.py`。現行 1.0.0）
 - ベースURL（開発時）: `http://127.0.0.1:8000`
@@ -128,7 +128,7 @@ v1.0.0で追加。Datasetを一時生成物ではなく開発資産として扱�
 | GET `/health/ready` | - | `{ready, checks}` | 受付可否（データDir書き込み・設定ファイル） |
 | GET `/health/details` | - | `{status, problems[], checks{}}` | 管理者向け詳細（Backend/データDir/設定/Tesseract/PaddleOCR/GPU/JobWorker/ディスク/プロジェクトDir。取得不能=null） |
 | GET `/api/auth/context` | ヘッダ: `X-Operator?`, `X-Role?` | `{operator, role, auth_configured, auth_mode}` | ユーザー識別。認証未設定環境は **Admin互換＋「認証未設定モード」** を返す |
-| GET `/api/audit` | Query: `project_id?`, `action?`, `user?`, `target_id?`, `date_from?`, `date_to?`, `limit?` | `{items[], actions[]}` | **監査ログ一覧**（新しい順・追記型のため削除/編集APIなし）。対象13操作、**パスワード・トークン・APIキー・画像バイナリは保存されない** |
+| GET `/api/audit` | Query: `project_id?`, `action?`, `user?`, `target_id?`, `date_from?`, `date_to?`, `limit?` | `{items[], actions[]}` | **監査ログ一覧**（新しい順・追記型のため削除/編集APIなし）。対象32操作、**パスワード・トークン・APIキー・画像バイナリは保存されない** |
 | GET `/api/operations/dashboard` | Query: `project_id?` | `{jobs, production, unevaluated_candidates[], latest_benchmark, data_usage, backup}` | 運用ダッシュボード（実行中/待機中/失敗Job・Production＋Gate状態・未評価Candidate・最近のBenchmark・データ使用量・バックアップ状態） |
 | GET `/api/backups` | Query: `project_id?` | `{items[]}` | バックアップ一覧（新しい順・BK-0001形式）。保存先 `data/backups/` |
 | POST `/api/backups` | `BackupCreateRequest`（`mode`=metadata_only/full） | `{item}` | バックアップ作成（metadata_only=設定・記録・モデルメタのみ / full=プロジェクト全体） |
@@ -272,4 +272,10 @@ Dataset Manager・Experiment Tracking・Model Manager・既存の評価結果（
 
 ## 認証
 
-- 認証・認可の仕組みは存在しない（ローカル実行前提。全エンドポイントが無認証）。
+ローカル単一ユーザー実行を前提とした軽量な識別・ロール制御があり、SSO/パスワード認証のような本格的な認証基盤ではない（詳細: `docs/22_SECURITY_AND_AUDIT.md`）。
+
+- **ユーザー識別**: リクエストヘッダ `X-Operator`（操作者名）・`X-Role`（`viewer`/`operator`/`approver`/`admin`）で識別する。`GET /api/auth/context` で現在の識別・モードを確認できる
+- **認証未設定モード（既定。`security.allow_unauthenticated_admin: true`）**: `X-Role` を明示した時のみロール階層を強制。ヘッダ無指定時はAdmin互換として動作する
+- **本番モード（`allow_unauthenticated_admin: false`）**: `X-Operator` 無指定は401、ロール不足・不正ロールは403
+- **ロール階層**: `viewer < operator < approver < admin`。プロジェクト作成/削除・前処理実行・データセット作成・学習開始・モデル削除・リリース昇格/Rollback/Policy変更・Benchmark実行・Job cancel/retry・バックアップ復元・Retention適用など変更系エンドポイントはロールを要求し、成功時に監査ログ（32操作）へ記録される
+- 401/403応答はいずれもJSON（`{error_code, message}`。`error_code`は`PERMISSION_DENIED`等）

@@ -3,7 +3,7 @@
 ## TODO / FIXME / HACK コメント
 
 - **リポジトリ内に存在しない**（src/, frontend/src/, tests/, config/, docs/ を走査。0件）。
-- 将来対応を示す唯一のコメント: `src/app/services/ocr_evaluation.py:72` `# 将来: elif engine == "paddleocr": ...`（OCRモデル評価のPaddleOCR対応は未実装）。
+- 将来対応を示す唯一のコメント: `src/app/services/ocr_evaluation.py:139` `# 将来: elif engine == "paddleocr": ...`（OCRモデル評価のPaddleOCR対応は未実装）。
 
 ## 未実装・機能面の制約（コード上の事実）
 
@@ -14,10 +14,10 @@
 | PaddleOCRの推論時whitelist不可 | 3.x系APIに実行時whitelistがなく、小文字OFFは出力後の大文字化で実現 | `predict.py`（`_apply_latin_case_to_results` のコメント） |
 | Tesseractのwhitelist指定時は信頼度が取得不能 | Tesseract 5.x のLSTMは `tessedit_char_whitelist` 指定時に信頼度を計算せず conf=0 を返す（実測: v5.3.3）。本アプリのTesseract推論は常にwhitelistを使うため Confidence は null（UI表示 `--`）になる | `tesseract_pipeline.py`（`aggregate_word_confidences`）、`docs/15_CHANGELOG_AI.md` |
 | 未exportモデルは推論拒否 | `STRICT_OCR_EXPORT_REQUIRED = True` | `predict.py` |
-| 認証なし | 全エンドポイント無認証（ローカル実行前提） | `main.py` |
+| 認証は軽量な識別のみ | SSO/パスワード認証は無い。`X-Operator`/`X-Role`ヘッダによる識別とロール階層（viewer<operator<approver<admin）のみ（既定は`X-Role`未指定時Admin互換の「認証未設定モード」） | `main.py`（`_enforce_role`）、`docs/22_SECURITY_AND_AUDIT.md` |
 | アップロードサイズ上限なし | `/predict` 等は `await file.read()` のみでサイズ検証なし（一覧APIの `limit<=1000` のみ） | `main.py` |
 | 候補辞書はlocalStorage保存 | 数万件規模の辞書には不向き（5MB/256文字の読込上限あり） | `lib/candidateDictionary.js` |
-| CI/CD未整備 | `.github/` は空。requirements-ci.txt は存在するがワークフロー定義なし | `.github/` |
+| CI稼働中（Docker/CD未整備） | `.github/workflows/ci.yml` でbackend（pytest）・frontend（npm build）を実行。Docker化・CD（自動デプロイ）は未対応 | `.github/workflows/ci.yml` |
 | Lint/型チェック未設定 | ruff/eslint/mypy等の設定ファイルなし | リポジトリルート |
 
 ## docs/13_QA_STATUS.md（2026-07-07）記載の既知課題
@@ -61,7 +61,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| `main.py` / `App.jsx` / `ocr_pipeline.py` の巨大化 | それぞれ約3190行 / 約3760行 / 約1860行の単一ファイル |
+| `main.py` / `App.jsx` / `ocr_pipeline.py` の巨大化 | それぞれ約4830行 / 約4920行 / 約2400行の単一ファイル（機能追加のたびに増加し続けている） |
 | 環境記述の不一致 | Pipfile=Python3.9（docs類はPython3.11+/Windows前提へ統一済み） |
 | `settings.yaml` の絶対パス | `tesseract.tessdata_dir` に開発機の絶対パスがハードコードされている |
 | Paddleキャッシュ隔離 | `HOME` 等の環境変数をプロセス内で上書きする実装（`services/ocr_pipeline.py`） |
@@ -85,4 +85,4 @@
 ## セキュリティ関連（実装済みの防御と残余リスク）
 
 - 実装済み: プロジェクトID検証（パストラバーサル拒否）、モデル削除の models 配下限定、OCRデータセット削除の allowed_roots 限定、CORS明示オリジン
-- 残余: 認証なし・アップロード上限なし（ローカル前提の設計判断として存在）
+- 残余: SSO/パスワード認証なし（`X-Operator`/`X-Role`ヘッダの軽量識別のみ）・アップロード上限なし（ローカル前提の設計判断として存在）

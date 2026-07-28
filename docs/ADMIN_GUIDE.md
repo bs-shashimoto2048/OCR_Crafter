@@ -67,7 +67,7 @@ cd frontend; npm run dev                     # フロントエンド（開発サ
 | **Production昇格 / Override承認 / Rollback** | ✕ | ✕ | ○ | ○ |
 | **Policy変更 / プロジェクト削除 / モデル削除 / Restore / Retention実行** | ✕ | ✕ | ✕ | ○ |
 
-- 監査対象は24操作（`report_generate`・`report_delete` 含む）。全組み合わせは `tests/test_permission_matrix.py` で自動検証されています（[UAT_CHECKLIST.md](UAT_CHECKLIST.md) に一覧表）
+- 監査対象は32操作（`report_generate`・`report_delete`、Dataset Manager/Experiment Manager/Benchmark Center関連6操作含む）。全組み合わせは `tests/test_permission_matrix.py` で自動検証されています（[UAT_CHECKLIST.md](UAT_CHECKLIST.md) に一覧表）
 - Release Override（FAIL判定モデルの例外昇格）は approver 以上で、Override Reason＋Approved By の両方が必須です
 
 ## 3. モデル運用（リリース管理）
@@ -78,7 +78,7 @@ cd frontend; npm run dev                     # フロントエンド（開発サ
 - **Release Gate**: Release Policy（プロジェクト毎・最大12項目）に基づく昇格自動判定（PASS / CONDITIONAL_PASS / FAIL / NOT_EVALUATED）。**未設定の項目はルール自体が生成されない**ため、Policy未設定プロジェクトは制限なしで動作します
 - **Override**: FAIL判定はサーバー側で昇格拒否。Override Reason＋Approved By が揃った場合のみ昇格でき、当時のFailed Rulesスナップショットが履歴へ保存されます
 - **Rollback**: 過去リリースVersionのモデルを再Productionへ（Version維持・新Release ID・監査記録）。現Productionへのロールバックは拒否されます
-- 運用上の推奨: 昇格前に評価（Evaluation Hash）・Benchmark・バックアップの取得を確認（[RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)）
+- 運用上の推奨: 昇格前に評価（Evaluation Hash）・Benchmark Runner・バックアップの取得を確認（[RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)）
 - 詳細仕様: [20_RELEASE_POLICY.md](20_RELEASE_POLICY.md)
 
 ## 4. Job運用

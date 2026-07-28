@@ -88,10 +88,15 @@ Productionは1プロジェクトに**0件または1件**（初期状態・未昇
 
 | Method / Path | 概要 |
 |---|---|
+| GET `/api/releases` | モデルのリリース状態・履歴一覧 |
 | GET `/api/releases/policy` | Policy取得（正規化済み） |
 | PUT `/api/releases/policy` | Policy保存（不正なseverity等は400） |
-| GET `/api/releases/gate?model=` | Gate判定（verdict＋ルール行） |
+| GET `/api/releases/gate` | Gate判定（verdict＋ルール行） |
 | POST `/api/releases/promote` | 昇格（FAILは `override_reason`+`approved_by` 必須） |
+| POST `/api/releases/status` | ステータス変更（昇格以外の遷移） |
+| POST `/api/releases/rollback` | Rollback（過去Versionを再Productionへ。Version維持・新Release ID発行） |
+| GET `/api/releases/model_card` | Model Card（Markdown）自動生成 |
+| GET `/api/releases/deployment_package` | Deployment Package（ZIP）Export |
 
 ## 11. テスト
 

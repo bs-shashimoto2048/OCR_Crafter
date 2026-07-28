@@ -43,24 +43,29 @@ OCR Crafterで使用する用語の説明です。画面上の「?」アイコ�
 
 | 用語 | 説明 |
 |---|---|
-| Benchmark | 複数OCRエンジンの同一条件での横並び比較（BM-0001形式）。精度・速度・メモリを計測 |
+| Benchmark Runner | 複数OCRエンジンを**実際に実行**し、同一条件での横並び比較を測定する実行ツール（BM-0001形式。精度・速度・メモリを計測）。旧称「Benchmark」。ダッシュボードのクイックアクションボタンは引き続き「Benchmark」と表示される |
+| Benchmark Center | Dataset Manager・実験管理・モデル管理の既存の評価結果を**実行せず横断比較**する参照ビュー（BMC-0001形式）。Benchmark Runnerとはコード・保存先とも完全に別の機能 |
 | Cold Start | エンジン・モデルの初回読み込み時間。推論時間とは分けて計測される |
 | P50 / P95 | 処理時間の中央値（50パーセンタイル）/ 95パーセンタイル。P95は「遅いケースでもこの程度」の目安 |
 | Peak Memory | 処理中の最大メモリ使用量 |
-| Balance Score | 精度・速度などを重み付けして合算した総合スコア（重みはBenchmark設定で変更可能） |
-| Profile Hash | Benchmark実行条件（前処理・エンジン設定）のハッシュ。同一Hash同士のみ直接比較できる |
+| Balance Score | 精度・速度などを重み付けして合算した総合スコア（重みはBenchmark Runner設定で変更可能） |
+| Profile Hash | Benchmark Runner実行条件（前処理・エンジン設定）のハッシュ。同一Hash同士のみ直接比較できる |
 
 ## ID・管理
 
 | 用語 | 説明 |
 |---|---|
 | Model ID（管理No） | M0001形式。モデルの管理番号。全プロジェクト横断で一意、削除後も再利用しない |
+| Dataset ID | DS0001形式。Dataset Managerが管理する学習データセットの識別子。全プロジェクト共通で一意、削除後も再利用しない |
 | Experiment ID | EXP-0001形式。学習実行ごとの実験カルテの識別子 |
+| Benchmark ID | BM-0001形式。Benchmark Runnerの実行結果（Leaderboard）の識別子 |
+| Benchmark Center ID | BMC-0001形式。Benchmark Centerで保存した比較条件（評価結果自体ではない）の識別子 |
 | Release ID | REL-0001形式。昇格・Rollbackなど「リリース行為」1回ごとの識別子 |
 | Version | 配布物の版番号。Candidate=0.x、Production初回=1.0.0→マイナー加算。RollbackではVersion維持 |
 | Report ID | RPT-0001形式。生成したレポートの識別子 |
 | Job ID | JOB-000001形式。バックグラウンドジョブの識別子（システム全体で一意） |
 | Backup ID | BK-0001形式。バックアップの識別子 |
+| Audit ID | AUD-000001形式。監査ログ1件ごとの識別子 |
 
 ## リリース管理
 

@@ -18,7 +18,7 @@ Audit ID / Timestamp / User（operator名）/ Role / Action / Project / TargetTy
 - **画像バイナリ**（bytes系は `[バイナリは保存しません]` へ置換）
 - 巨大値は2000文字で切り詰め
 
-### 対象操作（26種）
+### 対象操作（32種）
 
 基本13種: project_create / project_delete / preprocess_run / dataset_create / training_start（Tesseract・**PaddleOCR両方**） / model_delete / release_status_change / release_promote / release_rollback / release_policy_update / benchmark_run / job_cancel / job_retry
 
@@ -29,6 +29,8 @@ Audit ID / Timestamp / User（operator名）/ Role / Action / Project / TargetTy
 監査補完7種（最終検証フェーズ③）: **job_finished**（Job完了 succeeded/failed/cancelled。**Service層＝JobService.execute_jobで記録**するためAPI・Worker・CLIのどの経路でも同じ場所で1回だけ記録され二重記録しない） / **evaluation_run**（モデル評価実行） / **experiment_update**（タグ・メモ・実験名変更） / **analysis_toggle**（分析対象ON/OFF） / **backup_create** / **deployment_export**（Deployment Package Export） / **restore_failed**（復元失敗・整合性エラー含む）
 
 前処理設定保存2種（v1.0.0で追加）: **preprocess_config_save**（「前処理設定保存」＝学習用確定設定の新規保存） / **preprocess_config_restore**（確定済み前処理設定への復元）
+
+Dataset Manager / Experiment Manager / Benchmark Center 6種（v1.0.0で追加）: **dataset_delete**（Dataset Manager: Dataset削除。再現性情報が失われるためadmin） / **dataset_copy**（Datasetコピー） / **dataset_comment**（Datasetコメント保存） / **model_comment**（モデルコメント保存） / **experiment_delete**（実験カルテ削除。Dataset/Model/Evaluationには影響しない） / **benchmark_center_save**（Benchmark Centerの比較条件保存。評価結果自体は保存しない）
 
 CLI直接実行（`python -m src.app.train` 等）は、共通Service層で記録可能な操作（job_finished）のみ監査対象。API層でのみ記録する操作はCLI経由では記録されない（既知の制約）。
 
@@ -47,9 +49,9 @@ Before/Afterの例: release_status_change（変更前後のStatus/Version）、r
 | 操作 | 最低ロール |
 |---|---|
 | 参照系すべて | viewer |
-| preprocess_run / dataset_create / training_start / benchmark_run / release_status_change / job_cancel / job_retry / project_create / evaluation_run / experiment_update / analysis_toggle / backup_create / deployment_export / report_generate / report_delete / preprocess_config_save / preprocess_config_restore | operator |
+| preprocess_run / dataset_create / training_start / benchmark_run / release_status_change / job_cancel / job_retry / project_create / evaluation_run / experiment_update / analysis_toggle / backup_create / deployment_export / report_generate / report_delete / preprocess_config_save / preprocess_config_restore / dataset_copy / dataset_comment / model_comment / experiment_delete / benchmark_center_save | operator |
 | release_promote / release_rollback | approver |
-| project_delete / model_delete / release_policy_update / backup_restore / retention_cleanup | admin |
+| project_delete / model_delete / release_policy_update / backup_restore / retention_cleanup / dataset_delete | admin |
 
 ### 認証未設定モード（開発・移行用）と本番モード
 
@@ -83,7 +85,7 @@ Before/Afterの例: release_status_change（変更前後のStatus/Version）、r
 
 ## 4. 監査ログ画面
 
-- フィルタ: Project / 操作（26種の日本語ラベル） / User（部分一致） / Target ID / 日付From・To
+- フィルタ: Project / 操作（`lib/auditDiff.js` の `AUDIT_ACTION_LABELS` にある操作のみ日本語ラベルでフィルタ選択できる。Dataset Manager/Experiment Manager/Benchmark Center関連の6操作（dataset_delete/dataset_copy/dataset_comment/model_comment/experiment_delete/benchmark_center_save）は本書時点で`AUDIT_ACTION_LABELS`未登録のため、フィルタの選択肢には出ず一覧では英語の操作名がそのまま表示される。既知のドキュメント作成時点のギャップとして記録） / User（部分一致） / Target ID / 日付From・To
 - 行クリックで詳細: **Before/After差分**（変更キーを強調表示・`lib/auditDiff.js`）・記録情報（Target/Client/Reason）
 - 削除ボタンは存在しない（追記型の明示）
 
@@ -96,4 +98,4 @@ Before/Afterの例: release_status_change（変更前後のStatus/Version）、r
 
 ## 6. テスト
 
-`tests/test_audit_operations.py`（13操作定義・採番/保存項目・機密キー/バイナリ除去・フィルタ・ロール階層・認証未設定モード・ヘルスチェック・ダッシュボード）＋ `frontend/tests/auditDiff.test.mjs` / `operationsView.render.test.mjs`。
+`tests/test_audit_operations.py`（32操作定義・採番/保存項目・機密キー/バイナリ除去・フィルタ・ロール階層・認証未設定モード・ヘルスチェック・ダッシュボード。`assert len(AUDIT_ACTIONS) == 32`で操作数を固定検証）＋ `frontend/tests/auditDiff.test.mjs` / `operationsView.render.test.mjs`。

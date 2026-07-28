@@ -34,7 +34,7 @@ OCR Crafterのセキュリティ特性とデータの取扱いを、利用者・
 
 ## 4. 監査
 
-- 24操作（プロジェクト作成/削除・学習・評価・リリース昇格/Override/Rollback・バックアップ・レポート生成/削除等）が監査ログへ記録されます
+- 32操作（プロジェクト作成/削除・学習・評価・リリース昇格/Override/Rollback・バックアップ・レポート生成/削除・Dataset Manager/Experiment Manager/Benchmark Center関連操作等）が監査ログへ記録されます
 - 記録項目: Audit ID（AUD-000001）・日時・操作者・ロール・操作・対象・Before/After差分・理由・Client情報（IP・User-Agent）
 - **削除・編集する機能は存在しません**（追記型）。整理はデータ保持設定（保持日数）でのみ行えます
 

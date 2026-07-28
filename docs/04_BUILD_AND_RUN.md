@@ -61,14 +61,14 @@ npm run preview    # ビルド結果のプレビュー
 ### バックエンド（pytest）
 
 ```bash
-python -m pytest -q          # リポジトリルートで実行（tests/ 10ファイル）
+python -m pytest -q          # リポジトリルートで実行（tests/ 44ファイル + conftest.py、.venv経由）
 ```
 
 ### フロントエンド（node:test）
 
 ```bash
 cd frontend
-npm test    # node --test tests/labelNavigation.test.mjs tests/candidateDictionary.test.mjs
+npm test    # node --test で tests/ 配下56ファイルを実行（package.json scripts.testに列挙。依存追加不要）
 ```
 
 ## CLI（学習・推論・データ出力）

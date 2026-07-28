@@ -40,7 +40,7 @@
 | Benchmark Center | Dataset Manager・Experiment Tracking・Model Manager・既存評価結果を横断比較する統合ビュー（BMC-0001形式。評価は実行しない・比較条件のみ保存）。比較表・🏆最良値・レーダーチャート・推移グラフ・モデル推薦・CSV/Markdown/JSON出力。詳細は `docs/16_SCREEN_SPEC.md` |
 | Release Gate | Release Policy（プロジェクト毎12項目）に基づく昇格自動判定（PASS/CONDITIONAL_PASS/FAIL/NOT_EVALUATED）、FAILは例外承認必須、Release ID（REL-0001）。詳細は `docs/20_RELEASE_POLICY.md` |
 | レポート | モデル開発レポート自動生成（単一モデル/比較/プロジェクト総括。Markdown/PDF・RPT-0001形式・Job経由・外部通信なし）。詳細は `docs/16_SCREEN_SPEC.md` |
-| 監査・運用 | 監査ログ（24操作・追記型・削除不可・Before/After差分）、ユーザー識別（X-Operator/X-Role・認証未設定モード明示）、運用ダッシュボード、ヘルスチェック3段階、バックアップ（metadata_only/full・復元は新Project IDへ）、データ保持設定。詳細は `docs/21_OPERATIONS_GUIDE.md` / `22_SECURITY_AND_AUDIT.md` |
+| 監査・運用 | 監査ログ（32操作・追記型・削除不可・Before/After差分）、ユーザー識別（X-Operator/X-Role・認証未設定モード明示）、運用ダッシュボード、ヘルスチェック3段階、バックアップ（metadata_only/full・復元は新Project IDへ）、データ保持設定。詳細は `docs/21_OPERATIONS_GUIDE.md` / `22_SECURITY_AND_AUDIT.md` |
 
 ## 画面構成（サイドバー・OCR開発フロー順）
 
@@ -75,11 +75,11 @@ OCRモデル        … データ作成・学習 / モデル管理 / Dataset Man
 |---|---|
 | `src/app/` | FastAPIバックエンド（main.py に全140エンドポイント） |
 | `src/app/services/` | 前処理・OCRパイプライン・モデル管理などのドメインロジック |
-| `frontend/` | React UI（views 20画面 / components / lib） |
+| `frontend/` | React UI（views 22画面 / components / lib） |
 | `config/settings.yaml` | 全設定（前処理・学習・Tesseract等） |
 | `data/projects/<id>/` | プロジェクトデータ（gitignore対象）。`data/model_ids.json`=モデル管理No登録簿・`data/dataset_ids.json`=Dataset管理No登録簿（いずれも全プロジェクト共通） |
 | `models/`, `outputs/`, `external/` | モデル・出力・外部リポジトリ（gitignore対象） |
-| `tests/` | pytest テスト（37ファイル） |
+| `tests/` | pytest テスト（44ファイル） |
 | `docs/` | ドキュメント |
 
 詳細は `docs/02_DIRECTORY_STRUCTURE.md` を参照。

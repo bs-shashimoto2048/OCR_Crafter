@@ -72,6 +72,7 @@ Tesseract は pip 依存ではなく**外部実行ファイル**（`config/setti
 
 ## Docker / CI
 
-- Dockerfile・docker-compose: **このプロジェクトでは確認できない**
-- GitHub Actions: `.github/` ディレクトリは存在するが**中身は空**（ワークフロー定義なし）
-- `requirements-ci.txt` のコメントに CI 用途の記載があるが、CI 定義ファイル自体は不明
+- Dockerfile・docker-compose: **このプロジェクトでは確認できない**（Docker化は方針として未対応）
+- GitHub Actions: `.github/workflows/ci.yml` が存在し、`main`へのpush・PRで実行される
+  - backend job: Python 3.10 + `requirements-ci.txt`/`requirements-dev.txt`（CPU版torch等の最小依存）→ `import src.app.main` チェック → `pytest tests -v`（Tesseract本体が無いCI環境では該当E2Eが自動skip）
+  - frontend job: Node 20 + `npm ci` → `npm run build`（テスト実行はCIに含まれず、ビルド成功のみ確認）

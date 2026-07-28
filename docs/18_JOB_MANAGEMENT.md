@@ -12,7 +12,8 @@
 | `dataset_creation` | `services/ocr_pipeline.py create_ocr_dataset` |
 | `training` | `services/tesseract_pipeline.py run_tesseract_training` |
 | `evaluation` | `services/ocr_evaluation.py evaluate_ocr` |
-| `benchmark` | `services/benchmark.py run_benchmark_job`（Phase 2で実装） |
+| `benchmark` | `services/benchmark.py run_benchmark_job`（Benchmark Runner。実装済み） |
+| `report_generate` | `services/report_generator.py`（レポート生成。`POST /api/reports/generate`経由） |
 | `deployment_export` | `services/release_manager.py build_deployment_package` → `outputs/deployments/` へ保存 |
 
 ## 2. Job ID

@@ -11,7 +11,7 @@ flowchart LR
         LS["localStorage / sessionStorage<br/>UI設定・プリセット"]
     end
     subgraph Backend["FastAPI (127.0.0.1:8000)"]
-        API["src/app/main.py<br/>全55エンドポイント"]
+        API["src/app/main.py<br/>全140エンドポイント"]
         SVC["src/app/services/*<br/>前処理・OCR・モデル管理"]
         DB[("SQLite<br/>outputs/app.db<br/>training_jobs")]
         FS[("ファイル<br/>data/projects/&lt;id&gt;/<br/>raw/interim/processed/<br/>annotations/models/logs/outputs")]
@@ -38,9 +38,9 @@ flowchart LR
 
 | レイヤ | 場所 | 役割 |
 |---|---|---|
-| プレゼンテーション | `frontend/src/views/`（12画面）+ `components/` | 画面表示・操作。全状態は `App.jsx` に集約し props で配布 |
+| プレゼンテーション | `frontend/src/views/`（22画面）+ `components/` | 画面表示・操作。全状態は `App.jsx` に集約し props で配布 |
 | API | `src/app/main.py` | ルーティング・入力検証（`schemas.py` の Pydantic）・エラー変換 |
-| ドメインサービス | `src/app/services/`（17モジュール） | 前処理・OCR学習/推論・モデル管理・評価・ラベル管理 |
+| ドメインサービス | `src/app/services/`（34モジュール） | 前処理・OCR学習/推論・モデル管理・Dataset管理・実験管理・Benchmark・リリース管理・ジョブ管理・監査・評価・ラベル管理 |
 | 永続化 | `src/app/db.py` + ファイルシステム | SQLite（ジョブのみ）と CSV/JSON/画像ファイル |
 | 設定 | `src/app/config.py` + `config/settings.yaml` | `yaml.safe_load` のみ（デフォルトマージは呼び出し側の `.get()`） |
 
@@ -58,6 +58,18 @@ flowchart TD
     main --> ocrp["services/ocr_pipeline.py<br/>PaddleOCR学習・ログ・検証"]
     main --> tess["services/tesseract_pipeline.py"]
     main --> tib["services/training_image_builder.py<br/>YOLO"]
+    main --> dsreg["services/dataset_registry.py<br/>Dataset Manager"]
+    main --> exptr["services/experiment_tracker.py<br/>実験管理"]
+    main --> bm["services/benchmark.py<br/>Benchmark Runner"]
+    main --> bmc["services/benchmark_center.py<br/>Benchmark Center"]
+    main --> relm["services/release_manager.py<br/>リリース管理"]
+    main --> relg["services/release_gate.py<br/>Release Gate判定"]
+    main --> jm["services/job_manager.py<br/>ジョブ管理"]
+    main --> al["services/audit_log.py<br/>監査ログ"]
+    main --> rg["services/report_generator.py<br/>レポート生成"]
+    main --> ops["services/operations.py<br/>運用ダッシュボード・ヘルスチェック"]
+    main --> bkp["services/backup_manager.py<br/>バックアップ"]
+    main --> infm["services/inference_model.py<br/>推論モデル永続化"]
     main --> db["db.py (SQLite)"]
     main -- "Popen" --> jr["job_runner.py"]
     jr --> db
@@ -65,10 +77,14 @@ flowchart TD
     predict --> ocrp
     pre --> mm
     tib --> dp["services/detection_preprocess.py"]
+    bmc -. "参照のみ・非依存" .-> dsreg
+    bmc -. "参照のみ・非依存" .-> exptr
 ```
 
 - 循環依存を避けるため、共通判定は独立モジュール化（`latin_case.py` はバック/フロント両方に同等実装: `frontend/src/lib/lowercase.js`）。
 - OCR前処理（`preprocess.py`）と YOLO検出前処理（`detection_preprocess.py`）は**意図的に分離**されている。
+- Benchmark Center（`benchmark_center.py`）は Dataset Manager・実験管理・モデル管理の既存データを**参照するだけ**で、それらのモジュール側からBenchmark Centerへの依存は無い（一方向）。Benchmark Runner（`benchmark.py`）とはコード・保存先とも別（旧称「Benchmark」）。
+- 上記以外に `services/` には `dataset_builder.py`・`evaluation.py`・`evaluation_dataset.py`・`ocr_evaluation.py`・`ocr_preprocess.py`・`ocr_preview_cache.py`・`ocr_tuning.py`・`preprocess_config_store.py`・`preprocess_snapshot.py`・`image_classifier.py`・`dialogs.py`・`atomic_io.py` が存在する（計34モジュール、詳細は各モジュールのdocstring参照）。
 
 ## データフロー（主要ワークフロー）
 
@@ -90,7 +106,7 @@ flowchart LR
 
 ## API構成
 
-- REST（JSON + 一部 multipart/form-data）。`src/app/main.py` 単一ファイルに全55エンドポイント（`APIRouter` 不使用）。
+- REST（JSON + 一部 multipart/form-data）。`src/app/main.py` 単一ファイルに全140エンドポイント（`APIRouter` 不使用）。
 - 一覧は `docs/06_API_REFERENCE.md` を参照。
 - 学習は非同期: API がジョブを SQLite に登録し `python -m src.app.job_runner <type> <job_id>` を `Popen` で起動。フロントはポーリング（`GET /train/{job_id}` 等）で進捗取得。WebSocket は不使用。
 
