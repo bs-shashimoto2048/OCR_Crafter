@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: セキュリティ上の問題を報告する場合
+    url: https://github.com/bs-shashimoto2048/OCR_Crafter
+    about: >-
+      脆弱性など公開したくない内容は、通常のIssueへ投稿せず、リポジトリ管理者へ
+      直接連絡してください（本リポジトリはSecurity Policy（SECURITY.md）が
+      未整備のため、専用の報告フォーム・連絡先はまだありません）。

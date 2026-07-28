@@ -17,6 +17,7 @@
 | 問題が発生した方 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | [FAQ.md](FAQ.md) |
 | リリース・受入試験の担当者 | [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) | [UAT_CHECKLIST.md](UAT_CHECKLIST.md) |
 | 開発・保守担当者 | [09_AI_DEVELOPMENT_GUIDE.md](09_AI_DEVELOPMENT_GUIDE.md) | 下記「詳細仕様書」一覧 |
+| 機能追加・不具合修正を行う方（人間・AIエージェント問わず） | [../CONTRIBUTING.md](../CONTRIBUTING.md) | [development/GITHUB_ISSUES_WORKFLOW.md](development/GITHUB_ISSUES_WORKFLOW.md) |
 
 ## 目的別ドキュメント一覧
 
@@ -97,6 +98,15 @@
 | [26_PERFORMANCE_LIMITS.md](26_PERFORMANCE_LIMITS.md) | 負荷試験結果と限界値 |
 | [11_TESSERACT_CHECKLIST.md](11_TESSERACT_CHECKLIST.md) / [12_TESSERACT_CHARSET_SPEC.md](12_TESSERACT_CHARSET_SPEC.md) | Tesseract学習・charset仕様 |
 | [15_CHANGELOG_AI.md](15_CHANGELOG_AI.md) | 開発履歴（仕様の理由の記録。**ユーザーガイドではありません**） |
+
+### 開発に参加する方向け（GitHub Issues駆動開発）
+
+| ドキュメント | 内容 |
+|---|---|
+| [../CONTRIBUTING.md](../CONTRIBUTING.md) | Issue作成・ブランチ・Commit・PR・テストのルール |
+| [development/GITHUB_ISSUES_WORKFLOW.md](development/GITHUB_ISSUES_WORKFLOW.md) | Issue駆動開発の全体フロー・Issueの状態・分割基準 |
+| [development/ISSUE_WRITING_GUIDE.md](development/ISSUE_WRITING_GUIDE.md) | 良いIssueの書き方・受け入れ条件の書き方 |
+| [development/AI_AGENT_WORKFLOW.md](development/AI_AGENT_WORKFLOW.md) | Claude Code・Codex等のAIコーディングエージェント向け運用ガイド |
 
 ## バージョン情報
 

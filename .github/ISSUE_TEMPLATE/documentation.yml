@@ -1,0 +1,81 @@
+name: "📝 Documentation（ドキュメント）"
+description: ドキュメントの追加・修正・実装との不一致の是正を依頼する
+title: "[Docs] "
+labels:
+  - "type: documentation"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ドキュメントの追加・修正を依頼するIssueです。
+        推測・将来実装予定・一般論のみの記載は禁止です。実装済みの内容のみを根拠にしてください。
+
+  - type: textarea
+    id: target_docs
+    attributes:
+      label: 対象文書
+      description: 更新・追加したい文書のパス。例）docs/16_SCREEN_SPEC.md、readme.md。新規作成の場合は想定パスを記載。
+    validations:
+      required: true
+
+  - type: textarea
+    id: current_problem
+    attributes:
+      label: 現在の問題
+      description: 現状の記載の何が問題か（欠落・古い・分かりにくい等）。
+    validations:
+      required: true
+
+  - type: textarea
+    id: mismatch
+    attributes:
+      label: 実装との不一致
+      description: 具体的にどの記載が、実際のコード・UI・APIとどう食い違っているか。不一致が無い（新規追加のみ）場合は「なし」。
+      placeholder: なし
+    validations:
+      required: true
+
+  - type: textarea
+    id: update_content
+    attributes:
+      label: 更新内容
+      description: 追加・修正したい内容を具体的に記述してください。
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 根拠とするコード・UI・API
+      description: 更新内容の裏付けとなる、実際のファイルパス・画面名・エンドポイント。
+    validations:
+      required: true
+
+  - type: textarea
+    id: readme_consistency
+    attributes:
+      label: READMEとの整合性
+      description: リポジトリ直下のreadme.md・docs/README.mdの記載と矛盾しないか確認した結果。
+    validations:
+      required: true
+
+  - type: textarea
+    id: related_docs
+    attributes:
+      label: docs内の関連文書
+      description: 合わせて確認・更新すべき関連文書。例）USER_GUIDE.md、CHANGELOG.md、manual/、tutorial/。無ければ「なし」。
+      placeholder: なし
+    validations:
+      required: true
+
+  - type: textarea
+    id: definition_of_done
+    attributes:
+      label: 完了条件
+      description: 何をもって完了と判断するか。
+      placeholder: |
+        - [ ] 対象文書が実装と一致している
+        - [ ] リンク切れが無い
+        - [ ] READMEおよびdocs/README.mdから辿れる
+    validations:
+      required: true

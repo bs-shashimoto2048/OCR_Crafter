@@ -1,0 +1,99 @@
+name: "🔍 Investigation（設計調査・技術検証）"
+description: 設計調査・技術検証・PoC・原因調査を行う
+title: "[Investigation] "
+labels:
+  - "type: investigation"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **重要**: このIssueは調査専用です。調査結果が出て、対応方針（Feature/Bug/Refactor Issue化）が
+        決まるまで本実装を開始しないでください。調査中に実装が必要と分かった場合は、
+        別途Feature/Bug/Refactor Issueを作成し、このIssueとリンクしてください。
+
+  - type: textarea
+    id: theme
+    attributes:
+      label: 調査テーマ
+      description: 何を調査するのかを1〜3行で要約してください。
+    validations:
+      required: true
+
+  - type: textarea
+    id: background
+    attributes:
+      label: 背景
+      description: なぜこの調査が必要になったか。
+    validations:
+      required: true
+
+  - type: textarea
+    id: questions
+    attributes:
+      label: 確認したい問い
+      description: この調査で明らかにしたい具体的な問いを列挙してください。
+      placeholder: |
+        - 〇〇は技術的に実現可能か
+        - 〇〇の場合の性能・精度への影響はどの程度か
+    validations:
+      required: true
+
+  - type: textarea
+    id: in_scope
+    attributes:
+      label: 調査対象
+      description: 調査する範囲（画面・エンジン・ライブラリ等）。
+    validations:
+      required: true
+
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: 調査対象外
+      description: 今回は調査しない範囲。
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 比較候補
+      description: 検討する選択肢・代替案があれば列挙してください。無ければ「なし」。
+      placeholder: なし
+    validations:
+      required: false
+
+  - type: textarea
+    id: constraints
+    attributes:
+      label: 制約
+      description: 既存の設計方針・依存追加禁止・ローカル完結必須等、守るべき制約。
+    validations:
+      required: true
+
+  - type: textarea
+    id: deliverables
+    attributes:
+      label: 成果物
+      description: 調査の結果として何を残すか（比較表・レポート・PoCコード・後続Issue案等）。
+    validations:
+      required: true
+
+  - type: textarea
+    id: decision_criteria
+    attributes:
+      label: 意思決定基準
+      description: 調査結果をもとに、どのような基準で次の方針（実装する/しない等）を決めるか。
+    validations:
+      required: true
+
+  - type: textarea
+    id: definition_of_done
+    attributes:
+      label: 完了条件
+      description: 何をもってこの調査Issueが完了したと判断するか。
+      placeholder: |
+        - [ ] 「確認したい問い」に回答できている
+        - [ ] 次のアクション（実装Issue作成 or 見送り）が明記されている
+    validations:
+      required: true

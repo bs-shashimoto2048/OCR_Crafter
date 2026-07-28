@@ -6,9 +6,9 @@
 - バックエンド: FastAPI（`src/app/`、port 8000、全140エンドポイント）
 - フロントエンド: React 18 + Vite 5 + Tailwind（`frontend/`、port 5173）
 - データはプロジェクト単位（`data/projects/<project_id>/`）で分離管理
-- 認証なし・ローカル実行前提（外部通信なし）
+- 軽量な識別のみ（SSO等は無し）・ローカル実行前提（外部通信なし）
 
-ドキュメント案内: [docs/README.md](docs/README.md) ／ 利用手順: [docs/USER_GUIDE.md](docs/USER_GUIDE.md)
+ドキュメント案内: [docs/README.md](docs/README.md) ／ 初めての方: [docs/manual/01_はじめに.md](docs/manual/01_はじめに.md) ／ 操作しながら学ぶ: [docs/tutorial/01_Tesseractチュートリアル.md](docs/tutorial/01_Tesseractチュートリアル.md) ／ 全画面仕様: [docs/USER_GUIDE.md](docs/USER_GUIDE.md)
 
 ---
 
@@ -202,7 +202,7 @@ ocr_crafter/
 
 ## ドキュメント
 
-入口: [docs/README.md](docs/README.md)（対象読者別の案内）。利用者向けは [USER_GUIDE](docs/USER_GUIDE.md) / [FAQ](docs/FAQ.md)、管理者向けは [ADMIN_GUIDE](docs/ADMIN_GUIDE.md) / [INSTALLATION_GUIDE](docs/INSTALLATION_GUIDE.md) / [BACKUP_AND_RESTORE](docs/BACKUP_AND_RESTORE.md)。
+入口: [docs/README.md](docs/README.md)（対象読者別の案内）。初めての方は [docs/manual/](docs/manual/01_はじめに.md)（教育コンテンツ）・[docs/tutorial/](docs/tutorial/01_Tesseractチュートリアル.md)（操作しながら学ぶ）・[docs/examples/](docs/examples/README.md)（データ構造の実例）。利用者向けは [USER_GUIDE](docs/USER_GUIDE.md) / [FAQ](docs/FAQ.md)、管理者向けは [ADMIN_GUIDE](docs/ADMIN_GUIDE.md) / [INSTALLATION_GUIDE](docs/INSTALLATION_GUIDE.md) / [BACKUP_AND_RESTORE](docs/BACKUP_AND_RESTORE.md)。
 
 | 詳細仕様書 | 内容 |
 |---|---|
@@ -218,3 +218,12 @@ ocr_crafter/
 | [docs/20_RELEASE_POLICY.md](docs/20_RELEASE_POLICY.md) | リリース判定ポリシー |
 | [docs/15_CHANGELOG_AI.md](docs/15_CHANGELOG_AI.md) | 仕様変更の理由と履歴 |
 | [CLAUDE.md](CLAUDE.md) | 開発ルール（AIエージェント向け） |
+
+## 開発に参加する（GitHub Issues駆動開発）
+
+機能追加・不具合修正は、GitHub Issueを起点に進めます。詳細は [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。
+
+- [CONTRIBUTING.md](CONTRIBUTING.md) — Issue作成・ブランチ・Commit・PR・テストのルール
+- [docs/development/GITHUB_ISSUES_WORKFLOW.md](docs/development/GITHUB_ISSUES_WORKFLOW.md) — Issue駆動開発の全体フロー
+- [docs/development/ISSUE_WRITING_GUIDE.md](docs/development/ISSUE_WRITING_GUIDE.md) — Issueの書き方
+- [docs/development/AI_AGENT_WORKFLOW.md](docs/development/AI_AGENT_WORKFLOW.md) — AIコーディングエージェント向け運用ガイド

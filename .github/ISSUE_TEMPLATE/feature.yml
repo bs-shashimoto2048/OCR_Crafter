@@ -1,0 +1,203 @@
+name: "✨ Feature（機能追加・変更）"
+description: 新機能の追加、または既存機能の拡張を提案・依頼する
+title: "[Feature] "
+labels:
+  - "type: feature"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        OCR Crafterへの機能追加・変更を提案するIssueです。
+        該当しない項目は「なし」と記入してください。空欄のままにしないでください。
+        書き方に迷う場合は [docs/development/ISSUE_WRITING_GUIDE.md](../../docs/development/ISSUE_WRITING_GUIDE.md) を参照してください。
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: 機能概要
+      description: 追加・変更したい機能を1〜3行で要約してください。
+    validations:
+      required: true
+
+  - type: textarea
+    id: background
+    attributes:
+      label: 背景
+      description: なぜこの機能が必要になったか（きっかけ・利用場面）。
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 解決したい問題
+      description: 現状、何ができなくて困っているか。
+    validations:
+      required: true
+
+  - type: textarea
+    id: purpose
+    attributes:
+      label: 目的
+      description: この機能によって最終的に達成したいこと。
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: 対象範囲
+      description: 今回のIssueで対応する範囲（画面・エンジン・機能）を明記してください。
+    validations:
+      required: true
+
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: 対象外
+      description: 今回は対応しない範囲。将来の別Issueに回す内容も含めて明記してください。
+      placeholder: 例）TrOCR対応は別Issueで扱う。今回はTesseract/PaddleOCRのみ対象。
+    validations:
+      required: true
+
+  - type: textarea
+    id: current_behavior
+    attributes:
+      label: 現在の動作
+      description: 現状の挙動（新規機能の場合は「現時点では未実装」と記入）。
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: 期待する動作
+      description: 実装後にどう動作すべきか、具体的に記述してください。
+    validations:
+      required: true
+
+  - type: textarea
+    id: ui_change
+    attributes:
+      label: UI変更
+      description: 画面・コンポーネントへの変更有無と内容。無ければ「なし」。
+      placeholder: なし
+    validations:
+      required: true
+
+  - type: textarea
+    id: backend_change
+    attributes:
+      label: Backend変更
+      description: src/app/ 配下（main.py・services/等）への変更有無と内容。無ければ「なし」。
+      placeholder: なし
+    validations:
+      required: true
+
+  - type: textarea
+    id: api_change
+    attributes:
+      label: API変更
+      description: 追加・変更するエンドポイント（既存パラメータの意味は変えない前提）。無ければ「なし」。
+      placeholder: なし
+    validations:
+      required: true
+
+  - type: textarea
+    id: data_persistence_impact
+    attributes:
+      label: データ構造・永続化への影響
+      description: config/settings.yaml・data/projects/配下のファイル形式・localStorageキー等への影響。無ければ「なし」。
+      placeholder: なし
+    validations:
+      required: true
+
+  - type: textarea
+    id: dataset_impact
+    attributes:
+      label: Datasetへの影響
+      description: Dataset Manager（Dataset ID・meta.json・Dataset⇔Modelリンク等）への影響。無ければ「なし」。
+      placeholder: なし
+    validations:
+      required: true
+
+  - type: textarea
+    id: experiment_impact
+    attributes:
+      label: Experimentへの影響
+      description: 実験管理（実験カルテ・Evaluation Profile/Hash・Comparable Group等）への影響。無ければ「なし」。
+      placeholder: なし
+    validations:
+      required: true
+
+  - type: textarea
+    id: model_impact
+    attributes:
+      label: Modelへの影響
+      description: モデル管理（管理No・モデルカルテ・推論モデル切替・リリース管理等）への影響。無ければ「なし」。
+      placeholder: なし
+    validations:
+      required: true
+
+  - type: textarea
+    id: evaluation_impact
+    attributes:
+      label: Evaluationへの影響
+      description: モデル評価（CER等の指標・評価前処理モード等）への影響。無ければ「なし」。
+      placeholder: なし
+    validations:
+      required: true
+
+  - type: textarea
+    id: benchmark_impact
+    attributes:
+      label: Benchmarkへの影響
+      description: Benchmark Runner（実行して比較）・Benchmark Center（横断比較・実行なし）への影響。無ければ「なし」。
+      placeholder: なし
+    validations:
+      required: true
+
+  - type: textarea
+    id: security_audit_impact
+    attributes:
+      label: セキュリティ・監査への影響
+      description: 監査ログ（audit_log.pyのAUDIT_ACTIONS）・ロール権限・認証未設定モードへの影響。無ければ「なし」。
+      placeholder: なし
+    validations:
+      required: true
+
+  - type: textarea
+    id: docs_targets
+    attributes:
+      label: ドキュメント更新対象
+      description: 更新が必要な文書（README / docs/README / USER_GUIDE / 16_SCREEN_SPEC / 06_API_REFERENCE / CHANGELOG / manual / tutorial / examples / FAQ 等）。
+    validations:
+      required: true
+
+  - type: textarea
+    id: test_perspective
+    attributes:
+      label: テスト観点
+      description: 何を・どう確認すれば良いか（バックエンドpytest・フロントエンドnode:test・手動確認observation）。
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: 受け入れ条件
+      description: このIssueが完了したと判断できる具体的な条件を、チェックできる粒度で列挙してください。
+      placeholder: |
+        - [ ] 〇〇画面で〇〇できる
+        - [ ] 〇〇のテストが追加され通過する
+    validations:
+      required: true
+
+  - type: textarea
+    id: supplementary
+    attributes:
+      label: 補足資料
+      description: 参考リンク・スクリーンショット・関連Issue番号等。無ければ「なし」。
+      placeholder: なし
+    validations:
+      required: false

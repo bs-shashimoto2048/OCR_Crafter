@@ -1,0 +1,93 @@
+name: "🔧 Refactor（リファクタリング）"
+description: 外部から見える動作を変えずに、内部実装を改善する
+title: "[Refactor] "
+labels:
+  - "type: refactor"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **重要**: このIssueはリファクタリングのみを対象とします。
+        リファクタリングのついでに無関係な新機能を追加しないでください。
+        新機能が必要な場合は、別途 Feature Issue を作成してください。
+
+  - type: textarea
+    id: target
+    attributes:
+      label: 対象
+      description: リファクタリング対象のファイル・モジュール・画面。
+    validations:
+      required: true
+
+  - type: textarea
+    id: current_problem
+    attributes:
+      label: 現在の問題
+      description: 現状のコードの何が問題か（可読性・重複・肥大化・テスト困難さ等）。
+    validations:
+      required: true
+
+  - type: textarea
+    id: reason
+    attributes:
+      label: 変更理由
+      description: なぜ今このリファクタリングが必要か。
+    validations:
+      required: true
+
+  - type: dropdown
+    id: external_spec_change
+    attributes:
+      label: 外部仕様を変更するか
+      description: API応答・画面表示・保存形式など、利用者から見える挙動を変えるか。
+      options:
+        - 変更しない（内部実装のみ）
+        - 変更する（下記に詳細を記載）
+    validations:
+      required: true
+
+  - type: textarea
+    id: api_compatibility
+    attributes:
+      label: API互換性
+      description: 既存エンドポイントのパス・パラメータ・レスポンスの意味を維持するか。維持しない場合は移行方法も記載。
+      placeholder: 維持する（既存パラメータの意味・既定値を変更しない）
+    validations:
+      required: true
+
+  - type: textarea
+    id: data_compatibility
+    attributes:
+      label: データ互換性
+      description: config/settings.yaml・data/projects/配下のファイル形式・localStorageキー等の互換性。
+      placeholder: 維持する（既存プロジェクトのデータをそのまま読み込める）
+    validations:
+      required: true
+
+  - type: textarea
+    id: migration
+    attributes:
+      label: 移行方法
+      description: 互換性を維持できない場合の移行手順。例）db.pyのALTER TABLE、migrate_legacy_data.py方式。該当なしなら「なし」。
+      placeholder: なし
+    validations:
+      required: true
+
+  - type: textarea
+    id: regression_tests
+    attributes:
+      label: 回帰テスト
+      description: 既存動作が壊れていないことをどのテストで担保するか。
+    validations:
+      required: true
+
+  - type: textarea
+    id: definition_of_done
+    attributes:
+      label: 完了条件
+      description: 何をもって完了と判断するか。
+      placeholder: |
+        - [ ] 既存のバックエンド/フロントエンドテストが全件通過する
+        - [ ] 外部仕様（API/画面/保存形式）が変わっていないことを確認した
+    validations:
+      required: true

@@ -1,0 +1,140 @@
+name: "🐛 Bug（不具合報告）"
+description: 既存機能が仕様どおりに動作しない不具合を報告する
+title: "[Bug] "
+labels:
+  - "type: bug"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        不具合報告のIssueです。緊急の修正であっても、まずこのIssueを作成してから作業を始めてください。
+        開発サーバー（Vite HMR）特有の一時的な不整合と、実装上の不具合を区別するため、
+        下記の「再現確認」を先にお答えください。
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: 不具合概要
+      description: 何が起きているかを1〜3行で要約してください。
+    validations:
+      required: true
+
+  - type: input
+    id: location
+    attributes:
+      label: 発生画面・機能
+      description: サイドバーのどの画面・どの機能で発生するか。例）OCRモデル > モデル管理 > 推論モデル切替
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 再現手順
+      description: 番号付きで、誰でも再現できる粒度で記述してください。
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 実際の結果
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待する結果
+    validations:
+      required: true
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: 発生頻度
+      options:
+        - 常に発生する
+        - 特定条件でのみ発生する
+        - まれに発生する（再現困難）
+        - 一度だけ発生した
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: 実行環境
+      description: OS・ブラウザ・Python/Nodeバージョン・Tesseract/PaddleOCR有無等。
+      placeholder: |
+        OS: Windows 11
+        ブラウザ:
+        Backend起動方法: uvicorn src.app.main:app --reload --port 8000
+        Frontend起動方法: npm run dev
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: hmr_check
+    attributes:
+      label: 開発サーバーの状態不整合との切り分け（重要）
+      description: >-
+        Viteの開発サーバー（HMR）は、コード変更を重ねた後にブラウザ側の状態が古いままになることがあります。
+        実装上の不具合と区別するため、以下を確認してからチェックしてください。
+      options:
+        - label: 開発サーバー（backend/frontend）を再起動済みである
+        - label: ブラウザのハードリロード（キャッシュ無視の再読み込み）を実施済みである
+        - label: 上記を実施した後も、この不具合は再現する
+        - label: 本番Build（npm run build後のdist/を配信する等）でも再現することを確認した
+
+  - type: textarea
+    id: backend_log
+    attributes:
+      label: Backendログ
+      description: uvicornのコンソール出力・エラースタックトレース。無ければ「なし」。
+      placeholder: なし
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: frontend_console
+    attributes:
+      label: Frontendコンソール
+      description: ブラウザDevToolsのConsole/Networkタブのエラー内容。無ければ「なし」。
+      placeholder: なし
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: スクリーンショット
+      description: 該当箇所が分かる画像を添付してください。無ければ「なし」。
+      placeholder: なし
+    validations:
+      required: false
+
+  - type: textarea
+    id: regression_scope
+    attributes:
+      label: 回帰範囲
+      description: この不具合・修正が影響しうる他の画面・機能。例）推論に使用ボタンが3箇所ある等
+    validations:
+      required: true
+
+  - type: textarea
+    id: definition_of_done
+    attributes:
+      label: 完了条件
+      description: どうなれば修正完了と判断できるか（回帰テストの追加を含めてください）。
+      placeholder: |
+        - [ ] 〇〇を操作しても再現しない
+        - [ ] 回帰テストを追加し通過する
+    validations:
+      required: true

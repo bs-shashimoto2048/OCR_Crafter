@@ -64,6 +64,17 @@ cd frontend && npm test        # フロント（node --test、依存追加不要
 3. 日本語コミット本文で変更点を列挙し、`main` へ push（リモート: GitHub）
 4. 完了報告はタスク指示の報告項目に沿って日本語で行う
 
+## GitHub Issue駆動開発
+
+チャット内の一時的な指示（`task.md`）中心から、GitHub Issuesを起点とする開発フローへの移行を進めている。以下を守ること。
+
+- 作業開始前にGitHub Issueを確認する（Issueが無い場合は作成してから着手する）
+- Issue番号を作業単位とする（ブランチ名・コミットメッセージへ含める）
+- Issue本文を一次仕様とする（Pull Requestの説明文だけに仕様を書かない）
+- Issueの受け入れ条件を完了判定に使う（1項目ずつ確認する）
+- 原則としてIssue単位のブランチ・PRを使用する（現在の運用が`main`直接push中心の場合は、その運用を優先しつつ移行を進める）
+- 詳細は `docs/development/`（`GITHUB_ISSUES_WORKFLOW.md` / `ISSUE_WRITING_GUIDE.md` / `AI_AGENT_WORKFLOW.md`）と `CONTRIBUTING.md` を参照する
+
 ## 重要な設計思想
 
 - **プロジェクト分離**: 全データ・設定はproject_id単位。プロジェクト切替時のレスポンス競合ガード（リクエスト連番・IDタグ）を崩さない。
