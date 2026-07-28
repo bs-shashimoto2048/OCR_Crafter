@@ -563,8 +563,11 @@ export default function ModelsView({
     return !isOcrFamily(name) || exportReady(name);
   }
 
-  // サマリーカード（推論使用モデル / 最新モデル）共通描画
-  function SummaryCard({ title, name, emptyText, highlight }) {
+  // サマリーカード（推論使用モデル / 最新モデル）共通描画。
+  // showInferenceButton=false は「推論使用モデル」カード専用（このカード自体が現在の
+  // 推論使用モデルを示すサマリーのため、常に無効な「推論使用中」ボタンは情報が重複する）。
+  // カード種別やモデル名からの暗黙判定はせず、呼び出し側が明示的にpropsで制御する
+  function SummaryCard({ title, name, emptyText, highlight, showInferenceButton = true }) {
     const entries = name ? evalEntriesOf(evalHistory, name) : [];
     return (
       <div
@@ -599,16 +602,18 @@ export default function ModelsView({
               </div>
             ) : null}
             <div className="mt-1.5 flex flex-wrap gap-1.5">
-              <Button
-                size="sm"
-                variant="secondary"
-                className="h-6 px-2 text-[11px]"
-                disabled={Boolean(inferenceButtonDisabledReason(name))}
-                onClick={() => onUseForInference?.(name)}
-                title={inferenceButtonDisabledReason(name) || "このモデルをOCR推論で使用します"}
-              >
-                {isInferenceModelInUse(name, inferenceInUseModel) ? "推論使用中" : "推論に使用"}
-              </Button>
+              {showInferenceButton ? (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="h-6 px-2 text-[11px]"
+                  disabled={Boolean(inferenceButtonDisabledReason(name))}
+                  onClick={() => onUseForInference?.(name)}
+                  title={inferenceButtonDisabledReason(name) || "このモデルをOCR推論で使用します"}
+                >
+                  {isInferenceModelInUse(name, inferenceInUseModel) ? "推論使用中" : "推論に使用"}
+                </Button>
+              ) : null}
               <Button size="sm" variant="secondary" className="h-6 px-2 text-[11px]" onClick={() => onOpenEvaluation?.(name)}>
                 モデル評価
               </Button>
@@ -1952,6 +1957,7 @@ export default function ModelsView({
                 : "推論使用モデルが未設定です。一覧から「推論に使用」で設定できます。"
             }
             highlight
+            showInferenceButton={false}
           />
           <SummaryCard title="最新モデル" name={latestAny} emptyText="学習済みモデルがありません。" />
         </div>

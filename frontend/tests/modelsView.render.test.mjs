@@ -211,7 +211,10 @@ function extractInferenceButtons(html) {
   return results;
 }
 
-// 「最新モデル」カードのnameをtargetModelにして、そのモデル1件分のボタン状態だけを取り出す
+// 「最新モデル」カードのnameをtargetModelにして、そのモデル1件分のボタン状態だけを取り出す。
+// 「推論使用モデル」カード（A）はshowInferenceButton=falseで切替ボタン自体を持たないため、
+// 末尾（＝最新モデルカードか、initialDetailModel指定時はさらに後の詳細パネル）を採用すれば
+// 常にA以外の対象を取得できる
 function inferenceButtonFor(targetModel, overrides = {}) {
   const html = renderToString(
     React.createElement(
@@ -225,9 +228,16 @@ function inferenceButtonFor(targetModel, overrides = {}) {
     )
   );
   const buttons = extractInferenceButtons(html);
-  // inferenceInUseModelが空、または最新モデルと一致する場合は「推論使用モデル」カードの
-  // ボタンが出ない/最新モデルカードと同一モデルになるため、末尾（=最新モデルカード）を採用する
   return buttons[buttons.length - 1];
+}
+
+// 2枚のサマリーカードのうち、startTitle（例:"推論使用モデル"）からendTitle（例:"最新モデル"）
+// 直前までのHTML断片だけを取り出す（Aカード単独の検証用。両カードは兄弟要素として連続して
+// 描画されるため、タイトル文言の間だけを切り出せばそのカードの内容に限定できる）
+function extractCardHtml(html, startTitle, endTitle) {
+  const start = html.indexOf(startTitle);
+  const end = endTitle ? html.indexOf(endTitle, start) : -1;
+  return html.slice(start, end === -1 ? html.length : end);
 }
 
 test("回帰ケース1（未設定）: ModelA・ModelBともにボタンが有効", () => {
@@ -239,7 +249,7 @@ test("回帰ケース1（未設定）: ModelA・ModelBともにボタンが有�
   assert.equal(b.label, "推論に使用");
 });
 
-test("回帰ケース2（ModelAが推論使用中）: ModelAのみ無効「推論使用中」、ModelB・ModelCは有効「推論に使用」", () => {
+test("回帰ケース2（ModelAが推論使用中）: Aカードに切替ボタンはなく、ModelB・ModelCは有効「推論に使用」", () => {
   const html = renderToString(
     React.createElement(
       ModelsView,
@@ -251,9 +261,11 @@ test("回帰ケース2（ModelAが推論使用中）: ModelAのみ無効「推�
       })
     )
   );
-  const [cardA, cardB] = extractInferenceButtons(html);
-  assert.equal(cardA.disabled, true, "使用中のModelAのボタンが無効化されていない");
-  assert.equal(cardA.label, "推論使用中");
+  // Aカード（推論使用モデル）は showInferenceButton=false のため切替ボタン自体を持たない
+  const cardAHtml = extractCardHtml(html, "推論使用モデル", "最新モデル");
+  assert.ok(!/<button[^>]*>(推論に使用|推論使用中)<\/button>/.test(cardAHtml), "Aカードに切替ボタンが残っている");
+
+  const [cardB] = extractInferenceButtons(html);
   assert.equal(cardB.disabled, false, "別モデルのModelBのボタンが無効化されている（誤り）");
   assert.equal(cardB.label, "推論に使用");
 
@@ -262,7 +274,7 @@ test("回帰ケース2（ModelAが推論使用中）: ModelAのみ無効「推�
   assert.equal(c.label, "推論に使用");
 });
 
-test("回帰ケース3（ModelBへ切替後）: ModelBのみ無効、ModelA・ModelCは有効", () => {
+test("回帰ケース3（ModelBへ切替後）: Aカードに切替ボタンはなく、ModelA・ModelCは有効", () => {
   const html = renderToString(
     React.createElement(
       ModelsView,
@@ -274,15 +286,19 @@ test("回帰ケース3（ModelBへ切替後）: ModelBのみ無効、ModelA・Mo
       })
     )
   );
-  const [cardB, cardA] = extractInferenceButtons(html);
-  assert.equal(cardB.disabled, true, "切替後のModelBのボタンが無効化されていない");
-  assert.equal(cardA.disabled, false, "切替後、ModelAのボタンが無効化されたままになっている");
+  const cardAHtml = extractCardHtml(html, "推論使用モデル", "最新モデル");
+  assert.ok(!/<button[^>]*>(推論に使用|推論使用中)<\/button>/.test(cardAHtml), "Aカードに切替ボタンが残っている");
+
+  // 最新モデルカードの対象はModelA（現在の使用中モデルはModelBなので別モデル→有効のはず）
+  const [cardLatest] = extractInferenceButtons(html);
+  assert.equal(cardLatest.disabled, false, "切替後、ModelAのボタンが無効化されたままになっている");
+  assert.equal(cardLatest.label, "推論に使用");
 
   const c = inferenceButtonFor("model_c.tess.json", { inferenceInUseModel: "model_b.tess.json" });
   assert.equal(c.disabled, false, "切替後もModelCのボタンが無効化されている（誤り）");
 });
 
-test("回帰ケース4（通信中）: 全ての切替ボタンが一時無効化され、完了後は正しく復帰する", () => {
+test("回帰ケース4（通信中）: 残る切替ボタン（最新モデルカード）が一時無効化され、完了後は正しく復帰する", () => {
   const duringHtml = renderToString(
     React.createElement(
       ModelsView,
@@ -295,8 +311,7 @@ test("回帰ケース4（通信中）: 全ての切替ボタンが一時無効�
       })
     )
   );
-  const [duringA, duringB] = extractInferenceButtons(duringHtml);
-  assert.equal(duringA.disabled, true, "通信中にModelA（使用中）のボタンが無効化されていない");
+  const [duringB] = extractInferenceButtons(duringHtml);
   assert.equal(duringB.disabled, true, "通信中に別モデルModelBのボタンが無効化されていない");
   assert.equal(duringB.title, "切替処理中です");
 
@@ -312,8 +327,7 @@ test("回帰ケース4（通信中）: 全ての切替ボタンが一時無効�
       })
     )
   );
-  const [afterA, afterB] = extractInferenceButtons(afterHtml);
-  assert.equal(afterA.disabled, true, "通信完了後もModelA（使用中）は無効のままであるべき");
+  const [afterB] = extractInferenceButtons(afterHtml);
   assert.equal(afterB.disabled, false, "通信完了後にModelBのボタンが正しく復帰していない");
 });
 
@@ -351,7 +365,7 @@ test("回帰ケース5（利用不可モデル）: 未Exportのモデルだけ�
 // なってしまう誤り（例: disabled={Boolean(inferenceInUseModel)}）を防ぐことが目的。
 // 詳細パネル（C）はクリックで開くまで内部stateが空でSSRには出現しないため、
 // テスト専用のinitialDetailModelプロップ（本番コードでは未使用・省略時は従来どおり非表示）で開く。
-test("Aカード（推論使用モデル）: 表示中のモデルは常に「推論使用中」・無効", () => {
+test("Aカード（推論使用モデル）: 「推論使用中」ボタンを表示しない（カード自体が使用中モデルの表示のため重複操作を置かない）", () => {
   const html = renderToString(
     React.createElement(
       ModelsView,
@@ -363,9 +377,30 @@ test("Aカード（推論使用モデル）: 表示中のモデルは常に「�
       })
     )
   );
-  const [cardA] = extractInferenceButtons(html);
-  assert.equal(cardA.label, "推論使用中", "Aカードの対象（推論使用中のモデル自身）のラベルが誤っている");
-  assert.equal(cardA.disabled, true, "Aカードの対象（推論使用中のモデル自身）が無効化されていない");
+  const cardAHtml = extractCardHtml(html, "推論使用モデル", "最新モデル");
+  assert.ok(
+    !/<button[^>]*>(推論に使用|推論使用中)<\/button>/.test(cardAHtml),
+    "Aカードに「推論使用中」/「推論に使用」ボタンが残っている"
+  );
+});
+
+test("Aカード（推論使用モデル）: 使用中バッジ・モデル評価/ダウンロード/詳細ボタンは維持する", () => {
+  const html = renderToString(
+    React.createElement(
+      ModelsView,
+      baseProps({
+        models: THREE_MODELS,
+        modelInfos: THREE_MODEL_INFOS,
+        inferenceInUseModel: "model_a.tess.json",
+        latest: { any: "model_b.tess.json", byType: {} },
+      })
+    )
+  );
+  const cardAHtml = extractCardHtml(html, "推論使用モデル", "最新モデル");
+  assert.ok(cardAHtml.includes(">使用中<"), "Aカードの使用中バッジが表示されていない");
+  assert.ok(cardAHtml.includes(">モデル評価<"), "Aカードのモデル評価ボタンが消えている");
+  assert.ok(cardAHtml.includes("ダウンロード"), "Aカードのダウンロードボタンが消えている");
+  assert.ok(cardAHtml.includes(">詳細<"), "Aカードの詳細ボタンが消えている");
 });
 
 test("Bカード（最新モデル）: 最新モデル=現在の推論使用モデルと同一なら無効「推論使用中」", () => {

@@ -15,12 +15,22 @@ timeline
     07-18〜 : 学習条件比較・条件差分・次回学習提案 : サイドバーのOCR開発フロー順再編 : 性能サマリー省スペース化と比較カード短縮名
     07-24 : ダッシュボード「プロジェクト一覧」テーブル拡張 : 同カードビュー化（Health Badge・Exact Match） : カードへBenchmark性能指標追加（Balance Score・P95・Healthのreasons） : カードUI/UXブラッシュアップ（文字拡大・3列化・Primary/Secondary・Production独立表示） : 学習前処理・オーグメンテーションの実効値スナップショット保存と学習条件比較の2セクション化・推論使用モデルの一覧強調
     07-27 : 学習データ作成フローの明確化（事前作成の可視化・準備状況サマリー・評価データとの違いの明記） : 学習前処理の実行タイミング調査と前処理未実行時の警告・実行状況表示の追加 : 学習前処理ステータスの3状態化（旧プロジェクトの誤表示を是正） : 現在の前処理設定の可視化（GET /api/ocr/preprocess/current-config 追加） : OCR Dataset作成フローの見直し（Dataset作成時に必ずrun_preprocess()を自動実行する設計へ変更） : 推論使用モデルの永続化と学習用前処理設定の保存管理（Version・履歴・未保存変更ガード）
-    07-28 : Dataset Manager・Model Lineage機能追加（Dataset資産管理・Dataset⇔Model双方向リンク・再現性向上） : Experiment Manager機能強化（既存Experiment Trackingを唯一の実験管理基盤として拡張。新規Manager・新IDは作らず） : Benchmark Center追加（既存Benchmarkは「Benchmark Runner」へ改名し実行ツールとして温存、Benchmark Centerは既存資産を実行せず横断比較する別画面として新設） : 推論モデル切替不具合修正（保存トリガーを常時監視effectから明示呼び出しの一本道へ） : 同修正の削除漏れによる起動エラー対応（setInferenceModelRestored is not defined） : 「推論に使用」ボタン常時グレーアウト修正（本番の推論使用モデルと推論テスト画面の選択stateの混同を解消） : 「推論に使用」ボタン3か所（推論使用モデルカード・最新モデルカード・モデル詳細パネル）の判定を共通関数isInferenceModelInUseへ集約
+    07-28 : Dataset Manager・Model Lineage機能追加（Dataset資産管理・Dataset⇔Model双方向リンク・再現性向上） : Experiment Manager機能強化（既存Experiment Trackingを唯一の実験管理基盤として拡張。新規Manager・新IDは作らず） : Benchmark Center追加（既存Benchmarkは「Benchmark Runner」へ改名し実行ツールとして温存、Benchmark Centerは既存資産を実行せず横断比較する別画面として新設） : 推論モデル切替不具合修正（保存トリガーを常時監視effectから明示呼び出しの一本道へ） : 同修正の削除漏れによる起動エラー対応（setInferenceModelRestored is not defined） : 「推論に使用」ボタン常時グレーアウト修正（本番の推論使用モデルと推論テスト画面の選択stateの混同を解消） : 「推論に使用」ボタン3か所（推論使用モデルカード・最新モデルカード・モデル詳細パネル）の判定を共通関数isInferenceModelInUseへ集約 : 推論使用モデルカードの不要な「推論使用中」ボタン削除（showInferenceButton props制御）
 ```
 
 ---
 
 ## 2026-07
+
+### 推論使用モデルカードの不要な「推論使用中」ボタン削除
+
+**背景**: task.mdの要求。「推論使用モデル」カード自体が「現在推論で使用しているモデル」を示すサマリー表示であるため、カード内の常に無効な「推論使用中」ボタンは①既に使用中バッジで示している情報と重複する②見た目上は押せる操作のように見える、という2点で不要と判断された。
+
+**修正内容**: `ModelsView.jsx`の共通コンポーネント`SummaryCard`（「推論使用モデル」「最新モデル」の2カードで共用）へ`showInferenceButton`（既定`true`）propsを追加し、ボタン自体をこのpropsで条件分岐する形にした。「推論使用モデル」カードの呼び出し側だけ明示的に`showInferenceButton={false}`を渡し、カード種別やモデル名からの暗黙判定（例: タイトル文字列やモデル名を見て非表示にする）はしていない。他の要素（モデル名・Engine・作成日時・最新評価・使用中バッジ・モデル評価/ダウンロード/詳細ボタン）・他2箇所の切替ボタン（最新モデルカード・モデル詳細パネル）・推論モデル切替処理（`switchInferenceModel`）・保存API（`POST /api/ocr/inference/model`）は無変更。
+
+**テスト**: `frontend/tests/modelsView.render.test.mjs`の既存テストのうち、削除したボタンの存在を前提にしていた4件（回帰ケース2〜4・Aカードのラベル/disabled検証）を、ボタン非表示を前提とした内容へ更新した。新規に「Aカードにボタンが無いこと」「使用中バッジ・モデル評価/ダウンロード/詳細ボタンは維持されること」を検証する2件を追加。フロント521件全通過、`npm run build`成功。
+
+---
 
 ### 「推論に使用」ボタン3か所（推論使用モデルカード・最新モデルカード・モデル詳細パネル）の判定を共通関数へ集約
 
