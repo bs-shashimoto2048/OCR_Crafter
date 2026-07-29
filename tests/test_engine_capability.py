@@ -1,8 +1,8 @@
 """Engine Capability（src/app/services/engine_capability.py）の単体テスト。
 
 Engine Capability実装Issueのスコープ通り、生成・シリアライズ/デシリアライズ・
-比較・コピーのみを検証する。Registry連携・既存if/elif分岐への影響は対象外
-（本モジュールは既存コードから参照されていない）。
+比較・コピー（dataclasses.replace経由）・不変性のみを検証する。Registry連携・
+既存if/elif分岐への影響は対象外（本モジュールは既存コードから参照されていない）。
 """
 
 import dataclasses
@@ -31,9 +31,9 @@ def test_engine_capability_generation_with_defaults():
     assert cap.version == "1.0.0"
     assert cap.supports_training is False
     assert cap.supports_inference is True
-    assert cap.supported_languages == []
+    assert cap.supported_languages == ()
     assert cap.minimum_vram is None
-    assert cap.required_metadata == []
+    assert cap.required_metadata == ()
 
 
 def test_known_engine_ids_have_builtin_capability():
@@ -57,9 +57,9 @@ def test_trocr_capability_defined_but_not_wired_elsewhere():
     assert cap.display_name == "TrOCR"
     assert cap.framework == "transformers"
     assert cap.supports_training is True
-    assert cap.supported_languages == ["en"]
+    assert cap.supported_languages == ("en",)
     # Windows実機検証は未実施のため、推測補完せず空のまま
-    assert cap.supported_platforms == []
+    assert cap.supported_platforms == ()
     # 文字単位confidenceの算出方法は未解決事項（ARCHITECTURE_DRAFT.md参照）のためFalse
     assert cap.supports_confidence is False
 
@@ -86,6 +86,20 @@ def test_from_dict_ignores_unknown_keys():
     assert restored == get_builtin_capability(ENGINE_ID_PADDLEOCR)
 
 
+def test_from_dict_coerces_json_lists_back_to_tuples():
+    """JSON経由（json.loadsはtupleをlistへ変換する）で得たlist値もtupleへ矯正される。"""
+    restored = EngineCapability.from_dict(
+        {
+            "engine_id": "dummy",
+            "display_name": "Dummy",
+            "supported_languages": ["en", "ja"],  # listのまま渡す（JSONデコード後を想定）
+        }
+    )
+
+    assert isinstance(restored.supported_languages, tuple)
+    assert restored.supported_languages == ("en", "ja")
+
+
 def test_equality_compares_by_value():
     """同じ内容のCapabilityは等価、異なる内容は非等価と判定できる。"""
     a = EngineCapability(engine_id="x", display_name="X", version="1.0.0")
@@ -104,29 +118,44 @@ def test_capability_is_immutable():
         cap.display_name = "Changed"
 
 
-def test_copy_without_overrides_produces_equal_but_distinct_instance():
-    """引数無しのcopy()は、内容が同じ別インスタンスを返す。"""
-    original = get_builtin_capability(ENGINE_ID_EASYOCR)
-    copied = original.copy()
+def test_sequence_fields_are_tuples_not_mutable_lists():
+    """list型のフィールドを持たない（frozenでも.append()等で変更できてしまう抜け道を作らない）。"""
+    cap = get_builtin_capability(ENGINE_ID_TESSERACT)
 
-    assert copied == original
-    assert copied is not original
+    for name in (
+        "supported_platforms",
+        "supported_export_formats",
+        "supported_languages",
+        "accepted_dataset_types",
+        "required_annotations",
+        "required_image_format",
+        "required_metadata",
+        "optional_metadata",
+    ):
+        assert isinstance(getattr(cap, name), tuple), f"{name} should be a tuple, not a mutable list"
 
 
-def test_copy_with_overrides_changes_only_specified_fields():
-    """copy(**overrides)は指定フィールドのみ変更し、他は元のまま保持する。"""
+def test_copy_via_dataclasses_replace_changes_only_specified_fields():
+    """frozen dataclassの複製は標準の dataclasses.replace() で行う（専用copy()は持たない）。"""
     original = get_builtin_capability(ENGINE_ID_PADDLEOCR)
-    copied = original.copy(display_name="PaddleOCR (カスタムラベル)")
+    copied = dataclasses.replace(original, display_name="PaddleOCR (カスタムラベル)")
 
     assert copied.display_name == "PaddleOCR (カスタムラベル)"
     assert copied.engine_id == original.engine_id
     assert copied.framework == original.framework
     assert copied != original
+    assert copied is not original
 
 
 def test_builtin_capabilities_dict_matches_known_engine_ids():
     """BUILTIN_CAPABILITIESのキー集合がKNOWN_ENGINE_IDSと一致する。"""
     assert set(BUILTIN_CAPABILITIES.keys()) == set(KNOWN_ENGINE_IDS)
+
+
+def test_builtin_capabilities_is_read_only():
+    """BUILTIN_CAPABILITIESはMappingProxyTypeで、外部からキーの追加・上書きができない。"""
+    with pytest.raises(TypeError):
+        BUILTIN_CAPABILITIES["hacked"] = get_builtin_capability(ENGINE_ID_TESSERACT)
 
 
 def test_get_builtin_capability_unknown_engine_raises_key_error():

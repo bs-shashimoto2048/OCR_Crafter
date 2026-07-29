@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import dataclasses
 from dataclasses import dataclass, field
-from typing import Any
+from types import MappingProxyType
+from typing import Any, Mapping
 
 ENGINE_ID_TESSERACT = "tesseract"
 ENGINE_ID_PADDLEOCR = "paddleocr"
@@ -51,7 +52,7 @@ class EngineCapability:
     version: str = "1.0.0"
     framework: str = ""
     license: str = ""
-    supported_platforms: list[str] = field(default_factory=list)
+    supported_platforms: tuple[str, ...] = field(default_factory=tuple)
 
     # --- 学習 ---
     supports_training: bool = False
@@ -86,7 +87,7 @@ class EngineCapability:
 
     # --- Export ---
     supports_export: bool = False
-    supported_export_formats: list[str] = field(default_factory=list)
+    supported_export_formats: tuple[str, ...] = field(default_factory=tuple)
     supports_onnx: bool = False
     supports_torchscript: bool = False
     supports_quantization: bool = False
@@ -100,20 +101,39 @@ class EngineCapability:
     recommended_vram: int | None = None
 
     # --- Language ---
-    supported_languages: list[str] = field(default_factory=list)
+    supported_languages: tuple[str, ...] = field(default_factory=tuple)
     supports_multilingual: bool = False
     supports_unicode: bool = False
     supports_vertical_text: bool = False
     supports_handwriting: bool = False
 
     # --- Dataset ---
-    accepted_dataset_types: list[str] = field(default_factory=list)
-    required_annotations: list[str] = field(default_factory=list)
-    required_image_format: list[str] = field(default_factory=list)
+    accepted_dataset_types: tuple[str, ...] = field(default_factory=tuple)
+    required_annotations: tuple[str, ...] = field(default_factory=tuple)
+    required_image_format: tuple[str, ...] = field(default_factory=tuple)
 
     # --- Metadata連携（Engine CapabilityとModel Metadataを繋ぐ唯一の連携ポイント） ---
-    required_metadata: list[str] = field(default_factory=list)
-    optional_metadata: list[str] = field(default_factory=list)
+    required_metadata: tuple[str, ...] = field(default_factory=tuple)
+    optional_metadata: tuple[str, ...] = field(default_factory=tuple)
+
+    # frozenでも要素の追加・削除ができてしまう可変な list を混入させない
+    # （from_dict経由でJSON由来のlistが渡された場合も含め、常にtupleへ矯正する）。
+    _SEQUENCE_FIELDS = (
+        "supported_platforms",
+        "supported_export_formats",
+        "supported_languages",
+        "accepted_dataset_types",
+        "required_annotations",
+        "required_image_format",
+        "required_metadata",
+        "optional_metadata",
+    )
+
+    def __post_init__(self) -> None:
+        for name in self._SEQUENCE_FIELDS:
+            value = getattr(self, name)
+            if not isinstance(value, tuple):
+                object.__setattr__(self, name, tuple(value))
 
     def to_dict(self) -> dict[str, Any]:
         """辞書へシリアライズする（JSON保存・将来のAPI応答等に利用できる）。"""
@@ -125,10 +145,6 @@ class EngineCapability:
         known_fields = {f.name for f in dataclasses.fields(cls)}
         filtered = {k: v for k, v in data.items() if k in known_fields}
         return cls(**filtered)
-
-    def copy(self, **overrides: Any) -> "EngineCapability":
-        """一部フィールドを上書きしたコピーを返す（frozenのため複製が必要な場面向け）。"""
-        return dataclasses.replace(self, **overrides)
 
 
 def _tesseract_capability() -> EngineCapability:
@@ -262,12 +278,16 @@ def _trocr_capability() -> EngineCapability:
 
 # 既知エンジンのCapability一覧。今回はこのモジュール単体で完結させ、
 # Engine Registry（別Issue）からの参照・既存if/elif分岐への配線は行わない。
-BUILTIN_CAPABILITIES: dict[str, EngineCapability] = {
-    ENGINE_ID_TESSERACT: _tesseract_capability(),
-    ENGINE_ID_PADDLEOCR: _paddleocr_capability(),
-    ENGINE_ID_EASYOCR: _easyocr_capability(),
-    ENGINE_ID_TROCR: _trocr_capability(),
-}
+# MappingProxyTypeで読み取り専用にし、外部からのキー追加・削除・値の差し替えを防ぐ
+# （値自体のEngineCapabilityはfrozen dataclassのため、これで全体が変更不可になる）。
+BUILTIN_CAPABILITIES: Mapping[str, EngineCapability] = MappingProxyType(
+    {
+        ENGINE_ID_TESSERACT: _tesseract_capability(),
+        ENGINE_ID_PADDLEOCR: _paddleocr_capability(),
+        ENGINE_ID_EASYOCR: _easyocr_capability(),
+        ENGINE_ID_TROCR: _trocr_capability(),
+    }
+)
 
 
 def get_builtin_capability(engine_id: str) -> EngineCapability:
