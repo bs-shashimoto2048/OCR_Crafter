@@ -2,11 +2,13 @@
 # requirements.txt はローカル環境の全量スナップショット（GPU版paddle等の巨大依存を含む）のため
 # CI では使用しない。paddle/easyocr/cv2/ultralytics は遅延importのためCIでは不要。
 --extra-index-url https://download.pytorch.org/whl/cpu
-fastapi
+fastapi==0.136.1
+starlette==1.0.0
+httpx==0.28.1
 python-multipart
 pydantic
 numpy
-pillow
+pillow==12.2.0
 matplotlib
 scikit-learn
 PyYAML
