@@ -10,7 +10,7 @@ Issue: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)
 
 ✅ Design Documents（[ENGINE_CAPABILITY.md](../../design/ENGINE_CAPABILITY.md) / [ENGINE_REGISTRY.md](../../design/ENGINE_REGISTRY.md) / [MODEL_METADATA.md](../../design/MODEL_METADATA.md)）
 
-⬜ Engine Capability
+✅ Engine Capability（[#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)、`src/app/services/engine_capability.py`。既存コードへの配線はまだ無し）
 
 ⬜ Engine Registry
 
@@ -26,7 +26,7 @@ Issue: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)
 
 ⬜ Documentation
 
-次フェーズ（Phase2）: Engine Capability / Engine Registry / Model Metadataの実装Issueを、[ISSUE_MAP.md](ISSUE_MAP.md)の順序で作成予定。
+次フェーズ（Phase2）: Engine Registry / Model Metadataの実装Issueを、[ISSUE_MAP.md](ISSUE_MAP.md)の順序で作成予定。
 
 ## 背景
 
@@ -91,11 +91,8 @@ Epicの完了条件は、調査後に確定した子Issueがすべて完了し�
 
 ## 子Issue
 
-初期状態ではInvestigation Issueのみ登録してください。
-
-実装Issueは調査完了後に追加します。
-
-- [ ] #2
+- [ ] #2（Investigation、Close可能）
+- [ ] #4（Feature: Engine Capability実装）
 
 ## 関連資料
 

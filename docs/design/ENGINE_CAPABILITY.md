@@ -1,6 +1,10 @@
 # Engine Capability 設計
 
-Related: Investigation [#2](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/2) / Parent Epic [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1) / [ADR-0001](../adr/ADR-0001_Trocr_Architecture.md)（Status: Accepted）
+Related: Investigation [#2](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/2) / Parent Epic [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1) / [ADR-0001](../adr/ADR-0001_Trocr_Architecture.md)（Status: Accepted）/ Feature [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)（実装済み）
+
+## 実装済み（2026-07-29）
+
+本ドキュメントのスキーマは `src/app/services/engine_capability.py` として実装済み（Feature [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)）。`EngineCapability`（frozen dataclass）と、既知4エンジン（tesseract/paddleocr/easyocr/trocr）分の`BUILTIN_CAPABILITIES`を定義している。**既存コード（`predict.py`等）からの参照・配線はまだ行っていない**（Engine Registry実装後に接続予定）。単体テストは`tests/test_engine_capability.py`。
 
 ## 目的
 
