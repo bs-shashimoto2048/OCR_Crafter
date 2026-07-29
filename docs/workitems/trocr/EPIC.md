@@ -4,29 +4,37 @@ Issue: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)
 
 ## Progress（2026-07-29時点）
 
-✅ Investigation（[#2](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/2)、Close可能）
+✅ Investigation（[#2](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/2)、Closed。PR [#3](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/3)でmainへマージ済み）
 
 ✅ Architecture（[ADR-0001](../../adr/ADR-0001_Trocr_Architecture.md)、Status: Accepted）
 
 ✅ Design Documents（[ENGINE_CAPABILITY.md](../../design/ENGINE_CAPABILITY.md) / [ENGINE_REGISTRY.md](../../design/ENGINE_REGISTRY.md) / [MODEL_METADATA.md](../../design/MODEL_METADATA.md)）
 
-✅ Engine Capability（[#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)、`src/app/services/engine_capability.py`。既存コードへの配線はまだ無し）
+✅ Engine Capability（[#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)、Closed。PR [#5](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/5)でmainへマージ済み。`src/app/services/engine_capability.py`。既存コードへの配線はまだ無し）
 
 ⬜ Engine Registry
 
 ⬜ Model Metadata
 
+⬜ Engine判定既存バグ修正
+
 ⬜ TrOCR Backend
 
 ⬜ Training
 
+⬜ Inference
+
 ⬜ Evaluation
+
+⬜ Frontend
 
 ⬜ Benchmark
 
 ⬜ Documentation
 
-次フェーズ（Phase2）: Engine Registry / Model Metadataの実装Issueを、[ISSUE_MAP.md](ISSUE_MAP.md)の順序で作成予定。
+次フェーズ（Phase2）: Engine Registry / Model Metadataの実装Issueを、[ISSUE_MAP.md](ISSUE_MAP.md)の確定順序で作成予定。
+
+参考: CI依存関係修正（[#6](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/6)、PR [#7](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/7)でmainへマージ済み）／既存のDB初期化テスト課題（[#8](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/8)、Open、Epic対象外の既存不具合）
 
 ## 背景
 
@@ -91,8 +99,8 @@ Epicの完了条件は、調査後に確定した子Issueがすべて完了し�
 
 ## 子Issue
 
-- [ ] #2（Investigation、Close可能）
-- [ ] #4（Feature: Engine Capability実装）
+- [x] #2（Investigation、Closed）
+- [x] #4（Feature: Engine Capability実装、Closed）
 
 ## 関連資料
 
