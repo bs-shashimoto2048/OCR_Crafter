@@ -2,6 +2,32 @@
 
 Issue: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)
 
+## Progress（2026-07-29時点）
+
+✅ Investigation（[#2](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/2)、Close可能）
+
+✅ Architecture（[ADR-0001](../../adr/ADR-0001_Trocr_Architecture.md)、Status: Accepted）
+
+✅ Design Documents（[ENGINE_CAPABILITY.md](../../design/ENGINE_CAPABILITY.md) / [ENGINE_REGISTRY.md](../../design/ENGINE_REGISTRY.md) / [MODEL_METADATA.md](../../design/MODEL_METADATA.md)）
+
+⬜ Engine Capability
+
+⬜ Engine Registry
+
+⬜ Model Metadata
+
+⬜ TrOCR Backend
+
+⬜ Training
+
+⬜ Evaluation
+
+⬜ Benchmark
+
+⬜ Documentation
+
+次フェーズ（Phase2）: Engine Capability / Engine Registry / Model Metadataの実装Issueを、[ISSUE_MAP.md](ISSUE_MAP.md)の順序で作成予定。
+
 ## 背景
 
 OCR Crafterは現在、複数のOCRエンジンを扱っています。

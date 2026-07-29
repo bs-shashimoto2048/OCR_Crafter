@@ -4,6 +4,39 @@ Issue: [#2](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/2)
 
 Parent Epic: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)
 
+## 調査状況（2026-07-29時点：完了）
+
+**完了。以下の「完了条件」をすべて満たした。Issue #2はClosed可能な状態にある（本IssueではまだCloseしない。Close自体はユーザー判断で別途実施）。**
+
+- [x] 既存実装の関連箇所を特定している（Backend: エンジン分岐5箇所・Dataset/Experiment/Model/Benchmark連携／Frontend: エンジン選択UI3画面・111箇所の分岐）
+- [x] TrOCRの公式仕様を確認している（Hugging Face Transformers公式ドキュメント・Microsoft `unilm/trocr`リポジトリ・arXiv論文を一次情報として確認）
+- [x] 統合方式を複数比較している（案A〜Dの4方式を比較。詳細は[ARCHITECTURE_DRAFT.md](ARCHITECTURE_DRAFT.md)）
+- [x] 推奨方式を根拠付きで提示している（案C。理由は同上ドラフトおよび[ADR-0001](../../adr/ADR-0001_Trocr_Architecture.md)）
+- [x] 既存データ互換性への影響を確認している（Dataset/Experiment/Benchmark Centerはengine非依存と確認。Model/Frontendには既存の欠陥＝キャッチオール実装を発見）
+- [x] **実装Issueへ分割できる状態になっている**（[ISSUE_MAP.md](ISSUE_MAP.md)のPhase1〜7構成に加え、Phase2実装Issue候補11件の作成順序を確定。GitHub Issue化はまだ実施しない）
+- [x] 調査結果が`ARCHITECTURE_DRAFT.md`と`DECISION_LOG.md`（[ADR-0001](../../adr/ADR-0001_Trocr_Architecture.md)、Status: Accepted）へ反映されている
+- [x] **EpicのIssue Mapを更新している**（`ISSUE_MAP.md`更新済み、Epic Issue本文（#1）へも進捗（Progress）を反映済み）
+
+未解決事項（[ARCHITECTURE_DRAFT.md](ARCHITECTURE_DRAFT.md#未解決事項)に詳細）: confidence算出方法、評価画面のTrOCR対応可否、日本語対応方針、Windows実機検証、Experiment Trackingのフィールド追加要否。**これらはPhase2以降の実装Issueで個別に解消する（本Investigationのスコープではない）。**
+
+### Phase 1: Design Documents作成済み（2026-07-28追記）
+
+案C（Engine Capability導入 + 限定Adapter）の具体的な設計として、`docs/design/`へ3件のDesign Documentsを作成した。**TrOCR専用ではなく、PARSeq/ABINet/ViTSTR/SVTR/Florence/Qwen-VL OCR等の将来エンジンを想定した設計。**
+
+- [../../design/ENGINE_CAPABILITY.md](../../design/ENGINE_CAPABILITY.md)
+- [../../design/ENGINE_REGISTRY.md](../../design/ENGINE_REGISTRY.md)
+- [../../design/MODEL_METADATA.md](../../design/MODEL_METADATA.md)
+
+### 調査結果（2026-07-29追記）
+
+- **推奨アーキテクチャ決定**: 案C（Engine Capability導入 + 限定Adapter）を正式決定
+- **ADR-0001 Accepted**: [ADR-0001](../../adr/ADR-0001_Trocr_Architecture.md)のStatusをProposedからAcceptedへ変更
+- **Design Documents完成**: [ENGINE_CAPABILITY.md](../../design/ENGINE_CAPABILITY.md) / [ENGINE_REGISTRY.md](../../design/ENGINE_REGISTRY.md) / [MODEL_METADATA.md](../../design/MODEL_METADATA.md)の最終レビューを完了（重複・矛盾の大きな問題は無く、Status表記等の軽微な用語統一のみ実施）
+
+### 結論
+
+**Phase2（共通基盤: Engine Capability / Engine Registry / Model Metadataの実装）へ移行可能。** 次はEngine Capabilityの実装Issueから着手する（順序は[ISSUE_MAP.md](ISSUE_MAP.md)参照）。**TrOCR本体（`trocr_pipeline.py`等）の実装はまだ開始しない。**
+
 ## 背景
 
 TrOCRは既存のTesseract、PaddleOCR、EasyOCRとは異なるモデル構造・学習方式・依存関係を持つ可能性があります。
