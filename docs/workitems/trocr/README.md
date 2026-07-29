@@ -2,7 +2,7 @@
 
 ## 状態
 
-Phase1（設計フェーズ）完了。ADR-0001はAccepted。Phase2（共通基盤実装）へ移行準備中
+Phase1（設計フェーズ）完了。Phase2（共通基盤実装）着手済み（Engine Capability実装完了、Feature [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)）
 
 ## 目的
 
@@ -16,12 +16,14 @@ OCR CrafterへTransformerベースの文字認識エンジンを追加できる�
 - [x] Architecture Decision準備（[ADR-0001](../../adr/ADR-0001_Trocr_Architecture.md)）
 - [x] Design Documents作成（[ENGINE_CAPABILITY.md](../../design/ENGINE_CAPABILITY.md) / [ENGINE_REGISTRY.md](../../design/ENGINE_REGISTRY.md) / [MODEL_METADATA.md](../../design/MODEL_METADATA.md)）
 - [x] ユーザーレビュー（Design Documents最終レビュー完了、ADR-0001をAcceptedへ変更）
-- [ ] 実装Issueの作成（Phase2、[ISSUE_MAP.md](ISSUE_MAP.md)の確定順序に沿って次段階で作成）
+- [x] Phase2 最初の実装Issue作成・完了（Engine Capability、[#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)）
+- [ ] Phase2 残りの実装Issue作成（[ISSUE_MAP.md](ISSUE_MAP.md)の確定順序: Engine Registry以降）
 
 ## 関連Issue
 
 - Epic: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1) [Epic] Transformer OCR対応基盤とTrOCR統合
 - Investigation: [#2](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/2) [Investigation] TrOCR採用可否とOCR Crafter統合方式の調査（Parent Epic: #1）
+- Feature: [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4) [Feature] Engine Capability実装（Parent Epic: #1、実装済み）
 
 ## 作業資料
 
@@ -30,7 +32,8 @@ OCR CrafterへTransformerベースの文字認識エンジンを追加できる�
 - [ARCHITECTURE_DRAFT.md](ARCHITECTURE_DRAFT.md)
 - [ISSUE_MAP.md](ISSUE_MAP.md)
 - [DECISION_LOG.md](DECISION_LOG.md)
-- [../../adr/ADR-0001_Trocr_Architecture.md](../../adr/ADR-0001_Trocr_Architecture.md)（Status: Proposed）
+- [../../adr/ADR-0001_Trocr_Architecture.md](../../adr/ADR-0001_Trocr_Architecture.md)（Status: Accepted）
+- [FEATURE_ENGINE_CAPABILITY.md](FEATURE_ENGINE_CAPABILITY.md)（Feature [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)、実装済み）
 
 ## 重要な制約
 

@@ -1,6 +1,15 @@
 # Engine Capability 設計
 
-Related: Investigation [#2](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/2) / Parent Epic [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1) / [ADR-0001](../adr/ADR-0001_Trocr_Architecture.md)（Status: Accepted）
+Related: Investigation [#2](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/2) / Parent Epic [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1) / [ADR-0001](../adr/ADR-0001_Trocr_Architecture.md)（Status: Accepted）/ Feature [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)（実装済み）
+
+## 実装済み（2026-07-29）
+
+本ドキュメントのスキーマは `src/app/services/engine_capability.py` として実装済み（Feature [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)）。`EngineCapability`（frozen dataclass）と、既知4エンジン（tesseract/paddleocr/easyocr/trocr）分の`BUILTIN_CAPABILITIES`を定義している。**既存コード（`predict.py`等）からの参照・配線はまだ行っていない**（Engine Registry実装後に接続予定）。単体テストは`tests/test_engine_capability.py`。
+
+実装レビューにより、以下2点は設計時点の`list[str]`から実装を精緻化した（本ドキュメントの型列も`tuple[str, ...]`へ更新済み）。
+
+- リスト系フィールドは`tuple[str, ...]`（不変）で保持する。`frozen=True`はトップレベルの属性再代入のみを防ぎ、内部の`list`はその場で`.append()`等が可能なままのため、真に不変にするには要素型もtupleにする必要があった
+- `BUILTIN_CAPABILITIES`は`types.MappingProxyType`で読み取り専用にした。プレーンな`dict`のままだと、外部から共有インスタンスへキーの追加・上書きができてしまうため
 
 ## 目的
 
@@ -48,7 +57,7 @@ OCRエンジンごとの機能差異を、コード中に散在する`if engine 
 | `version` | `str` | エンジン実装（アダプタコード側）のバージョン。ライブラリ自体のバージョンとは区別する（後述） | `"1.0.0"`（新設） | 同様 |
 | `framework` | `str` | 基盤ライブラリ・フレームワーク名 | T=`""`（外部バイナリ）/ P=`"paddlepaddle"` / E=`"pytorch"`(EasyOCR内部) / C=`"pytorch"` | `"transformers"`（TrOCR/Florence/Qwen-VL）, `"pytorch"`（PARSeq等） |
 | `license` | `str` | エンジン実装（アダプタコードが依存するライブラリ）のライセンス種別 | T=`Apache-2.0`（Tesseract本体） / P=`Apache-2.0` / E=`Apache-2.0` | TrOCR=`MIT`、モデルによって異なる |
-| `supported_platforms` | `list[str]` | 動作確認済みOS（例: `["windows","linux"]`） | 全エンジンWindows動作確認済み | 未検証のものは空リストで明示（推測補完しない） |
+| `supported_platforms` | `tuple[str, ...]` | 動作確認済みOS（例: `["windows","linux"]`） | 全エンジンWindows動作確認済み | 未検証のものは空リストで明示（推測補完しない） |
 
 **注記**: `license`はここでは「エンジン実装（コード）」のライセンスを指す。個別の**学習済みモデル（チェックポイント）**のライセンスは、モデルごとに異なりうる（例: TrOCRエンジン自体はMITだが、Hugging Face Hubから取得する第三者ファインチューン版チェックポイントは別ライセンスの場合がある）ため、モデル単位のライセンスは[MODEL_METADATA.md](MODEL_METADATA.md)の`license`フィールドで別途持つ。**この2つのライセンスフィールドは値が異なりうることを設計上明示しておく。**
 
@@ -97,7 +106,7 @@ OCRエンジンごとの機能差異を、コード中に散在する`if engine 
 | フィールド | 型 | 説明 | 既存4種の例 | 将来エンジンの想定 |
 |---|---|---|---|---|
 | `supports_export` | `bool` | 推論用エクスポート機能を持つか | P=`true`（`export_model.py`による推論用ディレクトリ生成）、T=`true`（`.traineddata`自体がそのままエクスポート済み形式）、C=`false`（`.pt`をそのまま使用） | HF系（TrOCR/Florence）は`save_pretrained()`で常に可能=`true` |
-| `supported_export_formats` | `list[str]` | 対応するエクスポート形式 | P=`["paddle_inference"]`、T=`["traineddata"]`、C=`[]` | TrOCR=`["safetensors","pytorch_bin"]`等 |
+| `supported_export_formats` | `tuple[str, ...]` | 対応するエクスポート形式 | P=`["paddle_inference"]`、T=`["traineddata"]`、C=`[]` | TrOCR=`["safetensors","pytorch_bin"]`等 |
 | `supports_onnx` | `bool` | ONNX形式へのエクスポートに対応するか | 既存4種とも未対応=`false` | HF系は`optimum`等の追加ツールで対応可能な場合がある（現状OCR Crafterには未導入） |
 | `supports_torchscript` | `bool` | TorchScript形式に対応するか | 既存4種とも未対応=`false` | PyTorchネイティブなPARSeq等では対応しやすい |
 | `supports_quantization` | `bool` | 量子化に対応するか | 既存4種とも未対応=`false` | HF系は`bitsandbytes`等で対応可能（公式ドキュメントで確認済み。ただし追加依存が必要） |
@@ -121,7 +130,7 @@ OCRエンジンごとの機能差異を、コード中に散在する`if engine 
 
 | フィールド | 型 | 説明 | 既存4種の例 | 将来エンジンの想定 |
 |---|---|---|---|---|
-| `supported_languages` | `list[str]` | エンジンが理論上サポートしうる言語（ISO 639-1等）のリスト | T=多数（`traineddata`次第、理論上100+言語）、P=多数、E=多数、C=言語非依存（文字分類のため） | TrOCR公式チェックポイントは英語のみ確認（[ADR-0001](../adr/ADR-0001_Trocr_Architecture.md)調査結果）。日本語は非公式チェックポイントのみ＝`supported_languages`に`"ja"`を含めるかは公式/非公式の別を明示した上で慎重に判断する（推測で含めない） |
+| `supported_languages` | `tuple[str, ...]` | エンジンが理論上サポートしうる言語（ISO 639-1等）のリスト | T=多数（`traineddata`次第、理論上100+言語）、P=多数、E=多数、C=言語非依存（文字分類のため） | TrOCR公式チェックポイントは英語のみ確認（[ADR-0001](../adr/ADR-0001_Trocr_Architecture.md)調査結果）。日本語は非公式チェックポイントのみ＝`supported_languages`に`"ja"`を含めるかは公式/非公式の別を明示した上で慎重に判断する（推測で含めない） |
 | `supports_multilingual` | `bool` | 単一モデルで複数言語混在に対応するか | E=`true`（複数言語同時指定可）、T/P=モデル切替方式のため単一モデル内混在は`false`扱い | XLM-RoBERTaベースのTrOCR/Florenceは理論上多言語対応だが、公式チェックポイントの学習データが英語中心のため実用上の多言語性は別途検証が必要 |
 | `supports_unicode` | `bool` | Unicode全般（絵文字・特殊記号含む）に対応するか | 既存4種ともASCII+一部拡張が中心。完全なUnicode対応は未検証=`false`扱いが安全 | 同様に要検証 |
 | `supports_vertical_text` | `bool` | 縦書きに対応するか | 既存4種とも未対応=`false` | 日本語OCR用途で将来的に重要になりうるが、現時点で対応を明言できるエンジンは無い |
@@ -131,16 +140,16 @@ OCRエンジンごとの機能差異を、コード中に散在する`if engine 
 
 | フィールド | 型 | 説明 | 既存4種の例 | 将来エンジンの想定 |
 |---|---|---|---|---|
-| `accepted_dataset_types` | `list[str]` | 受け入れ可能なデータセット形式（例: `["line_image_text_pair"]`） | T/P=`["line_image_text_pair"]`（既存の汎用Dataset形式そのまま）、C=`["classification_image"]` | TrOCR/Florence/PARSeq等も基本`line_image_text_pair`で流用可能（Investigationで確認済み：既存Dataset形式はengine非依存で変更不要） |
-| `required_annotations` | `list[str]` | 必要なアノテーション種別（例: `["text"]`, `["text","bbox"]`） | T/P=`["text"]`（行画像+テキストのみ）、C=`["class_label"]` | Florence等、検出も同時に行うモデルを学習する場合は`["text","bbox"]`が必要になりうるが、OCR Crafterの既存Dataset形式にbboxは無いため、**この種のエンジンを学習対応させる場合は別途Dataset拡張の実装Issueが必要になる**（本設計では現状のDataset形式を変更しないことを優先し、bbox必須のエンジンは当面「推論専用」として導入する選択肢を残す） |
-| `required_image_format` | `list[str]` | 必要な画像形式（例: `["png","jpg"]`） | 既存4種とも共通の前処理パイプライン経由でPNG統一 | 同様 |
+| `accepted_dataset_types` | `tuple[str, ...]` | 受け入れ可能なデータセット形式（例: `["line_image_text_pair"]`） | T/P=`["line_image_text_pair"]`（既存の汎用Dataset形式そのまま）、C=`["classification_image"]` | TrOCR/Florence/PARSeq等も基本`line_image_text_pair`で流用可能（Investigationで確認済み：既存Dataset形式はengine非依存で変更不要） |
+| `required_annotations` | `tuple[str, ...]` | 必要なアノテーション種別（例: `["text"]`, `["text","bbox"]`） | T/P=`["text"]`（行画像+テキストのみ）、C=`["class_label"]` | Florence等、検出も同時に行うモデルを学習する場合は`["text","bbox"]`が必要になりうるが、OCR Crafterの既存Dataset形式にbboxは無いため、**この種のエンジンを学習対応させる場合は別途Dataset拡張の実装Issueが必要になる**（本設計では現状のDataset形式を変更しないことを優先し、bbox必須のエンジンは当面「推論専用」として導入する選択肢を残す） |
+| `required_image_format` | `tuple[str, ...]` | 必要な画像形式（例: `["png","jpg"]`） | 既存4種とも共通の前処理パイプライン経由でPNG統一 | 同様 |
 
 ### Metadata（Engine Capabilityが宣言する、Model Metadataとの連携フィールド）
 
 | フィールド | 型 | 説明 |
 |---|---|---|
-| `required_metadata` | `list[str]` | このエンジンのモデルが**必ず**持つべき[MODEL_METADATA.md](MODEL_METADATA.md)のフィールド名リスト（例: Tesseractなら`["engine","charset","checkpoint"]`等） |
-| `optional_metadata` | `list[str]` | 持っていてもよいが必須ではないフィールド名リスト |
+| `required_metadata` | `tuple[str, ...]` | このエンジンのモデルが**必ず**持つべき[MODEL_METADATA.md](MODEL_METADATA.md)のフィールド名リスト（例: Tesseractなら`["engine","charset","checkpoint"]`等） |
+| `optional_metadata` | `tuple[str, ...]` | 持っていてもよいが必須ではないフィールド名リスト |
 
 この2フィールドが、[ENGINE_REGISTRY.md](ENGINE_REGISTRY.md)の`Validator`が「このモデルのMetadataは、そのengineが要求する必須フィールドを満たしているか」を検証する際の参照元になる。**これがEngine CapabilityとModel Metadataを繋ぐ唯一の連携ポイントであり、両者の責務を明確に分離する設計上の要とする。**
 
