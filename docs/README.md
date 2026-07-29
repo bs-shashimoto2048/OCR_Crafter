@@ -108,6 +108,10 @@
 | [development/ISSUE_WRITING_GUIDE.md](development/ISSUE_WRITING_GUIDE.md) | 良いIssueの書き方・受け入れ条件の書き方 |
 | [development/AI_AGENT_WORKFLOW.md](development/AI_AGENT_WORKFLOW.md) | Claude Code・Codex等のAIコーディングエージェント向け運用ガイド |
 
+## 開発中のWork Items
+
+- [TrOCR対応](workitems/trocr/README.md)
+
 ## バージョン情報
 
 - アプリバージョン: `src/app/version.py`（`APP_VERSION = "1.0.0"`）。FastAPIの表示・バックアップmanifestで共用
