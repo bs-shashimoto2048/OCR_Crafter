@@ -1006,7 +1006,11 @@ export default function App() {
       try {
         const savedData = await request(`/api/ocr/inference/model?project_id=${pid}`);
         const resolved = resolveRestoredInferenceSelection(savedData?.inference_model || null, infoMap);
-        if (resolved && resolved.found) {
+        if (resolved && resolved.found && resolved.engine === "unknown") {
+          // 未知Engineを暗黙にcustom等へ変換せず復元を止める（Issue #12）。
+          // 保存済みinference_model.jsonはそのまま（勝手に書き換えない）
+          notify("error", "前回使用していた推論モデルのOCRエンジンを判定できません。");
+        } else if (resolved && resolved.found) {
           // 推論テスト画面（推論/RapidOCR/一括OCR）の初期選択も、本番の推論使用モデルに合わせておく
           if (resolved.engine === "tesseract") {
             setInferEngine("tesseract");
@@ -1197,6 +1201,11 @@ export default function App() {
     if (switchingInferenceModel) return; // 通信中の連打は無視（重複POST防止）
     const info = modelInfos?.[name] || {};
     const nextEngine = resolveInferenceEngine(info);
+    if (nextEngine === "unknown") {
+      // 未知Engineを暗黙にPaddleOCR等へ変換しない（Issue #12）。APIへは送信せず停止する
+      notify("error", "このモデルのOCRエンジンを判定できません。");
+      return;
+    }
 
     // 確認要否は本番の推論使用モデル（savedInferenceModel）と比較する。推論テスト画面
     // （推論/RapidOCR/一括OCR）で試しに選んでいるモデル（inferModel等）とは無関係

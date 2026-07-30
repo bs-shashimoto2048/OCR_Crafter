@@ -14,14 +14,28 @@ test("resolveInferenceEngine: engine=tesseractのモデルはtesseract", () => {
   assert.equal(resolveInferenceEngine({ engine: "tesseract", training_family: "tesseract" }), "tesseract");
 });
 
-test("resolveInferenceEngine: training_family=ocr（PaddleOCR系）はpaddleocr", () => {
+test("resolveInferenceEngine: engine=paddleocrのモデルはpaddleocr", () => {
   assert.equal(resolveInferenceEngine({ engine: "paddleocr", training_family: "ocr" }), "paddleocr");
 });
 
-test("resolveInferenceEngine: それ以外（分類モデル等）はcustom", () => {
+test("resolveInferenceEngine: engine=easyocrのモデルはeasyocr", () => {
+  assert.equal(resolveInferenceEngine({ engine: "easyocr", training_family: "ocr" }), "easyocr");
+});
+
+test("resolveInferenceEngine: engine=trocrのモデルはtrocr（Issue #12: PaddleOCRへフォールバックしない）", () => {
+  assert.equal(resolveInferenceEngine({ engine: "trocr", training_family: "ocr" }), "trocr");
+});
+
+test("resolveInferenceEngine: それ以外（分類モデル・engine未指定等）はcustom", () => {
   assert.equal(resolveInferenceEngine({ engine: "custom", training_family: "classification" }), "custom");
   assert.equal(resolveInferenceEngine({}), "custom");
   assert.equal(resolveInferenceEngine(undefined), "custom");
+});
+
+test("resolveInferenceEngine: 未登録・未知のengine値はunknown（PaddleOCRへフォールバックしない）", () => {
+  assert.equal(resolveInferenceEngine({ engine: "unknown-engine", training_family: "ocr" }), "unknown");
+  assert.equal(resolveInferenceEngine({ engine: "unknown", training_family: "ocr" }), "unknown");
+  assert.equal(resolveInferenceEngine({ engine: "parseq", training_family: "ocr" }), "unknown");
 });
 
 test("shouldConfirmSwitch: 初回設定（現在値なし）は確認不要", () => {
@@ -53,6 +67,8 @@ const INFO_MAP = {
   "ModelA.tess.json": { engine: "tesseract", training_family: "tesseract" },
   "ModelB.ocr.json": { engine: "paddleocr", training_family: "ocr" },
   "ModelC_classify.pt": { engine: "custom", training_family: "classification" },
+  "ModelD.trocr.json": { engine: "trocr", training_family: "ocr" },
+  "ModelE_unknown.ocr.json": { engine: "unknown-engine", training_family: "ocr" },
 };
 
 test("resolveRestoredInferenceSelection: 保存が無い場合はnull（何もしない）", () => {
@@ -80,6 +96,30 @@ test("resolveRestoredInferenceSelection: 保存済みPaddleOCRモデルの復元
 test("resolveRestoredInferenceSelection: engine未指定はcustomとして復元する（後方互換）", () => {
   const resolved = resolveRestoredInferenceSelection({ model: "ModelC_classify.pt" }, INFO_MAP);
   assert.deepEqual(resolved, { found: true, engine: "custom", model: "ModelC_classify.pt" });
+});
+
+test("resolveRestoredInferenceSelection: engine=customを明示指定してもcustomのまま復元する", () => {
+  const resolved = resolveRestoredInferenceSelection(
+    { engine: "custom", model: "ModelC_classify.pt" },
+    INFO_MAP
+  );
+  assert.deepEqual(resolved, { found: true, engine: "custom", model: "ModelC_classify.pt" });
+});
+
+test("resolveRestoredInferenceSelection: 保存済みTrOCRモデルはtrocrとして復元する（Issue #12）", () => {
+  const resolved = resolveRestoredInferenceSelection(
+    { engine: "trocr", model: "ModelD.trocr.json" },
+    INFO_MAP
+  );
+  assert.deepEqual(resolved, { found: true, engine: "trocr", model: "ModelD.trocr.json" });
+});
+
+test("resolveRestoredInferenceSelection: 未登録・未知のengineはunknownのまま返す（customへ暗黙変換しない）", () => {
+  const resolved = resolveRestoredInferenceSelection(
+    { engine: "unknown-engine", model: "ModelE_unknown.ocr.json" },
+    INFO_MAP
+  );
+  assert.deepEqual(resolved, { found: true, engine: "unknown", model: "ModelE_unknown.ocr.json" });
 });
 
 test("resolveRestoredInferenceSelection: 保存済みモデルが現在の一覧に無い（削除・移動済み）場合はfound:falseで、勝手に置き換えない", () => {
