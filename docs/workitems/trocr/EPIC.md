@@ -20,9 +20,11 @@ Issue: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)
 
 ✅ TrOCR Backend推論コア（[#16](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/16)、Closed。PR [#17](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/17)でmainへマージ済み（merge commit `8b914e5`）。`src/app/services/trocr_engine.py`。単画像推論のみ、OCR Pipeline等へは未接続）
 
+🔶 OCR PipelineへTrOCR統合（[#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18)、実装済み・PRレビュー待ち。`src/app/predict.py::predict_from_image()`が`resolve_engine_id()`経由で`trocr`分岐しTrOCREngineを呼び出す。当初想定の`ocr_pipeline.py`ではなく実際の推論ディスパッチファイルへ接続。API/Frontend/学習/評価は未接続）
+
 ⬜ Training
 
-⬜ Inference
+⬜ Inference（Engine Registry Handler化は未着手。OCR Pipelineへの接続自体は上記参照）
 
 ⬜ Evaluation
 
@@ -32,11 +34,11 @@ Issue: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)
 
 ⬜ Documentation
 
-次フェーズ: OCR PipelineへのTrOCR統合を含む残りの実装Issue（[ISSUE_MAP.md](ISSUE_MAP.md)の確定順序）を作成予定。
+次フェーズ: TrOCR Training／Evaluation連携を含む残りの実装Issue（[ISSUE_MAP.md](ISSUE_MAP.md)の確定順序）を作成予定。
 
 参考: CI依存関係修正（[#6](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/6)、PR [#7](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/7)でmainへマージ済み）／既存のDB初期化テスト課題（[#8](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/8)、Open、Epic対象外の既存不具合）
 
-**Future Work（Epic範囲内・未着手）**: カスタム分類モデル（`engine="custom"`）のModel Metadata対応／device選択ロジックの共通化候補（`train.py::detect_device()`と`trocr_engine.py::_resolve_device()`が独立実装）。詳細は[ISSUE_MAP.md](ISSUE_MAP.md)の「Future Work」参照。
+**Future Work（Epic範囲内・未着手）**: カスタム分類モデル（`engine="custom"`）のModel Metadata対応／device選択ロジックの共通化候補（`train.py::detect_device()`と`trocr_engine.py::_resolve_device()`が独立実装）／TrOCRのmodel_ref解決方式の見直し（Model Metadata連携実装時）。詳細は[ISSUE_MAP.md](ISSUE_MAP.md)の「Future Work」参照。
 
 ## 背景
 
@@ -108,6 +110,7 @@ Epicの完了条件は、調査後に確定した子Issueがすべて完了し�
 - [ ] #12（Bug: Frontendの未知Engine判定がPaddleOCRへ暗黙フォールバックする、未着手）
 - [x] #14（Feature: 共通Model Metadata実装、Closed）
 - [x] #16（Feature: TrOCR Backend単画像推論コア実装、Closed）
+- [ ] #18（Feature: OCR PipelineへTrOCR統合、実装済み・PRレビュー待ち）
 
 ## 関連資料
 

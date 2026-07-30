@@ -6,6 +6,8 @@ Related: [ADR-0001](../adr/ADR-0001_Trocr_Architecture.md)（Status: Accepted）
 
 `src/app/services/trocr_engine.py`として、Hugging Face Transformersを利用したTrOCRの**単画像推論コアのみ**を実装した（Feature [#16](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/16)）。既存OCR Pipeline・API・Frontend・学習・評価・Benchmark・Release Gate・Model Metadataとは**まだ接続していない**（独立したBackendサービスとして実装のみ）。
 
+**追記（2026-07-30、Feature [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18)）**: 実際の推論ディスパッチ（`src/app/predict.py::predict_from_image()`）からTrOCREngineを呼び出せるようになった。詳細は[FEATURE_PIPELINE_TROCR.md](../workitems/trocr/FEATURE_PIPELINE_TROCR.md)を参照。本ファイル下部の「OCR Pipelineとは未接続であること」はFeature #16時点の記述であり、`predict.py`については現在は接続済み（`trocr_engine.py`自体は無変更）。API・Frontend・学習・評価・Benchmark・Release Gate・Model Metadataとの接続は引き続き未実装。
+
 ## 推論コアの責務
 
 - TrOCR互換モデル（Processor・`VisionEncoderDecoderModel`）のロード
@@ -109,9 +111,11 @@ TrOCRError（RuntimeError）
 - `ModelMetadata.engine_id="trocr"`は既存の`resolve_engine_id()`によるEngine Registry検証をそのまま通過する（`trocr`は既に組み込みエンジンとして登録済み）
 - `ModelMetadata`から`TrOCREngine`を自動構築するAdapter・Factoryは本Issueでは実装しない。実装する場合は、`ModelMetadata`側の`extra`に保持されうるTrOCR固有情報（`processor`/`tokenizer`設定等、[MODEL_METADATA.md](MODEL_METADATA.md)で不採用とした項目）をどう扱うかも合わせて別Issueで検討する
 
-## OCR Pipelineとは未接続であること
+## OCR Pipelineとは未接続であること（Feature #16時点。predict.pyはFeature #18で接続済み）
 
-`src/app/services/ocr_pipeline.py`・`src/app/predict.py`・`src/app/job_runner.py`・`src/app/services/ocr_evaluation.py`・`src/app/services/release_gate.py`・`src/app/services/benchmark.py`は本Issueで一切変更していない。`TrOCREngine`は独立したモジュールとして存在するのみで、既存の推論・学習・評価フローからは呼び出されない。
+本Issue（Feature #16）の時点では、`src/app/services/ocr_pipeline.py`・`src/app/predict.py`・`src/app/job_runner.py`・`src/app/services/ocr_evaluation.py`・`src/app/services/release_gate.py`・`src/app/services/benchmark.py`は一切変更していなかった。`TrOCREngine`は独立したモジュールとして存在するのみで、既存の推論・学習・評価フローからは呼び出されなかった。
+
+その後、Feature [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18)で`src/app/predict.py::predict_from_image()`のみが変更され、`resolve_engine_id()`経由で`engine="trocr"`のときに`TrOCREngine`を呼び出すようになった（`ocr_pipeline.py`・`job_runner.py`・`ocr_evaluation.py`・`release_gate.py`・`benchmark.py`は引き続き無変更）。詳細は[FEATURE_PIPELINE_TROCR.md](../workitems/trocr/FEATURE_PIPELINE_TROCR.md)を参照。
 
 ## Engine Registry / Engine Capabilityとの関係
 
