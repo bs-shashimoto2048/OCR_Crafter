@@ -16,7 +16,7 @@ Issue: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)
 
 ⬜ Model Metadata
 
-🔶 Engine判定既存バグ修正（Backend側は[#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)でPRレビュー待ち・未マージ。Frontend側は[#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)として別Issue化、未着手）
+🔶 Engine判定既存バグ修正（Backend側は[#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)実装済み、PR [#13](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/13)はOpen・レビュー待ち・未マージ。Frontend側は[#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)として別Issue化、未着手）
 
 ⬜ TrOCR Backend
 
