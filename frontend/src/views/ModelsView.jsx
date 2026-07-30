@@ -8,6 +8,7 @@ import ModelIdBadge from "../components/ModelIdBadge";
 import { API_BASE, request } from "../lib/api";
 import { HELP_TEXTS } from "../lib/helpTexts";
 import { isInferenceModelInUse } from "../lib/inferenceModel";
+import { engineDisplayLabel } from "../lib/engineResolution";
 import { historyPreprocessLabel } from "../lib/evalHistory";
 import {
   MODEL_BADGE_LABELS,
@@ -111,11 +112,13 @@ function parseDownloadFilename(contentDisposition, fallback) {
 // いっぱいまで伸ばさず、Engine列との間に大きな空白を作らない）
 export const MODEL_LIST_GRID_COLUMNS = "32px minmax(300px, 420px) 80px 85px 130px 140px 140px 70px";
 
-const ENGINE_LABELS = { tesseract: "Tesseract", easyocr: "EasyOCR", custom: "カスタム" };
-
-function engineLabelOf(engine, family) {
-  if (family === "ocr" && engine !== "tesseract") return "PaddleOCR";
-  return ENGINE_LABELS[String(engine || "").toLowerCase()] || (engine || "-");
+// 未知Engineを暗黙にPaddleOCRとみなさない（Issue #12）。既知4Engine（tesseract/paddleocr/
+// easyocr/trocr）はengineResolution.jsで判定し、customはEngine Registry未登録のためここで
+// 個別に扱う。それ以外（未知値）は"不明"（既存UI規約。frontend/src/lib/detectModel.js参照）。
+function engineLabelOf(engine) {
+  const normalized = String(engine || "").trim().toLowerCase();
+  if (normalized === "custom") return "カスタム";
+  return engineDisplayLabel(engine);
 }
 
 function familyLabelOf(family) {
@@ -465,7 +468,7 @@ export default function ModelsView({
       ) {
         return false;
       }
-      if (filterEngine !== "all" && engineLabelOf(engineName(name), trainingFamily(name)) !== filterEngine) {
+      if (filterEngine !== "all" && engineLabelOf(engineName(name)) !== filterEngine) {
         return false;
       }
       if (filterFamily !== "all" && familyLabelOf(trainingFamily(name)) !== filterFamily) {
@@ -479,7 +482,7 @@ export default function ModelsView({
   }, [models, aliases, filterSearch, filterEngine, filterFamily, filterStatus, modelInfos, inferenceInUseModel]);
 
   const engineOptions = useMemo(() => {
-    const set = new Set(models.map((name) => engineLabelOf(engineName(name), trainingFamily(name))));
+    const set = new Set(models.map((name) => engineLabelOf(engineName(name))));
     return [...set].sort();
   }, [models, modelInfos]);
 
@@ -587,7 +590,7 @@ export default function ModelsView({
               </p>
             ) : null}
             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted">
-              <span>Engine: {engineLabelOf(engineName(name), trainingFamily(name))}</span>
+              <span>Engine: {engineLabelOf(engineName(name))}</span>
               <span>作成: {formatDateTime(createdAt(name))}</span>
               <StatusBadge status={statusOf(name)} />
             </div>
@@ -860,7 +863,7 @@ export default function ModelsView({
                 <span className="text-[15px] font-semibold text-muted">未記録</span>
               )}
             </div>
-            <SpecRow label="Engine" value={engineLabelOf(engineName(name), trainingFamily(name))} />
+            <SpecRow label="Engine" value={engineLabelOf(engineName(name))} />
             <SpecRow label="方式" value={familyLabelOf(trainingFamily(name))} />
             {/* 学習Dataset（Dataset Manager連携。登録時点で確定保存された来歴。未記録=旧モデル） */}
             <div className="flex items-start justify-between gap-3 py-0.5">
@@ -1896,7 +1899,7 @@ export default function ModelsView({
                 </thead>
                 <tbody>
                   {[
-                    { label: "Engine", value: (name) => engineLabelOf(engineName(name), trainingFamily(name)) },
+                    { label: "Engine", value: (name) => engineLabelOf(engineName(name)) },
                     { label: "方式", value: (name) => familyLabelOf(trainingFamily(name)) },
                     { label: "ベースモデル", value: (name) => infoOf(name).base_lang || "-", help: HELP_TEXTS.baseModel },
                     { label: "Iteration", value: (name) => iterationText(name), help: HELP_TEXTS.iteration },
@@ -2080,7 +2083,7 @@ export default function ModelsView({
                       </p>
                     ) : null}
                   </span>
-                  <span className="px-2 py-2 text-muted">{engineLabelOf(engineName(name), trainingFamily(name))}</span>
+                  <span className="px-2 py-2 text-muted">{engineLabelOf(engineName(name))}</span>
                   <span className="px-2 py-2 text-muted">{familyLabelOf(trainingFamily(name))}</span>
                   <span className="min-w-0 px-2 py-2">
                     {datasetIdOf(name) ? (

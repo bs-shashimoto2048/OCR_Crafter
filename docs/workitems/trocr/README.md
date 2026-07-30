@@ -2,7 +2,7 @@
 
 ## 状態
 
-Phase1（設計フェーズ）完了。Phase2（共通基盤実装）完了（Engine Capability [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)・Engine Registry [#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9)・Engine判定ロジック統一Backend側[#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)・共通Model Metadata [#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14)、いずれもmainへマージ済み。Frontend側は[#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)として別Issue化・未着手）。Phase3（TrOCR Backend単画像推論コア、Feature [#16](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/16)）完了・mainへマージ済み。Phase4（OCR Pipelineへの接続、Feature [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18)）完了・mainへマージ済み。既存OCR推論APIへの統合（Feature [#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20)）実装済み・PRレビュー待ち
+Phase1（設計フェーズ）完了。Phase2（共通基盤実装）完了（Engine Capability [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)・Engine Registry [#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9)・Engine判定ロジック統一Backend側[#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)・共通Model Metadata [#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14)、いずれもmainへマージ済み。Frontend側[#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)は実装済み・PRレビュー待ち）。Phase3（TrOCR Backend単画像推論コア、Feature [#16](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/16)）完了・mainへマージ済み。Phase4（OCR Pipelineへの接続、Feature [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18)）完了・mainへマージ済み。既存OCR推論APIへの統合（Feature [#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20)）完了・mainへマージ済み
 
 ## 目的
 
@@ -18,12 +18,13 @@ OCR CrafterへTransformerベースの文字認識エンジンを追加できる�
 - [x] ユーザーレビュー（Design Documents最終レビュー完了、ADR-0001をAcceptedへ変更）
 - [x] Phase2 最初の実装Issue作成・完了（Engine Capability、[#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)）
 - [x] Phase2 2番目の実装Issue作成・MVP実装完了（Engine Registry、[#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9)、Closed）
-- [x] Engine判定既存バグ修正（Backend）実装完了・Closed（[#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)）。Frontend側は別Issue化のみ（[#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)、未着手）
+- [x] Engine判定既存バグ修正（Backend）実装完了・Closed（[#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)）。Frontend側は実装完了・PRレビュー待ち（[#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)）
 - [x] Phase2 3番目の実装Issue作成・実装完了（Model Metadata、[#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14)、Closed）
 - [x] Phase3 最初の実装Issue作成・実装完了（TrOCR Backend単画像推論コア、[#16](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/16)、Closed・mainへマージ済み）
 - [x] Phase4 OCR Pipelineへの接続Issue作成・実装完了（[#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18)、Closed・mainへマージ済み）
-- [x] 既存OCR推論APIへのTrOCR統合Issue作成・実装完了（[#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20)、PRレビュー待ち・未マージ）
-- [ ] 残りの実装Issue作成（[ISSUE_MAP.md](ISSUE_MAP.md)の確定順序: Engine判定既存バグ修正のFrontend側、TrOCR Training/Evaluation等）
+- [x] 既存OCR推論APIへのTrOCR統合Issue作成・実装完了（[#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20)、Closed・mainへマージ済み）
+- [x] Frontend側Engine判定修正Issue実装完了（既存Issue [#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)を使用、新規Issue作成なし。PRレビュー待ち・未マージ）
+- [ ] 残りの実装Issue作成（[ISSUE_MAP.md](ISSUE_MAP.md)の確定順序: TrOCR Training/Evaluation等）
 
 ## 関連Issue
 
@@ -32,11 +33,11 @@ OCR CrafterへTransformerベースの文字認識エンジンを追加できる�
 - Feature: [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4) [Feature] Engine Capability実装（Parent Epic: #1、実装済み）
 - Feature: [#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9) [Feature] Engine Registry実装（Parent Epic: #1、MVP実装済み・Closed）
 - Refactor: [#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11) [Refactor] Engine判定ロジックをEngine Registryへ統一（Parent Epic: #1、Backend実装済み・Closed）
-- Bug: [#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12) [Bug] Frontendの未知Engine判定がPaddleOCRへ暗黙フォールバックする（Parent Epic: #1、未着手）
+- Bug: [#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12) [Bug] Frontendの未知Engine判定がPaddleOCRへ暗黙フォールバックする（Parent Epic: #1、実装済み・PRレビュー待ち）
 - Feature: [#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14) [Feature] 共通Model Metadata実装（Parent Epic: #1、実装済み・Closed）
 - Feature: [#16](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/16) [Feature] TrOCR Backend単画像推論コア実装（Parent Epic: #1、実装済み・Closed）
 - Feature: [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18) [Feature] OCR PipelineへTrOCR統合（Parent Epic: #1、実装済み・Closed）
-- Feature: [#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20) [Feature] 既存OCR推論APIへTrOCR統合（Parent Epic: #1、実装済み・PRレビュー待ち）
+- Feature: [#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20) [Feature] 既存OCR推論APIへTrOCR統合（Parent Epic: #1、実装済み・Closed）
 
 ## 作業資料
 
@@ -52,7 +53,8 @@ OCR CrafterへTransformerベースの文字認識エンジンを追加できる�
 - [FEATURE_MODEL_METADATA.md](FEATURE_MODEL_METADATA.md)（Feature [#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14)、実装済み・Closed）
 - [FEATURE_TROCR_INFERENCE_CORE.md](FEATURE_TROCR_INFERENCE_CORE.md)（Feature [#16](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/16)、実装済み・Closed）
 - [FEATURE_PIPELINE_TROCR.md](FEATURE_PIPELINE_TROCR.md)（Feature [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18)、実装済み・Closed）
-- [FEATURE_TROCR_API_INTEGRATION.md](FEATURE_TROCR_API_INTEGRATION.md)（Feature [#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20)、実装済み・PRレビュー待ち）
+- [FEATURE_TROCR_API_INTEGRATION.md](FEATURE_TROCR_API_INTEGRATION.md)（Feature [#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20)、実装済み・Closed）
+- [FEATURE_FRONTEND_ENGINE_RESOLUTION.md](FEATURE_FRONTEND_ENGINE_RESOLUTION.md)（Bug [#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)、実装済み・PRレビュー待ち）
 
 ## 重要な制約
 
