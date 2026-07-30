@@ -14,7 +14,7 @@ Issue: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)
 
 ✅ Engine Registry（[#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9)、Closed。PR [#10](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/10)でmainへマージ済み。`src/app/services/engine_registry.py`。MVP範囲のみ（Handler群未実装）、既存コードへの配線はまだ無し）
 
-🔶 Model Metadata（[#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14)、実装済み・PR Open・レビュー待ち・未マージ）
+🔶 Model Metadata（[#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14)、実装済み。PR [#15](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/15)はOpen・レビュー待ち・未マージ）
 
 🔶 Engine判定既存バグ修正（Backend側は[#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)、Closed。PR [#13](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/13)でmainへマージ済み。`resolve_engine_id()`経由の明示的判定へ統一、互換性調査済み。Frontend側は[#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)として別Issue化、未着手のため🔶のまま）
 
