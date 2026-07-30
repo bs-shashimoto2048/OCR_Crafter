@@ -5,9 +5,11 @@ import { test } from "node:test";
 import {
   buildSwitchConfirmMessage,
   isInferenceModelInUse,
+  normalizeTrocrModelRef,
   resolveInferenceEngine,
   resolveRestoredInferenceSelection,
   shouldConfirmSwitch,
+  trocrModelRefMissing,
 } from "../src/lib/inferenceModel.js";
 
 test("resolveInferenceEngine: engine=tesseractのモデルはtesseract", () => {
@@ -146,4 +148,37 @@ test("isInferenceModelInUse: 保存済み推論使用モデルが未設定（空
 test("isInferenceModelInUse: 対象モデル名が空でも保存済み値と誤って一致しない（空文字同士でfalse）", () => {
   assert.equal(isInferenceModelInUse("", ""), false);
   assert.equal(isInferenceModelInUse("", "ModelA.tess.json"), false);
+});
+
+// ---------- normalizeTrocrModelRef / trocrModelRefMissing（Frontend TrOCR UI） ----------
+
+test("normalizeTrocrModelRef: 前後空白を除去する", () => {
+  assert.equal(normalizeTrocrModelRef("  microsoft/trocr-base-printed  "), "microsoft/trocr-base-printed");
+  assert.equal(normalizeTrocrModelRef("C:\\models\\trocr-custom"), "C:\\models\\trocr-custom");
+});
+
+test("normalizeTrocrModelRef: null/undefined/空文字/空白のみは空文字", () => {
+  assert.equal(normalizeTrocrModelRef(null), "");
+  assert.equal(normalizeTrocrModelRef(undefined), "");
+  assert.equal(normalizeTrocrModelRef(""), "");
+  assert.equal(normalizeTrocrModelRef("   "), "");
+});
+
+test("trocrModelRefMissing: engine=trocrでmodel_ref未入力・空白のみはtrue", () => {
+  assert.equal(trocrModelRefMissing("trocr", ""), true);
+  assert.equal(trocrModelRefMissing("trocr", "   "), true);
+  assert.equal(trocrModelRefMissing("trocr", null), true);
+  assert.equal(trocrModelRefMissing("trocr", undefined), true);
+});
+
+test("trocrModelRefMissing: engine=trocrでmodel_refが入力済みならfalse", () => {
+  assert.equal(trocrModelRefMissing("trocr", "microsoft/trocr-base-printed"), false);
+  assert.equal(trocrModelRefMissing("trocr", "  /opt/models/trocr-custom  "), false);
+});
+
+test("trocrModelRefMissing: engine=trocr以外はmodel_refの値に関わらずfalse（既存Engineの挙動を変えない）", () => {
+  assert.equal(trocrModelRefMissing("paddleocr", ""), false);
+  assert.equal(trocrModelRefMissing("tesseract", null), false);
+  assert.equal(trocrModelRefMissing("easyocr", "   "), false);
+  assert.equal(trocrModelRefMissing("custom", ""), false);
 });

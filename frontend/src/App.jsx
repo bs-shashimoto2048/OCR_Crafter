@@ -37,9 +37,11 @@ import { viewBoundaryKey } from "./lib/viewKey";
 import { lowercaseToggleApplicable } from "./lib/lowercase";
 import {
   buildSwitchConfirmMessage,
+  normalizeTrocrModelRef,
   resolveInferenceEngine,
   resolveRestoredInferenceSelection,
   shouldConfirmSwitch,
+  trocrModelRefMissing,
 } from "./lib/inferenceModel";
 import {
   buildPreprocessPreviewPayload,
@@ -549,6 +551,9 @@ export default function App() {
   const [inferEasyOcrLangs, setInferEasyOcrLangs] = useState(["en"]);
   const [inferPaddleModel, setInferPaddleModel] = useState("latest");
   const [inferTesseractModel, setInferTesseractModel] = useState("latest");
+  // TrOCRのモデル参照（Hugging Face model ID・ローカルパス）の自由入力。既定値を持たせない
+  // （TrOCRモデルの既定値をハードコードしない方針。空文字のまま送信すると推論前に停止する）
+  const [inferTrocrModelRef, setInferTrocrModelRef] = useState("");
   // 「推論に使用（本番の推論使用モデル）」設定は、推論テスト画面（推論/RapidOCR/一括OCR）が
   // 試し撃ち用に自由に切り替えるinferEngine/inferModel等とは完全に別のstateで管理する。
   // 以前はinferEngine/inferModelを両方の用途で共用しており、テスト画面で別モデルを試しに
@@ -3455,6 +3460,14 @@ export default function App() {
       notify("error", "画像ファイルを選択してください");
       return;
     }
+    // TrOCR選択時はmodel_ref（Hugging Face model ID・ローカルパス）が必須。
+    // 未入力・空白のみならAPIを呼び出さずここで停止する（Backend側にも検証はあるが、
+    // Frontend側でも送信前に止める）
+    if (trocrModelRefMissing(inferEngine, inferTrocrModelRef)) {
+      notify("error", "TrOCRモデル参照を入力してください。");
+      return;
+    }
+    const trimmedTrocrModelRef = normalizeTrocrModelRef(inferTrocrModelRef);
 
     setInferLoading(true);
     try {
@@ -3479,6 +3492,10 @@ export default function App() {
         }
       } else if (inferEngine === "easyocr") {
         formData.append("easyocr_langs", inferEasyOcrLangs.length > 0 ? inferEasyOcrLangs.join(",") : "en");
+      } else if (inferEngine === "trocr") {
+        // 既存modelフィールドへそのまま渡す（TrOCR専用フィールドは追加しない）。
+        // "latest"の自動変換はしない（trimmedTrocrModelRefは利用者の入力値そのまま）
+        formData.append("model", trimmedTrocrModelRef);
       }
       if (lowercaseToggleApplicable(inferEngine, inferEasyOcrLangs)) {
         formData.append("include_lowercase", inferIncludeLowercase ? "true" : "false");
@@ -4634,6 +4651,8 @@ export default function App() {
         tesseractModel={inferTesseractModel}
         setTesseractModel={setInferTesseractModel}
         tesseractModels={tesseractModels}
+        trocrModelRef={inferTrocrModelRef}
+        setTrocrModelRef={setInferTrocrModelRef}
         latestModels={latestModels}
         onFileChange={selectInferenceFile}
         fileName={inferFileName}

@@ -2,6 +2,8 @@ import Card from "../components/Card";
 import Button from "../components/Button";
 import CharHeatmap from "../components/CharHeatmap";
 import LowercaseToggle from "../components/LowercaseToggle";
+import { engineDisplayLabel } from "../lib/engineResolution";
+import { normalizeTrocrModelRef, trocrModelRefMissing } from "../lib/inferenceModel";
 
 export default function InferenceView({
   engine,
@@ -23,6 +25,8 @@ export default function InferenceView({
   tesseractModel,
   setTesseractModel,
   tesseractModels,
+  trocrModelRef,
+  setTrocrModelRef,
   latestModels,
   onFileChange,
   fileName,
@@ -47,10 +51,8 @@ export default function InferenceView({
   }
 
   function engineLabel(value) {
-    if (value === "easyocr") return "EasyOCR";
-    if (value === "paddleocr") return "PaddleOCR";
-    if (value === "tesseract") return "Tesseract";
-    return "カスタムモデル";
+    if (value === "custom") return "カスタムモデル";
+    return engineDisplayLabel(value);
   }
 
   function toggleEasyOcrLang(lang) {
@@ -76,7 +78,9 @@ export default function InferenceView({
           ? tesseractModel === "latest"
             ? "Tesseract最新モデル"
             : tesseractModel
-          : "EasyOCR";
+          : engine === "trocr"
+            ? normalizeTrocrModelRef(trocrModelRef) || "未入力"
+            : "EasyOCR";
   // null=取得不能（whitelist指定時のTesseract等）。0%へ偽装せず "--" 表示にする
   const confidenceAvailable = typeof result?.confidence === "number" && Number.isFinite(result.confidence);
   const confidenceValue = confidenceAvailable ? result.confidence : 0;
@@ -100,6 +104,7 @@ export default function InferenceView({
               <option value="easyocr">EasyOCR</option>
               <option value="paddleocr">PaddleOCR</option>
               <option value="tesseract">Tesseract</option>
+              <option value="trocr">TrOCR</option>
             </select>
           </div>
 
@@ -220,6 +225,26 @@ export default function InferenceView({
                 ) : null}
               </div>
             </>
+          ) : engine === "trocr" ? (
+            <div>
+              <label className="app-label">TrOCRモデル参照</label>
+              <input
+                type="text"
+                value={trocrModelRef || ""}
+                onChange={(e) => setTrocrModelRef(e.target.value)}
+                placeholder="例: microsoft/trocr-base-printed"
+                className="app-select"
+              />
+              <p className="mt-1 text-xs text-muted">
+                Hugging Face model IDまたはローカルモデルパスを指定してください（必須）。
+              </p>
+              <p className="mt-1 text-xs text-amber-200">
+                Hub上のモデルIDを指定した場合、Backendがモデルを取得する可能性があります。社内運用ではローカルモデルパスの利用を推奨します。
+              </p>
+              {trocrModelRefMissing(engine, trocrModelRef) ? (
+                <p className="mt-1 text-xs text-red-400">TrOCRモデル参照を入力してください。</p>
+              ) : null}
+            </div>
           ) : (
             <div>
               <label className="app-label">{engine === "paddleocr" ? "PaddleOCR 言語" : "EasyOCR 言語"}</label>
@@ -271,7 +296,10 @@ export default function InferenceView({
             <span className="text-xs text-muted">現在: {Number(rotation || 0)}°</span>
           </div>
 
-          <Button onClick={onRun} disabled={!fileName || loading}>
+          <Button
+            onClick={onRun}
+            disabled={!fileName || loading || trocrModelRefMissing(engine, trocrModelRef)}
+          >
             {loading ? "推論中..." : "推論実行"}
           </Button>
         </div>
