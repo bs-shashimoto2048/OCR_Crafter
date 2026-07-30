@@ -12,7 +12,7 @@ Issue: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)
 
 ✅ Engine Capability（[#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)、Closed。PR [#5](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/5)でmainへマージ済み。`src/app/services/engine_capability.py`。既存コードへの配線はまだ無し）
 
-⬜ Engine Registry
+🔶 Engine Registry（[#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9)、MVP実装済み。PR [#10](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/10)はOpen・レビュー待ち・未マージ）
 
 ⬜ Model Metadata
 
@@ -101,6 +101,7 @@ Epicの完了条件は、調査後に確定した子Issueがすべて完了し�
 
 - [x] #2（Investigation、Closed）
 - [x] #4（Feature: Engine Capability実装、Closed）
+- [ ] #9（Feature: Engine Registry実装、MVP実装済み・PRレビュー待ち）
 
 ## 関連資料
 

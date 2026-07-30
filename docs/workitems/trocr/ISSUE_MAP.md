@@ -7,13 +7,14 @@ Related Issue: Epic [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues
 - Epic: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1) Transformer OCR対応基盤とTrOCR統合
 - Investigation: [#2](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/2) TrOCR採用可否とOCR Crafter統合方式の調査（Parent Epic: #1）
 - Feature: [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4) Engine Capability実装（実装済み。Parent Epic: #1）
+- Feature: [#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9) Engine Registry実装（MVP実装済み・PR未マージ。Parent Epic: #1）
 
 ## 次に作成するIssue候補（確定順序、2026-07-29）
 
 ADR-0001がAcceptedとなり、Phase2（共通基盤実装）へ移行するにあたり、次に作成するIssue候補の順序を以下のとおり確定した。**GitHub Issueはまだ作成しない。** 各項目の詳細は次節「調査完了後に作成を検討するIssue（Phase構成）」の該当Phaseを参照。
 
 1. **Engine Capability** — Phase1（[ENGINE_CAPABILITY.md](../../design/ENGINE_CAPABILITY.md)の実装、✅完了: [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)）
-2. **Engine Registry** — Phase1（[ENGINE_REGISTRY.md](../../design/ENGINE_REGISTRY.md)の実装）
+2. **Engine Registry** — Phase1（[ENGINE_REGISTRY.md](../../design/ENGINE_REGISTRY.md)のMVP実装、✅実装済み・PRレビュー待ち: [#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9)）
 3. **Model Metadata** — Phase1（[MODEL_METADATA.md](../../design/MODEL_METADATA.md)の実装）
 4. **Engine判定既存バグ修正** — Phase2（`engineLabelOf()`/`resolveInferenceEngine()`/`_model_engine()`のキャッチオール是正＋判定ロジックの一本化）
 5. **TrOCR Backend** — Phase3（依存関係・設定管理・Dataset確認・TrOCR Model Metadata適用）
@@ -35,7 +36,7 @@ ADR-0001がAcceptedとなり、Phase2（共通基盤実装）へ移行するに�
 ### Phase1: 共通基盤（Engine Capability / Engine Registry / Model Metadata）
 
 - **Engine Capability**（✅完了: [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)）: [ENGINE_CAPABILITY.md](../../design/ENGINE_CAPABILITY.md)の設計を実装。`src/app/services/engine_capability.py`へスキーマ定義（既存3エンジンの`if/elif`分岐は変更しない。既存コードからの参照・配線はEngine Registry実装後に行う）
-- **Engine Registry**: [ENGINE_REGISTRY.md](../../design/ENGINE_REGISTRY.md)の設計を実装。`EngineDescriptor`/`Factory`/遅延登録の仕組みを新設（既存3エンジンをRegistryへ移行するかは別Issue、本Phaseでは仕組みのみ）
+- **Engine Registry**（✅MVP実装済み: [#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9)）: [ENGINE_REGISTRY.md](../../design/ENGINE_REGISTRY.md)のうち`EngineDescriptor`/`EngineRegistry`（register/unregister/get/list/exists）のみを実装。Training/Inference/Evaluation Handler・MetadataProvider・ModelLoader・Exporter・Validatorは未実装（別Issue）。既存3エンジンをRegistryへ移行するかは別Issue、本Phaseでは仕組みのみ
 - **Model Metadata**: [MODEL_METADATA.md](../../design/MODEL_METADATA.md)の統一スキーマを実装（既存`.tess.json`/`.ocr.json`/`.pt`は変更しない。新規エンジン向けの標準形式として新設）
 
 ### Phase2: 既存バグ修正・Engine判定の一本化
@@ -74,6 +75,10 @@ ADR-0001がAcceptedとなり、Phase2（共通基盤実装）へ移行するに�
 - **ユーザーマニュアル**: `docs/manual/`関連章の更新
 - **チュートリアル**: `docs/tutorial/`へTrOCRチュートリアル追加（日本語対応方針が未解決のため、英語/英数字ユースケースを優先する可能性あり）
 - **リリース・移行確認**: 既存プロジェクトへの影響が無いことの最終確認
+
+## その他の将来検討候補（優先度低・Epic対象外）
+
+- **[Performance] Frontendの初期JavaScript bundleを分割する**: `npm run build`時に`index-*.js`が500kBを超える警告が継続的に出ている（2026-07-29時点で約937kB）。ビルド自体は正常完了しており、Engine Capability/Engine Registry実装（Backendのみの変更）とは無関係。現時点では初期表示遅延等の具体的な症状は確認できていないため、急いで対応する必要はない。実際に初期表示が遅い・端末で重い・配信環境で問題になる等の症状が確認された段階でIssue化し、対応を検討する
 
 ## 分割ルール
 
