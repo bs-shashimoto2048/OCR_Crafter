@@ -14,7 +14,7 @@ Issue: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)
 
 ✅ Engine Registry（[#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9)、Closed。PR [#10](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/10)でmainへマージ済み。`src/app/services/engine_registry.py`。MVP範囲のみ（Handler群未実装）、既存コードへの配線はまだ無し）
 
-⬜ Model Metadata
+🔶 Model Metadata（[#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14)、実装済み・PR Open・レビュー待ち・未マージ）
 
 🔶 Engine判定既存バグ修正（Backend側は[#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)、Closed。PR [#13](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/13)でmainへマージ済み。`resolve_engine_id()`経由の明示的判定へ統一、互換性調査済み。Frontend側は[#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)として別Issue化、未着手のため🔶のまま）
 
@@ -32,7 +32,7 @@ Issue: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)
 
 ⬜ Documentation
 
-次フェーズ（Phase2）: Model Metadataの実装Issueを、[ISSUE_MAP.md](ISSUE_MAP.md)の確定順序で作成予定。
+次フェーズ（Phase2）: Model Metadata PRのレビュー・マージ後、[ISSUE_MAP.md](ISSUE_MAP.md)の確定順序で残りの実装Issueを作成予定。
 
 参考: CI依存関係修正（[#6](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/6)、PR [#7](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/7)でmainへマージ済み）／既存のDB初期化テスト課題（[#8](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/8)、Open、Epic対象外の既存不具合）
 
@@ -104,6 +104,7 @@ Epicの完了条件は、調査後に確定した子Issueがすべて完了し�
 - [x] #9（Feature: Engine Registry実装、Closed）
 - [x] #11（Refactor: Engine判定ロジックをEngine Registryへ統一、Backend側、Closed）
 - [ ] #12（Bug: Frontendの未知Engine判定がPaddleOCRへ暗黙フォールバックする、未着手）
+- [ ] #14（Feature: 共通Model Metadata実装、実装済み・PRレビュー待ち）
 
 ## 関連資料
 
