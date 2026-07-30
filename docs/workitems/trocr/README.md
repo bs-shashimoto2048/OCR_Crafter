@@ -2,7 +2,7 @@
 
 ## 状態
 
-Phase1（設計フェーズ）完了。Phase2（共通基盤実装）着手済み（Engine Capability実装完了、Feature [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)）
+Phase1（設計フェーズ）完了。Phase2（共通基盤実装）着手済み（Engine Capability実装完了、Feature [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)。Engine Registry MVP実装済み・PRレビュー待ち、Feature [#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9)）
 
 ## 目的
 
@@ -17,13 +17,15 @@ OCR CrafterへTransformerベースの文字認識エンジンを追加できる�
 - [x] Design Documents作成（[ENGINE_CAPABILITY.md](../../design/ENGINE_CAPABILITY.md) / [ENGINE_REGISTRY.md](../../design/ENGINE_REGISTRY.md) / [MODEL_METADATA.md](../../design/MODEL_METADATA.md)）
 - [x] ユーザーレビュー（Design Documents最終レビュー完了、ADR-0001をAcceptedへ変更）
 - [x] Phase2 最初の実装Issue作成・完了（Engine Capability、[#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)）
-- [ ] Phase2 残りの実装Issue作成（[ISSUE_MAP.md](ISSUE_MAP.md)の確定順序: Engine Registry以降）
+- [x] Phase2 2番目の実装Issue作成・MVP実装完了（Engine Registry、[#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9)、PRレビュー待ち・未マージ）
+- [ ] Phase2 残りの実装Issue作成（[ISSUE_MAP.md](ISSUE_MAP.md)の確定順序: Model Metadata以降）
 
 ## 関連Issue
 
 - Epic: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1) [Epic] Transformer OCR対応基盤とTrOCR統合
 - Investigation: [#2](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/2) [Investigation] TrOCR採用可否とOCR Crafter統合方式の調査（Parent Epic: #1）
 - Feature: [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4) [Feature] Engine Capability実装（Parent Epic: #1、実装済み）
+- Feature: [#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9) [Feature] Engine Registry実装（Parent Epic: #1、MVP実装済み・PRレビュー待ち）
 
 ## 作業資料
 
@@ -34,6 +36,7 @@ OCR CrafterへTransformerベースの文字認識エンジンを追加できる�
 - [DECISION_LOG.md](DECISION_LOG.md)
 - [../../adr/ADR-0001_Trocr_Architecture.md](../../adr/ADR-0001_Trocr_Architecture.md)（Status: Accepted）
 - [FEATURE_ENGINE_CAPABILITY.md](FEATURE_ENGINE_CAPABILITY.md)（Feature [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)、実装済み）
+- [FEATURE_ENGINE_REGISTRY.md](FEATURE_ENGINE_REGISTRY.md)（Feature [#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9)、MVP実装済み・PRレビュー待ち）
 
 ## 重要な制約
 
