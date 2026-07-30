@@ -12,7 +12,8 @@ Related Issue: Epic [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues
 - Bug: [#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12) Frontendの未知Engine判定がPaddleOCRへ暗黙フォールバックする（未着手・別Issue化のみ。Parent Epic: #1）
 - Feature: [#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14) 共通Model Metadata実装（実装済み・PRレビュー待ち。Parent Epic: #1）
 - Feature: [#16](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/16) TrOCR Backend単画像推論コア実装（実装済み・Closed。Parent Epic: #1）
-- Feature: [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18) OCR PipelineへTrOCR統合（実装済み・PRレビュー待ち。Parent Epic: #1。当初想定の`ocr_pipeline.py`ではなく実際の推論ディスパッチファイル`predict.py`へ接続）
+- Feature: [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18) OCR PipelineへTrOCR統合（実装済み・Closed。Parent Epic: #1。当初想定の`ocr_pipeline.py`ではなく実際の推論ディスパッチファイル`predict.py`へ接続）
+- Feature: [#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20) 既存OCR推論APIへTrOCR統合（実装済み・PRレビュー待ち。Parent Epic: #1。新規TrOCR専用APIは作成せず既存`POST /predict`を拡張）
 
 ## 次に作成するIssue候補（確定順序、2026-07-29）
 
@@ -24,7 +25,7 @@ ADR-0001がAcceptedとなり、Phase2（共通基盤実装）へ移行するに�
 4. **Engine判定既存バグ修正** — Phase2（`engineLabelOf()`/`resolveInferenceEngine()`/`_model_engine()`のキャッチオール是正＋判定ロジックの一本化。Backend側（`model_registry.py`/`ocr_pipeline.py`）は✅完了: [#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)。Frontend側は未着手・別Issue: [#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)。`release_gate.py::_model_engine()`との重複一本化も未着手）
 5. **TrOCR Backend** — Phase3（依存関係・設定管理・Dataset確認・TrOCR Model Metadata適用。単画像推論コアは✅完了: [#16](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/16)）
 6. **TrOCR Training** — Phase4（`services/trocr_pipeline.py`学習Backend）
-7. **TrOCR Inference** — Phase4（OCR Pipelineへの接続は✅実装済み・PRレビュー待ち: [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18)。`ENGINE_BUILDERS`スタイルの`recognize()`実装は未着手）
+7. **TrOCR Inference** — Phase4（OCR Pipelineへの接続は✅完了: [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18)。既存OCR推論APIへの統合は✅実装済み・PRレビュー待ち: [#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20)。`ENGINE_BUILDERS`スタイルの`recognize()`実装は未着手）
 8. **TrOCR Evaluation** — Phase4（評価連携の方針決定・confidence算出方法の確定）
 9. **Frontend** — Phase5（Model Manager UI / Training UI / Evaluation UI / Experiment Tracking連携）
 10. **Benchmark** — Phase6（Benchmark Runner/Center連携）
@@ -62,7 +63,8 @@ ADR-0001がAcceptedとなり、Phase2（共通基盤実装）へ移行するに�
 ### Phase4: Training / Inference / Evaluation
 
 - **TrOCR学習Backend**: `services/trocr_pipeline.py`新設。Hugging Face Transformers（`VisionEncoderDecoderModel`+`Seq2SeqTrainer`）経由、公式`unilm/trocr`（fairseq）は不採用（[ADR-0001](../../adr/ADR-0001_Trocr_Architecture.md)決定事項）
-- **TrOCR推論Backend**（✅OCR Pipelineへの接続完了・PRレビュー待ち: [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18)）: `predict.py::predict_from_image()`（`ocr_pipeline.py`ではなく実際の推論ディスパッチ先）へ`resolve_engine_id()`経由の`trocr`分岐を追加済み。詳細は[FEATURE_PIPELINE_TROCR.md](FEATURE_PIPELINE_TROCR.md)。`ENGINE_BUILDERS`スタイルの`recognize()`実装（Engine Registry Handler化）は未着手
+- **TrOCR推論Backend**（✅OCR Pipelineへの接続完了: [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18)）: `predict.py::predict_from_image()`（`ocr_pipeline.py`ではなく実際の推論ディスパッチ先）へ`resolve_engine_id()`経由の`trocr`分岐を追加済み。詳細は[FEATURE_PIPELINE_TROCR.md](FEATURE_PIPELINE_TROCR.md)。`ENGINE_BUILDERS`スタイルの`recognize()`実装（Engine Registry Handler化）は未着手
+- **既存OCR推論APIへの統合**（✅実装済み・PRレビュー待ち: [#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20)）: 新規TrOCR専用APIは作成せず、既存`POST /predict`が`engine="trocr"`を受け付けるよう最小拡張。詳細は[FEATURE_TROCR_API_INTEGRATION.md](FEATURE_TROCR_API_INTEGRATION.md)
 - **TrOCR評価連携の方針決定**: `ocr_evaluation.py`のTesseract専用制約への対応可否（PaddleOCRも未対応のため、TrOCR単独の課題ではないことに留意）。confidence算出方法の確定（未解決事項）
 
 ### Phase5: Frontend
@@ -91,6 +93,8 @@ ADR-0001がAcceptedとなり、Phase2（共通基盤実装）へ移行するに�
 - **device選択ロジックの共通化候補**: 現在、`src/app/train.py::detect_device()`（分類モデル用、MPS/CPUのみ判定）と`src/app/services/trocr_engine.py::_resolve_device()`（TrOCR用、CPU/CUDAのみ判定）が、それぞれ独立した自己完結ロジックとして存在する（Feature [#16](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/16)で確認済み）。将来PARSeq等のPyTorchベースエンジンが追加されるたびに同種のdevice解決ロジックが個別実装される可能性がある。共通のdevice解決ヘルパーへ統合するかどうかは、実際に3つ目以降のPyTorchベースエンジンが追加される段階で判断する（現時点で2エンジンのみのため、抽象化を急がない）。GitHub Issueはまだ作成しない
 - **TrOCRのmodel_ref解決**: `predict.py::_predict_with_trocr()`は、既存3エンジンが使う`.ocr.json`/`.tess.json`ファイル探索（`resolve_model_path()`/`resolve_ocr_model_meta()`）を適用せず、呼び出し側の`model`パラメータをHugging Face Hub ID・ローカルパスとしてそのまま`TrOCREngine.load()`へ渡している（Feature [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18)で確認済み）。そのため`model`未指定時の既定値`"latest"`をTrOCRへ渡すと存在しないモデル名としてロード失敗する。TrOCR用のModel Metadata・Model Registry連携が実装される段階で、他エンジンと同様の解決方式へ見直す
 - **PipelineレベルでのTrOCREngineインスタンス再利用**: 現在、`predict.py::_predict_with_trocr()`はTrOCR推論のたびに`TrOCREngine.load()`を呼び直しており、EasyOCR/PaddleOCRが持つような`_EASYOCR_READER_CACHE`/`_PADDLEOCR_READER_CACHE`相当のキャッシュを持たない（Feature [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18)で意図的に対象外とした）。TrOCRのモデルロードはProcessor/Modelのロード＋deviceへの移動を伴い相対的に重いため、同一model_refでの連続推論が増える場合はPipelineまたはServiceレベルでのインスタンス再利用（キャッシュ）を検討する余地がある。ただし新規キャッシュの導入はメモリ保持・複数device・複数model_ref同時利用時の設計判断を要するため、実際の利用状況（連続呼び出し頻度・レイテンシ影響）を確認してから着手する。GitHub Issueはまだ作成しない
+- **`/predict`の同期推論実行**: `POST /predict`は`async def`だが、内部で`predict_from_image()`（重い同期処理）を直接呼び出しており、Thread Pool等でオフロードしていない（Feature [#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20)で確認済み。既存3エンジンも同様で、TrOCR固有の問題ではない）。TrOCRはモデルロード＋推論が相対的に重いため、リクエスト処理中のイベントループ占有時間が既存エンジンより長くなる可能性がある。既存Engineも含めた影響を踏まえ、対応要否は別途判断する。GitHub Issueはまだ作成しない
+- **preview/batch系エンドポイントへのmodel_ref必須検証拡張**: `POST /predict`にのみ、engine=trocr時の`model`（model_ref）必須検証を追加した（Feature [#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20)）。`/preprocess/preview`（GET/POST）・`/api/ocr/predict/batch`・`/api/ocr/yolo/predict`・`/api/ocr/preview-file/batch`は、engine/model文字列を制限していないため`engine="trocr"`自体は引き続き通るが、model_ref未指定時に`/predict`と同じ明確な400エラーにはならない（既存の`ValueError`/`FileNotFoundError`個別catchのみで、`RuntimeError`系の汎用catch-allを持たないエンドポイントもある）。利用実態を踏まえ、必要であれば共通バリデーションヘルパーとして各エンドポイントへ展開する。GitHub Issueはまだ作成しない
 
 ## その他の将来検討候補（優先度低・Epic対象外）
 
