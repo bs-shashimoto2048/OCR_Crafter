@@ -16,7 +16,7 @@ Issue: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)
 
 ⬜ Model Metadata
 
-🔶 Engine判定既存バグ修正（Backend側は[#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)実装済み、PR [#13](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/13)はOpen・レビュー待ち・未マージ。Frontend側は[#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)として別Issue化、未着手）
+🔶 Engine判定既存バグ修正（Backend側は[#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)、Closed。PR [#13](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/13)でmainへマージ済み。`resolve_engine_id()`経由の明示的判定へ統一、互換性調査済み。Frontend側は[#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)として別Issue化、未着手のため🔶のまま）
 
 ⬜ TrOCR Backend
 
@@ -102,7 +102,7 @@ Epicの完了条件は、調査後に確定した子Issueがすべて完了し�
 - [x] #2（Investigation、Closed）
 - [x] #4（Feature: Engine Capability実装、Closed）
 - [x] #9（Feature: Engine Registry実装、Closed）
-- [ ] #11（Refactor: Engine判定ロジックをEngine Registryへ統一、Backend実装済み・PRレビュー待ち）
+- [x] #11（Refactor: Engine判定ロジックをEngine Registryへ統一、Backend側、Closed）
 - [ ] #12（Bug: Frontendの未知Engine判定がPaddleOCRへ暗黙フォールバックする、未着手）
 
 ## 関連資料
