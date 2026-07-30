@@ -67,6 +67,8 @@ Engine Registryを利用して、Backend側の**Engine判定のみ**を統一す
 
 `.ocr.json`の`engine`フィールドが未指定の既存モデルは、一覧表示上`"paddleocr"`から`"unknown"`に変わる可能性がある（ファイル自体は変更しない）。現状の`data/projects/`には該当データが無いことを確認済みだが、挙動変化として明記する。
 
+**互換性調査（2026-07-30追記）**: レビュー指摘を受け、「engine未指定→unknown」への変更が既存データを壊さないかを追加調査した。`.ocr.json`を書き込む`_register_ocr_model()`は、このOCR学習機能が実装された最初のコミット（`2eff6a4`, 2026-04-23）の時点から一貫して`engine`を必須引数として書き込んでおり（`git log -S'"engine": engine'`で該当コミット以外にヒットなし）、**「engine未指定の`.ocr.json`」が正式に生成されていた過去のバージョンはリポジトリ上一度も存在しない**。Migration処理・実データ（`data/projects/`）・既存テストのいずれにもengine未指定の`.ocr.json`は見つからず、既存テストが旧paddleocrフォールバックへ依存しているケースも無い。以上より、本変更は後方互換性を壊すものではなく、Engine Registry導入後の設計として妥当と判断した。
+
 ## Modelへの影響
 
 `list_model_infos()`が返す`engine`フィールドの値が変わりうる（上記参照）。
