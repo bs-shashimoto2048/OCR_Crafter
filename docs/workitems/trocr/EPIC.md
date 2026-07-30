@@ -16,7 +16,7 @@ Issue: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)
 
 ✅ Model Metadata（[#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14)、Closed。PR [#15](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/15)でmainへマージ済み。`src/app/services/model_metadata.py`。既存コードへの配線・Adapterはまだ無し）
 
-🔶 Engine判定既存バグ修正（Backend側は[#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)、Closed。PR [#13](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/13)でmainへマージ済み。`resolve_engine_id()`経由の明示的判定へ統一、互換性調査済み。Frontend側は[#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)、実装済み・PRレビュー待ちのため🔶のまま。`frontend/src/lib/engineResolution.js`を新設し`engineLabelOf()`/`resolveInferenceEngine()`/`resolveRestoredInferenceSelection()`の暗黙PaddleOCRフォールバックを是正）
+✅ Engine判定既存バグ修正（Backend側は[#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)、Closed。PR [#13](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/13)でmainへマージ済み。`resolve_engine_id()`経由の明示的判定へ統一、互換性調査済み。Frontend側は[#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)、Closed。PR [#22](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/22)でmainへマージ済み（merge commit `1b93b75`）。`frontend/src/lib/engineResolution.js`を新設し`engineLabelOf()`/`resolveInferenceEngine()`/`resolveRestoredInferenceSelection()`の暗黙PaddleOCRフォールバックを是正）
 
 ✅ TrOCR Backend推論コア（[#16](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/16)、Closed。PR [#17](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/17)でmainへマージ済み（merge commit `8b914e5`）。`src/app/services/trocr_engine.py`。単画像推論のみ、OCR Pipeline等へは未接続）
 
@@ -40,7 +40,7 @@ Issue: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)
 
 参考: CI依存関係修正（[#6](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/6)、PR [#7](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/7)でmainへマージ済み）／既存のDB初期化テスト課題（[#8](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/8)、Open、Epic対象外の既存不具合）
 
-**Future Work（Epic範囲内・未着手）**: カスタム分類モデル（`engine="custom"`）のModel Metadata対応／device選択ロジックの共通化候補（`train.py::detect_device()`と`trocr_engine.py::_resolve_device()`が独立実装）／TrOCRのmodel_ref解決方式の見直し（Model Metadata連携実装時）／PipelineレベルでのTrOCREngineインスタンス再利用（現状は推論のたびに`load()`し直す設計）／`/predict`の同期推論実行（Thread Pool未使用、既存Engine共通の課題）／preview・batch系エンドポイントへのmodel_ref必須検証拡張。詳細は[ISSUE_MAP.md](ISSUE_MAP.md)の「Future Work」参照。
+**Future Work（Epic範囲内・未着手）**: カスタム分類モデル（`engine="custom"`）のModel Metadata対応／device選択ロジックの共通化候補（`train.py::detect_device()`と`trocr_engine.py::_resolve_device()`が独立実装）／TrOCRのmodel_ref解決方式の見直し（Model Metadata連携実装時）／PipelineレベルでのTrOCREngineインスタンス再利用（現状は推論のたびに`load()`し直す設計）／`/predict`の同期推論実行（Thread Pool未使用、既存Engine共通の課題）／preview・batch系エンドポイントへのmodel_ref必須検証拡張／Backend Engine RegistryをAPI経由でFrontendへ提供しFrontend側Engine一覧を一元管理する案。詳細は[ISSUE_MAP.md](ISSUE_MAP.md)の「Future Work」参照。
 
 ## 背景
 
@@ -109,7 +109,7 @@ Epicの完了条件は、調査後に確定した子Issueがすべて完了し�
 - [x] #4（Feature: Engine Capability実装、Closed）
 - [x] #9（Feature: Engine Registry実装、Closed）
 - [x] #11（Refactor: Engine判定ロジックをEngine Registryへ統一、Backend側、Closed）
-- [ ] #12（Bug: Frontendの未知Engine判定がPaddleOCRへ暗黙フォールバックする、実装済み・PRレビュー待ち）
+- [x] #12（Bug: Frontendの未知Engine判定がPaddleOCRへ暗黙フォールバックする、Closed）
 - [x] #14（Feature: 共通Model Metadata実装、Closed）
 - [x] #16（Feature: TrOCR Backend単画像推論コア実装、Closed）
 - [x] #18（Feature: OCR PipelineへTrOCR統合、Closed）
