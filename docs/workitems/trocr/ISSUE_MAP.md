@@ -14,7 +14,8 @@ Related Issue: Epic [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues
 - Feature: [#16](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/16) TrOCR Backend単画像推論コア実装（実装済み・Closed。Parent Epic: #1）
 - Feature: [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18) OCR PipelineへTrOCR統合（実装済み・Closed。Parent Epic: #1。当初想定の`ocr_pipeline.py`ではなく実際の推論ディスパッチファイル`predict.py`へ接続）
 - Feature: [#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20) 既存OCR推論APIへTrOCR統合（実装済み・Closed。Parent Epic: #1。新規TrOCR専用APIは作成せず既存`POST /predict`を拡張）
-- Feature: [#23](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/23) FrontendへTrOCR選択UIを追加（実装済み・PRレビュー待ち。Parent Epic: #1。`InferenceView.jsx`（推論テスト画面）へ最小追加、`OcrBatchView.jsx`/`RapidOCRView.jsx`は対象外）
+- Feature: [#23](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/23) FrontendへTrOCR選択UIを追加（実装済み・Closed。Parent Epic: #1。`InferenceView.jsx`（推論テスト画面）へ最小追加、`OcrBatchView.jsx`/`RapidOCRView.jsx`は対象外）
+- Feature: [#25](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/25) TrOCR Model MetadataをFrontend推論UIへ連携（実装済み・PRレビュー待ち。Parent Epic: #1。既存`GET /models/info`のengineフィルタのみで実現、Backend変更なし。実環境では登録済みモデルは基本的に0件）
 
 ## 次に作成するIssue候補（確定順序、2026-07-29）
 
@@ -70,7 +71,8 @@ ADR-0001がAcceptedとなり、Phase2（共通基盤実装）へ移行するに�
 
 ### Phase5: Frontend
 
-- **推論テスト画面へのTrOCR選択UI**（✅実装済み・PRレビュー待ち: [#23](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/23)）: `InferenceView.jsx`（既存OCR推論APIへ直接`POST /predict`する画面）へTrOCR選択肢＋モデル参照自由入力欄を追加。詳細は[FEATURE_TROCR_FRONTEND_UI.md](FEATURE_TROCR_FRONTEND_UI.md)。`OcrBatchView.jsx`/`RapidOCRView.jsx`は対象外（Future Work参照）
+- **推論テスト画面へのTrOCR選択UI**（✅完了: [#23](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/23)）: `InferenceView.jsx`（既存OCR推論APIへ直接`POST /predict`する画面）へTrOCR選択肢＋モデル参照自由入力欄を追加。詳細は[FEATURE_TROCR_FRONTEND_UI.md](FEATURE_TROCR_FRONTEND_UI.md)。`OcrBatchView.jsx`/`RapidOCRView.jsx`は対象外（Future Work参照）
+- **TrOCR Model MetadataのFrontend連携**（✅実装済み・PRレビュー待ち: [#25](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/25)）: 既存`GET /models/info`（`modelInfos`）からengine正規化が`trocr`のものだけを抽出し、登録済みモデル選択・手動入力の2方式を共存させた。`ModelMetadata`dataclass自体は依然未配線・TrOCR用モデル一覧ファイル形式も存在しないため、実環境では登録済みモデルは基本的に0件（既知の状態）。詳細は[FEATURE_TROCR_MODEL_METADATA_UI.md](FEATURE_TROCR_MODEL_METADATA_UI.md)
 - **Model Manager UI**: Engine Capability参照への切替（Phase2の欠陥修正と連動）
 - **Training UI**: `TrainingView.jsx`の既存ドロップダウンへTrOCR選択肢を追加
 - **Evaluation UI**: Phase4の評価連携方針決定に連動
@@ -91,6 +93,7 @@ ADR-0001がAcceptedとなり、Phase2（共通基盤実装）へ移行するに�
 
 ## Future Work（Epic #1範囲内・未着手）
 
+- **【最優先】`ModelMetadata`は実運用で未使用**: Feature [#25](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/25)のレビューで確定した最重要事項。`ModelMetadata`dataclass（Feature [#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14)で実装済み）は、`model_metadata.py`自身以外のどのファイルからも参照されず、これを生成・保存・読込する処理はコードベース上どこにも存在しない（既存コードへ一切未配線）。加えて`model_registry.py::list_model_infos()`にもTrOCR用ファイル形式（`*.trocr.json`相当）は存在しないため、Frontendの「登録済みモデルから選択」機能（Feature #25）は実環境では常に0件を返す。TrOCR学習（Phase4）に着手する際は、学習済みモデルのメタデータを`ModelMetadata`経由で保存するか、既存`.ocr.json`/`.tess.json`パターンを踏襲した新形式にするかを最初に判断する必要がある。他のFuture Work項目（カスタム分類モデル対応・変換Adapter実装等）より優先して検討すること。GitHub Issueはまだ作成しない
 - **カスタム分類モデル（`engine="custom"`）のModel Metadata対応**: [MODEL_METADATA.md](../../design/MODEL_METADATA.md)の`ModelMetadata`は、Engine Registry登録済みの4エンジン（tesseract/paddleocr/easyocr/trocr）のみを`engine_id`として許可する。カスタム分類モデル（`.pt`）は`engine="custom"`という、Engine Registry未登録の値を使っているため、現時点のModelMetadataはカスタム分類モデルを表現できない（Feature [#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14)で確認済みの既知の制約）。対応する場合はEngine Registryへ`custom`を新規登録するか、ModelMetadataの対象外として扱うかを別途判断する必要がある。今回は対象外のため、忘れないようここへ記録する（GitHub Issueはまだ作成しない）
 - **device選択ロジックの共通化候補**: 現在、`src/app/train.py::detect_device()`（分類モデル用、MPS/CPUのみ判定）と`src/app/services/trocr_engine.py::_resolve_device()`（TrOCR用、CPU/CUDAのみ判定）が、それぞれ独立した自己完結ロジックとして存在する（Feature [#16](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/16)で確認済み）。将来PARSeq等のPyTorchベースエンジンが追加されるたびに同種のdevice解決ロジックが個別実装される可能性がある。共通のdevice解決ヘルパーへ統合するかどうかは、実際に3つ目以降のPyTorchベースエンジンが追加される段階で判断する（現時点で2エンジンのみのため、抽象化を急がない）。GitHub Issueはまだ作成しない
 - **TrOCRのmodel_ref解決**: `predict.py::_predict_with_trocr()`は、既存3エンジンが使う`.ocr.json`/`.tess.json`ファイル探索（`resolve_model_path()`/`resolve_ocr_model_meta()`）を適用せず、呼び出し側の`model`パラメータをHugging Face Hub ID・ローカルパスとしてそのまま`TrOCREngine.load()`へ渡している（Feature [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18)で確認済み）。そのため`model`未指定時の既定値`"latest"`をTrOCRへ渡すと存在しないモデル名としてロード失敗する。TrOCR用のModel Metadata・Model Registry連携が実装される段階で、他エンジンと同様の解決方式へ見直す

@@ -12,6 +12,8 @@ Related: [ADR-0001](../adr/ADR-0001_Trocr_Architecture.md)（Status: Accepted）
 
 **追記（2026-07-30、Feature [#23](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/23)）**: Frontend（`InferenceView.jsx`、推論テスト画面）からもTrOCRを選択して`POST /predict`を呼び出せるようになった。詳細は[FEATURE_TROCR_FRONTEND_UI.md](../workitems/trocr/FEATURE_TROCR_FRONTEND_UI.md)を参照。モデル参照はUI側の自由入力欄からそのまま`model`フィールドへ渡るのみで、Model Metadata・Engine Registry APIとは引き続き未接続。`trocr_engine.py`・Backend API自体は無変更。
 
+**追記（2026-07-30、Feature [#25](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/25)）**: Frontendの手動入力に加え、既存モデル一覧（`GET /models/info`）からengine正規化が`trocr`のものだけを抽出し、登録済みモデルとして選択できるようになった（詳細は[FEATURE_TROCR_MODEL_METADATA_UI.md](../workitems/trocr/FEATURE_TROCR_MODEL_METADATA_UI.md)）。ただし`ModelMetadata`（本ファイル前段で言及した将来接続点）自体は依然として既存コードへ未配線であり、TrOCR用のモデル一覧ファイル形式も存在しないため、実環境では登録済みモデルは基本的に0件のままである。Backend・`trocr_engine.py`は無変更。
+
 ## 推論コアの責務
 
 - TrOCR互換モデル（Processor・`VisionEncoderDecoderModel`）のロード

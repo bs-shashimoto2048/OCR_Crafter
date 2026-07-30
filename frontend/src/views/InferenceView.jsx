@@ -4,6 +4,7 @@ import CharHeatmap from "../components/CharHeatmap";
 import LowercaseToggle from "../components/LowercaseToggle";
 import { engineDisplayLabel } from "../lib/engineResolution";
 import { normalizeTrocrModelRef, trocrModelRefMissing } from "../lib/inferenceModel";
+import { trocrMetadataValidationError } from "../lib/trocrModelMetadata";
 
 export default function InferenceView({
   engine,
@@ -27,6 +28,11 @@ export default function InferenceView({
   tesseractModels,
   trocrModelRef,
   setTrocrModelRef,
+  trocrModels = [],
+  trocrModelSource = "manual",
+  setTrocrModelSource,
+  trocrSelectedModel = "",
+  setTrocrSelectedModel,
   latestModels,
   onFileChange,
   fileName,
@@ -79,7 +85,9 @@ export default function InferenceView({
             ? "Tesseract最新モデル"
             : tesseractModel
           : engine === "trocr"
-            ? normalizeTrocrModelRef(trocrModelRef) || "未入力"
+            ? trocrModelSource === "metadata"
+              ? trocrModels.find((m) => m.name === trocrSelectedModel)?.label || "未選択"
+              : normalizeTrocrModelRef(trocrModelRef) || "未入力"
             : "EasyOCR";
   // null=取得不能（whitelist指定時のTesseract等）。0%へ偽装せず "--" 表示にする
   const confidenceAvailable = typeof result?.confidence === "number" && Number.isFinite(result.confidence);
@@ -226,24 +234,81 @@ export default function InferenceView({
               </div>
             </>
           ) : engine === "trocr" ? (
-            <div>
-              <label className="app-label">TrOCRモデル参照</label>
-              <input
-                type="text"
-                value={trocrModelRef || ""}
-                onChange={(e) => setTrocrModelRef(e.target.value)}
-                placeholder="例: microsoft/trocr-base-printed"
-                className="app-select"
-              />
-              <p className="mt-1 text-xs text-muted">
-                Hugging Face model IDまたはローカルモデルパスを指定してください（必須）。
-              </p>
-              <p className="mt-1 text-xs text-amber-200">
-                Hub上のモデルIDを指定した場合、Backendがモデルを取得する可能性があります。社内運用ではローカルモデルパスの利用を推奨します。
-              </p>
-              {trocrModelRefMissing(engine, trocrModelRef) ? (
-                <p className="mt-1 text-xs text-red-400">TrOCRモデル参照を入力してください。</p>
-              ) : null}
+            <div className="space-y-2">
+              <div>
+                <label className="app-label">TrOCRモデル指定方法</label>
+                <div className="flex gap-3 rounded-lg border border-border bg-card/45 p-2 text-xs text-text">
+                  <label className="inline-flex items-center gap-1.5">
+                    <input
+                      type="radio"
+                      name="trocr-model-source"
+                      checked={trocrModelSource === "metadata"}
+                      onChange={() => setTrocrModelSource?.("metadata")}
+                    />
+                    登録済みモデルから選択
+                  </label>
+                  <label className="inline-flex items-center gap-1.5">
+                    <input
+                      type="radio"
+                      name="trocr-model-source"
+                      checked={trocrModelSource !== "metadata"}
+                      onChange={() => setTrocrModelSource?.("manual")}
+                    />
+                    手動入力
+                  </label>
+                </div>
+              </div>
+
+              {trocrModelSource === "metadata" ? (
+                <div>
+                  <label className="app-label">TrOCRモデル</label>
+                  {trocrModels.length === 0 ? (
+                    <p className="text-xs text-amber-200">
+                      登録済みTrOCRモデルはありません。手動入力をご利用ください。
+                    </p>
+                  ) : (
+                    <>
+                      <select
+                        value={trocrSelectedModel}
+                        onChange={(e) => setTrocrSelectedModel?.(e.target.value)}
+                        className="app-select"
+                      >
+                        <option value="">選択してください</option>
+                        {trocrModels.map((m) => (
+                          <option key={m.name} value={m.name}>
+                            {m.label}
+                          </option>
+                        ))}
+                      </select>
+                      {trocrMetadataValidationError(trocrModels, trocrSelectedModel) ? (
+                        <p className="mt-1 text-xs text-red-400">
+                          {trocrMetadataValidationError(trocrModels, trocrSelectedModel)}
+                        </p>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  <label className="app-label">TrOCRモデル参照</label>
+                  <input
+                    type="text"
+                    value={trocrModelRef || ""}
+                    onChange={(e) => setTrocrModelRef(e.target.value)}
+                    placeholder="例: microsoft/trocr-base-printed"
+                    className="app-select"
+                  />
+                  <p className="mt-1 text-xs text-muted">
+                    Hugging Face model IDまたはローカルモデルパスを指定してください（必須）。
+                  </p>
+                  <p className="mt-1 text-xs text-amber-200">
+                    Hub上のモデルIDを指定した場合、Backendがモデルを取得する可能性があります。社内運用ではローカルモデルパスの利用を推奨します。
+                  </p>
+                  {trocrModelRefMissing(engine, trocrModelRef) ? (
+                    <p className="mt-1 text-xs text-red-400">TrOCRモデル参照を入力してください。</p>
+                  ) : null}
+                </div>
+              )}
             </div>
           ) : (
             <div>
@@ -298,7 +363,14 @@ export default function InferenceView({
 
           <Button
             onClick={onRun}
-            disabled={!fileName || loading || trocrModelRefMissing(engine, trocrModelRef)}
+            disabled={
+              !fileName ||
+              loading ||
+              (engine === "trocr" &&
+                (trocrModelSource === "metadata"
+                  ? Boolean(trocrMetadataValidationError(trocrModels, trocrSelectedModel))
+                  : trocrModelRefMissing(engine, trocrModelRef)))
+            }
           >
             {loading ? "推論中..." : "推論実行"}
           </Button>
