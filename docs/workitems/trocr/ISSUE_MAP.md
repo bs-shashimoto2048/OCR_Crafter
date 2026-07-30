@@ -8,6 +8,8 @@ Related Issue: Epic [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues
 - Investigation: [#2](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/2) TrOCR採用可否とOCR Crafter統合方式の調査（Parent Epic: #1）
 - Feature: [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4) Engine Capability実装（実装済み。Parent Epic: #1）
 - Feature: [#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9) Engine Registry実装（実装済み・Closed。Parent Epic: #1）
+- Refactor: [#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11) Engine判定ロジックをEngine Registryへ統一（Backend側実装済み・PRレビュー待ち。Parent Epic: #1）
+- Bug: [#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12) Frontendの未知Engine判定がPaddleOCRへ暗黙フォールバックする（未着手・別Issue化のみ。Parent Epic: #1）
 
 ## 次に作成するIssue候補（確定順序、2026-07-29）
 
@@ -16,7 +18,7 @@ ADR-0001がAcceptedとなり、Phase2（共通基盤実装）へ移行するに�
 1. **Engine Capability** — Phase1（[ENGINE_CAPABILITY.md](../../design/ENGINE_CAPABILITY.md)の実装、✅完了: [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)）
 2. **Engine Registry** — Phase1（[ENGINE_REGISTRY.md](../../design/ENGINE_REGISTRY.md)のMVP実装、✅完了: [#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9)）
 3. **Model Metadata** — Phase1（[MODEL_METADATA.md](../../design/MODEL_METADATA.md)の実装）
-4. **Engine判定既存バグ修正** — Phase2（`engineLabelOf()`/`resolveInferenceEngine()`/`_model_engine()`のキャッチオール是正＋判定ロジックの一本化）
+4. **Engine判定既存バグ修正** — Phase2（`engineLabelOf()`/`resolveInferenceEngine()`/`_model_engine()`のキャッチオール是正＋判定ロジックの一本化。Backend側（`model_registry.py`/`ocr_pipeline.py`）は✅完了: [#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)。Frontend側は未着手・別Issue: [#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)。`release_gate.py::_model_engine()`との重複一本化も未着手）
 5. **TrOCR Backend** — Phase3（依存関係・設定管理・Dataset確認・TrOCR Model Metadata適用）
 6. **TrOCR Training** — Phase4（`services/trocr_pipeline.py`学習Backend）
 7. **TrOCR Inference** — Phase4（推論Backend、`ENGINE_BUILDERS`スタイルの`recognize()`実装）
@@ -41,8 +43,11 @@ ADR-0001がAcceptedとなり、Phase2（共通基盤実装）へ移行するに�
 
 ### Phase2: 既存バグ修正・Engine判定の一本化
 
-- **既存エンジン判定の欠陥修正**（新機能ではなくバグ修正）: `frontend/src/views/ModelsView.jsx::engineLabelOf()`・`frontend/src/lib/inferenceModel.js::resolveInferenceEngine()`・`src/app/services/release_gate.py::_model_engine()`の「PaddleOCRキャッチオール」をEngine Capability参照へ置き換えて是正（TrOCR追加前から存在する潜在バグの是正であり、既存3エンジンの表示が壊れないことを回帰テストで確認する）
-- **Engine判定の一本化**: `release_gate.py::_model_engine()`と`model_registry.py`の重複した拡張子判定ロジックを、Engine Registryの解決方法（[ENGINE_REGISTRY.md](../../design/ENGINE_REGISTRY.md)の「Engine解決方法」参照）へ一本化
+- **既存エンジン判定の欠陥修正**（新機能ではなくバグ修正）: `frontend/src/views/ModelsView.jsx::engineLabelOf()`・`frontend/src/lib/inferenceModel.js::resolveInferenceEngine()`・`src/app/services/release_gate.py::_model_engine()`の「PaddleOCRキャッチオール」是正
+  - ✅**Backend完了**（[#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)）: `model_registry.py::list_model_infos()`・`ocr_pipeline.py::migrate_ocr_models_to_inference()`の暗黙paddleocrフォールバックを、`engine_registry.py`の`resolve_engine_id()`経由の明示的判定へ置き換え済み。未知engineは`"unknown"`
+  - ⬜**Frontend未着手**（[#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)）: `engineLabelOf()`/`resolveInferenceEngine()`は同型の暗黙フォールバックを持つが、JSからPythonのEngine Registryを直接参照できないため今回は対象外。設計判断（API追加要否等）を要する別Issueとして記録
+  - ⬜`release_gate.py::_model_engine()`は未知拡張子で空文字を返す設計のため今回の「暗黙paddleocrフォールバック廃止」の対象外だったが、`model_registry.py`との重複一本化自体は未着手のまま
+- **Engine判定の一本化**: `release_gate.py::_model_engine()`と`model_registry.py`の重複した拡張子判定ロジックを、Engine Registryの解決方法（[ENGINE_REGISTRY.md](../../design/ENGINE_REGISTRY.md)の「Engine解決方法」参照）へ一本化（未着手）
 
 ### Phase3: TrOCR Backend基盤
 

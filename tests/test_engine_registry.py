@@ -23,6 +23,7 @@ from src.app.services.engine_registry import (
     EngineRegistry,
     InvalidEngineDescriptorError,
     create_default_registry,
+    resolve_engine_id,
 )
 
 
@@ -314,3 +315,73 @@ def test_register_unregister_in_one_test_does_not_leak_to_module_state():
     registry.unregister(ENGINE_ID_TESSERACT)
     # 新しく作った別インスタンスは影響を受けない
     assert create_default_registry().exists(ENGINE_ID_TESSERACT) is True
+
+
+# ---------------------------------------------------------------------------
+# resolve_engine_id（Engine判定ロジック統一の中核ヘルパー）
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_engine_id_accepts_known_engines():
+    """正常系: tesseract/paddleocr/easyocrはそのままengine_idとして解決される。"""
+    registry = create_default_registry()
+
+    assert resolve_engine_id(ENGINE_ID_TESSERACT, registry=registry) == ENGINE_ID_TESSERACT
+    assert resolve_engine_id(ENGINE_ID_PADDLEOCR, registry=registry) == ENGINE_ID_PADDLEOCR
+    assert resolve_engine_id(ENGINE_ID_EASYOCR, registry=registry) == ENGINE_ID_EASYOCR
+
+
+def test_resolve_engine_id_normalizes_case_and_whitespace():
+    """大文字・前後空白は正規化した上で判定する（別名変換ではなく単純な正規化）。"""
+    registry = create_default_registry()
+
+    assert resolve_engine_id("Tesseract", registry=registry) == ENGINE_ID_TESSERACT
+    assert resolve_engine_id("PADDLEOCR", registry=registry) == ENGINE_ID_PADDLEOCR
+    assert resolve_engine_id("  easyocr  ", registry=registry) == ENGINE_ID_EASYOCR
+
+
+def test_resolve_engine_id_unknown_engine_returns_none():
+    """異常系: 未登録のengine文字列はNone（不明）。暗黙のpaddleocrフォールバックはしない。"""
+    registry = create_default_registry()
+
+    assert resolve_engine_id("unknown_future_engine", registry=registry) is None
+    assert resolve_engine_id("paddle", registry=registry) is None  # aliasを追加していない
+    assert resolve_engine_id("paddle_ocr", registry=registry) is None
+
+
+def test_resolve_engine_id_none_returns_none():
+    """異常系: Noneはそのまま不明として扱う。"""
+    registry = create_default_registry()
+    assert resolve_engine_id(None, registry=registry) is None
+
+
+def test_resolve_engine_id_empty_string_returns_none():
+    """異常系: 空文字・空白のみの文字列は不明として扱う。"""
+    registry = create_default_registry()
+
+    assert resolve_engine_id("", registry=registry) is None
+    assert resolve_engine_id("   ", registry=registry) is None
+
+
+def test_resolve_engine_id_invalid_type_like_values_return_none():
+    """異常系: 数値や記号だけの不正なIDも、登録が無ければ不明として扱う。"""
+    registry = create_default_registry()
+
+    assert resolve_engine_id("12345", registry=registry) is None
+    assert resolve_engine_id("!!!", registry=registry) is None
+
+
+def test_resolve_engine_id_without_explicit_registry_uses_default():
+    """registry省略時はcreate_default_registry()相当の既知4エンジンで判定できる。"""
+    assert resolve_engine_id("tesseract") == "tesseract"
+    assert resolve_engine_id("not_a_real_engine") is None
+
+
+def test_resolve_engine_id_never_falls_back_to_paddleocr():
+    """回帰確認: どんな不明値を渡しても、暗黙にpaddleocrへフォールバックしない。"""
+    registry = create_default_registry()
+
+    for bad_value in (None, "", "  ", "Tesseract_typo", "paddleocr2", "EASY-OCR"):
+        result = resolve_engine_id(bad_value, registry=registry)
+        assert result != ENGINE_ID_PADDLEOCR
+        assert result is None

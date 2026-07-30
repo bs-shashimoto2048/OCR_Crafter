@@ -1,6 +1,6 @@
 # Engine Registry 設計
 
-Related: Investigation [#2](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/2) / Parent Epic [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1) / [ADR-0001](../adr/ADR-0001_Trocr_Architecture.md)（Status: Accepted）/ [ENGINE_CAPABILITY.md](ENGINE_CAPABILITY.md) / Feature [#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9)（MVP実装済み）
+Related: Investigation [#2](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/2) / Parent Epic [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1) / [ADR-0001](../adr/ADR-0001_Trocr_Architecture.md)（Status: Accepted）/ [ENGINE_CAPABILITY.md](ENGINE_CAPABILITY.md) / Feature [#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9)（MVP実装済み）/ Refactor [#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)（Backend初適用）
 
 ## MVP実装済み（2026-07-30）
 
@@ -11,7 +11,10 @@ Related: Investigation [#2](https://github.com/bs-shashimoto2048/OCR_Crafter/iss
 - `EngineDescriptor`（frozen dataclass）: `engine_id` / `display_name` / `description` / `version` / `capability` / `implemented`
 - `EngineRegistry`: `register()` / `unregister()` / `get()` / `list()` / `exists()`
 - `create_default_registry()`: 既知4エンジン（tesseract/paddleocr/easyocr/trocr）を登録済みの新しい`EngineRegistry`インスタンスを返すfactory関数
+- `resolve_engine_id()`（[#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)で追加）: rawな値（None・空文字・大文字混在・未登録値）から既知engine_idを解決する最小限の補助関数。前後空白のトリムと小文字化のみ正規化し、別名（alias）変換・未登録時の特定エンジンへの暗黙フォールバックは行わない。判定不能な場合は`None`を返す
 - 例外: `InvalidEngineDescriptorError` / `EngineAlreadyRegisteredError` / `EngineNotFoundError`
+
+**既存コードへの初適用（[#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)、Backend限定）:** `model_registry.py::list_model_infos()`と`ocr_pipeline.py::migrate_ocr_models_to_inference()`が、`resolve_engine_id()`経由でEngine Registryを利用するようになった。両箇所とも「`engine`未指定・不明ならPaddleOCRとみなす」という暗黙フォールバックを廃止し、未知の値は`"unknown"`として明示的に扱う。Frontend側の同型の暗黙フォールバック（`ModelsView.jsx::engineLabelOf()`・`inferenceModel.js::resolveInferenceEngine()`）は未対応のまま（[#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)）。`predict.py`・`job_runner.py`・`ocr_evaluation.py`・`release_gate.py`・`services/benchmark.py`は引き続き未使用。
 
 **今回未実装（本ドキュメントの将来構想のまま）:**
 

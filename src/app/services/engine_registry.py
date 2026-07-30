@@ -207,3 +207,30 @@ def create_default_registry() -> EngineRegistry:
     for descriptor in _builtin_descriptors():
         registry.register(descriptor)
     return registry
+
+
+def resolve_engine_id(raw_engine: str | None, registry: EngineRegistry | None = None) -> str | None:
+    """rawな値（None・空文字・大文字混在・未登録の値等）から、Registryに登録済みの
+    正式なengine_idを解決する。Engine判定ロジックを一箇所に集約するための最小限の
+    補助関数（Factory化・Handler化・Metadata対応はしない）。
+
+    正規化は前後空白のトリムと小文字化のみ（既存コードの`str(x).strip().lower()`
+    という慣習に合わせる）。別名（alias）変換や、未登録・不明時に特定のエンジン
+    （例: PaddleOCR）へ暗黙にフォールバックすることは一切行わない。
+
+    判定できない場合（None・空文字・Registry未登録の値）はNoneを返す。
+    呼び出し側はNoneを「不明（unknown）」として明示的に扱うこと。
+
+    registryを省略した場合は`create_default_registry()`を都度生成して使う
+    （モジュールレベルの共有Registryを持たないという設計方針に合わせる）。
+    複数件を判定するループ内で呼ぶ場合は、ループの外で1つ生成して
+    `registry=`へ渡すことで、毎回の再生成を避けられる。
+    """
+    if raw_engine is None:
+        return None
+    normalized = str(raw_engine).strip().lower()
+    if not normalized:
+        return None
+    if registry is None:
+        registry = create_default_registry()
+    return normalized if registry.exists(normalized) else None
