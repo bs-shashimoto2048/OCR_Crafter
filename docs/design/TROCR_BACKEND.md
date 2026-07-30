@@ -8,6 +8,8 @@ Related: [ADR-0001](../adr/ADR-0001_Trocr_Architecture.md)（Status: Accepted）
 
 **追記（2026-07-30、Feature [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18)）**: 実際の推論ディスパッチ（`src/app/predict.py::predict_from_image()`）からTrOCREngineを呼び出せるようになった。詳細は[FEATURE_PIPELINE_TROCR.md](../workitems/trocr/FEATURE_PIPELINE_TROCR.md)を参照。本ファイル下部の「OCR Pipelineとは未接続であること」はFeature #16時点の記述であり、`predict.py`については現在は接続済み（`trocr_engine.py`自体は無変更）。API・Frontend・学習・評価・Benchmark・Release Gate・Model Metadataとの接続は引き続き未実装。
 
+**追記（2026-07-30、Feature [#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20)）**: 既存OCR推論API（`POST /predict`）からもTrOCR推論を利用できるようになった。詳細は[FEATURE_TROCR_API_INTEGRATION.md](../workitems/trocr/FEATURE_TROCR_API_INTEGRATION.md)を参照。API経由の呼び出しはHugging Face Hubへアクセスする可能性がある（`local_files_only`は未公開）ため、社内運用ではローカルモデルパスの指定を推奨する。Frontend・学習・評価・Benchmark・Release Gate・Model Metadataとの接続は引き続き未実装。`trocr_engine.py`自体は無変更。
+
 ## 推論コアの責務
 
 - TrOCR互換モデル（Processor・`VisionEncoderDecoderModel`）のロード

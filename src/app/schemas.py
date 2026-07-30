@@ -96,8 +96,14 @@ class PreprocessPreviewRequest(BaseModel):
     image: str = Field(..., description="プレビュー対象の画像ファイル名")
     project_id: Optional[str] = Field(default="default", description="プロジェクトID")
     overrides: Optional[dict[str, Any]] = Field(default=None, description="前処理設定の上書き")
-    engine: str = Field(default="custom", description="推論エンジン: custom/easyocr/paddleocr/tesseract")
-    model: str = Field(default="latest", description="custom/paddleocr/tesseract時のモデル指定 (tesseractはengでベースモデル指定可)")
+    engine: str = Field(default="custom", description="推論エンジン: custom/easyocr/paddleocr/tesseract/trocr")
+    model: str = Field(
+        default="latest",
+        description=(
+            "custom/paddleocr/tesseract時のモデル指定 (tesseractはengでベースモデル指定可)。"
+            "engine=trocr時はmodel_ref（Hugging Face Hub ID・ローカルパス）として扱われ、必須"
+        ),
+    )
     model_type: Optional[str] = Field(default=None, description="custom+latest時のモデル種別")
     easyocr_langs: str = Field(default="en", description="OCR使用言語 (comma separated)")
     include_lowercase: bool = Field(

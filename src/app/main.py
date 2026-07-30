@@ -37,6 +37,7 @@ from .db import (
 )
 from .init_dirs import ensure_directories
 from .predict import list_paddleocr_official_rec_models, predict_from_image
+from .services.engine_registry import resolve_engine_id
 from .project_paths import (
     delete_project_directory,
     ensure_project_directories,
@@ -4049,6 +4050,22 @@ def model_types(project_id: Optional[str] = Query(default="default")) -> dict[st
     return {"project_id": resolved, "items": list_model_types(project_id=resolved)}
 
 
+def _require_trocr_model_ref(engine: str, model: str) -> None:
+    """engine=trocr選択時、model（model_ref）が未指定なら明確な400にする。
+
+    既存API（/predict）の`model`はmodel_refとしてそのまま`predict_from_image()`へ
+    渡り、TrOCRの場合はHugging Face Hub ID・ローカルパスとして扱われる
+    （Model Metadata経由の解決は未接続。Feature #18参照）。他エンジンと異なり
+    TrOCRには対応する"latest"探索先（.ocr.json等）が存在しないため、
+    空文字・空白のみを明示的に拒否する。"latest"自体は暗黙変換せず、
+    そのままpredict_from_image()へ渡す（Pipeline側の既存仕様どおり）。
+    """
+    if resolve_engine_id(engine) != "trocr":
+        return
+    if not str(model or "").strip():
+        raise HTTPException(status_code=400, detail="model (model_ref) is required when engine=trocr")
+
+
 @app.post("/predict")
 async def predict(
     file: UploadFile = File(...),
@@ -4062,6 +4079,7 @@ async def predict(
     preprocess_mode: str = Form(""),
     project_id: str = Form("default"),
 ) -> dict[str, Any]:
+    _require_trocr_model_ref(engine, model)
     resolved = _resolve_project_id(project_id)
     suffix = Path(file.filename or "image.png").suffix or ".png"
 
