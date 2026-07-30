@@ -14,6 +14,7 @@ from ..config import get_settings
 from ..db import fetch_training_job
 from ..project_paths import ensure_project_directories
 from .. import project_paths as project_paths_module
+from .engine_registry import create_default_registry, resolve_engine_id
 
 logger = logging.getLogger(__name__)
 
@@ -194,6 +195,7 @@ def list_model_infos(project_id: Optional[str] = None) -> list[dict]:
     files += [p for p in paths.models.glob("*.ocr.json") if p.is_file()]
     files += [p for p in paths.models.glob("*.tess.json") if p.is_file()]
     items: list[dict] = []
+    engine_registry = create_default_registry()
     for path in sorted(files):
         st = path.stat()
         if path.name.endswith(".tess.json"):
@@ -318,7 +320,8 @@ def list_model_infos(project_id: Optional[str] = None) -> list[dict]:
                     "name": path.name,
                     "model_type": str(payload.get("model_type") or "ocr"),
                     "training_family": str(payload.get("training_family") or "ocr"),
-                    "engine": str(payload.get("engine") or "paddleocr"),
+                    # 未指定・未登録の値をpaddleocrへ暗黙フォールバックしない（Engine Registry経由の明示的な判定）
+                    "engine": resolve_engine_id(payload.get("engine"), registry=engine_registry) or "unknown",
                     "created_at": str(payload.get("created_at") or ""),
                     "modified_at": datetime.fromtimestamp(st.st_mtime).isoformat(),
                     "dataset_split_ratio": dataset_ratio,

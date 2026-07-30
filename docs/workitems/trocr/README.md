@@ -2,7 +2,7 @@
 
 ## 状態
 
-Phase1（設計フェーズ）完了。Phase2（共通基盤実装）着手済み（Engine Capability実装完了、Feature [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)。Engine Registry MVP実装完了、Feature [#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9)）
+Phase1（設計フェーズ）完了。Phase2（共通基盤実装）着手済み（Engine Capability実装完了、Feature [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)。Engine Registry MVP実装完了、Feature [#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9)。Engine判定ロジック統一（Backend）実装完了・PRレビュー待ち、Refactor [#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)。Frontend側は[#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)として別Issue化・未着手）
 
 ## 目的
 
@@ -18,6 +18,7 @@ OCR CrafterへTransformerベースの文字認識エンジンを追加できる�
 - [x] ユーザーレビュー（Design Documents最終レビュー完了、ADR-0001をAcceptedへ変更）
 - [x] Phase2 最初の実装Issue作成・完了（Engine Capability、[#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)）
 - [x] Phase2 2番目の実装Issue作成・MVP実装完了（Engine Registry、[#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9)、Closed）
+- [x] Engine判定既存バグ修正（Backend）実装完了・PRレビュー待ち（[#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)）。Frontend側は別Issue化のみ（[#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)、未着手）
 - [ ] Phase2 残りの実装Issue作成（[ISSUE_MAP.md](ISSUE_MAP.md)の確定順序: Model Metadata以降）
 
 ## 関連Issue
@@ -26,6 +27,8 @@ OCR CrafterへTransformerベースの文字認識エンジンを追加できる�
 - Investigation: [#2](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/2) [Investigation] TrOCR採用可否とOCR Crafter統合方式の調査（Parent Epic: #1）
 - Feature: [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4) [Feature] Engine Capability実装（Parent Epic: #1、実装済み）
 - Feature: [#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9) [Feature] Engine Registry実装（Parent Epic: #1、MVP実装済み・Closed）
+- Refactor: [#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11) [Refactor] Engine判定ロジックをEngine Registryへ統一（Parent Epic: #1、Backend実装済み・PRレビュー待ち）
+- Bug: [#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12) [Bug] Frontendの未知Engine判定がPaddleOCRへ暗黙フォールバックする（Parent Epic: #1、未着手）
 
 ## 作業資料
 
@@ -37,6 +40,7 @@ OCR CrafterへTransformerベースの文字認識エンジンを追加できる�
 - [../../adr/ADR-0001_Trocr_Architecture.md](../../adr/ADR-0001_Trocr_Architecture.md)（Status: Accepted）
 - [FEATURE_ENGINE_CAPABILITY.md](FEATURE_ENGINE_CAPABILITY.md)（Feature [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)、実装済み）
 - [FEATURE_ENGINE_REGISTRY.md](FEATURE_ENGINE_REGISTRY.md)（Feature [#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9)、MVP実装済み・Closed）
+- [FEATURE_ENGINE_RESOLUTION.md](FEATURE_ENGINE_RESOLUTION.md)（Refactor [#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)、Backend実装済み・PRレビュー待ち）
 
 ## 重要な制約
 

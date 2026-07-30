@@ -21,6 +21,7 @@ import yaml
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
 from ..project_paths import ensure_project_directories, safe_rmtree
+from .engine_registry import create_default_registry, resolve_engine_id
 from .labels import read_labels
 from .model_registry import resolve_ocr_model_meta
 from .dataset_registry import resolve_dataset_id_safe, scan_ocr_dataset_folders
@@ -2253,6 +2254,7 @@ def migrate_ocr_models_to_inference(
     migrated = 0
     skipped = 0
     failed = 0
+    engine_registry = create_default_registry()
     for meta_path in meta_files:
         payload: dict[str, Any]
         try:
@@ -2264,7 +2266,8 @@ def migrate_ocr_models_to_inference(
             results.append({"name": meta_path.name, "status": "failed", "reason": "invalid_meta_json"})
             continue
 
-        engine = str(payload.get("engine") or "paddleocr").strip().lower()
+        # 未指定・未登録の値をpaddleocrへ暗黙フォールバックしない（Engine Registry経由の明示的な判定）
+        engine = resolve_engine_id(payload.get("engine"), registry=engine_registry) or "unknown"
         if engine != "paddleocr":
             skipped += 1
             results.append({"name": meta_path.name, "status": "skipped", "reason": f"unsupported_engine:{engine}"})
