@@ -22,7 +22,7 @@ Issue: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)
 
 ✅ OCR PipelineへTrOCR統合（[#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18)、Closed。PR [#19](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/19)でmainへマージ済み（merge commit `dab3cbe`）。`src/app/predict.py::predict_from_image()`が`resolve_engine_id()`経由で`trocr`分岐しTrOCREngineを呼び出す。当初想定の`ocr_pipeline.py`ではなく実際の推論ディスパッチファイルへ接続。API/Frontend/学習/評価は未接続）
 
-🔶 TrOCR API統合（[#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20)、実装済み・PRレビュー待ち。既存`POST /predict`が`engine="trocr"`を受け付ける。新規TrOCR専用APIは作成せず既存経路を拡張。Frontend/Model Metadata/Engineキャッシュは未接続）
+✅ TrOCR API統合（[#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20)、Closed。PR [#21](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/21)でmainへマージ済み（merge commit `031f59b`）。既存`POST /predict`が`engine="trocr"`を受け付ける。新規TrOCR専用APIは作成せず既存経路を拡張。Frontend/Model Metadata/Engineキャッシュは未接続）
 
 ⬜ Training
 
@@ -36,7 +36,7 @@ Issue: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)
 
 ⬜ Documentation
 
-次フェーズ: TrOCR Training／Evaluation連携を含む残りの実装Issue（[ISSUE_MAP.md](ISSUE_MAP.md)の確定順序）を作成予定。
+次フェーズ: Frontend側Engine判定修正（Issue #12）に着手予定。その後、TrOCR Training／Evaluation連携を含む残りの実装Issue（[ISSUE_MAP.md](ISSUE_MAP.md)の確定順序）を作成予定。
 
 参考: CI依存関係修正（[#6](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/6)、PR [#7](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/7)でmainへマージ済み）／既存のDB初期化テスト課題（[#8](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/8)、Open、Epic対象外の既存不具合）
 
@@ -113,7 +113,7 @@ Epicの完了条件は、調査後に確定した子Issueがすべて完了し�
 - [x] #14（Feature: 共通Model Metadata実装、Closed）
 - [x] #16（Feature: TrOCR Backend単画像推論コア実装、Closed）
 - [x] #18（Feature: OCR PipelineへTrOCR統合、Closed）
-- [ ] #20（Feature: 既存OCR推論APIへTrOCR統合、実装済み・PRレビュー待ち）
+- [x] #20（Feature: 既存OCR推論APIへTrOCR統合、Closed）
 
 ## 関連資料
 
