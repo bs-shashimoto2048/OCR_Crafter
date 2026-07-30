@@ -123,17 +123,19 @@ def test_default_registry_trocr_is_not_implemented():
         assert registry.get(engine_id).implemented is True
 
 
-def test_default_registry_version_is_none_when_unknowable():
-    """バージョンを実行環境から確認できないエンジンはNoneのまま（捏造しない）。"""
+def test_default_registry_version_is_none_for_all_builtin_engines():
+    """組み込み4エンジンとも version は None（バージョン管理はRegistryの責務としない）。
+
+    PaddleOCR/EasyOCRのrequirements.txt由来バージョンを一度は転記していたが、
+    静的な文字列としてハードコードすると更新への追従が保証できず、実際の
+    バージョンとずれても気づけない（Noneより悪い）ため、レビューで見直した。
+    実際にインストールされたバージョンの解決はVersionResolver/MetadataProvider
+    （いずれも将来実装）の責務とし、本Issueでは捏造も転記もしない。
+    """
     registry = create_default_registry()
 
-    # Tesseractは外部バイナリでバージョン問い合わせ手段が無いためNone
-    assert registry.get(ENGINE_ID_TESSERACT).version is None
-    # TrOCRは未実装のためNone
-    assert registry.get(ENGINE_ID_TROCR).version is None
-    # requirements.txtで固定されている実バージョンが分かるものは設定済み
-    assert registry.get(ENGINE_ID_PADDLEOCR).version == "3.5.0"
-    assert registry.get(ENGINE_ID_EASYOCR).version == "1.7.2"
+    for engine_id in (ENGINE_ID_TESSERACT, ENGINE_ID_PADDLEOCR, ENGINE_ID_EASYOCR, ENGINE_ID_TROCR):
+        assert registry.get(engine_id).version is None
 
 
 # ---------------------------------------------------------------------------

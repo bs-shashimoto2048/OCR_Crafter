@@ -148,6 +148,21 @@ def _builtin_descriptors() -> tuple[EngineDescriptor, ...]:
     Capabilityはengine_capability.BUILTIN_CAPABILITIESをそのまま参照し、
     重複定義しない。descriptionはCapability側の値をそのまま使う設計のため、
     ここでは意図的に指定しない（Descriptor側に同じ文字列を転記しない）。
+
+    versionは全エンジンとも意図的にNoneとする（レビューでの再検討の結果）。
+    PaddleOCR/EasyOCRについてはrequirements.txt記載のパッケージバージョンを
+    一度は転記していたが、以下の理由でNoneへ戻した。
+    - requirements.txtが更新されても、ここへ手作業で反映し続ける保証が無く、
+      黙って古い値のまま残ってしまう（`None`より悪い「実際と異なる値が
+      それらしく存在する」状態を生む）
+    - 「実行環境に実際にインストールされているバージョン」を知りたいなら、
+      本来は登録時に静的な文字列を書き写すのではなく、問い合わせ時に
+      `importlib.metadata.version()`等で動的に解決するVersionResolver、
+      またはモデルインスタンス単位の実際の情報を扱うMetadataProviderの
+      責務とすべきである（いずれもENGINE_REGISTRY.mdの将来構想）
+    - Tesseract/TrOCRだけNoneで、PaddleOCR/EasyOCRだけ実値、という
+      不揃いな状態自体が「たまたまrequirements.txtで見つけられたかどうか」
+      でしかなく、Descriptorとしての一貫した基準になっていなかった
     """
     return (
         EngineDescriptor(
@@ -155,8 +170,6 @@ def _builtin_descriptors() -> tuple[EngineDescriptor, ...]:
             display_name="Tesseract",
             capability=get_builtin_capability(ENGINE_ID_TESSERACT),
             implemented=True,
-            # 外部実行ファイル（tesseract.exe）のバージョンをコードから問い合わせる仕組みが
-            # 現状の実装に存在しないため、捏造せずNoneのままとする。
             version=None,
         ),
         EngineDescriptor(
@@ -164,23 +177,20 @@ def _builtin_descriptors() -> tuple[EngineDescriptor, ...]:
             display_name="PaddleOCR",
             capability=get_builtin_capability(ENGINE_ID_PADDLEOCR),
             implemented=True,
-            # requirements.txtに固定されているpaddleocrパッケージのバージョン。
-            version="3.5.0",
+            version=None,
         ),
         EngineDescriptor(
             engine_id=ENGINE_ID_EASYOCR,
             display_name="EasyOCR",
             capability=get_builtin_capability(ENGINE_ID_EASYOCR),
             implemented=True,
-            # requirements.txtに固定されているeasyocrパッケージのバージョン。
-            version="1.7.2",
+            version=None,
         ),
         EngineDescriptor(
             engine_id=ENGINE_ID_TROCR,
             display_name="TrOCR",
             capability=get_builtin_capability(ENGINE_ID_TROCR),
             implemented=False,
-            # 未実装（transformers依存すら未導入）のためバージョン概念が存在しない。
             version=None,
         ),
     )

@@ -24,6 +24,12 @@ Related: Investigation [#2](https://github.com/bs-shashimoto2048/OCR_Crafter/iss
 
 **将来の段階的移行方針**: Handler群を導入する際は、まず`InferenceHandler`（`ENGINE_BUILDERS`と契約が一致する）から着手し、TrOCR等の新規エンジンの`register()`実装を通じて実証した上で、既存エンジンの移行要否を個別Issueで判断する（[ISSUE_MAP.md](../workitems/trocr/ISSUE_MAP.md)のPhase2以降）。モジュールレベルの共有Registryは持たせず、`create_default_registry()`を都度呼ぶ設計としたため、将来アプリへ配線する際は`main.py`の`startup`イベント等、呼び出し元1箇所で生成したインスタンスを明示的に受け渡す方式を想定する。
 
+**`EngineDescriptor.version`について（レビューでの再検討、2026-07-30）**: 実装当初はPaddleOCR/EasyOCRについて`requirements.txt`記載のバージョンをDescriptorへ直接転記していたが、静的な文字列としてハードコードすると`requirements.txt`更新時に追従する保証が無く、気づかないまま実際のバージョンとずれる恐れがあるため、全エンジンとも`None`へ戻した。「実行環境に実際にインストールされているバージョン」を扱いたい場合は、登録時に値を書き写すのではなく、問い合わせ時に動的解決する仕組み（VersionResolver）、またはモデルインスタンス単位の実情報を扱う`MetadataProvider`側の責務とすべきと判断する。
+
+## 将来検討事項
+
+- **組み込みEngineの`unregister()`保護**: 現状の`EngineRegistry.unregister()`は、組み込み（`create_default_registry()`で登録した）エンジンかどうかを区別せず削除できる。本Issueの時点ではRegistryを既存処理から一切呼び出していないため実害は無いが、将来Registryを`predict.py`等の実処理へ配線する段階では、意図しない`unregister("tesseract")`のような呼び出しから組み込みエンジンを保護する必要が生じる可能性がある。その場合も保護ロジックはRegistry自体ではなく、呼び出し側（API層・配線層）に持たせる方針を維持しつつ、実装時に改めて要否を判断する。
+
 ## 目的
 
 現在`predict.py`・`job_runner.py`・`ocr_evaluation.py`・`model_registry.py`・`release_gate.py`に散在する`if/elif`（またはファイル拡張子）によるエンジン判定を、**Registry（辞書ベースの解決機構）へ置き換えられるか**を検討し、置き換え可能な設計を示す。
