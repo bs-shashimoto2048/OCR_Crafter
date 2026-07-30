@@ -100,6 +100,7 @@ ADR-0001がAcceptedとなり、Phase2（共通基盤実装）へ移行するに�
 - **Backend Engine RegistryをAPI経由でFrontendへ提供し、Frontend側Engine一覧を一元管理する**（Bug [#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)のレビューで記録）。GitHub Issueはまだ作成しない
 - **`OcrBatchView.jsx`/`RapidOCRView.jsx`へのTrOCR対応**: 両画面は`InferenceView.jsx`と同じApp.jsx共有state（`inferEngine`等）を参照するが、独自のEngine選択肢・FormData構築ロジックを持ち、いずれもTrOCRを追加していない（Feature [#23](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/23)で確認済み）。`InferenceView`でTrOCRを選択したまま両画面へ遷移すると、共有stateの値がそれらのドロップダウン選択肢と一致しない状態になりうる（クラッシュはしない。既存の行/スロット単位のエラーハンドリングで捕捉される）。対応する場合は両画面へ同様のUI追加が必要。GitHub Issueはまだ作成しない
 - **TrOCRモデル参照の永続化**: `InferenceView.jsx`のTrOCRモデル参照入力はテスト画面の一時的なUI状態としてのみ保持しており、プロジェクト保存・復元（「推論に使用」の仕組み）の対象にしていない（Feature [#23](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/23)で意図的に対象外とした）。Model Metadata連携が実装される段階で永続化要否を再検討する。GitHub Issueはまだ作成しない
+- **`InferenceView`・`OcrBatchView`・`RapidOCRView`のEngine選択UIを共通Component化する**（Feature [#23](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/23)のレビューで記録）。GitHub Issueはまだ作成しない
 
 ## その他の将来検討候補（優先度低・Epic対象外）
 
