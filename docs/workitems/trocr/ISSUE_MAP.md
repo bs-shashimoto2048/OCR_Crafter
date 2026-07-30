@@ -10,6 +10,7 @@ Related Issue: Epic [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues
 - Feature: [#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9) Engine Registry実装（実装済み・Closed。Parent Epic: #1）
 - Refactor: [#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11) Engine判定ロジックをEngine Registryへ統一（Backend側実装済み・PRレビュー待ち。Parent Epic: #1）
 - Bug: [#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12) Frontendの未知Engine判定がPaddleOCRへ暗黙フォールバックする（未着手・別Issue化のみ。Parent Epic: #1）
+- Feature: [#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14) 共通Model Metadata実装（実装済み・PRレビュー待ち。Parent Epic: #1）
 
 ## 次に作成するIssue候補（確定順序、2026-07-29）
 
@@ -17,7 +18,7 @@ ADR-0001がAcceptedとなり、Phase2（共通基盤実装）へ移行するに�
 
 1. **Engine Capability** — Phase1（[ENGINE_CAPABILITY.md](../../design/ENGINE_CAPABILITY.md)の実装、✅完了: [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)）
 2. **Engine Registry** — Phase1（[ENGINE_REGISTRY.md](../../design/ENGINE_REGISTRY.md)のMVP実装、✅完了: [#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9)）
-3. **Model Metadata** — Phase1（[MODEL_METADATA.md](../../design/MODEL_METADATA.md)の実装）
+3. **Model Metadata** — Phase1（[MODEL_METADATA.md](../../design/MODEL_METADATA.md)のMVP実装、✅実装済み・PRレビュー待ち: [#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14)）
 4. **Engine判定既存バグ修正** — Phase2（`engineLabelOf()`/`resolveInferenceEngine()`/`_model_engine()`のキャッチオール是正＋判定ロジックの一本化。Backend側（`model_registry.py`/`ocr_pipeline.py`）は✅完了: [#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)。Frontend側は未着手・別Issue: [#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)。`release_gate.py::_model_engine()`との重複一本化も未着手）
 5. **TrOCR Backend** — Phase3（依存関係・設定管理・Dataset確認・TrOCR Model Metadata適用）
 6. **TrOCR Training** — Phase4（`services/trocr_pipeline.py`学習Backend）
@@ -39,7 +40,7 @@ ADR-0001がAcceptedとなり、Phase2（共通基盤実装）へ移行するに�
 
 - **Engine Capability**（✅完了: [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)）: [ENGINE_CAPABILITY.md](../../design/ENGINE_CAPABILITY.md)の設計を実装。`src/app/services/engine_capability.py`へスキーマ定義（既存3エンジンの`if/elif`分岐は変更しない。既存コードからの参照・配線はEngine Registry実装後に行う）
 - **Engine Registry**（✅MVP実装済み: [#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9)）: [ENGINE_REGISTRY.md](../../design/ENGINE_REGISTRY.md)のうち`EngineDescriptor`/`EngineRegistry`（register/unregister/get/list/exists）のみを実装。Training/Inference/Evaluation Handler・MetadataProvider・ModelLoader・Exporter・Validatorは未実装（別Issue）。既存3エンジンをRegistryへ移行するかは別Issue、本Phaseでは仕組みのみ
-- **Model Metadata**: [MODEL_METADATA.md](../../design/MODEL_METADATA.md)の統一スキーマを実装（既存`.tess.json`/`.ocr.json`/`.pt`は変更しない。新規エンジン向けの標準形式として新設）
+- **Model Metadata**（✅MVP実装済み: [#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14)）: [MODEL_METADATA.md](../../design/MODEL_METADATA.md)のうち`ModelMetadata`（必須: `model_id`/`engine_id`のみ、`status`/`version`は不採用）を実装。既存`.tess.json`/`.ocr.json`/`.pt`は変更せず、各形式からの変換Adapterも今回は実装しない（`from_dict()`のみ提供）。カスタム分類モデル（`engine="custom"`）はEngine Registry未登録のため現時点では表現できない既知の制約あり
 
 ### Phase2: 既存バグ修正・Engine判定の一本化
 
@@ -80,6 +81,10 @@ ADR-0001がAcceptedとなり、Phase2（共通基盤実装）へ移行するに�
 - **ユーザーマニュアル**: `docs/manual/`関連章の更新
 - **チュートリアル**: `docs/tutorial/`へTrOCRチュートリアル追加（日本語対応方針が未解決のため、英語/英数字ユースケースを優先する可能性あり）
 - **リリース・移行確認**: 既存プロジェクトへの影響が無いことの最終確認
+
+## Future Work（Model Metadata、Epic #1範囲内・未着手）
+
+- **カスタム分類モデル（`engine="custom"`）のModel Metadata対応**: [MODEL_METADATA.md](../../design/MODEL_METADATA.md)の`ModelMetadata`は、Engine Registry登録済みの4エンジン（tesseract/paddleocr/easyocr/trocr）のみを`engine_id`として許可する。カスタム分類モデル（`.pt`）は`engine="custom"`という、Engine Registry未登録の値を使っているため、現時点のModelMetadataはカスタム分類モデルを表現できない（Feature [#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14)で確認済みの既知の制約）。対応する場合はEngine Registryへ`custom`を新規登録するか、ModelMetadataの対象外として扱うかを別途判断する必要がある。今回は対象外のため、忘れないようここへ記録する（GitHub Issueはまだ作成しない）
 
 ## その他の将来検討候補（優先度低・Epic対象外）
 

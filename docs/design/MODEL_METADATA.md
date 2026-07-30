@@ -1,6 +1,36 @@
 # Model Metadata 設計
 
-Related: Investigation [#2](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/2) / Parent Epic [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1) / [ADR-0001](../adr/ADR-0001_Trocr_Architecture.md)（Status: Accepted）/ [ENGINE_CAPABILITY.md](ENGINE_CAPABILITY.md) / [ENGINE_REGISTRY.md](ENGINE_REGISTRY.md)
+Related: Investigation [#2](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/2) / Parent Epic [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1) / [ADR-0001](../adr/ADR-0001_Trocr_Architecture.md)（Status: Accepted）/ [ENGINE_CAPABILITY.md](ENGINE_CAPABILITY.md) / [ENGINE_REGISTRY.md](ENGINE_REGISTRY.md) / Feature [#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14)（MVP実装済み）
+
+## MVP実装済み（2026-07-30）
+
+`src/app/services/model_metadata.py`として、以下のスキーマ全体ではなく**大幅に絞り込んだ最小構成**を実装した（Feature [#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14)）。既存4形式（`.ocr.json`/`.tess.json`/`.pt`/`inference_model.json`）と学習履歴・実験カルテ・Benchmark結果を実地調査した結果、下記「スキーマ」節にある19フィールドの多くは**現時点の実データには存在しない、または既存データとの対応が確定していない**ため、本Issueでは採用しなかった（詳細調査は[FEATURE_MODEL_METADATA.md](../workitems/trocr/FEATURE_MODEL_METADATA.md)参照）。
+
+**実装したフィールド:**
+
+- 必須: `model_id`, `engine_id`
+- 任意: `display_name`, `model_type`, `created_at`, `updated_at`, `artifact_path`, `dataset_id`, `experiment_id`, `preprocess_version`, `source`, `extra`
+
+**下記スキーマ節との対応（採用・不採用・改名）:**
+
+| 元スキーマのフィールド | 本実装での扱い |
+|---|---|
+| `engine` | `engine_id`へ改名。[ENGINE_REGISTRY.md](ENGINE_REGISTRY.md)の`resolve_engine_id()`で検証（Engine Registry登録済みIDのみ有効。正規化ロジックは複製せず再利用） |
+| `checkpoint`（dict） | `artifact_path`（単一のstr）へ簡略化。`{"path","format","sha256"}`という構造化表現は、実データでの実際の使われ方が確定していないため採用を見送った |
+| `dataset`（dict） | `dataset_id`（str）のみ採用。`dataset_name`/`dataset_hash`は実データ上`dataset_registry.py`側が正のため重複保持しない |
+| `experiment`（dict） | `experiment_id`（str）のみ採用。理由は同上（`experiment_tracker.py`が正） |
+| `engine_version`, `framework`, `architecture`, `processor`, `tokenizer`, `language`, `charset`, `license`, `training_config`, `metrics`, `ocr_version`, `export_format`, `model_format` | **本Issueでは不採用。** いずれも「既存データに存在しない項目を必須/任意問わず追加しない」という方針により見送った。特にTrOCR登場時に初めて意味を持つとされていた`processor`/`tokenizer`/`license`は、実装が伴わない段階で構造を固めると推測でスキーマを設計することになるため、実際にTrOCR実装（後続Issue）に着手する段階で改めて設計する |
+| （新規） | `source`（実験カルテの`source: "training"\|"backfill"`と同じ概念。このメタデータレコード自体がライブ記録かバックフィルかを表す）、`preprocess_version`（`preprocess_config_version`相当）、`extra`（`Mapping[str, Any]`、エンジン固有情報の逃し場。MappingProxyType + deep copyで外部からの書き換えを防止） |
+
+**採用しなかった概念（`status`・`version`）:** モデルファイル自体（`.ocr.json`/`.tess.json`/`.pt`）には「モデルの状態」「モデルのバージョン」に対応する実データが存在しない。Job状態（`training_jobs.status`: `queued/running/succeeded/failed/...`）とRelease状態（`release_manager.py`: `Draft/Validated/Candidate/Production/Archived`）はいずれも別テーブル・別ファイルの概念であり、モデル自体のstatusではない。「バージョン」も、Releaseのセマンティックバージョン・前処理設定バージョン・レジストリのスキーマバージョンという3つの異なる概念が既に併存しており、`ModelMetadata.version`を新設すると更に紛らわしくなるため、[ENGINE_REGISTRY.md](ENGINE_REGISTRY.md)の`EngineDescriptor.version`（実行環境から確認できない場合はNoneを許容する）と同じ判断基準に基づき、MVPでは採用を見送った。
+
+**既知の制約（`engine="custom"`）:** カスタム分類モデル（`.pt`）は、Engine Capability/Engine Registryの対象4エンジン（tesseract/paddleocr/easyocr/trocr）に含まれていない`"custom"`という値を使う。`ModelMetadata.engine_id`はEngine Registry登録済みIDのみを許可するため、**現時点のModelMetadataはカスタム分類モデルを表現できない。** 将来ModelMetadataをカスタム分類モデルへ適用する場合は、Engine Registryへ`custom`を新規登録するか、ModelMetadataの対象外として扱うかを別途判断する必要がある。
+
+**未知フィールドの方針（仕様）:** `from_dict()`は、ModelMetadataが持たない未知キーを**保持せず無視する**（自動的に`extra`へ混入させない）。既存の`.ocr.json`等はここでモデル化していない多数のエンジン固有フィールド（`training_params`の20項目等）を持つため、それらを無条件に`extra`へ集約すると共通フィールドとの衝突判定が複雑化する。`extra`へ値を持たせたい場合は、呼び出し側が変換時に`data["extra"]`へ明示的に格納する。**この方針は、各エンジン形式向けの変換Adapter（後述「対象外」参照）を導入する段階で再検討する。** Adapterが「どのフィールドをextraへ回すか」を明示的に決定できるようになれば、未知フィールドの扱いを「無視」から「Adapter経由でextraへ取り込む」へ変更する余地がある。
+
+**`artifact_path`について（単一成果物前提）:** 現在の`artifact_path`は単一のパス文字列であり、1モデル=1成果物を前提としている。PaddleOCRの`train_dir`/`inference_dir`のように学習チェックポイントと推論用エクスポートが別ディレクトリで併存するケースは、今回は単純化により1つの代表パスへ丸めることを想定し、複数パスの構造化表現は採用していない。将来、複数成果物を明示的に区別する必要が生じた場合は、`artifact_path`を`artifact_paths`（複数パスを持つ構造）へ拡張するか、`extra`で当面代替するかを、実際にAdapterを実装する段階で検討する。
+
+**対象外（後続Issueへ）:** `.ocr.json`/`.tess.json`/`.pt`/`inference_model.json`それぞれからの変換Adapter（`from_ocr_metadata()`等）は今回実装しない。`from_dict()`のみを提供し、既存形式ごとの変換ロジックは個別Issueで検討する。既存処理（`model_registry.py`・`ocr_pipeline.py`・`predict.py`・`release_gate.py`・`benchmark.py`・`experiment_tracker.py`等）への配線・既存JSONの書き換えも行っていない。
 
 ## 目的
 
