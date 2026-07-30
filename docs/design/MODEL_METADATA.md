@@ -32,6 +32,8 @@ Related: Investigation [#2](https://github.com/bs-shashimoto2048/OCR_Crafter/iss
 
 **対象外（後続Issueへ）:** `.ocr.json`/`.tess.json`/`.pt`/`inference_model.json`それぞれからの変換Adapter（`from_ocr_metadata()`等）は今回実装しない。`from_dict()`のみを提供し、既存形式ごとの変換ロジックは個別Issueで検討する。既存処理（`model_registry.py`・`ocr_pipeline.py`・`predict.py`・`release_gate.py`・`benchmark.py`・`experiment_tracker.py`等）への配線・既存JSONの書き換えも行っていない。
 
+**追記（2026-07-30、Feature [#25](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/25)、重要な調査結果）:** 「TrOCR Model MetadataをFrontendへ連携する」という着手時点で、`ModelMetadata`（本ファイルが説明するdataclass自体）が**依然として既存コードへ一切配線されていない**ことを再確認した。`ModelMetadata`を生成・保存・読込する処理はコードベース上どこにも存在せず（`model_metadata.py`自身以外から一切参照されない）、`.pt`/`.ocr.json`/`.tess.json`のいずれの既存モデル一覧グロブパターンにも`.trocr.json`相当の形式は存在しない（TrOCR学習自体が未実装のため）。したがって、Feature #25のFrontend連携は、この`ModelMetadata`dataclassではなく、**既存の`model_registry.py::list_model_infos()`（`GET /models/info`）が返す`engine`フィールド**を`resolve_engine_id()`経由で正規化して`"trocr"`のものだけを抽出する方式を採用した。実環境では、TrOCR学習・モデル登録の仕組みが実装されるまで、この抽出結果は基本的に空になる（既知の状態であり不具合ではない。詳細は[FEATURE_TROCR_MODEL_METADATA_UI.md](../workitems/trocr/FEATURE_TROCR_MODEL_METADATA_UI.md)参照）。
+
 ## 目的
 
 学習済みOCRモデルの管理情報を、エンジン共通の1つのスキーマとして保持できるようにする。[ENGINE_CAPABILITY.md](ENGINE_CAPABILITY.md)冒頭で定義したとおり、**Metadataは「ある1つの学習済みモデルが実際に何であるか」（動的・モデルインスタンス単位）を表す。**

@@ -44,6 +44,11 @@ import {
   trocrModelRefMissing,
 } from "./lib/inferenceModel";
 import {
+  extractTrocrModels,
+  resolveSelectedTrocrModelRef,
+  trocrMetadataValidationError,
+} from "./lib/trocrModelMetadata";
+import {
   buildPreprocessPreviewPayload,
   buildPreprocessRunPayload,
   denormalizePreprocessOperations,
@@ -1477,6 +1482,18 @@ export default function App() {
       return next;
     });
   }
+
+  // TrOCR Model Metadata連携（Issue #25）。既存のモデル一覧（modelInfos）から
+  // engine=trocrのものだけを抽出する。新規APIは追加しない
+  const trocrModels = useMemo(
+    () => extractTrocrModels(models, modelInfos, modelAliases),
+    [models, modelInfos, modelAliases]
+  );
+  // ""=未選択（登録済みモデルの有無で動的に既定値を決める）。ユーザーが明示的に
+  // 選択した後は、その値を固定で保持する（データ読込タイミングによる再切替をしない）
+  const [inferTrocrModelSource, setInferTrocrModelSource] = useState("");
+  const inferTrocrModelSourceEffective = inferTrocrModelSource || (trocrModels.length > 0 ? "metadata" : "manual");
+  const [inferTrocrSelectedModel, setInferTrocrSelectedModel] = useState("");
 
   // 比較用推論スロットの project 別読込（既存の単一推論設定とは独立したキーで互換維持）
   useEffect(() => {
@@ -3461,13 +3478,25 @@ export default function App() {
       return;
     }
     // TrOCR選択時はmodel_ref（Hugging Face model ID・ローカルパス）が必須。
-    // 未入力・空白のみならAPIを呼び出さずここで停止する（Backend側にも検証はあるが、
-    // Frontend側でも送信前に止める）
-    if (trocrModelRefMissing(inferEngine, inferTrocrModelRef)) {
-      notify("error", "TrOCRモデル参照を入力してください。");
-      return;
+    // 未入力・空白のみ・未選択・解決不能ならAPIを呼び出さずここで停止する
+    // （Backend側にも検証はあるが、Frontend側でも送信前に止める）
+    let resolvedTrocrModel = "";
+    if (inferEngine === "trocr") {
+      if (inferTrocrModelSourceEffective === "metadata") {
+        const validationError = trocrMetadataValidationError(trocrModels, inferTrocrSelectedModel);
+        if (validationError) {
+          notify("error", validationError);
+          return;
+        }
+        resolvedTrocrModel = resolveSelectedTrocrModelRef(trocrModels, inferTrocrSelectedModel);
+      } else {
+        if (trocrModelRefMissing(inferEngine, inferTrocrModelRef)) {
+          notify("error", "TrOCRモデル参照を入力してください。");
+          return;
+        }
+        resolvedTrocrModel = normalizeTrocrModelRef(inferTrocrModelRef);
+      }
     }
-    const trimmedTrocrModelRef = normalizeTrocrModelRef(inferTrocrModelRef);
 
     setInferLoading(true);
     try {
@@ -3494,8 +3523,9 @@ export default function App() {
         formData.append("easyocr_langs", inferEasyOcrLangs.length > 0 ? inferEasyOcrLangs.join(",") : "en");
       } else if (inferEngine === "trocr") {
         // 既存modelフィールドへそのまま渡す（TrOCR専用フィールドは追加しない）。
-        // "latest"の自動変換はしない（trimmedTrocrModelRefは利用者の入力値そのまま）
-        formData.append("model", trimmedTrocrModelRef);
+        // "latest"の自動変換はしない。登録済みモデル方式は解決済みmodel_ref、
+        // 手動入力方式は利用者の入力値そのもの（前後空白除去済み）
+        formData.append("model", resolvedTrocrModel);
       }
       if (lowercaseToggleApplicable(inferEngine, inferEasyOcrLangs)) {
         formData.append("include_lowercase", inferIncludeLowercase ? "true" : "false");
@@ -4653,6 +4683,11 @@ export default function App() {
         tesseractModels={tesseractModels}
         trocrModelRef={inferTrocrModelRef}
         setTrocrModelRef={setInferTrocrModelRef}
+        trocrModels={trocrModels}
+        trocrModelSource={inferTrocrModelSourceEffective}
+        setTrocrModelSource={setInferTrocrModelSource}
+        trocrSelectedModel={inferTrocrSelectedModel}
+        setTrocrSelectedModel={setInferTrocrSelectedModel}
         latestModels={latestModels}
         onFileChange={selectInferenceFile}
         fileName={inferFileName}

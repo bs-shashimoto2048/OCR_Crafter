@@ -50,6 +50,11 @@ function baseProps(overrides = {}) {
     tesseractModels: [],
     trocrModelRef: "",
     setTrocrModelRef: noop,
+    trocrModels: [],
+    trocrModelSource: "manual",
+    setTrocrModelSource: noop,
+    trocrSelectedModel: "",
+    setTrocrSelectedModel: noop,
     latestModels: { any: "", byType: {} },
     onFileChange: noop,
     fileName: "",
@@ -183,4 +188,129 @@ test("結果表示: confidenceを0や100として捏造しない", () => {
   const html = renderToString(React.createElement(InferenceView, baseProps({ engine: "trocr", result })));
   assert.ok(!html.includes("信頼度 0.0%"));
   assert.ok(!html.includes("信頼度 100.0%"));
+});
+
+// ---------- TrOCR Model Metadata連携（Issue #25） ----------
+
+const TROCR_MODELS = [
+  { name: "a.trocr.json", label: "手書き文字TrOCR v1", modelRef: "/opt/models/trocr-a" },
+  { name: "b.trocr.json", label: "b.trocr.json", modelRef: "/opt/models/trocr-b" },
+];
+
+test("TrOCR選択時に「TrOCRモデル指定方法」の選択肢（登録済み/手動入力）が表示される", () => {
+  const html = renderToString(React.createElement(InferenceView, baseProps({ engine: "trocr" })));
+  assert.ok(html.includes("TrOCRモデル指定方法"));
+  assert.ok(html.includes("登録済みモデルから選択"));
+  assert.ok(html.includes("手動入力"));
+});
+
+test("他Engine選択時はTrOCRモデル指定方法UIを表示しない", () => {
+  const html = renderToString(React.createElement(InferenceView, baseProps({ engine: "paddleocr" })));
+  assert.ok(!html.includes("TrOCRモデル指定方法"));
+});
+
+test("登録済みモデル方式・0件の場合は空のselectを出さず案内文を表示する", () => {
+  const html = renderToString(
+    React.createElement(InferenceView, baseProps({ engine: "trocr", trocrModelSource: "metadata", trocrModels: [] }))
+  );
+  assert.ok(html.includes("登録済みTrOCRモデルはありません。手動入力をご利用ください。"));
+  // 「TrOCRモデル」select（選択してくださいoption）は出ない。既存の「推論エンジン」selectのみ残る
+  assert.ok(!html.includes("選択してください"));
+});
+
+test("登録済みモデル方式・モデルがある場合はTrOCRモデルだけをselectへ表示する（ラベルはdisplay_name/エイリアス優先）", () => {
+  const html = renderToString(
+    React.createElement(
+      InferenceView,
+      baseProps({ engine: "trocr", trocrModelSource: "metadata", trocrModels: TROCR_MODELS })
+    )
+  );
+  assert.ok(html.includes('<option value="a.trocr.json">手書き文字TrOCR v1</option>'));
+  assert.ok(html.includes('<option value="b.trocr.json">b.trocr.json</option>'));
+  // 絶対パス（modelRef）はラベルとして表示されない
+  assert.ok(!html.includes("/opt/models/trocr-a"));
+  assert.ok(!html.includes("/opt/models/trocr-b"));
+});
+
+test("登録済みモデル方式・未選択では実行ボタンが無効化され、エラー案内が表示される", () => {
+  const html = renderToString(
+    React.createElement(
+      InferenceView,
+      baseProps({
+        engine: "trocr",
+        trocrModelSource: "metadata",
+        trocrModels: TROCR_MODELS,
+        trocrSelectedModel: "",
+        fileName: "img.png",
+      })
+    )
+  );
+  const button = extractRunButton(html);
+  assert.match(button, /disabled=""/);
+  assert.ok(html.includes("TrOCRモデルを選択してください。"));
+});
+
+test("登録済みモデル方式・model_refが解決できないモデルを選択した場合は実行ボタンが無効化される", () => {
+  const brokenModels = [{ name: "broken.trocr.json", label: "壊れたモデル", modelRef: "" }];
+  const html = renderToString(
+    React.createElement(
+      InferenceView,
+      baseProps({
+        engine: "trocr",
+        trocrModelSource: "metadata",
+        trocrModels: brokenModels,
+        trocrSelectedModel: "broken.trocr.json",
+        fileName: "img.png",
+      })
+    )
+  );
+  const button = extractRunButton(html);
+  assert.match(button, /disabled=""/);
+  assert.ok(html.includes("選択したTrOCRモデルを利用できません。"));
+});
+
+test("登録済みモデル方式・有効なモデルを選択済みなら実行ボタンは有効", () => {
+  const html = renderToString(
+    React.createElement(
+      InferenceView,
+      baseProps({
+        engine: "trocr",
+        trocrModelSource: "metadata",
+        trocrModels: TROCR_MODELS,
+        trocrSelectedModel: "a.trocr.json",
+        fileName: "img.png",
+      })
+    )
+  );
+  const button = extractRunButton(html);
+  assert.ok(!/\sdisabled=""/.test(button));
+});
+
+test("登録済みモデル方式・選択済みなら「実際に使用される推論先」へラベルを表示する（絶対パスではない）", () => {
+  const html = renderToString(
+    React.createElement(
+      InferenceView,
+      baseProps({
+        engine: "trocr",
+        trocrModelSource: "metadata",
+        trocrModels: TROCR_MODELS,
+        trocrSelectedModel: "a.trocr.json",
+      })
+    )
+  );
+  assert.ok(html.includes("手書き文字TrOCR v1"));
+  assert.ok(!html.includes("/opt/models/trocr-a"));
+});
+
+test("手動入力方式では従来どおりモデル参照入力欄のみ表示し、登録済みモデルselectは出さない", () => {
+  const html = renderToString(
+    React.createElement(
+      InferenceView,
+      baseProps({ engine: "trocr", trocrModelSource: "manual", trocrModels: TROCR_MODELS })
+    )
+  );
+  assert.ok(html.includes("TrOCRモデル参照"));
+  // 登録済みモデルのoption（ラベル）が出ない = TrOCRモデルselect自体が表示されていない
+  assert.ok(!html.includes("手書き文字TrOCR v1"));
+  assert.ok(!html.includes('value="a.trocr.json"'));
 });

@@ -14,7 +14,8 @@ Related Issue: Epic [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues
 - Feature: [#16](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/16) TrOCR Backend単画像推論コア実装（実装済み・Closed。Parent Epic: #1）
 - Feature: [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18) OCR PipelineへTrOCR統合（実装済み・Closed。Parent Epic: #1。当初想定の`ocr_pipeline.py`ではなく実際の推論ディスパッチファイル`predict.py`へ接続）
 - Feature: [#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20) 既存OCR推論APIへTrOCR統合（実装済み・Closed。Parent Epic: #1。新規TrOCR専用APIは作成せず既存`POST /predict`を拡張）
-- Feature: [#23](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/23) FrontendへTrOCR選択UIを追加（実装済み・PRレビュー待ち。Parent Epic: #1。`InferenceView.jsx`（推論テスト画面）へ最小追加、`OcrBatchView.jsx`/`RapidOCRView.jsx`は対象外）
+- Feature: [#23](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/23) FrontendへTrOCR選択UIを追加（実装済み・Closed。Parent Epic: #1。`InferenceView.jsx`（推論テスト画面）へ最小追加、`OcrBatchView.jsx`/`RapidOCRView.jsx`は対象外）
+- Feature: [#25](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/25) TrOCR Model MetadataをFrontend推論UIへ連携（実装済み・PRレビュー待ち。Parent Epic: #1。既存`GET /models/info`のengineフィルタのみで実現、Backend変更なし。実環境では登録済みモデルは基本的に0件）
 
 ## 次に作成するIssue候補（確定順序、2026-07-29）
 
@@ -70,7 +71,8 @@ ADR-0001がAcceptedとなり、Phase2（共通基盤実装）へ移行するに�
 
 ### Phase5: Frontend
 
-- **推論テスト画面へのTrOCR選択UI**（✅実装済み・PRレビュー待ち: [#23](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/23)）: `InferenceView.jsx`（既存OCR推論APIへ直接`POST /predict`する画面）へTrOCR選択肢＋モデル参照自由入力欄を追加。詳細は[FEATURE_TROCR_FRONTEND_UI.md](FEATURE_TROCR_FRONTEND_UI.md)。`OcrBatchView.jsx`/`RapidOCRView.jsx`は対象外（Future Work参照）
+- **推論テスト画面へのTrOCR選択UI**（✅完了: [#23](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/23)）: `InferenceView.jsx`（既存OCR推論APIへ直接`POST /predict`する画面）へTrOCR選択肢＋モデル参照自由入力欄を追加。詳細は[FEATURE_TROCR_FRONTEND_UI.md](FEATURE_TROCR_FRONTEND_UI.md)。`OcrBatchView.jsx`/`RapidOCRView.jsx`は対象外（Future Work参照）
+- **TrOCR Model MetadataのFrontend連携**（✅実装済み・PRレビュー待ち: [#25](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/25)）: 既存`GET /models/info`（`modelInfos`）からengine正規化が`trocr`のものだけを抽出し、登録済みモデル選択・手動入力の2方式を共存させた。`ModelMetadata`dataclass自体は依然未配線・TrOCR用モデル一覧ファイル形式も存在しないため、実環境では登録済みモデルは基本的に0件（既知の状態）。詳細は[FEATURE_TROCR_MODEL_METADATA_UI.md](FEATURE_TROCR_MODEL_METADATA_UI.md)
 - **Model Manager UI**: Engine Capability参照への切替（Phase2の欠陥修正と連動）
 - **Training UI**: `TrainingView.jsx`の既存ドロップダウンへTrOCR選択肢を追加
 - **Evaluation UI**: Phase4の評価連携方針決定に連動
@@ -101,6 +103,8 @@ ADR-0001がAcceptedとなり、Phase2（共通基盤実装）へ移行するに�
 - **`OcrBatchView.jsx`/`RapidOCRView.jsx`へのTrOCR対応**: 両画面は`InferenceView.jsx`と同じApp.jsx共有state（`inferEngine`等）を参照するが、独自のEngine選択肢・FormData構築ロジックを持ち、いずれもTrOCRを追加していない（Feature [#23](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/23)で確認済み）。`InferenceView`でTrOCRを選択したまま両画面へ遷移すると、共有stateの値がそれらのドロップダウン選択肢と一致しない状態になりうる（クラッシュはしない。既存の行/スロット単位のエラーハンドリングで捕捉される）。対応する場合は両画面へ同様のUI追加が必要。GitHub Issueはまだ作成しない
 - **TrOCRモデル参照の永続化**: `InferenceView.jsx`のTrOCRモデル参照入力はテスト画面の一時的なUI状態としてのみ保持しており、プロジェクト保存・復元（「推論に使用」の仕組み）の対象にしていない（Feature [#23](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/23)で意図的に対象外とした）。Model Metadata連携が実装される段階で永続化要否を再検討する。GitHub Issueはまだ作成しない
 - **`InferenceView`・`OcrBatchView`・`RapidOCRView`のEngine選択UIを共通Component化する**（Feature [#23](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/23)のレビューで記録）。GitHub Issueはまだ作成しない
+- **TrOCR学習・モデル登録の仕組み**: Feature [#25](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/25)で確認済みのとおり、`ModelMetadata`dataclass（Feature #14）は既存コードへ一切配線されておらず、`model_registry.py::list_model_infos()`にもTrOCR用ファイル形式（`*.trocr.json`相当）は存在しない。そのためFrontendの「登録済みモデルから選択」機能は、実環境では常に0件を返す。TrOCR学習（Phase4）またはTrOCRモデル登録の仕組みが実装されるまでは、この状態が正しい。GitHub Issueはまだ作成しない（Phase4のTrOCR Training自体が該当候補）
+- **`ModelMetadata`の既存コードへの配線・変換Adapter実装**: Feature [#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14)から一貫して未着手（Feature #25でも再確認）。TrOCR学習実装時に、学習済みモデルのメタデータをどう保存するか（`ModelMetadata`経由か、既存`.ocr.json`/`.tess.json`パターンを踏襲した新形式か）を合わせて判断する必要がある。GitHub Issueはまだ作成しない
 
 ## その他の将来検討候補（優先度低・Epic対象外）
 
