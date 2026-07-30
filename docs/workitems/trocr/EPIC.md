@@ -18,7 +18,7 @@ Issue: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)
 
 🔶 Engine判定既存バグ修正（Backend側は[#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)、Closed。PR [#13](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/13)でmainへマージ済み。`resolve_engine_id()`経由の明示的判定へ統一、互換性調査済み。Frontend側は[#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)として別Issue化、未着手のため🔶のまま）
 
-🔶 TrOCR Backend推論コア（[#16](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/16)、実装済み・PRレビュー待ち。`src/app/services/trocr_engine.py`。単画像推論のみ、OCR Pipeline等へは未接続）
+🔶 TrOCR Backend推論コア（[#16](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/16)、実装済み。PR [#17](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/17)はOpen・レビュー待ち・未マージ。`src/app/services/trocr_engine.py`。単画像推論のみ、OCR Pipeline等へは未接続）
 
 ⬜ Training
 
