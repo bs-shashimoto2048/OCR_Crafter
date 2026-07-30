@@ -2,7 +2,7 @@
 
 Issue: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)
 
-## Progress（2026-07-29時点）
+## Progress（2026-07-30時点）
 
 ✅ Investigation（[#2](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/2)、Closed。PR [#3](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/3)でmainへマージ済み）
 
@@ -12,7 +12,7 @@ Issue: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)
 
 ✅ Engine Capability（[#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)、Closed。PR [#5](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/5)でmainへマージ済み。`src/app/services/engine_capability.py`。既存コードへの配線はまだ無し）
 
-🔶 Engine Registry（[#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9)、MVP実装済み。PR [#10](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/10)はOpen・レビュー待ち・未マージ）
+✅ Engine Registry（[#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9)、Closed。PR [#10](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/10)でmainへマージ済み。`src/app/services/engine_registry.py`。MVP範囲のみ（Handler群未実装）、既存コードへの配線はまだ無し）
 
 ⬜ Model Metadata
 
@@ -32,7 +32,7 @@ Issue: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)
 
 ⬜ Documentation
 
-次フェーズ（Phase2）: Engine Registry / Model Metadataの実装Issueを、[ISSUE_MAP.md](ISSUE_MAP.md)の確定順序で作成予定。
+次フェーズ（Phase2）: Model Metadataの実装Issueを、[ISSUE_MAP.md](ISSUE_MAP.md)の確定順序で作成予定。
 
 参考: CI依存関係修正（[#6](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/6)、PR [#7](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/7)でmainへマージ済み）／既存のDB初期化テスト課題（[#8](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/8)、Open、Epic対象外の既存不具合）
 
@@ -101,7 +101,7 @@ Epicの完了条件は、調査後に確定した子Issueがすべて完了し�
 
 - [x] #2（Investigation、Closed）
 - [x] #4（Feature: Engine Capability実装、Closed）
-- [ ] #9（Feature: Engine Registry実装、MVP実装済み・PRレビュー待ち）
+- [x] #9（Feature: Engine Registry実装、Closed）
 
 ## 関連資料
 
