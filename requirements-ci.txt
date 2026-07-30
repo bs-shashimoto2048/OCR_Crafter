@@ -14,3 +14,6 @@ scikit-learn
 PyYAML
 torch
 torchvision
+# TrOCR推論コア（services/trocr_engine.py）のテスト用。実モデルはダウンロードせず、
+# transformers自体（コードライブラリ）のみをCIへ導入し、from_pretrained()等はテスト側でmonkeypatchする。
+transformers==5.14.1

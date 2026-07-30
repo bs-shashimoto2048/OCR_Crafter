@@ -1,0 +1,227 @@
+"""TrOCR推論コア（Hugging Face Transformersを利用した単画像文字認識）。
+
+docs/design/TROCR_BACKEND.md のうち、本Issue（TrOCR Backend単画像推論コア）で
+実装する範囲のみを対象とする。
+
+設計方針:
+- `transformers`はoptional dependency。モジュールのトップレベルではimportせず、
+  実際に使う箇所でのみ遅延importする（既存の`predict.py::_get_easyocr_reader()`と
+  同じ「try/except ImportError → 明確なRuntimeError系例外」パターンを踏襲する）。
+  これにより、transformers未導入でも本モジュール以外の既存Backend（Tesseract/
+  PaddleOCR/EasyOCR処理・アプリ起動）には一切影響しない
+- import時にモデルをロードしない。`TrOCREngine.load()`を呼んで初めてロードする
+- グローバルSingleton・グローバルモデルキャッシュは持たない。モデルの再利用は
+  「同一`TrOCREngine`インスタンスを使い回す」ことでのみ行う
+- Engine Capability/Engine Registry/Model Metadataへは接続しない（本Issueの
+  スコープ外）。`trocr`は既にEngine Registryへ登録済みだが、そこから
+  `TrOCREngine`を生成するFactoryは実装しない
+- confidence・bboxは返さない。TrOCR標準の`generate()`は文字単位confidenceを
+  直接返さず、算出方法は未解決事項のまま（ARCHITECTURE_DRAFT.md参照）。
+  推測で埋めない
+- Dataset管理・学習・評価・BBOX検出・画像分割・APIレスポンス作成・DB保存・
+  Model Registry登録・Model Metadata保存・Benchmark記録は責務外
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from PIL import Image, UnidentifiedImageError
+
+
+class TrOCRError(RuntimeError):
+    """TrOCR推論コア関連のエラーの基底クラス。"""
+
+
+class TrOCRDependencyError(TrOCRError):
+    """transformers等、必要な依存関係が導入されていない。"""
+
+
+class TrOCRModelLoadError(TrOCRError):
+    """Processor/Modelのロード、またはdeviceへの移動に失敗した。"""
+
+
+class TrOCRInferenceError(TrOCRError):
+    """推論（前処理/generate/decode）に失敗した。"""
+
+
+@dataclass(frozen=True)
+class TrOCRResult:
+    """単一画像に対するTrOCR推論結果。
+
+    confidence・bboxは意図的に持たない（捏造しない。詳細はモジュールdocstring参照）。
+    """
+
+    text: str
+    engine_id: str = "trocr"
+    model_ref: str | None = None
+
+
+def _resolve_device(device: str | None) -> str:
+    """device指定を解決する。
+
+    None: CUDAが利用可能なら"cuda"、そうでなければ"cpu"。
+    明示指定: "cpu"または"cuda"/"cuda:N"のみ許可。それ以外の文字列は
+    ValueErrorで明確に拒否する。"cuda"系を指定したのにCUDAが利用不可の場合、
+    黙って"cpu"へフォールバックせずTrOCRModelLoadErrorを送出する
+    （"cuda:N"のNの妥当性自体は、実際に`model.to()`した際にtorch側の
+    エラーとして表面化させ、ここでは重複した構文チェックを行わない）。
+    """
+    import torch  # torchは既存の必須依存のため、easyocr等とは異なり遅延import不要
+
+    if device is None:
+        return "cuda" if torch.cuda.is_available() else "cpu"
+
+    if not isinstance(device, str):
+        raise ValueError(f"device must be a string or None, got {type(device)!r}")
+
+    normalized = device.strip().lower()
+    if not normalized:
+        raise ValueError(f"device must not be empty: {device!r}")
+    if normalized != "cpu" and not normalized.startswith("cuda"):
+        raise ValueError(f"unsupported device: {device!r}")
+    if normalized.startswith("cuda") and not torch.cuda.is_available():
+        raise TrOCRModelLoadError(
+            f"device={device!r} was requested but CUDA is not available on this machine"
+        )
+    return normalized
+
+
+class TrOCREngine:
+    """TrOCR互換モデルをロードし、単一画像の文字認識を行う推論コア。
+
+    `TrOCREngine.load(model_ref)`で生成し、同一インスタンスの`predict()`/
+    `predict_file()`を繰り返し呼ぶことでモデルを再利用する。直接の
+    コンストラクタ呼び出しは`load()`が返すインスタンスの複製目的以外では想定しない。
+    """
+
+    def __init__(self, *, processor: Any, model: Any, device: str, model_ref: str) -> None:
+        self._processor = processor
+        self._model = model
+        self._device = device
+        self._model_ref = model_ref
+
+    @property
+    def device(self) -> str:
+        return self._device
+
+    @property
+    def model_ref(self) -> str:
+        return self._model_ref
+
+    @classmethod
+    def load(
+        cls,
+        model_ref: str,
+        *,
+        device: str | None = None,
+        local_files_only: bool = False,
+    ) -> "TrOCREngine":
+        """Processor/Modelをロードし、指定deviceへ移動済みのTrOCREngineを返す。
+
+        model_refはHugging Face Hub上のmodel ID・ローカルディレクトリパスの
+        いずれも受け付ける（`from_pretrained()`にそのまま渡す）。特定のmodel ID
+        （例: "microsoft/trocr-base-printed"）を既定値として固定することはしない。
+        """
+        if model_ref is None:
+            raise ValueError("model_ref must not be None")
+        if not isinstance(model_ref, str):
+            raise ValueError(f"model_ref must be a string, got {type(model_ref)!r}")
+        normalized_ref = model_ref.strip()
+        if not normalized_ref:
+            raise ValueError("model_ref must not be empty or whitespace-only")
+
+        resolved_device = _resolve_device(device)
+
+        try:
+            from transformers import AutoProcessor, VisionEncoderDecoderModel
+        except ImportError as e:
+            raise TrOCRDependencyError(
+                "transformers is not installed. Please run: pip install transformers"
+            ) from e
+
+        try:
+            processor = AutoProcessor.from_pretrained(normalized_ref, local_files_only=local_files_only)
+        except Exception as e:  # noqa: BLE001
+            raise TrOCRModelLoadError(
+                f"failed to load TrOCR processor for model_ref={normalized_ref!r}: {e}"
+            ) from e
+
+        try:
+            model = VisionEncoderDecoderModel.from_pretrained(normalized_ref, local_files_only=local_files_only)
+        except Exception as e:  # noqa: BLE001
+            raise TrOCRModelLoadError(
+                f"failed to load TrOCR model for model_ref={normalized_ref!r}: {e}"
+            ) from e
+
+        try:
+            model = model.to(resolved_device)
+        except Exception as e:  # noqa: BLE001
+            raise TrOCRModelLoadError(
+                f"failed to move TrOCR model to device={resolved_device!r} for model_ref={normalized_ref!r}: {e}"
+            ) from e
+
+        model.eval()
+
+        return cls(processor=processor, model=model, device=resolved_device, model_ref=normalized_ref)
+
+    def predict(self, image: "Image.Image") -> TrOCRResult:
+        """PIL画像1枚を認識し、TrOCRResultを返す。"""
+        if image is None:
+            raise ValueError("image must not be None")
+        if not isinstance(image, Image.Image):
+            raise ValueError(f"image must be a PIL.Image.Image, got {type(image)!r}")
+
+        rgb_image = image.convert("RGB")  # 新規オブジェクトを返す。元画像は変更しない
+
+        import torch  # 既存の必須依存
+
+        try:
+            pixel_values = self._processor(images=rgb_image, return_tensors="pt").pixel_values
+        except Exception as e:  # noqa: BLE001
+            raise TrOCRInferenceError(
+                f"failed to preprocess image for model_ref={self._model_ref!r}: {e}"
+            ) from e
+
+        pixel_values = pixel_values.to(self._device)
+
+        try:
+            with torch.inference_mode():
+                generated_ids = self._model.generate(pixel_values)
+        except Exception as e:  # noqa: BLE001
+            raise TrOCRInferenceError(
+                f"failed to generate text for model_ref={self._model_ref!r}: {e}"
+            ) from e
+
+        try:
+            decoded = self._processor.batch_decode(generated_ids, skip_special_tokens=True)
+            text = decoded[0]
+        except Exception as e:  # noqa: BLE001
+            raise TrOCRInferenceError(
+                f"failed to decode generated text for model_ref={self._model_ref!r}: {e}"
+            ) from e
+
+        # 前後空白は除去する。空文字自体は捏造せず、そのまま正常な結果として返す
+        return TrOCRResult(text=text.strip(), model_ref=self._model_ref)
+
+    def predict_file(self, path: "str | Path") -> TrOCRResult:
+        """画像ファイルを開いて認識する。predict()の薄いラッパー。"""
+        if path is None:
+            raise ValueError("path must not be None")
+
+        resolved_path = Path(path)
+        if not resolved_path.exists():
+            raise FileNotFoundError(f"image file not found: {resolved_path}")
+        if resolved_path.is_dir():
+            raise ValueError(f"path must be a file, not a directory: {resolved_path}")
+
+        try:
+            with Image.open(resolved_path) as opened:
+                opened.load()
+                image = opened.copy()
+        except (UnidentifiedImageError, OSError) as e:
+            raise ValueError(f"failed to open image file: {resolved_path}: {e}") from e
+
+        return self.predict(image)

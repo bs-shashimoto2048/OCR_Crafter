@@ -11,6 +11,7 @@ Related Issue: Epic [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues
 - Refactor: [#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11) Engine判定ロジックをEngine Registryへ統一（Backend側実装済み・PRレビュー待ち。Parent Epic: #1）
 - Bug: [#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12) Frontendの未知Engine判定がPaddleOCRへ暗黙フォールバックする（未着手・別Issue化のみ。Parent Epic: #1）
 - Feature: [#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14) 共通Model Metadata実装（実装済み・PRレビュー待ち。Parent Epic: #1）
+- Feature: [#16](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/16) TrOCR Backend単画像推論コア実装（実装済み・PRレビュー待ち。Parent Epic: #1）
 
 ## 次に作成するIssue候補（確定順序、2026-07-29）
 
@@ -20,7 +21,7 @@ ADR-0001がAcceptedとなり、Phase2（共通基盤実装）へ移行するに�
 2. **Engine Registry** — Phase1（[ENGINE_REGISTRY.md](../../design/ENGINE_REGISTRY.md)のMVP実装、✅完了: [#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9)）
 3. **Model Metadata** — Phase1（[MODEL_METADATA.md](../../design/MODEL_METADATA.md)のMVP実装、✅実装済み・PRレビュー待ち: [#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14)）
 4. **Engine判定既存バグ修正** — Phase2（`engineLabelOf()`/`resolveInferenceEngine()`/`_model_engine()`のキャッチオール是正＋判定ロジックの一本化。Backend側（`model_registry.py`/`ocr_pipeline.py`）は✅完了: [#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)。Frontend側は未着手・別Issue: [#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)。`release_gate.py::_model_engine()`との重複一本化も未着手）
-5. **TrOCR Backend** — Phase3（依存関係・設定管理・Dataset確認・TrOCR Model Metadata適用）
+5. **TrOCR Backend** — Phase3（依存関係・設定管理・Dataset確認・TrOCR Model Metadata適用。単画像推論コアは✅実装済み・PRレビュー待ち: [#16](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/16)）
 6. **TrOCR Training** — Phase4（`services/trocr_pipeline.py`学習Backend）
 7. **TrOCR Inference** — Phase4（推論Backend、`ENGINE_BUILDERS`スタイルの`recognize()`実装）
 8. **TrOCR Evaluation** — Phase4（評価連携の方針決定・confidence算出方法の確定）
@@ -52,9 +53,10 @@ ADR-0001がAcceptedとなり、Phase2（共通基盤実装）へ移行するに�
 
 ### Phase3: TrOCR Backend基盤
 
-- **TrOCR依存関係・設定管理**: `requirements.txt`へ`transformers`等を追加、`config/settings.yaml`へ新設の統一名前空間（例: `engines.trocr.*`）でブロック新設、遅延import方針の適用
-- **TrOCR Dataset側の確認**: 既存Dataset形式（`meta.json`）がそのまま使えることを実装レベルで検証（スキーマ変更は不要と調査時点で判断済み）
-- **TrOCR Model Metadata**: [MODEL_METADATA.md](../../design/MODEL_METADATA.md)スキーマに沿ったTrOCR用メタデータ実装（`processor`/`tokenizer`/`license`等の新規フィールドを実際に使う最初の事例）
+- **TrOCR依存関係・設定管理**（✅一部完了: [#16](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/16)）: `requirements.txt`/`requirements-ci.txt`へ`transformers==5.14.1`等を追加済み、遅延import方針を適用済み（`src/app/services/trocr_engine.py`）。`config/settings.yaml`への統一名前空間（例: `engines.trocr.*`）ブロック新設は未着手
+- **TrOCR単画像推論コア**（✅完了: [#16](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/16)）: `TrOCREngine.load()`/`predict()`/`predict_file()`を実装。既存OCR Pipeline・API・Frontendへの接続は未着手（詳細は[TROCR_BACKEND.md](../../design/TROCR_BACKEND.md)）
+- **TrOCR Dataset側の確認**: 既存Dataset形式（`meta.json`）がそのまま使えることを実装レベルで検証（スキーマ変更は不要と調査時点で判断済み）。未着手
+- **TrOCR Model Metadata**: [MODEL_METADATA.md](../../design/MODEL_METADATA.md)スキーマに沿ったTrOCR用メタデータ実装（`processor`/`tokenizer`/`license`等の新規フィールドを実際に使う最初の事例）。未着手（Model Metadata AdapterはFeature #16でも対象外とした）
 
 ### Phase4: Training / Inference / Evaluation
 
