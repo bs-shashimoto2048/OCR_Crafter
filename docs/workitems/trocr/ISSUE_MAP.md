@@ -11,7 +11,8 @@ Related Issue: Epic [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues
 - Refactor: [#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11) Engine判定ロジックをEngine Registryへ統一（Backend側実装済み・PRレビュー待ち。Parent Epic: #1）
 - Bug: [#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12) Frontendの未知Engine判定がPaddleOCRへ暗黙フォールバックする（未着手・別Issue化のみ。Parent Epic: #1）
 - Feature: [#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14) 共通Model Metadata実装（実装済み・PRレビュー待ち。Parent Epic: #1）
-- Feature: [#16](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/16) TrOCR Backend単画像推論コア実装（実装済み・PRレビュー待ち。Parent Epic: #1）
+- Feature: [#16](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/16) TrOCR Backend単画像推論コア実装（実装済み・Closed。Parent Epic: #1）
+- Feature: [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18) OCR PipelineへTrOCR統合（実装済み・PRレビュー待ち。Parent Epic: #1。当初想定の`ocr_pipeline.py`ではなく実際の推論ディスパッチファイル`predict.py`へ接続）
 
 ## 次に作成するIssue候補（確定順序、2026-07-29）
 
@@ -21,9 +22,9 @@ ADR-0001がAcceptedとなり、Phase2（共通基盤実装）へ移行するに�
 2. **Engine Registry** — Phase1（[ENGINE_REGISTRY.md](../../design/ENGINE_REGISTRY.md)のMVP実装、✅完了: [#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9)）
 3. **Model Metadata** — Phase1（[MODEL_METADATA.md](../../design/MODEL_METADATA.md)のMVP実装、✅実装済み・PRレビュー待ち: [#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14)）
 4. **Engine判定既存バグ修正** — Phase2（`engineLabelOf()`/`resolveInferenceEngine()`/`_model_engine()`のキャッチオール是正＋判定ロジックの一本化。Backend側（`model_registry.py`/`ocr_pipeline.py`）は✅完了: [#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)。Frontend側は未着手・別Issue: [#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)。`release_gate.py::_model_engine()`との重複一本化も未着手）
-5. **TrOCR Backend** — Phase3（依存関係・設定管理・Dataset確認・TrOCR Model Metadata適用。単画像推論コアは✅実装済み・PRレビュー待ち: [#16](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/16)）
+5. **TrOCR Backend** — Phase3（依存関係・設定管理・Dataset確認・TrOCR Model Metadata適用。単画像推論コアは✅完了: [#16](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/16)）
 6. **TrOCR Training** — Phase4（`services/trocr_pipeline.py`学習Backend）
-7. **TrOCR Inference** — Phase4（推論Backend、`ENGINE_BUILDERS`スタイルの`recognize()`実装）
+7. **TrOCR Inference** — Phase4（OCR Pipelineへの接続は✅実装済み・PRレビュー待ち: [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18)。`ENGINE_BUILDERS`スタイルの`recognize()`実装は未着手）
 8. **TrOCR Evaluation** — Phase4（評価連携の方針決定・confidence算出方法の確定）
 9. **Frontend** — Phase5（Model Manager UI / Training UI / Evaluation UI / Experiment Tracking連携）
 10. **Benchmark** — Phase6（Benchmark Runner/Center連携）
@@ -61,7 +62,7 @@ ADR-0001がAcceptedとなり、Phase2（共通基盤実装）へ移行するに�
 ### Phase4: Training / Inference / Evaluation
 
 - **TrOCR学習Backend**: `services/trocr_pipeline.py`新設。Hugging Face Transformers（`VisionEncoderDecoderModel`+`Seq2SeqTrainer`）経由、公式`unilm/trocr`（fairseq）は不採用（[ADR-0001](../../adr/ADR-0001_Trocr_Architecture.md)決定事項）
-- **TrOCR推論Backend**: `predict.py`への`trocr`分岐追加、および`ENGINE_BUILDERS`スタイルの`recognize()`実装（[ENGINE_REGISTRY.md](../../design/ENGINE_REGISTRY.md)の`InferenceHandler`参照）
+- **TrOCR推論Backend**（✅OCR Pipelineへの接続完了・PRレビュー待ち: [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18)）: `predict.py::predict_from_image()`（`ocr_pipeline.py`ではなく実際の推論ディスパッチ先）へ`resolve_engine_id()`経由の`trocr`分岐を追加済み。詳細は[FEATURE_PIPELINE_TROCR.md](FEATURE_PIPELINE_TROCR.md)。`ENGINE_BUILDERS`スタイルの`recognize()`実装（Engine Registry Handler化）は未着手
 - **TrOCR評価連携の方針決定**: `ocr_evaluation.py`のTesseract専用制約への対応可否（PaddleOCRも未対応のため、TrOCR単独の課題ではないことに留意）。confidence算出方法の確定（未解決事項）
 
 ### Phase5: Frontend
@@ -88,6 +89,7 @@ ADR-0001がAcceptedとなり、Phase2（共通基盤実装）へ移行するに�
 
 - **カスタム分類モデル（`engine="custom"`）のModel Metadata対応**: [MODEL_METADATA.md](../../design/MODEL_METADATA.md)の`ModelMetadata`は、Engine Registry登録済みの4エンジン（tesseract/paddleocr/easyocr/trocr）のみを`engine_id`として許可する。カスタム分類モデル（`.pt`）は`engine="custom"`という、Engine Registry未登録の値を使っているため、現時点のModelMetadataはカスタム分類モデルを表現できない（Feature [#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14)で確認済みの既知の制約）。対応する場合はEngine Registryへ`custom`を新規登録するか、ModelMetadataの対象外として扱うかを別途判断する必要がある。今回は対象外のため、忘れないようここへ記録する（GitHub Issueはまだ作成しない）
 - **device選択ロジックの共通化候補**: 現在、`src/app/train.py::detect_device()`（分類モデル用、MPS/CPUのみ判定）と`src/app/services/trocr_engine.py::_resolve_device()`（TrOCR用、CPU/CUDAのみ判定）が、それぞれ独立した自己完結ロジックとして存在する（Feature [#16](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/16)で確認済み）。将来PARSeq等のPyTorchベースエンジンが追加されるたびに同種のdevice解決ロジックが個別実装される可能性がある。共通のdevice解決ヘルパーへ統合するかどうかは、実際に3つ目以降のPyTorchベースエンジンが追加される段階で判断する（現時点で2エンジンのみのため、抽象化を急がない）。GitHub Issueはまだ作成しない
+- **TrOCRのmodel_ref解決**: `predict.py::_predict_with_trocr()`は、既存3エンジンが使う`.ocr.json`/`.tess.json`ファイル探索（`resolve_model_path()`/`resolve_ocr_model_meta()`）を適用せず、呼び出し側の`model`パラメータをHugging Face Hub ID・ローカルパスとしてそのまま`TrOCREngine.load()`へ渡している（Feature [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18)で確認済み）。そのため`model`未指定時の既定値`"latest"`をTrOCRへ渡すと存在しないモデル名としてロード失敗する。TrOCR用のModel Metadata・Model Registry連携が実装される段階で、他エンジンと同様の解決方式へ見直す
 
 ## その他の将来検討候補（優先度低・Epic対象外）
 

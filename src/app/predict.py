@@ -13,7 +13,9 @@ from PIL import Image, ImageEnhance, ImageFilter
 from torchvision import transforms
 
 from .config import get_settings
+from .services.engine_registry import create_default_registry, resolve_engine_id
 from .services.model_registry import resolve_model_path, resolve_ocr_model_meta, resolve_tesseract_model_meta
+from .services.trocr_engine import TrOCREngine, TrOCRError
 from .services.tesseract_pipeline import (
     TESSERACT_WHITELIST_DEFAULT,
     ensure_tesseract_inference_tool,
@@ -957,6 +959,40 @@ def _predict_with_tesseract(
     }
 
 
+def _predict_with_trocr(image_source: Any, model_ref: str) -> dict[str, Any]:
+    """TrOCREngineによる単画像推論を実行し、既存OCR結果と同じdict形状へ変換する。
+
+    Model MetadataやEngine Registry経由のモデル解決はまだ無いため、model_ref
+    （Hugging Face Hub ID・ローカルパス）は呼び出し側がmodelパラメータへ渡した
+    値をそのまま使う（既存の`resolve_model_path()`系ヘルパーはPaddleOCR/Tesseractの
+    モデルファイル探索専用のためtrocrには適用しない）。TrOCREngineのインスタンスは
+    呼び出しのたびに`load()`し直す（本Issueのスコープで新規キャッシュは作らない）。
+    """
+    try:
+        engine_instance = TrOCREngine.load(model_ref)
+        if isinstance(image_source, Image.Image):
+            result = engine_instance.predict(image_source)
+        else:
+            result = engine_instance.predict_file(image_source)
+    except TrOCRError as e:
+        # TrOCR固有の例外はPipeline外へ出さず、既存エンジン（例: EasyOCR未導入時の
+        # RuntimeError）と同じ例外種別へ変換する
+        raise RuntimeError(str(e)) from e
+
+    return {
+        "text": result.text,
+        "prediction": result.text,
+        "confidence": None,
+        "engine": "trocr",
+        "model_name": result.model_ref,
+        "model_type": "trocr",
+        "valid": True,
+        "validation": None,
+        "char_scores": [],
+        "char_confidence_normalized": [],
+    }
+
+
 def predict_from_image(
     image_path: str,
     model_type: Optional[str] = None,
@@ -970,7 +1006,8 @@ def predict_from_image(
     tesseract_psm: Optional[int] = None,
     whitelist: Optional[str] = None,
 ) -> dict[str, Any]:
-    engine_name = (engine or "custom").strip().lower()
+    # 未指定・未登録の値をpaddleocrへ暗黙フォールバックしない（Engine Registry経由の明示的な判定）
+    resolved_engine_id = resolve_engine_id(engine, registry=create_default_registry())
     preprocess_meta: dict[str, Any] = {"applied": False, "image_type": "", "pipeline": []}
     ocr_input_source: Any = image_path
 
@@ -985,7 +1022,7 @@ def predict_from_image(
         }
         ocr_input_source = Image.fromarray(pre["processed"], mode="L")
 
-    if engine_name == "easyocr":
+    if resolved_engine_id == "easyocr":
         result = _predict_with_easyocr(
             ocr_input_source,
             project_id=project_id,
@@ -998,7 +1035,7 @@ def predict_from_image(
         result["preprocess_image_type"] = preprocess_meta["image_type"]
         result["preprocess_pipeline"] = preprocess_meta["pipeline"]
         return result
-    if engine_name == "paddleocr":
+    if resolved_engine_id == "paddleocr":
         result = _predict_with_paddleocr(
             ocr_input_source,
             project_id=project_id,
@@ -1011,7 +1048,7 @@ def predict_from_image(
         result["preprocess_image_type"] = preprocess_meta["image_type"]
         result["preprocess_pipeline"] = preprocess_meta["pipeline"]
         return result
-    if engine_name == "tesseract":
+    if resolved_engine_id == "tesseract":
         result = _predict_with_tesseract(
             ocr_input_source,
             project_id=project_id,
@@ -1020,6 +1057,12 @@ def predict_from_image(
             psm=tesseract_psm,
             whitelist=whitelist,
         )
+        result["preprocess_applied"] = preprocess_meta["applied"]
+        result["preprocess_image_type"] = preprocess_meta["image_type"]
+        result["preprocess_pipeline"] = preprocess_meta["pipeline"]
+        return result
+    if resolved_engine_id == "trocr":
+        result = _predict_with_trocr(ocr_input_source, model)
         result["preprocess_applied"] = preprocess_meta["applied"]
         result["preprocess_image_type"] = preprocess_meta["image_type"]
         result["preprocess_pipeline"] = preprocess_meta["pipeline"]
@@ -1104,7 +1147,7 @@ def main() -> None:
     parser.add_argument("--project-id", type=str, default="default")
     parser.add_argument("--model-type", type=str, default="")
     parser.add_argument("--model", type=str, default="latest")
-    parser.add_argument("--engine", type=str, default="custom", choices=["custom", "easyocr", "paddleocr", "tesseract"])
+    parser.add_argument("--engine", type=str, default="custom", choices=["custom", "easyocr", "paddleocr", "tesseract", "trocr"])
     parser.add_argument("--easyocr-langs", type=str, default="en")
     args = parser.parse_args()
 
