@@ -24,7 +24,7 @@ Issue: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)
 
 ✅ TrOCR API統合（[#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20)、Closed。PR [#21](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/21)でmainへマージ済み（merge commit `031f59b`）。既存`POST /predict`が`engine="trocr"`を受け付ける。新規TrOCR専用APIは作成せず既存経路を拡張。Frontend/Model Metadata/Engineキャッシュは未接続）
 
-🔶 TrOCR Frontend UI（[#23](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/23)、実装済み・PRレビュー待ち。`InferenceView.jsx`（推論テスト画面）へTrOCR選択肢＋モデル参照入力を追加し、既存`POST /predict`を利用。`OcrBatchView.jsx`/`RapidOCRView.jsx`は対象外。Model Metadata/Engine Registry APIは未接続）
+✅ TrOCR Frontend UI（[#23](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/23)、Closed。PR [#24](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/24)でmainへマージ済み（merge commit `cfb9ac3`）。`InferenceView.jsx`（推論テスト画面）へTrOCR選択肢＋モデル参照入力を追加し、既存`POST /predict`を利用。`OcrBatchView.jsx`/`RapidOCRView.jsx`は対象外。Model Metadata/Engine Registry APIは未接続）
 
 ⬜ Training
 
@@ -42,7 +42,7 @@ Issue: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)
 
 参考: CI依存関係修正（[#6](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/6)、PR [#7](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/7)でmainへマージ済み）／既存のDB初期化テスト課題（[#8](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/8)、Open、Epic対象外の既存不具合）
 
-**Future Work（Epic範囲内・未着手）**: カスタム分類モデル（`engine="custom"`）のModel Metadata対応／device選択ロジックの共通化候補（`train.py::detect_device()`と`trocr_engine.py::_resolve_device()`が独立実装）／TrOCRのmodel_ref解決方式の見直し（Model Metadata連携実装時）／PipelineレベルでのTrOCREngineインスタンス再利用（現状は推論のたびに`load()`し直す設計）／`/predict`の同期推論実行（Thread Pool未使用、既存Engine共通の課題）／preview・batch系エンドポイントへのmodel_ref必須検証拡張／Backend Engine RegistryをAPI経由でFrontendへ提供しFrontend側Engine一覧を一元管理する案／`OcrBatchView.jsx`・`RapidOCRView.jsx`へのTrOCR対応／TrOCRモデル参照の永続化。詳細は[ISSUE_MAP.md](ISSUE_MAP.md)の「Future Work」参照。
+**Future Work（Epic範囲内・未着手）**: カスタム分類モデル（`engine="custom"`）のModel Metadata対応／device選択ロジックの共通化候補（`train.py::detect_device()`と`trocr_engine.py::_resolve_device()`が独立実装）／TrOCRのmodel_ref解決方式の見直し（Model Metadata連携実装時）／PipelineレベルでのTrOCREngineインスタンス再利用（現状は推論のたびに`load()`し直す設計）／`/predict`の同期推論実行（Thread Pool未使用、既存Engine共通の課題）／preview・batch系エンドポイントへのmodel_ref必須検証拡張／Backend Engine RegistryをAPI経由でFrontendへ提供しFrontend側Engine一覧を一元管理する案／`OcrBatchView.jsx`・`RapidOCRView.jsx`へのTrOCR対応／TrOCRモデル参照の永続化／`InferenceView`・`OcrBatchView`・`RapidOCRView`のEngine選択UIの共通Component化。詳細は[ISSUE_MAP.md](ISSUE_MAP.md)の「Future Work」参照。
 
 ## 背景
 
@@ -116,7 +116,7 @@ Epicの完了条件は、調査後に確定した子Issueがすべて完了し�
 - [x] #16（Feature: TrOCR Backend単画像推論コア実装、Closed）
 - [x] #18（Feature: OCR PipelineへTrOCR統合、Closed）
 - [x] #20（Feature: 既存OCR推論APIへTrOCR統合、Closed）
-- [ ] #23（Feature: FrontendへTrOCR選択UIを追加、実装済み・PRレビュー待ち）
+- [x] #23（Feature: FrontendへTrOCR選択UIを追加、Closed）
 
 ## 関連資料
 
