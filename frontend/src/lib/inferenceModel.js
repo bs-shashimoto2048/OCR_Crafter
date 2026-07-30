@@ -55,3 +55,16 @@ export function resolveRestoredInferenceSelection(savedModel, infoMap) {
   const engine = !rawEngine || rawEngine === "custom" ? "custom" : normalizeEngineId(rawEngine);
   return { found: true, engine, model: modelName };
 }
+
+// TrOCRのmodel_ref（Hugging Face model ID・ローカルパス）を前後空白除去のうえ正規化する。
+// 既定値・自動補完は行わない（未入力ならそのまま空文字を返す）
+export function normalizeTrocrModelRef(value) {
+  return String(value ?? "").trim();
+}
+
+// engine=trocr選択時、model_refが未入力（空文字・空白のみ）かどうかを判定する。
+// InferenceView.jsxの実行ボタン無効化・App.jsx::runInference()の送信前チェックの両方で使う
+// （Backend側にも同種の検証はあるが、Frontend側でもAPI呼び出し前に停止する）
+export function trocrModelRefMissing(engine, trocrModelRef) {
+  return engine === "trocr" && !normalizeTrocrModelRef(trocrModelRef);
+}
