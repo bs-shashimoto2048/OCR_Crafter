@@ -36,6 +36,8 @@ Issue: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)
 
 参考: CI依存関係修正（[#6](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/6)、PR [#7](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/7)でmainへマージ済み）／既存のDB初期化テスト課題（[#8](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/8)、Open、Epic対象外の既存不具合）
 
+**Future Work（Epic範囲内・未着手）**: カスタム分類モデル（`engine="custom"`）のModel Metadata対応。Engine Registry未登録の`custom`をどう扱うか未決定（詳細は[ISSUE_MAP.md](ISSUE_MAP.md)の「Future Work」参照）。
+
 ## 背景
 
 OCR Crafterは現在、複数のOCRエンジンを扱っています。

@@ -26,7 +26,9 @@ Related: Investigation [#2](https://github.com/bs-shashimoto2048/OCR_Crafter/iss
 
 **既知の制約（`engine="custom"`）:** カスタム分類モデル（`.pt`）は、Engine Capability/Engine Registryの対象4エンジン（tesseract/paddleocr/easyocr/trocr）に含まれていない`"custom"`という値を使う。`ModelMetadata.engine_id`はEngine Registry登録済みIDのみを許可するため、**現時点のModelMetadataはカスタム分類モデルを表現できない。** 将来ModelMetadataをカスタム分類モデルへ適用する場合は、Engine Registryへ`custom`を新規登録するか、ModelMetadataの対象外として扱うかを別途判断する必要がある。
 
-**未知フィールドの方針:** `from_dict()`は、ModelMetadataが持たない未知キーを**無視する**（自動的に`extra`へ混入させない）。既存の`.ocr.json`等はここでモデル化していない多数のエンジン固有フィールド（`training_params`の20項目等）を持つため、それらを無条件に`extra`へ集約すると共通フィールドとの衝突判定が複雑化する。`extra`へ値を持たせたい場合は、呼び出し側が変換時に`data["extra"]`へ明示的に格納する。
+**未知フィールドの方針（仕様）:** `from_dict()`は、ModelMetadataが持たない未知キーを**保持せず無視する**（自動的に`extra`へ混入させない）。既存の`.ocr.json`等はここでモデル化していない多数のエンジン固有フィールド（`training_params`の20項目等）を持つため、それらを無条件に`extra`へ集約すると共通フィールドとの衝突判定が複雑化する。`extra`へ値を持たせたい場合は、呼び出し側が変換時に`data["extra"]`へ明示的に格納する。**この方針は、各エンジン形式向けの変換Adapter（後述「対象外」参照）を導入する段階で再検討する。** Adapterが「どのフィールドをextraへ回すか」を明示的に決定できるようになれば、未知フィールドの扱いを「無視」から「Adapter経由でextraへ取り込む」へ変更する余地がある。
+
+**`artifact_path`について（単一成果物前提）:** 現在の`artifact_path`は単一のパス文字列であり、1モデル=1成果物を前提としている。PaddleOCRの`train_dir`/`inference_dir`のように学習チェックポイントと推論用エクスポートが別ディレクトリで併存するケースは、今回は単純化により1つの代表パスへ丸めることを想定し、複数パスの構造化表現は採用していない。将来、複数成果物を明示的に区別する必要が生じた場合は、`artifact_path`を`artifact_paths`（複数パスを持つ構造）へ拡張するか、`extra`で当面代替するかを、実際にAdapterを実装する段階で検討する。
 
 **対象外（後続Issueへ）:** `.ocr.json`/`.tess.json`/`.pt`/`inference_model.json`それぞれからの変換Adapter（`from_ocr_metadata()`等）は今回実装しない。`from_dict()`のみを提供し、既存形式ごとの変換ロジックは個別Issueで検討する。既存処理（`model_registry.py`・`ocr_pipeline.py`・`predict.py`・`release_gate.py`・`benchmark.py`・`experiment_tracker.py`等）への配線・既存JSONの書き換えも行っていない。
 
