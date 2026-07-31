@@ -6,6 +6,8 @@
 - **Related PR**: [#31](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/31)（Squash Merge済み。Squash Commit: `ce04863`）
 
 > このADRはArchitecture Issue #30の成果物であり、Investigation #29の調査結果を前提とする。PR #31のレビュー承認・mainへのSquash Mergeを受けて、本ADRのStatusを**Proposed→Accepted**へ変更した。以降、本ADRの決定は正式な設計判断として扱い、Epic #28配下のFeature Issue（Canonical ModelMetadata Schema整備以降）はこの決定に基づいて進める。
+>
+> **実装状況（2026-07-31）**: Feature [#32](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/32)（Canonical ModelMetadata Schema）により、本ADRの「Canonical Schema」決定（既存`ModelMetadata`採用・`schema_version`はenvelope値としてdataclass外で扱う）を実装済み。Adapter/Reader/Writer/Catalog以降は未実装。
 
 ## Context
 

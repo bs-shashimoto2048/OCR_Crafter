@@ -1,16 +1,21 @@
 """Model Metadata（src/app/services/model_metadata.py）の単体テスト。
 
-共通Model Metadata実装Issue（#14）のスコープ通り、生成・シリアライズ/
-デシリアライズ・バリデーション・不変性・状態分離のみを検証する。
-既存処理（model_registry.py/ocr_pipeline.py等）への適用・Adapter・
-TrOCR・Frontendは対象外（本モジュールはまだ既存コードから参照されていない）。
+共通Model Metadata実装Issue（#14）・Canonical ModelMetadata Schema Feature（#32）の
+スコープ通り、生成・シリアライズ/デシリアライズ・スキーマバージョン・バリデーション・
+不変性・同値性・状態分離のみを検証する。既存処理（model_registry.py/ocr_pipeline.py等）
+への適用・Adapter・Reader/Writer・TrOCR・Frontendは対象外（本モジュールはまだ既存コード
+から参照されていない）。
 """
 
 import dataclasses
 
 import pytest
 
-from src.app.services.model_metadata import InvalidModelMetadataError, ModelMetadata
+from src.app.services.model_metadata import (
+    MODEL_METADATA_SCHEMA_VERSION,
+    InvalidModelMetadataError,
+    ModelMetadata,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -66,11 +71,12 @@ def test_can_create_with_all_optional_fields():
 
 
 def test_to_dict_contains_all_fields_including_none():
-    """to_dict()はNoneフィールドも含めて全キーを出力する。"""
+    """to_dict()はNoneフィールドも含めて全キーを出力する（schema_versionはenvelopeとして追加）。"""
     m = ModelMetadata(model_id="M0001", engine_id="tesseract")
     d = m.to_dict()
 
     assert d == {
+        "schema_version": MODEL_METADATA_SCHEMA_VERSION,
         "model_id": "M0001",
         "engine_id": "tesseract",
         "display_name": None,
@@ -335,3 +341,137 @@ def test_from_dict_with_minimal_legacy_input_only_required_fields():
     assert m.model_id == "old_model"
     assert m.engine_id == "easyocr"
     assert dict(m.extra) == {}
+
+
+# ---------------------------------------------------------------------------
+# Schema Version（Feature #32、Architecture #30 6.2）
+# ---------------------------------------------------------------------------
+
+
+def test_to_dict_includes_current_schema_version():
+    m = ModelMetadata(model_id="M0001", engine_id="tesseract")
+    assert m.to_dict()["schema_version"] == MODEL_METADATA_SCHEMA_VERSION == 1
+
+
+def test_from_dict_accepts_matching_schema_version():
+    m = ModelMetadata.from_dict(
+        {"schema_version": MODEL_METADATA_SCHEMA_VERSION, "model_id": "M0001", "engine_id": "tesseract"}
+    )
+    assert m.model_id == "M0001"
+
+
+def test_from_dict_accepts_missing_schema_version_as_legacy_compatible():
+    """schema_versionキー自体が無い入力（導入前のto_dict()出力・Adapter変換結果）はエラーにしない。"""
+    m = ModelMetadata.from_dict({"model_id": "M0001", "engine_id": "tesseract"})
+    assert m.model_id == "M0001"
+
+
+def test_from_dict_rejects_unsupported_schema_version():
+    with pytest.raises(InvalidModelMetadataError):
+        ModelMetadata.from_dict({"schema_version": 999, "model_id": "M0001", "engine_id": "tesseract"})
+
+
+def test_from_dict_rejects_unsupported_schema_version_before_checking_other_fields():
+    """schema_version不正時は、他のフィールドが有効でも拒否される（version検証が先に走る）。"""
+    with pytest.raises(InvalidModelMetadataError):
+        ModelMetadata.from_dict(
+            {
+                "schema_version": 0,
+                "model_id": "M0001",
+                "engine_id": "tesseract",
+                "display_name": "valid otherwise",
+            }
+        )
+
+
+def test_round_trip_preserves_schema_version():
+    original = ModelMetadata(model_id="M0001", engine_id="tesseract")
+    restored = ModelMetadata.from_dict(original.to_dict())
+    assert restored.to_dict()["schema_version"] == MODEL_METADATA_SCHEMA_VERSION
+
+
+# ---------------------------------------------------------------------------
+# Equality（Feature #32）
+# ---------------------------------------------------------------------------
+
+
+def test_equal_instances_with_same_field_values_are_equal():
+    """同じフィールド値を持つ別インスタンスは等価（dataclass既定の__eq__。カスタム実装は追加しない）。"""
+    a = ModelMetadata(model_id="M0001", engine_id="tesseract", display_name="A", extra={"x": 1})
+    b = ModelMetadata(model_id="M0001", engine_id="tesseract", display_name="A", extra={"x": 1})
+    assert a == b
+    assert a is not b
+
+
+def test_instances_differing_in_any_field_are_not_equal():
+    base = ModelMetadata(model_id="M0001", engine_id="tesseract")
+    assert base != ModelMetadata(model_id="M0002", engine_id="tesseract")
+    assert base != ModelMetadata(model_id="M0001", engine_id="paddleocr")
+    assert base != ModelMetadata(model_id="M0001", engine_id="tesseract", display_name="different")
+    assert base != ModelMetadata(model_id="M0001", engine_id="tesseract", extra={"x": 1})
+
+
+def test_equality_does_not_depend_on_extra_dict_identity():
+    """extraは構築時にdeep copyされるため、元dictが同一オブジェクトでなくとも内容が同じなら等価。"""
+    a = ModelMetadata(model_id="M0001", engine_id="tesseract", extra={"nested": [1, 2]})
+    b = ModelMetadata(model_id="M0001", engine_id="tesseract", extra={"nested": [1, 2]})
+    assert a == b
+    assert a.extra is not b.extra
+
+
+def test_not_equal_to_non_model_metadata_value():
+    m = ModelMetadata(model_id="M0001", engine_id="tesseract")
+    assert m != {"model_id": "M0001", "engine_id": "tesseract"}
+    assert m != "M0001"
+    assert m is not None
+
+
+# ---------------------------------------------------------------------------
+# Helper: is_valid() / replace()（Feature #32）
+# ---------------------------------------------------------------------------
+
+
+def test_is_valid_true_for_constructible_data():
+    assert ModelMetadata.is_valid({"model_id": "M0001", "engine_id": "tesseract"}) is True
+
+
+def test_is_valid_false_for_missing_required_field():
+    assert ModelMetadata.is_valid({"engine_id": "tesseract"}) is False
+
+
+def test_is_valid_false_for_unknown_engine():
+    assert ModelMetadata.is_valid({"model_id": "M0001", "engine_id": "not_a_real_engine"}) is False
+
+
+def test_is_valid_false_for_unsupported_schema_version():
+    assert ModelMetadata.is_valid({"schema_version": 999, "model_id": "M0001", "engine_id": "tesseract"}) is False
+
+
+def test_is_valid_does_not_raise():
+    """is_valid()はfrom_dict()と異なり、不正入力（非Mapping含む）でも例外を送出せずFalseを返す。"""
+    assert ModelMetadata.is_valid(["not", "a", "mapping"]) is False
+
+
+def test_replace_returns_new_instance_with_changed_field():
+    original = ModelMetadata(model_id="M0001", engine_id="tesseract", display_name="old")
+    updated = original.replace(display_name="new")
+
+    assert updated is not original
+    assert updated.display_name == "new"
+    assert original.display_name == "old"  # 元インスタンスは変更されない（frozen）
+    assert updated.model_id == original.model_id
+    assert updated.engine_id == original.engine_id
+
+
+def test_replace_reruns_validation_and_rejects_invalid_change():
+    """replace()は__post_init__のValidationを再実行するため、不正な差し替えは拒否される。"""
+    original = ModelMetadata(model_id="M0001", engine_id="tesseract")
+    with pytest.raises(InvalidModelMetadataError):
+        original.replace(engine_id="not_a_real_engine")
+
+
+def test_replace_with_no_changes_returns_equal_instance():
+    original = ModelMetadata(model_id="M0001", engine_id="tesseract", extra={"a": 1})
+    copy_ = original.replace()
+    assert copy_ == original
+    assert copy_ is not original

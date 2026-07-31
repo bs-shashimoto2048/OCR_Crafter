@@ -76,13 +76,13 @@ Export
 
 - [x] Investigation: Model Metadata実運用化の影響調査（[#29](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/29)、**Closed**）
 - [x] Architecture: Unified Model Metadata Adapterと段階的移行方式を設計（[#30](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/30)、**Completed**。PR [#31](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/31)をSquash Merge・mainへ反映済み）
-- [ ] Feature: Canonical ModelMetadata Schema整備（次のOpen項目。ADR-0002・[MODEL_METADATA_ARCHITECTURE.md](../../design/MODEL_METADATA_ARCHITECTURE.md)10章#3を参照）
+- [ ] Feature: Canonical ModelMetadata Schema（[#32](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/32)、実装中。次のOpen項目はLegacy Metadata Adapter実装）
 
 ## Progress
 
 - [x] Investigation（#29、Closed。調査結果は[INVESTIGATION_29.md](INVESTIGATION_29.md)参照）
 - [x] Architecture + ADR（#30、**Completed**。PR #31をSquash Merge済み。ADR-0002のStatusはAcceptedへ変更済み。[ARCHITECTURE_30.md](ARCHITECTURE_30.md)参照）
-- 🔶 次のOpen項目: **Canonical ModelMetadata Schema整備**（Schema/Validation/Serialize/Deserialize/Versionの実装。Reader/Writer/Adapter/Catalogは対象外）
+- 🔶 Feature: Canonical ModelMetadata Schema（[#32](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/32)、実装完了・PRレビュー待ち。Schema/Validation/schema_version/to_dict/from_dict/Equality/is_valid/replaceを実装。Reader/Writer/Adapter/Catalogは対象外）
 - 未着手（Canonical Schema整備後にIssue化）: Legacy Metadata Adapter実装/Reader・Writer実装/Model Catalog実装/Training・Import時のMetadata生成/Models連携/Inference連携/Evaluation連携/Deployment連携/Cleanup
 
 ## 関連資料
@@ -90,5 +90,5 @@ Export
 - [MODEL_METADATA.md](../../design/MODEL_METADATA.md)
 - [MODEL_METADATA_MIGRATION_PLAN.md](../../design/MODEL_METADATA_MIGRATION_PLAN.md)（Investigation成果物）
 - [MODEL_METADATA_ARCHITECTURE.md](../../design/MODEL_METADATA_ARCHITECTURE.md)（Architecture #30成果物）
-- [ADR-0002_Unified_Model_Metadata.md](../../adr/ADR-0002_Unified_Model_Metadata.md)（Status: Proposed）
+- [ADR-0002_Unified_Model_Metadata.md](../../adr/ADR-0002_Unified_Model_Metadata.md)（Status: Accepted）
 - [ISSUE_MAP.md](ISSUE_MAP.md)（本Epic配下のIssue一覧）

@@ -18,6 +18,10 @@ Related: [MODEL_METADATA.md](MODEL_METADATA.md)（`ModelMetadata`のスキーマ
 
 以降の本文（現状・問題点・理想構成・Migration戦略・Issue分割・リスク・Future Work）はInvestigation #29時点の調査記録として維持し、確定した決定内容は上記表からArchitecture成果物を参照すること。
 
+## 追記2（2026-07-31）: Feature #32でCanonical Schema実装（Migration Phase 1準備）
+
+Feature [#32](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/32)（Canonical ModelMetadata Schema）により、`src/app/services/model_metadata.py`へ`schema_version`（envelope値・`MODEL_METADATA_SCHEMA_VERSION = 1`）・`is_valid()`・`replace()`を追加した。Adapter/Reader/Writer/Catalog（Migration Phase 1本体）はまだ未実装であり、永続化（JSON保存・読込）も行っていない。次のOpen項目はLegacy Metadata Adapter実装（[docs/workitems/model-metadata/ISSUE_MAP.md](../workitems/model-metadata/ISSUE_MAP.md)参照）。
+
 ## 現状
 
 ### 発見: モデルに関する情報は、単一のSource of Truthではなく、最低6つの独立した永続化機構に分散している

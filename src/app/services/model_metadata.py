@@ -15,6 +15,12 @@ docs/design/MODEL_METADATA.md のうち、本Issue（共通Model Metadata MVP）
 - engine_idの検証は`engine_registry.resolve_engine_id()`を再利用し、正規化ロジック
   （trim・小文字化・Registry照合）を複製しない
 - 既存コード（model_registry.py等）へは一切配線しない。既存JSON・DBは変更しない
+
+Architecture #30 / ADR-0002（Feature #32）で追加した方針:
+- `MODEL_METADATA_SCHEMA_VERSION`（`schema_version`）は、上記の`status`/`version`とは
+  別概念。モデル自体のバージョンではなく、`to_dict()`が返す辞書表現（将来のsidecar
+  ファイル形式）そのものの構造バージョンを表す。dataclassのフィールドには追加しない
+- 永続化（JSON保存・読込・Reader/Writer/Adapter）は本Issueの対象外のまま
 """
 
 from __future__ import annotations
@@ -29,7 +35,15 @@ from .engine_registry import resolve_engine_id
 
 
 class InvalidModelMetadataError(ValueError):
-    """ModelMetadataとして不正な値（必須フィールド欠損・型不一致・engine_id不正・extra衝突等）。"""
+    """ModelMetadataとして不正な値（必須フィールド欠損・型不一致・engine_id不正・extra衝突・schema_version不正等）。"""
+
+
+# Canonical Schemaのenvelopeバージョン（Architecture #30 6.2）。
+# dataclass自身のフィールドにはしない（sidecarファイル形式が持つ「入れ物」のバージョンであり、
+# ModelMetadataというデータ自体の一部ではないため。永続化はまだ実装しない本Issueの時点でも、
+# to_dict()の出力・from_dict()の入力チェックとして先に導入する）。
+MODEL_METADATA_SCHEMA_VERSION = 1
+_SUPPORTED_SCHEMA_VERSIONS = (MODEL_METADATA_SCHEMA_VERSION,)
 
 
 # 型チェックのみで足りる任意のstr|Noneフィールド一覧（__post_init__で一括検証する）。
@@ -110,8 +124,13 @@ class ModelMetadata:
         object.__setattr__(self, "extra", MappingProxyType(copy.deepcopy(dict(self.extra))))
 
     def to_dict(self) -> dict[str, Any]:
-        """辞書へシリアライズする。Noneフィールドも含めて全キーを出力する（round trip前提）。"""
+        """辞書へシリアライズする。Noneフィールドも含めて全キーを出力する（round trip前提）。
+
+        `schema_version`はModelMetadata自身のフィールドではなく、この辞書表現（将来の
+        sidecarファイル形式）のenvelopeバージョンとして付与する（Architecture #30 6.2）。
+        """
         return {
+            "schema_version": MODEL_METADATA_SCHEMA_VERSION,
             "model_id": self.model_id,
             "engine_id": self.engine_id,
             "display_name": self.display_name,
@@ -140,9 +159,20 @@ class ModelMetadata:
 
         必須フィールド（model_id/engine_id）の欠損・型不正は
         InvalidModelMetadataError として明確に送出する。
+
+        `schema_version`キーが含まれる場合は既知のバージョン（現状v1のみ）と一致するか検証する
+        （未知の将来バージョンをそれと知らずに現行スキーマとして誤解釈しないため）。キー自体が
+        無い入力（`schema_version`導入前の`to_dict()`出力・Adapterが変換した旧データ相当）は
+        検証をスキップする（後方互換）。
         """
         if not isinstance(data, Mapping):
             raise InvalidModelMetadataError(f"data must be a mapping, got {type(data)!r}")
+
+        if "schema_version" in data and data["schema_version"] not in _SUPPORTED_SCHEMA_VERSIONS:
+            raise InvalidModelMetadataError(
+                f"unsupported schema_version: {data['schema_version']!r} "
+                f"(supported: {_SUPPORTED_SCHEMA_VERSIONS!r})"
+            )
 
         known_fields = {f.name for f in dataclasses.fields(cls)}
         kwargs = {k: v for k, v in data.items() if k in known_fields}
@@ -150,3 +180,25 @@ class ModelMetadata:
             return cls(**kwargs)
         except TypeError as e:
             raise InvalidModelMetadataError(f"missing or invalid ModelMetadata fields: {e}") from e
+
+    @classmethod
+    def is_valid(cls, data: Mapping[str, Any]) -> bool:
+        """dataがModelMetadataとして構築可能かを判定する（例外を送出しない`from_dict()`）。
+
+        後続Issue（Adapter/Catalog）が、個々の入力の妥当性を例外送出なしに判定できるようにする
+        ための最小限のUtility。判定ロジック自体は`from_dict()`を再利用し、複製しない。
+        """
+        try:
+            cls.from_dict(data)
+        except InvalidModelMetadataError:
+            return False
+        return True
+
+    def replace(self, **changes: Any) -> "ModelMetadata":
+        """一部フィールドを差し替えた新しいインスタンスを返す（frozenのため自身は変更しない）。
+
+        `dataclasses.replace()`の薄いラッパー。新インスタンス生成時に`__post_init__`の
+        Validationがそのまま再実行される（差し替え後の値が不正ならInvalidModelMetadataErrorが
+        送出される）。
+        """
+        return dataclasses.replace(self, **changes)
