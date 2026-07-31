@@ -1,8 +1,8 @@
 # Unified Model Metadata Infrastructure Issue Map
 
-Related: Epic [#28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28) / Architecture [#30](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/30) / Feature [#32](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/32)
+Related: Epic [#28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28) / Architecture [#30](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/30) / Feature [#32](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/32) / Feature [#34](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/34)
 
-本ドキュメントは、Architecture [#30](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/30)（[MODEL_METADATA_ARCHITECTURE.md](../../design/MODEL_METADATA_ARCHITECTURE.md)「Issue分割」章）で決定した、Epic #28配下の後続Issue構成の追跡表である。Architecture #30はPR [#31](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/31)のSquash Mergeによりmainへ反映済み・Closed。Canonical ModelMetadata Schema（[#32](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/32)）はPR [#33](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/33)のSquash Mergeによりmainへ反映済み・Closed。次のOpen項目は「Legacy Metadata Adapter実装」である。
+本ドキュメントは、Architecture [#30](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/30)（[MODEL_METADATA_ARCHITECTURE.md](../../design/MODEL_METADATA_ARCHITECTURE.md)「Issue分割」章）で決定した、Epic #28配下の後続Issue構成の追跡表である。Architecture #30はPR [#31](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/31)のSquash Mergeによりmainへ反映済み・Closed。Canonical ModelMetadata Schema（[#32](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/32)）はPR [#33](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/33)のSquash Mergeによりmainへ反映済み・Closed。Legacy Metadata Adapter（[#34](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/34)）は実装完了・PRレビュー待ち。次のOpen項目は「ModelMetadata Reader/Writer実装」である。
 
 ## Issue一覧（提案）
 
@@ -11,8 +11,8 @@ Related: Epic [#28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28) 
 | 1 | Investigation | なし | Model Metadata実運用化の影響調査 | Closed（[#29](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/29)） |
 | 2 | Architecture + ADR | 1 | Adapter設計・保存先決定・Migration戦略確定 | **Completed**（[#30](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/30)、PR [#31](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/31)Squash Merge済み。ADR-0002はAccepted） |
 | 3 | Canonical ModelMetadata Schema整備 | 2 | 既存`ModelMetadata` dataclassのSchema確定・schema_version・Validation・to_dict/from_dict・Equality・is_valid/replace | **Completed**（[#32](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/32)、PR [#33](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/33)Squash Merge済み。Merge Commit: `b250c8f`） |
-| 4 | Legacy Metadata Adapter実装 | 3 | `.ocr.json`/`.tess.json`/`.pt`/`inference_model.json`→`ModelMetadata`変換（読み取り専用） | 次のOpen項目（未作成） |
-| 5 | ModelMetadata Reader/Writer実装 | 3 | Canonical sidecar読込・原子的書込（新規モデルのみ） | 未作成 |
+| 4 | Legacy Metadata Adapter実装 | 3 | `.ocr.json`/`.tess.json`/`inference_model.json`→`ModelMetadata`変換（読み取り専用、`LegacyMetadataAdapter`＋3専用Adapter） | 実装完了・PRレビュー待ち（[#34](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/34)） |
+| 5 | ModelMetadata Reader/Writer実装 | 3 | Canonical sidecar読込・原子的書込（新規モデルのみ） | 次のOpen項目（未作成） |
 | 6 | Model Catalog / Registry実装 | 4, 5 | 一覧・フィルタ・legacy合成・重複排除 | 未作成 |
 | 7 | Training・Import時のMetadata生成 | 5 | Factory/Builder。新規学習・Export時にCanonical Metadataを書込 | 未作成 |
 | 8 | Models API・Models画面連携 | 6 | `/models/info`をCatalog経由へ切替（レスポンス形式は維持） | 未作成 |

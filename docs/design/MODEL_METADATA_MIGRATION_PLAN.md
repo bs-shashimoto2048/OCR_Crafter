@@ -20,7 +20,11 @@ Related: [MODEL_METADATA.md](MODEL_METADATA.md)（`ModelMetadata`のスキーマ
 
 ## 追記2（2026-07-31）: Feature #32でCanonical Schema実装完了（Migration Phase 1: Canonical Schema — Completed）
 
-Feature [#32](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/32)（Canonical ModelMetadata Schema）**Completed**。`src/app/services/model_metadata.py`へ`schema_version`（envelope値・`MODEL_METADATA_SCHEMA_VERSION = 1`、bool/floatを誤受理しない厳密int検証）・`is_valid()`・`replace()`を追加し、PR [#33](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/33)をSquash Merge・mainへ反映済み（Merge Commit: `b250c8f`）。Migration Phase 1のうちCanonical Schema部分は完了。Adapter/Reader/Writer/Catalog（Phase 1の残り）はまだ未実装であり、永続化（JSON保存・読込）も行っていない。次のOpen項目はLegacy Metadata Adapter実装（[docs/workitems/model-metadata/ISSUE_MAP.md](../workitems/model-metadata/ISSUE_MAP.md)参照）。
+Feature [#32](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/32)（Canonical ModelMetadata Schema）**Completed**。`src/app/services/model_metadata.py`へ`schema_version`（envelope値・`MODEL_METADATA_SCHEMA_VERSION = 1`、bool/floatを誤受理しない厳密int検証）・`is_valid()`・`replace()`を追加し、PR [#33](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/33)をSquash Merge・mainへ反映済み（Merge Commit: `b250c8f`）。Migration Phase 1のうちCanonical Schema部分は完了。Reader/Writer/Catalog（Phase 1の残り）はまだ未実装であり、永続化（JSON保存・読込）も行っていない。
+
+## 追記3（2026-07-31）: Feature #34でLegacy Metadata Adapter実装完了（Migration Phase 1: Adapter — Completed）
+
+Feature [#34](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/34)（Legacy Metadata Adapter）**Completed**。新規`src/app/services/legacy_metadata_adapter.py`へ`OCRMetadataAdapter`（`.ocr.json`）・`TesseractMetadataAdapter`（`.tess.json`）・`InferenceMetadataAdapter`（`inference_model.json`）と、それらへ委譲する`LegacyMetadataAdapter`を実装した。Filesystemアクセスなし（dict→ModelMetadataの変換のみ）、Validationは全て`ModelMetadata.from_dict()`へ委譲、Engine判定は`resolve_engine_id()`一本化（推測フォールバックなし）。未対応形式は新設の`UnsupportedLegacyMetadataError`で区別する。これでMigration Phase 1（Adapter導入）が完了。次のOpen項目はModelMetadata Reader/Writer実装（[docs/workitems/model-metadata/ISSUE_MAP.md](../workitems/model-metadata/ISSUE_MAP.md)参照）。
 
 ## 現状
 
