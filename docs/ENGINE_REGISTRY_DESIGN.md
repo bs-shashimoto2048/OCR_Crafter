@@ -1,8 +1,10 @@
 # Engine Registry Design
 
-Related: Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46)（Engine UI Generalization） / Feature [#47](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/47)（Engine Registry Design） / Epic [#28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)（Unified Model Metadata Infrastructure、完了済み） / Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)（TrOCR本体）
+Related: Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46)（Engine UI Generalization） / Feature [#47](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/47)（Engine Registry Design、**Completed**・Closed。PR [#48](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/48)をSquash Merge・mainへ反映済み、Merge Commit: `57ca74e`） / Epic [#28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)（Unified Model Metadata Infrastructure、完了済み） / Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)（TrOCR本体）
 
-**本ドキュメントは設計のみを対象とする。実装（`EngineRegistry`本体・UI変更・TrOCR追加・Models API変更・Resolver変更）は一切行わない。**
+**本ドキュメントは設計のみを対象とする。実装（`EngineRegistry`本体・UI変更・TrOCR追加・Models API変更・Resolver変更）は一切行わない。実装は後続Feature（Engine Registry Core等）で個別に着手する。**
+
+**状態（2026-07-31）**: Feature #47は**Completed**。次のFeatureは「Engine Registry Core」（Registry本体のみ実装、9章の優先順位1に相当）。
 
 ## 1. 背景・目的
 

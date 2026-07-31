@@ -116,10 +116,15 @@ Investigation #29でこの状況を詳細調査した結果、モデルに関す
 - `ModelCatalog`のキャッシュ実装
 - `release_gate.py::_model_engine()`の`resolve_engine_id()`への置き換え（Cleanup Issue）
 - checksumによるmetadata整合性検証
+- バックエンド`engine_registry.py`/`engine_capability.py`と、Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46)「Engine UI Generalization」で設計中のフロントエンド`EngineRegistry`との統合要否（[ENGINE_REGISTRY_DESIGN.md](../ENGINE_REGISTRY_DESIGN.md)3章で、現時点では両者を統合しない方針を確認済み。将来的にバックエンドをSource of Truthとする場合は新規APIエンドポイントが必要になるため、その時点で本ADRとは別に判断する）
 
 ## Related Issue
 
 Architecture #30（Completed・Closed） / Investigation #29（Closed） / Parent Epic #28
+
+## Related Documents（他Epicとの責務境界）
+
+[ENGINE_REGISTRY_DESIGN.md](../ENGINE_REGISTRY_DESIGN.md)（Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46)、Completed）3章「責務境界」で、フロントエンド`EngineRegistry`（エンジン単位の静的設定）と、本ADRが扱うModels API・`ModelMetadata`（モデルインスタンス単位のデータ）が異なる軸であり互いの変更を要求しないことを整理済み。
 
 ## Related PR
 
