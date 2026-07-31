@@ -2,7 +2,9 @@
 
 ## 状態
 
-Phase1（設計フェーズ）完了。Phase2（共通基盤実装）完了（Engine Capability [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)・Engine Registry [#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9)・Engine判定ロジック統一Backend側[#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)・Frontend側[#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)・共通Model Metadata [#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14)、いずれもmainへマージ済み）。Phase3（TrOCR Backend単画像推論コア、Feature [#16](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/16)）完了・mainへマージ済み。Phase4（OCR Pipelineへの接続、Feature [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18)）完了・mainへマージ済み。既存OCR推論APIへの統合（Feature [#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20)）完了・mainへマージ済み。Phase5（推論テスト画面へのTrOCR選択UI追加、Feature [#23](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/23)）完了・mainへマージ済み。TrOCR Model MetadataのFrontend連携（Feature [#25](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/25)）実装済み・PRレビュー待ち
+**Epic [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)は既存推論経路へのTrOCR統合が完了し、Close可能な状態。** Phase1（設計フェーズ）完了。Phase2（共通基盤実装）完了（Engine Capability [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)・Engine Registry [#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9)・Engine判定ロジック統一Backend側[#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)・Frontend側[#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)・共通Model Metadata [#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14)、いずれもmainへマージ済み）。Phase3（TrOCR Backend単画像推論コア、Feature [#16](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/16)）完了・mainへマージ済み。Phase4（OCR Pipelineへの接続、Feature [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18)）完了・mainへマージ済み。既存OCR推論APIへの統合（Feature [#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20)）完了・mainへマージ済み。Phase5（推論テスト画面へのTrOCR選択UI追加、Feature [#23](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/23)）完了・mainへマージ済み。TrOCR Model MetadataのFrontend連携（Feature [#25](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/25)）完了・mainへマージ済み。
+
+**[Epic #27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)（TrOCR学習・評価・Benchmark・Release Gate統合）を新設し、当初ロードマップのうちTraining／Evaluation／Benchmark／Release Gateを引き継いだ。** 未着手（Phase4/6/7の一部）。
 
 ## 目的
 
@@ -25,12 +27,14 @@ OCR CrafterへTransformerベースの文字認識エンジンを追加できる�
 - [x] 既存OCR推論APIへのTrOCR統合Issue作成・実装完了（[#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20)、Closed・mainへマージ済み）
 - [x] Frontend側Engine判定修正Issue実装完了（既存Issue [#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)を使用、新規Issue作成なし。Closed・mainへマージ済み）
 - [x] Frontend TrOCR選択UI追加Issue作成・実装完了（[#23](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/23)、Closed・mainへマージ済み）
-- [x] TrOCR Model MetadataのFrontend連携Issue作成・実装完了（[#25](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/25)、PRレビュー待ち・未マージ）
-- [ ] 残りの実装Issue作成（[ISSUE_MAP.md](ISSUE_MAP.md)の確定順序: TrOCR Training/Evaluation等）
+- [x] TrOCR Model MetadataのFrontend連携Issue作成・実装完了（[#25](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/25)、Closed・mainへマージ済み）
+- [x] Epic #1のスコープ整理（Training/Evaluation/Benchmark/Release GateをEpic #2 [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)へ引き継ぎ。Epic #1はClose可能な状態に）
+- [ ] Epic #27配下の実装Issue作成（[ISSUE_MAP.md](ISSUE_MAP.md)のPhase4/6/7参照: TrOCR Training/Evaluation/Benchmark/Release Gate等）
 
 ## 関連Issue
 
-- Epic: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1) [Epic] Transformer OCR対応基盤とTrOCR統合
+- Epic: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1) [Epic] Transformer OCR対応基盤とTrOCR統合（既存推論経路への統合完了、Close可能）
+- Epic: [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27) [Epic] TrOCR学習・評価・Benchmark・Release Gate統合（Epic #1の後続、未着手）
 - Investigation: [#2](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/2) [Investigation] TrOCR採用可否とOCR Crafter統合方式の調査（Parent Epic: #1）
 - Feature: [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4) [Feature] Engine Capability実装（Parent Epic: #1、実装済み）
 - Feature: [#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9) [Feature] Engine Registry実装（Parent Epic: #1、MVP実装済み・Closed）
@@ -41,11 +45,12 @@ OCR CrafterへTransformerベースの文字認識エンジンを追加できる�
 - Feature: [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18) [Feature] OCR PipelineへTrOCR統合（Parent Epic: #1、実装済み・Closed）
 - Feature: [#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20) [Feature] 既存OCR推論APIへTrOCR統合（Parent Epic: #1、実装済み・Closed）
 - Feature: [#23](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/23) [Feature] FrontendへTrOCR選択UIを追加（Parent Epic: #1、実装済み・Closed）
-- Feature: [#25](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/25) [Feature] TrOCR Model MetadataをFrontend推論UIへ連携（Parent Epic: #1、実装済み・PRレビュー待ち）
+- Feature: [#25](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/25) [Feature] TrOCR Model MetadataをFrontend推論UIへ連携（Parent Epic: #1、実装済み・Closed）
 
 ## 作業資料
 
-- [EPIC.md](EPIC.md)
+- [EPIC.md](EPIC.md)（Epic #1）
+- [EPIC_2.md](EPIC_2.md)（Epic #27）
 - [INVESTIGATION.md](INVESTIGATION.md)
 - [ARCHITECTURE_DRAFT.md](ARCHITECTURE_DRAFT.md)
 - [ISSUE_MAP.md](ISSUE_MAP.md)
@@ -60,7 +65,7 @@ OCR CrafterへTransformerベースの文字認識エンジンを追加できる�
 - [FEATURE_TROCR_API_INTEGRATION.md](FEATURE_TROCR_API_INTEGRATION.md)（Feature [#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20)、実装済み・Closed）
 - [FEATURE_FRONTEND_ENGINE_RESOLUTION.md](FEATURE_FRONTEND_ENGINE_RESOLUTION.md)（Bug [#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)、実装済み・Closed）
 - [FEATURE_TROCR_FRONTEND_UI.md](FEATURE_TROCR_FRONTEND_UI.md)（Feature [#23](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/23)、実装済み・Closed）
-- [FEATURE_TROCR_MODEL_METADATA_UI.md](FEATURE_TROCR_MODEL_METADATA_UI.md)（Feature [#25](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/25)、実装済み・PRレビュー待ち）
+- [FEATURE_TROCR_MODEL_METADATA_UI.md](FEATURE_TROCR_MODEL_METADATA_UI.md)（Feature [#25](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/25)、実装済み・Closed）
 
 ## 重要な制約
 

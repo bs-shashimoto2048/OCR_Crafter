@@ -1,10 +1,13 @@
 # TrOCR対応 Issue Map
 
-Related Issue: Epic [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1) / Investigation [#2](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/2)
+Related Issue: Epic [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1) / Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27) / Investigation [#2](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/2)
+
+**Epic分割（2026-07-31）**: [Epic #1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)（Transformer OCR対応基盤とTrOCR統合）は、既存OCR推論経路（OCR Pipeline / 既存OCR推論API / Frontend推論画面）へのTrOCR統合が完了しClose可能な状態となった。当初ロードマップに含まれていたTraining／Evaluation／Benchmark／Release Gateは、実際には未着手のまま[Epic #2](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)（TrOCR学習・評価・Benchmark・Release Gate統合）へ引き継いだ。本ドキュメントの各Phaseの記載は両Epicで共有するが、Phase4（Training/Evaluation）・Phase6（Benchmark）・Phase7の一部（マニュアル・チュートリアル・リリース確認）はEpic #2の管轄である。
 
 ## 現在作成するIssue
 
-- Epic: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1) Transformer OCR対応基盤とTrOCR統合
+- Epic: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1) Transformer OCR対応基盤とTrOCR統合（既存推論経路への統合完了、Close可能）
+- Epic: [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27) TrOCR学習・評価・Benchmark・Release Gate統合（Epic #1の後続。未着手）
 - Investigation: [#2](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/2) TrOCR採用可否とOCR Crafter統合方式の調査（Parent Epic: #1）
 - Feature: [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4) Engine Capability実装（実装済み。Parent Epic: #1）
 - Feature: [#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9) Engine Registry実装（実装済み・Closed。Parent Epic: #1）
@@ -15,7 +18,7 @@ Related Issue: Epic [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues
 - Feature: [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18) OCR PipelineへTrOCR統合（実装済み・Closed。Parent Epic: #1。当初想定の`ocr_pipeline.py`ではなく実際の推論ディスパッチファイル`predict.py`へ接続）
 - Feature: [#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20) 既存OCR推論APIへTrOCR統合（実装済み・Closed。Parent Epic: #1。新規TrOCR専用APIは作成せず既存`POST /predict`を拡張）
 - Feature: [#23](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/23) FrontendへTrOCR選択UIを追加（実装済み・Closed。Parent Epic: #1。`InferenceView.jsx`（推論テスト画面）へ最小追加、`OcrBatchView.jsx`/`RapidOCRView.jsx`は対象外）
-- Feature: [#25](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/25) TrOCR Model MetadataをFrontend推論UIへ連携（実装済み・PRレビュー待ち。Parent Epic: #1。既存`GET /models/info`のengineフィルタのみで実現、Backend変更なし。実環境では登録済みモデルは基本的に0件）
+- Feature: [#25](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/25) TrOCR Model MetadataをFrontend推論UIへ連携（実装済み・Closed。Parent Epic: #1。既存`GET /models/info`のengineフィルタのみで実現、Backend変更なし。実環境では登録済みモデルは基本的に0件）
 
 ## 次に作成するIssue候補（確定順序、2026-07-29）
 
@@ -26,14 +29,14 @@ ADR-0001がAcceptedとなり、Phase2（共通基盤実装）へ移行するに�
 3. **Model Metadata** — Phase1（[MODEL_METADATA.md](../../design/MODEL_METADATA.md)のMVP実装、✅完了: [#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14)）
 4. **Engine判定既存バグ修正** — Phase2（`engineLabelOf()`/`resolveInferenceEngine()`/`_model_engine()`のキャッチオール是正＋判定ロジックの一本化。Backend側（`model_registry.py`/`ocr_pipeline.py`）は✅完了: [#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)。Frontend側も✅完了: [#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)。`release_gate.py::_model_engine()`との重複一本化は未着手）
 5. **TrOCR Backend** — Phase3（依存関係・設定管理・Dataset確認・TrOCR Model Metadata適用。単画像推論コアは✅完了: [#16](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/16)）
-6. **TrOCR Training** — Phase4（`services/trocr_pipeline.py`学習Backend）
-7. **TrOCR Inference** — Phase4（OCR Pipelineへの接続は✅完了: [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18)。既存OCR推論APIへの統合も✅完了: [#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20)。`ENGINE_BUILDERS`スタイルの`recognize()`実装は未着手）
-8. **TrOCR Evaluation** — Phase4（評価連携の方針決定・confidence算出方法の確定）
-9. **Frontend** — Phase5（Model Manager UI / Training UI / Evaluation UI / Experiment Tracking連携。既存OCR推論テスト画面へのTrOCR選択UI追加は✅実装済み・PRレビュー待ち: [#23](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/23)）
-10. **Benchmark** — Phase6（Benchmark Runner/Center連携）
-11. **Documentation** — Phase7（Backend/Frontendテスト・マニュアル・チュートリアル・リリース確認）
+6. **TrOCR Training** — Phase4（`services/trocr_pipeline.py`学習Backend。**Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)管轄**）
+7. **TrOCR Inference** — Phase4（OCR Pipelineへの接続は✅完了: [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18)。既存OCR推論APIへの統合も✅完了: [#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20)。Epic #1完了。`ENGINE_BUILDERS`スタイルの`recognize()`実装＝Engine Registry Handler化はFuture Work）
+8. **TrOCR Evaluation** — Phase4（評価連携の方針決定・confidence算出方法の確定。**Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)管轄**）
+9. **Frontend** — Phase5（既存OCR推論テスト画面へのTrOCR選択UI追加・Model Metadata連携は✅完了: [#23](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/23) / [#25](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/25)、Epic #1完了。Model Manager UI / Training UI / Evaluation UI / Experiment Tracking連携は**Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)管轄**）
+10. **Benchmark** — Phase6（Benchmark Runner/Center連携。**Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)管轄**）
+11. **Documentation** — Phase7（Backend/Frontendテストは各Feature Issueで実施済み。マニュアル・チュートリアル・リリース確認は**Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)管轄**）
 
-1〜3（Engine Capability/Engine Registry/Model Metadata）は、TrOCRの採否に関わらず単独で価値を持つ共通基盤であるため最優先で着手する。4は新機能ではなく既存バグ修正のため3の直後に行う。5以降がTrOCRという最初の適用事例になる。
+1〜3（Engine Capability/Engine Registry/Model Metadata）は、TrOCRの採否に関わらず単独で価値を持つ共通基盤であるため最優先で着手した。4は新機能ではなく既存バグ修正のため3の直後に行った。5・7・9（一部）がTrOCRの既存推論経路への統合＝Epic #1で、6・8・9（残り）・10・11がEpic #27（学習・評価・Benchmark・Release Gate）である。
 
 ## 調査完了後に作成を検討するIssue（Phase構成）
 
@@ -51,7 +54,7 @@ ADR-0001がAcceptedとなり、Phase2（共通基盤実装）へ移行するに�
 
 - **既存エンジン判定の欠陥修正**（新機能ではなくバグ修正）: `frontend/src/views/ModelsView.jsx::engineLabelOf()`・`frontend/src/lib/inferenceModel.js::resolveInferenceEngine()`・`src/app/services/release_gate.py::_model_engine()`の「PaddleOCRキャッチオール」是正
   - ✅**Backend完了**（[#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)）: `model_registry.py::list_model_infos()`・`ocr_pipeline.py::migrate_ocr_models_to_inference()`の暗黙paddleocrフォールバックを、`engine_registry.py`の`resolve_engine_id()`経由の明示的判定へ置き換え済み。未知engineは`"unknown"`
-  - ✅**Frontend実装済み・PRレビュー待ち**（[#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)）: JSからPythonのEngine Registryを直接参照できないため、Backendとは独立したFrontend側最小実装（`frontend/src/lib/engineResolution.js::normalizeEngineId()`/`engineDisplayLabel()`）を新設し、`engineLabelOf()`/`resolveInferenceEngine()`/`resolveRestoredInferenceSelection()`の暗黙フォールバックを是正。詳細は[FEATURE_FRONTEND_ENGINE_RESOLUTION.md](FEATURE_FRONTEND_ENGINE_RESOLUTION.md)
+  - ✅**Frontend完了**（[#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)）: JSからPythonのEngine Registryを直接参照できないため、Backendとは独立したFrontend側最小実装（`frontend/src/lib/engineResolution.js::normalizeEngineId()`/`engineDisplayLabel()`）を新設し、`engineLabelOf()`/`resolveInferenceEngine()`/`resolveRestoredInferenceSelection()`の暗黙フォールバックを是正。詳細は[FEATURE_FRONTEND_ENGINE_RESOLUTION.md](FEATURE_FRONTEND_ENGINE_RESOLUTION.md)
   - ⬜`release_gate.py::_model_engine()`は未知拡張子で空文字を返す設計のため今回の「暗黙paddleocrフォールバック廃止」の対象外だったが、`model_registry.py`との重複一本化自体は未着手のまま
 - **Engine判定の一本化**: `release_gate.py::_model_engine()`と`model_registry.py`の重複した拡張子判定ロジックを、Engine Registryの解決方法（[ENGINE_REGISTRY.md](../../design/ENGINE_REGISTRY.md)の「Engine解決方法」参照）へ一本化（未着手）
 
@@ -64,32 +67,31 @@ ADR-0001がAcceptedとなり、Phase2（共通基盤実装）へ移行するに�
 
 ### Phase4: Training / Inference / Evaluation
 
-- **TrOCR学習Backend**: `services/trocr_pipeline.py`新設。Hugging Face Transformers（`VisionEncoderDecoderModel`+`Seq2SeqTrainer`）経由、公式`unilm/trocr`（fairseq）は不採用（[ADR-0001](../../adr/ADR-0001_Trocr_Architecture.md)決定事項）
-- **TrOCR推論Backend**（✅OCR Pipelineへの接続完了: [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18)）: `predict.py::predict_from_image()`（`ocr_pipeline.py`ではなく実際の推論ディスパッチ先）へ`resolve_engine_id()`経由の`trocr`分岐を追加済み。詳細は[FEATURE_PIPELINE_TROCR.md](FEATURE_PIPELINE_TROCR.md)。`ENGINE_BUILDERS`スタイルの`recognize()`実装（Engine Registry Handler化）は未着手
-- **既存OCR推論APIへの統合**（✅実装済み・PRレビュー待ち: [#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20)）: 新規TrOCR専用APIは作成せず、既存`POST /predict`が`engine="trocr"`を受け付けるよう最小拡張。詳細は[FEATURE_TROCR_API_INTEGRATION.md](FEATURE_TROCR_API_INTEGRATION.md)
-- **TrOCR評価連携の方針決定**: `ocr_evaluation.py`のTesseract専用制約への対応可否（PaddleOCRも未対応のため、TrOCR単独の課題ではないことに留意）。confidence算出方法の確定（未解決事項）
+- **TrOCR学習Backend**（**Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)管轄・未着手**）: `services/trocr_pipeline.py`新設。Hugging Face Transformers（`VisionEncoderDecoderModel`+`Seq2SeqTrainer`）経由、公式`unilm/trocr`（fairseq）は不採用（[ADR-0001](../../adr/ADR-0001_Trocr_Architecture.md)決定事項）
+- **TrOCR推論Backend**（✅Epic #1完了: [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18) / [#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20)）: `predict.py::predict_from_image()`（`ocr_pipeline.py`ではなく実際の推論ディスパッチ先）へ`resolve_engine_id()`経由の`trocr`分岐を追加済み。既存`POST /predict`が`engine="trocr"`を受け付ける。詳細は[FEATURE_PIPELINE_TROCR.md](FEATURE_PIPELINE_TROCR.md) / [FEATURE_TROCR_API_INTEGRATION.md](FEATURE_TROCR_API_INTEGRATION.md)。`ENGINE_BUILDERS`スタイルの`recognize()`実装（Engine Registry Handler化）はFuture Work
+- **TrOCR評価連携の方針決定**（**Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)管轄・未着手**）: `ocr_evaluation.py`のTesseract専用制約への対応可否（PaddleOCRも未対応のため、TrOCR単独の課題ではないことに留意）。confidence算出方法の確定（未解決事項）
 
 ### Phase5: Frontend
 
-- **推論テスト画面へのTrOCR選択UI**（✅完了: [#23](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/23)）: `InferenceView.jsx`（既存OCR推論APIへ直接`POST /predict`する画面）へTrOCR選択肢＋モデル参照自由入力欄を追加。詳細は[FEATURE_TROCR_FRONTEND_UI.md](FEATURE_TROCR_FRONTEND_UI.md)。`OcrBatchView.jsx`/`RapidOCRView.jsx`は対象外（Future Work参照）
-- **TrOCR Model MetadataのFrontend連携**（✅実装済み・PRレビュー待ち: [#25](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/25)）: 既存`GET /models/info`（`modelInfos`）からengine正規化が`trocr`のものだけを抽出し、登録済みモデル選択・手動入力の2方式を共存させた。`ModelMetadata`dataclass自体は依然未配線・TrOCR用モデル一覧ファイル形式も存在しないため、実環境では登録済みモデルは基本的に0件（既知の状態）。詳細は[FEATURE_TROCR_MODEL_METADATA_UI.md](FEATURE_TROCR_MODEL_METADATA_UI.md)
-- **Model Manager UI**: Engine Capability参照への切替（Phase2の欠陥修正と連動）
-- **Training UI**: `TrainingView.jsx`の既存ドロップダウンへTrOCR選択肢を追加
-- **Evaluation UI**: Phase4の評価連携方針決定に連動
-- **Experiment Tracking連携**: 既存の`training`サブオブジェクト予約フィールド（`optimizer`/`scheduler`/`loss`/`learning_rate`/`batch_size`）の活用可否、epoch/loss推移の記録要否を確定
+- **推論テスト画面へのTrOCR選択UI**（✅Epic #1完了: [#23](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/23)）: `InferenceView.jsx`（既存OCR推論APIへ直接`POST /predict`する画面）へTrOCR選択肢＋モデル参照自由入力欄を追加。詳細は[FEATURE_TROCR_FRONTEND_UI.md](FEATURE_TROCR_FRONTEND_UI.md)。`OcrBatchView.jsx`/`RapidOCRView.jsx`は対象外（Future Work参照）
+- **TrOCR Model MetadataのFrontend連携**（✅Epic #1完了: [#25](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/25)）: 既存`GET /models/info`（`modelInfos`）からengine正規化が`trocr`のものだけを抽出し、登録済みモデル選択・手動入力の2方式を共存させた。`ModelMetadata`dataclass自体は依然未配線・TrOCR用モデル一覧ファイル形式も存在しないため、実環境では登録済みモデルは基本的に0件（既知の状態）。詳細は[FEATURE_TROCR_MODEL_METADATA_UI.md](FEATURE_TROCR_MODEL_METADATA_UI.md)
+- **Model Manager UI**（**Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)管轄・未着手**）: Engine Capability参照への切替（Phase2の欠陥修正と連動）
+- **Training UI**（**Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)管轄・未着手**）: `TrainingView.jsx`の既存ドロップダウンへTrOCR選択肢を追加
+- **Evaluation UI**（**Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)管轄・未着手**）: Phase4の評価連携方針決定に連動
+- **Experiment Tracking連携**（**Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)管轄・未着手**）: 既存の`training`サブオブジェクト予約フィールド（`optimizer`/`scheduler`/`loss`/`learning_rate`/`batch_size`）の活用可否、epoch/loss推移の記録要否を確定
 
-### Phase6: Benchmark
+### Phase6: Benchmark（**Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)管轄・未着手**）
 
 - **Benchmark Runner連携**: `ENGINE_CATALOG`/`ENGINE_BUILDERS`へのTrOCR登録
 - **Benchmark Center連携**: 変更不要の想定だが実装後に確認（調査時点でengine非依存と判断済み）
 
 ### Phase7: Documentation
 
-- **Backendテスト**: `trocr_pipeline.py`の単体テスト、既存3エンジン（Tesseract/PaddleOCR/カスタム分類）への回帰テスト
-- **Frontendテスト**: `engineLabelOf()`等の修正に対する回帰テスト（既存PaddleOCR表示が壊れていないことを含む）
-- **ユーザーマニュアル**: `docs/manual/`関連章の更新
-- **チュートリアル**: `docs/tutorial/`へTrOCRチュートリアル追加（日本語対応方針が未解決のため、英語/英数字ユースケースを優先する可能性あり）
-- **リリース・移行確認**: 既存プロジェクトへの影響が無いことの最終確認
+- **Backendテスト**（✅Epic #1完了）: 各Feature Issue（#16/#18/#20/#25）で実装と同じPRにテストを含めて完了済み
+- **Frontendテスト**（✅Epic #1完了）: `engineLabelOf()`等の修正に対する回帰テストを含め、各Feature Issue（#12/#23/#25）で完了済み
+- **ユーザーマニュアル**（**Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)管轄・未着手**）: `docs/manual/`関連章の更新
+- **チュートリアル**（**Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)管轄・未着手**）: `docs/tutorial/`へTrOCRチュートリアル追加（日本語対応方針が未解決のため、英語/英数字ユースケースを優先する可能性あり。学習成果物ができてから書く方が実用的）
+- **リリース・移行確認**（**Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)管轄・未着手**）: 既存プロジェクトへの影響が無いことの最終確認
 
 ## Future Work（Epic #1範囲内・未着手）
 
