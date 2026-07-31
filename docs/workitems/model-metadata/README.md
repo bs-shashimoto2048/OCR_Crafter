@@ -2,7 +2,7 @@
 
 ## 状態
 
-**Epic [#28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)は現在Open。** Investigation（[#29](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/29)）完了・Closed。Architecture（[#30](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/30)）**Completed**（PR [#31](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/31)をSquash Merge・mainへ反映済み、ADR-0002はAccepted）。Canonical ModelMetadata Schema（[#32](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/32)）**Completed**・Closed（PR [#33](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/33)をSquash Merge・mainへ反映済み、Merge Commit: `b250c8f`）。Legacy Metadata Adapter（[#34](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/34)）は実装完了・PRレビュー待ち。
+**Epic [#28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)は現在Open。** Investigation（[#29](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/29)）完了・Closed。Architecture（[#30](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/30)）**Completed**（PR [#31](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/31)をSquash Merge・mainへ反映済み、ADR-0002はAccepted）。Canonical ModelMetadata Schema（[#32](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/32)）**Completed**・Closed（PR [#33](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/33)をSquash Merge・mainへ反映済み、Merge Commit: `b250c8f`）。Legacy Metadata Adapter（[#34](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/34)）**Completed**・Closed（PR [#35](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/35)をSquash Merge・mainへ反映済み、Merge Commit: `434993d`）。次のOpen項目は**ModelMetadata Reader/Writer実装**（未作成）。
 
 本ディレクトリは、[Epic #1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)（Transformer OCR対応基盤とTrOCR統合）の実装過程で発見された「`ModelMetadata`が実運用で未配線」という課題に対応するため新設したEpic #28専用の作業資料である。TrOCRに限らない、既存コード全体への`ModelMetadata`の本格配線を扱う。TrOCR固有のTraining/Evaluation/Benchmark/Release Gateは[Epic #27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)（`docs/workitems/trocr/`）の責務であり、本Epicとは分離管理する。
 
@@ -21,7 +21,8 @@
 - [x] PR #31レビュー・Squash Merge（mainへ反映済み）
 - [x] ADRレビュー・Accepted判断（ユーザー承認によりADR-0002 Status: Accepted）
 - [x] Feature Issue作成・実装完了: Canonical ModelMetadata Schema（[#32](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/32)、**Completed**・Closed。PR [#33](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/33)Squash Merge済み）
-- [x] Feature Issue作成・実装完了: Legacy Metadata Adapter（[#34](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/34)、PRレビュー待ち）
+- [x] Feature Issue作成・実装完了: Legacy Metadata Adapter（[#34](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/34)、**Completed**・Closed。PR [#35](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/35)Squash Merge済み）
+- [x] Metadata Reader Design Notes作成（[METADATA_READER_DESIGN_NOTES.md](METADATA_READER_DESIGN_NOTES.md)。#34レビューのMinor未決事項を記録）
 - [ ] 次のOpen項目: ModelMetadata Reader/Writer実装（[ISSUE_MAP.md](ISSUE_MAP.md)参照）
 - [ ] 後続Feature Issue作成（Model Catalog〜Cleanupまで）
 
@@ -31,7 +32,7 @@
 - Investigation: [#29](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/29) [Investigation] Model Metadata実運用化の影響調査（Closed）
 - Architecture: [#30](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/30) [Architecture] Unified Model Metadata Adapterと段階的移行方式を設計（**Completed**・Closed。PR [#31](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/31)Squash Merge済み）
 - Feature: [#32](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/32) [Feature] Canonical ModelMetadata Schema（**Completed**・Closed。PR [#33](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/33)Squash Merge済み）
-- Feature: [#34](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/34) [Feature] Legacy Metadata Adapter（実装完了・PRレビュー待ち）
+- Feature: [#34](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/34) [Feature] Legacy Metadata Adapter（**Completed**・Closed。PR [#35](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/35)Squash Merge済み）
 
 ## 作業資料
 
@@ -39,6 +40,7 @@
 - [INVESTIGATION_29.md](INVESTIGATION_29.md)（Investigation #29、Closed）
 - [ARCHITECTURE_30.md](ARCHITECTURE_30.md)（Architecture #30）
 - [ISSUE_MAP.md](ISSUE_MAP.md)
+- [METADATA_READER_DESIGN_NOTES.md](METADATA_READER_DESIGN_NOTES.md)（次のReader Issueで決定すべき未決事項）
 - [../../design/MODEL_METADATA.md](../../design/MODEL_METADATA.md)（`ModelMetadata` dataclass設計、Feature #14）
 - [../../design/MODEL_METADATA_MIGRATION_PLAN.md](../../design/MODEL_METADATA_MIGRATION_PLAN.md)（Investigation #29成果物）
 - [../../design/MODEL_METADATA_ARCHITECTURE.md](../../design/MODEL_METADATA_ARCHITECTURE.md)（Architecture #30成果物）
