@@ -9,6 +9,8 @@ Related: Epic [#28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28) 
 > **2026-07-31追記2**: Feature [#32](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/32)（Canonical ModelMetadata Schema）**Completed**。6.2の決定どおり`schema_version`（`MODEL_METADATA_SCHEMA_VERSION = 1`）をdataclassのフィールドにはせず、`to_dict()`/`from_dict()`のenvelope値として実装。`is_valid()`（例外を送出しない`from_dict()`）・`replace()`（`dataclasses.replace()`の薄いラッパー）を追加。同値性は`@dataclass(frozen=True)`既定の`__eq__`をそのまま採用し、カスタム実装は追加していない（過剰実装を避けるため）。`copy()`は、frozenかつ`extra`もdeep copy済みで不変性が保証されているため実装しなかった（既定の値渡し・`replace()`で十分と判断）。PRレビューでschema_versionがbool/floatを誤って`1`と同一視して受理する不具合が見つかり、型を明示的に検証する修正を追加コミットで反映（PR [#33](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/33)、Squash Merge・Merge Commit: `b250c8f`）。永続化（Reader/Writer/Adapter/Catalog）は本Featureの対象外のまま、次のIssueはLegacy Metadata Adapter。
 >
 > **2026-07-31追記3**: Feature [#34](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/34)（Legacy Metadata Adapter）**Completed**。6.6の決定どおり単一`LegacyMetadataAdapter`（形式別クラス分割はしない）ではなく、`OCRMetadataAdapter`/`TesseractMetadataAdapter`/`InferenceMetadataAdapter`の3専用Adapter＋`LegacyMetadataAdapter`という委譲構成を採用（既知3形式の固定if/elif分岐のみ、Factory/Registry/Plugin/DIは導入しない）。各Adapterは`.get()`によるフィールド抽出のみを行い、Validationは一切自前で書かず`ModelMetadata.from_dict()`へ完全委譲（非Mapping入力も自前でエラーにせず`from_dict()`へそのまま渡す）。`model_id`はLegacy形式のファイル内容から一意に決定できないため、呼び出し側（将来のReader/Catalog）が解決した値を明示的に渡す設計とした。未対応形式は新設の`UnsupportedLegacyMetadataError`で区別。PR [#35](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/35)をSquash Merge・mainへ反映済み（Merge Commit: `434993d`）。レビューで挙がったMinor（`inference_model_id`の優先順位・`source`のtraining/backfill区別）は実装せず、[METADATA_READER_DESIGN_NOTES.md](../workitems/model-metadata/METADATA_READER_DESIGN_NOTES.md)へ未決事項として記録した。Reader/Writer/Model Catalog/Factory（生成用）は本Featureの対象外のまま、次のIssueはModelMetadata Reader/Writer実装。
+>
+> **2026-07-31追記4**: Feature [#36](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/36)（Metadata Reader）**Completed**。6.7の決定どおり、Canonical sidecar（`<model>.model_metadata.json`、命名規則を`metadata_reader.py::CANONICAL_METADATA_SIDECAR_SUFFIX`として実装）は`ModelMetadata.from_dict()`へ直接委譲、Legacyファイルは`LegacyMetadataAdapter`へ委譲する`MetadataReader`（`read_canonical()`/`read_legacy()`/`read()`）を実装した。`read()`はファイル名のみでCanonical/Legacy判定・Legacy形式種別判定を行う（内容を見て推測しない）。Filesystemアクセスは渡された単一Pathの読込のみ（`glob`/`os.walk`/ディレクトリスキャンは行わない）。I/O・JSON解析エラーは新設`MetadataReadError`（`OSError`、元例外を`__cause__`で保持）として、`UnsupportedLegacyMetadataError`（未対応形式）・`InvalidModelMetadataError`（Validation違反）と区別した。METADATA_READER_DESIGN_NOTES.mdの未決事項を本Featureで決定・実装（詳細は6.6・6.7の更新箇所、および同ノートの「決定済み」セクション参照）。Writer/Model Catalogは本Featureの対象外のまま、次のIssueはModelMetadata Writer実装。
 
 ## 1. 目的
 
@@ -199,11 +201,22 @@ model_ref     = 推論エンジンがロード時に受け取る参照
 - 実装方針: 形式ごとのクラス階層（`PaddleOcrMetadataAdapter`等）は作らず、`LegacyMetadataAdapter`内部に形式別の小さな変換関数（`_from_tess_json()`/`_from_ocr_json()`/`_from_checkpoint()`）を持たせる（過剰なクラス分割を避ける、タスク指示どおり）
 - `inference_model.json`・`releases.json`・`experiments.json`はAdapterの直接の変換対象では**ない**（これらは「どのモデルが選択されているか/どの状態か」という別軸の情報であり、`ModelMetadata`自体の生成源ではない。6.14/6.15で境界を扱う）
 
+**実装確定（Feature #34/#36、Design Decision）**:
+
+- `source`（training/backfill）: `OCRMetadataAdapter.adapt()`/`TesseractMetadataAdapter.adapt()`は`source: str = "training"`をAdapter直接呼び出し時の既定値として持つ。Metadata Reader（6.7）はこれを`"backfill"`で明示的に上書きする。既存モデルへの遡及読み取り（Reader経由）と、学習・Export完了直後のリアルタイム変換（将来Writerが直接Adapterを呼ぶ想定）を区別するための決定
+- `inference_model.json`固有の`inference_model_id`は、Adapter自体は関知しない（Reader側の責務、下記6.7参照）
+
 ### 6.7 Reader — 採用: Canonical優先、無ければAdapterへfallback
 
 - 責務: sidecar（Canonical Metadata）読込 → 無い/壊れている場合は`LegacyMetadataAdapter`へfallback → schema_version確認 → path解決
 - Readerは旧形式を直接理解しない。旧形式の解釈は常にAdapterへ委譲する（責務分離）
 - 破損sidecar（JSON parse失敗・必須フィールド欠損）は「Canonical無し」として扱い、Adapterへfallbackする（クラッシュさせない。8章）
+
+**実装確定（Feature #36、Design Decision）**:
+
+- `MetadataReader.read(path)`は渡された単一Pathのファイル名のみでCanonical/Legacy判定・Legacy形式種別を判定する（`.model_metadata.json`サフィックス→Canonical、`.ocr.json`/`.tess.json`/`inference_model.json`→対応するLegacy形式）。「無ければfallback」は、Model Catalog（未実装）がディレクトリ列挙時に「Canonical sidecarが存在しなければLegacyパスを`read()`する」形で実現する想定であり、本Reader自体は1ファイルの読込に閉じる
+- **`inference_model_id`優先順位**: 呼び出し側が`model_id`を明示指定した場合はそれを優先する。指定が無い場合のみ、`inference_model.json`内の`inference_model_id`へfallbackする（`.ocr.json`/`.tess.json`にはこの概念が無いため対象外。両方とも無い場合は`model_id=None`のまま`ModelMetadata.from_dict()`へ渡し、既存の必須フィールドValidationが欠損として拒否する）
+- I/O・JSON解析エラーは`MetadataReadError`（`OSError`のサブクラス）として、`UnsupportedLegacyMetadataError`（形式未対応）・`InvalidModelMetadataError`（Validation違反）と型で区別する
 
 ### 6.8 Writer — 採用: 新規モデルのみへの原子的書込
 

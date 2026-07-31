@@ -44,7 +44,7 @@ class UnsupportedLegacyMetadataError(ValueError):
     """
 
 
-def _adapt_via(data: Any, model_id: str, build_canonical: "Any") -> ModelMetadata:
+def _adapt_via(data: Any, build_canonical: "Any") -> ModelMetadata:
     """`data`がMappingでなければ、フィールド読取り（`.get()`）を試みず`data`自体をそのまま
     `ModelMetadata.from_dict()`へ渡す。
 
@@ -55,7 +55,7 @@ def _adapt_via(data: Any, model_id: str, build_canonical: "Any") -> ModelMetadat
     """
     if not isinstance(data, Mapping):
         return ModelMetadata.from_dict(data)
-    return ModelMetadata.from_dict(build_canonical(data, model_id))
+    return ModelMetadata.from_dict(build_canonical(data))
 
 
 class OCRMetadataAdapter:
@@ -64,7 +64,7 @@ class OCRMetadataAdapter:
     """
 
     @staticmethod
-    def _build_canonical(data: Mapping[str, Any], model_id: str) -> dict[str, Any]:
+    def _build_canonical(data: Mapping[str, Any], model_id: str, source: str) -> dict[str, Any]:
         return {
             "model_id": model_id,
             "engine_id": data.get("engine"),
@@ -73,13 +73,17 @@ class OCRMetadataAdapter:
             # inference_dir（Export後の推論用ディレクトリ）を優先し、無ければmodel_dirへ
             "artifact_path": data.get("inference_dir") or data.get("model_dir"),
             "dataset_id": data.get("dataset_id"),
-            # _register_ocr_model()は学習・Export完了時にのみ呼ばれる（バックフィル経路は無い）
-            "source": "training",
+            "source": source,
         }
 
     @staticmethod
-    def adapt(data: Mapping[str, Any], *, model_id: str) -> ModelMetadata:
-        return _adapt_via(data, model_id, OCRMetadataAdapter._build_canonical)
+    def adapt(data: Mapping[str, Any], *, model_id: str, source: str = "training") -> ModelMetadata:
+        """`source`の既定値は`"training"`（Adapterを直接呼ぶ場合の既定。Feature #34時点の挙動を
+        後方互換で維持する）。Metadata Reader（Feature #36）はこれを`"backfill"`で上書きする
+        （[METADATA_READER_DESIGN_NOTES.md](../../workitems/model-metadata/METADATA_READER_DESIGN_NOTES.md)
+        の決定どおり、既存モデルへの遡及読み取りであるため）。
+        """
+        return _adapt_via(data, lambda d: OCRMetadataAdapter._build_canonical(d, model_id, source))
 
 
 class TesseractMetadataAdapter:
@@ -88,7 +92,7 @@ class TesseractMetadataAdapter:
     """
 
     @staticmethod
-    def _build_canonical(data: Mapping[str, Any], model_id: str) -> dict[str, Any]:
+    def _build_canonical(data: Mapping[str, Any], model_id: str, source: str) -> dict[str, Any]:
         return {
             "model_id": model_id,
             "engine_id": data.get("engine"),
@@ -97,12 +101,13 @@ class TesseractMetadataAdapter:
             # tessdata_dir（traineddata配置先）を優先し、無ければmodel_dirへ
             "artifact_path": data.get("tessdata_dir") or data.get("model_dir"),
             "dataset_id": data.get("dataset_id"),
-            "source": "training",
+            "source": source,
         }
 
     @staticmethod
-    def adapt(data: Mapping[str, Any], *, model_id: str) -> ModelMetadata:
-        return _adapt_via(data, model_id, TesseractMetadataAdapter._build_canonical)
+    def adapt(data: Mapping[str, Any], *, model_id: str, source: str = "training") -> ModelMetadata:
+        """`source`の既定値は`OCRMetadataAdapter.adapt()`と同じ理由で`"training"`。"""
+        return _adapt_via(data, lambda d: TesseractMetadataAdapter._build_canonical(d, model_id, source))
 
 
 class InferenceMetadataAdapter:
@@ -128,7 +133,7 @@ class InferenceMetadataAdapter:
 
     @staticmethod
     def adapt(data: Mapping[str, Any], *, model_id: str) -> ModelMetadata:
-        return _adapt_via(data, model_id, InferenceMetadataAdapter._build_canonical)
+        return _adapt_via(data, lambda d: InferenceMetadataAdapter._build_canonical(d, model_id))
 
 
 class LegacyMetadataAdapter:
@@ -149,28 +154,29 @@ class LegacyMetadataAdapter:
     """
 
     @staticmethod
-    def from_ocr_json(data: Mapping[str, Any], *, model_id: str) -> ModelMetadata:
-        return OCRMetadataAdapter.adapt(data, model_id=model_id)
+    def from_ocr_json(data: Mapping[str, Any], *, model_id: str, source: str = "training") -> ModelMetadata:
+        return OCRMetadataAdapter.adapt(data, model_id=model_id, source=source)
 
     @staticmethod
-    def from_tess_json(data: Mapping[str, Any], *, model_id: str) -> ModelMetadata:
-        return TesseractMetadataAdapter.adapt(data, model_id=model_id)
+    def from_tess_json(data: Mapping[str, Any], *, model_id: str, source: str = "training") -> ModelMetadata:
+        return TesseractMetadataAdapter.adapt(data, model_id=model_id, source=source)
 
     @staticmethod
     def from_inference_model_json(data: Mapping[str, Any], *, model_id: str) -> ModelMetadata:
         return InferenceMetadataAdapter.adapt(data, model_id=model_id)
 
     @staticmethod
-    def adapt(legacy_format: str, data: Mapping[str, Any], *, model_id: str) -> ModelMetadata:
+    def adapt(legacy_format: str, data: Mapping[str, Any], *, model_id: str, source: str = "training") -> ModelMetadata:
         """`legacy_format`（既知3形式のいずれか）に応じて適切な専用Adapterへ委譲する。
 
         既知3形式以外が指定された場合は`UnsupportedLegacyMetadataError`を送出する
         （Engine不正等の`InvalidModelMetadataError`とは異なる、形式自体が未対応という意味）。
+        `source`は`inference_model_json`には適用されない（この形式に対応する概念が無いため）。
         """
         if legacy_format == LEGACY_FORMAT_OCR_JSON:
-            return LegacyMetadataAdapter.from_ocr_json(data, model_id=model_id)
+            return LegacyMetadataAdapter.from_ocr_json(data, model_id=model_id, source=source)
         if legacy_format == LEGACY_FORMAT_TESS_JSON:
-            return LegacyMetadataAdapter.from_tess_json(data, model_id=model_id)
+            return LegacyMetadataAdapter.from_tess_json(data, model_id=model_id, source=source)
         if legacy_format == LEGACY_FORMAT_INFERENCE_MODEL_JSON:
             return LegacyMetadataAdapter.from_inference_model_json(data, model_id=model_id)
         raise UnsupportedLegacyMetadataError(
