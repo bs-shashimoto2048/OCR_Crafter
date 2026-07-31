@@ -194,11 +194,11 @@ model_ref     = 推論エンジンがロード時に受け取る参照
 - Frontendへ返してよいのは相対パス・ファイル名のみ。絶対パスは公開しない（既存`list_model_infos()`が`model_dir`等の絶対パスをそのまま返している箇所は、本Architectureのスコープ外の既存動作として現状維持し、Models連携Issue（10章）で見直すかを判断する）
 - path traversalは既存の`_is_safe_model_artifact_dir()`（`model_registry.py`）と同等の許可ルート検証パターンを、新規Reader/Writerでも踏襲する（9章）
 
-### 6.6 Adapter — 採用: 単一`LegacyMetadataAdapter`（形式別クラス分割はしない）
+### 6.6 Adapter — 採用: 3専用Adapter＋`LegacyMetadataAdapter`（Factory/Registry/Plugin/DIは導入しない）
 
 - 責務: 旧形式（`.ocr.json`/`.tess.json`/`.pt`/`inference_model.json`）→`ModelMetadata`への**読み取り専用**変換
 - 非責務: ファイル保存・model loading・推論・Training・UI表示・Release判定
-- 実装方針: 形式ごとのクラス階層（`PaddleOcrMetadataAdapter`等）は作らず、`LegacyMetadataAdapter`内部に形式別の小さな変換関数（`_from_tess_json()`/`_from_ocr_json()`/`_from_checkpoint()`）を持たせる（過剰なクラス分割を避ける、タスク指示どおり）
+- 実装方針（Feature #34で確定）: 形式ごとに`OCRMetadataAdapter`（`.ocr.json`）・`TesseractMetadataAdapter`（`.tess.json`）・`InferenceMetadataAdapter`（`inference_model.json`）の3専用クラスを分離し、`LegacyMetadataAdapter`が固定的なif/elif分岐でそれらへ委譲する（Factory・Registry・Plugin・DIといった動的解決の仕組みは導入しない。過剰なクラス分割を避けつつ、将来Adapterが増えることを前提とした最小限の分離）
 - `inference_model.json`・`releases.json`・`experiments.json`はAdapterの直接の変換対象では**ない**（これらは「どのモデルが選択されているか/どの状態か」という別軸の情報であり、`ModelMetadata`自体の生成源ではない。6.14/6.15で境界を扱う）
 
 **実装確定（Feature #34/#36、Design Decision）**:
@@ -206,17 +206,19 @@ model_ref     = 推論エンジンがロード時に受け取る参照
 - `source`（training/backfill）: `OCRMetadataAdapter.adapt()`/`TesseractMetadataAdapter.adapt()`は`source: str = "training"`をAdapter直接呼び出し時の既定値として持つ。Metadata Reader（6.7）はこれを`"backfill"`で明示的に上書きする。既存モデルへの遡及読み取り（Reader経由）と、学習・Export完了直後のリアルタイム変換（将来Writerが直接Adapterを呼ぶ想定）を区別するための決定
 - `inference_model.json`固有の`inference_model_id`は、Adapter自体は関知しない（Reader側の責務、下記6.7参照）
 
-### 6.7 Reader — 採用: Canonical優先、無ければAdapterへfallback
+### 6.7 Reader — 採用: 渡された1ファイルの読込のみ（Directory探索・Fallback探索は行わない）
 
-- 責務: sidecar（Canonical Metadata）読込 → 無い/壊れている場合は`LegacyMetadataAdapter`へfallback → schema_version確認 → path解決
-- Readerは旧形式を直接理解しない。旧形式の解釈は常にAdapterへ委譲する（責務分離）
-- 破損sidecar（JSON parse失敗・必須フィールド欠損）は「Canonical無し」として扱い、Adapterへfallbackする（クラッシュさせない。8章）
+- 責務: 呼び出し側から渡された単一のPath（Canonical sidecarまたはLegacyファイルのいずれか1件）を読み込み、`ModelMetadata`を返す
+- Canonical sidecar（`<model>.model_metadata.json`）は`ModelMetadata.from_dict()`へ直接委譲する。schema_version検証・Validationは自前で行わない
+- Legacy形式（`.ocr.json`/`.tess.json`/`inference_model.json`）は`LegacyMetadataAdapter`へ委譲する。Readerは旧形式を直接理解しない（責務分離）
+- Canonical/Legacyの判定・Legacy形式種別の判定は、渡されたファイル名のみで行う（内容を見て推測しない）
+- **Reader自身はDirectory探索（`glob`/`os.walk`等）もFallback探索（「Canonical sidecarが無ければ同じモデルのLegacyファイルを探す」といった複数ファイルにまたがる判定）も行わない。** Canonicalとして渡されたファイルが壊れている・存在しない場合は`MetadataReadError`/`InvalidModelMetadataError`をそのまま送出し、Legacyへの自動フォールバックは行わない。「無ければLegacyへ」という複数ファイル間の解決は、ディレクトリを列挙できる**Model Catalog（未実装、後続Issue）の責務**とする
 
 **実装確定（Feature #36、Design Decision）**:
 
-- `MetadataReader.read(path)`は渡された単一Pathのファイル名のみでCanonical/Legacy判定・Legacy形式種別を判定する（`.model_metadata.json`サフィックス→Canonical、`.ocr.json`/`.tess.json`/`inference_model.json`→対応するLegacy形式）。「無ければfallback」は、Model Catalog（未実装）がディレクトリ列挙時に「Canonical sidecarが存在しなければLegacyパスを`read()`する」形で実現する想定であり、本Reader自体は1ファイルの読込に閉じる
 - **`inference_model_id`優先順位**: 呼び出し側が`model_id`を明示指定した場合はそれを優先する。指定が無い場合のみ、`inference_model.json`内の`inference_model_id`へfallbackする（`.ocr.json`/`.tess.json`にはこの概念が無いため対象外。両方とも無い場合は`model_id=None`のまま`ModelMetadata.from_dict()`へ渡し、既存の必須フィールドValidationが欠損として拒否する）
 - I/O・JSON解析エラーは`MetadataReadError`（`OSError`のサブクラス）として、`UnsupportedLegacyMetadataError`（形式未対応）・`InvalidModelMetadataError`（Validation違反）と型で区別する
+- ファイル名判定（`.model_metadata.json`/`.ocr.json`/`.tess.json`/`inference_model.json`）は、実際の命名規則（`ocr_pipeline.py::_register_ocr_model()`が`ocr_<engine>_<timestamp>.ocr.json`、`tesseract_pipeline.py::register_tesseract_model()`が`<lang>.tess.json`）では互いに衝突しないことを確認済み
 
 ### 6.8 Writer — 採用: 新規モデルのみへの原子的書込
 

@@ -11,7 +11,7 @@
 >
 > **Legacy Metadata Adapter: Completed**。Feature [#34](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/34)により、PR [#35](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/35)をSquash Merge・mainへ反映済み（Merge Commit: `434993d`）。本ADRの「Adapter」決定（単一`LegacyMetadataAdapter`＋専用Adapter分離、Factory/Registry/Plugin/DIは導入しない）を実装済み。
 >
-> **Metadata Reader: Completed**。Feature [#36](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/36)により、`MetadataReader`（`read_canonical()`/`read_legacy()`/`read()`）を実装。[METADATA_READER_DESIGN_NOTES.md](../workitems/model-metadata/METADATA_READER_DESIGN_NOTES.md)の未決事項（`inference_model_id`優先順位・`source`のtraining/backfill区別）を決定・実装済み。Writer/Catalog以降は未実装（次はModelMetadata Writer）。
+> **Metadata Reader: Completed**。Feature [#36](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/36)により、`MetadataReader`（`read_canonical()`/`read_legacy()`/`read()`）を実装。PR [#37](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/37)をSquash Merge・mainへ反映済み（Merge Commit: `678524f`）。[METADATA_READER_DESIGN_NOTES.md](../workitems/model-metadata/METADATA_READER_DESIGN_NOTES.md)の未決事項（`inference_model_id`優先順位・`source`のtraining/backfill区別）を決定・実装済み。Writer/Catalog以降は未実装（次はModelMetadata Writer）。
 
 ## Context
 
@@ -41,7 +41,7 @@ Investigation #29でこの状況を詳細調査した結果、モデルに関す
 - **model_id**: 新規のUUID等は発行せず、既存のモデル管理No登録簿（`model_registry.py::assign_model_ids()`/`data/model_ids.json`のM0001形式）をそのまま再利用する
 - **engine_id**: `resolve_engine_id()`（Engine Registry）へ一本化する。`custom`（分類モデル）をEngine Registryへ新規登録する（後続Issueで実装）。`release_gate.py::_model_engine()`の独自判定は最終的にCleanupで置き換える
 - **Adapter**: 形式別クラス分割はせず、単一`LegacyMetadataAdapter`（内部は形式別の変換関数）とする
-- **Reader/Writer**: Canonical優先・Legacy Adapterへのfallback方式のReader、新規モデルのみへ書き込むWriter
+- **Reader/Writer**: 渡された1ファイル（Canonicalまたは Legacy）のみを読むReader（Directory探索・Fallback探索は行わない。「無ければLegacyへ」の判定はModel Catalogの責務）、新規モデルのみへ書き込むWriter
 - **Model Catalog**: 一覧・フィルタ・重複排除を担う`ModelCatalog`（Engine Registryとは別責務）
 - **Resolver**: `model_id→ModelMetadata→model_ref`の解決を新設するが、**既存`POST /predict`の`model`パラメータ契約は変更しない**
 - **Factory**: 単一`ModelMetadataFactory`（Engine別クラス分割なし）
@@ -83,7 +83,7 @@ Investigation #29でこの状況を詳細調査した結果、モデルに関す
 
 ## Rollback
 
-- Canonical Metadata書込（Writer）を停止すれば、Phase 2以降でもすべてのConsumerはLegacy Adapter経由の読み取りへ自然にフォールバックする（Readerのfallback設計、[MODEL_METADATA_ARCHITECTURE.md](../design/MODEL_METADATA_ARCHITECTURE.md)8章）
+- Canonical Metadata書込（Writer）を停止すれば、Phase 2以降でもすべてのConsumerはLegacy Adapter経由の読み取りへ自然に戻る（Model Catalogが「Canonical sidecarが無ければLegacyファイルをReaderで読む」という選択を行うため。Reader自体は1ファイルの読込のみでfallback判定は持たない、[MODEL_METADATA_ARCHITECTURE.md](../design/MODEL_METADATA_ARCHITECTURE.md) 6.7・8章）
 - 旧ファイル（`.ocr.json`/`.tess.json`/`.pt`/`inference_model.json`等）は一切削除しない方針のため、Rollback時にデータ欠損は発生しない
 - Consumer単位で切り戻せる（Phase 3が「1 Issue = 1 Consumer」の設計のため、特定のConsumerだけを旧実装へ戻すことが可能）
 
