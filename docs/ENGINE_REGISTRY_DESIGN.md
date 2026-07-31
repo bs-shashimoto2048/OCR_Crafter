@@ -4,7 +4,7 @@ Related: Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46)�
 
 **本ドキュメントは設計のみを対象とする。実装（`EngineRegistry`本体・UI変更・TrOCR追加・Models API変更・Resolver変更）は一切行わない。実装は後続Feature（Engine Registry Core等）で個別に着手する。**
 
-**状態（2026-07-31）**: Feature #47は**Completed**。次のFeatureは「Engine Registry Core」（Registry本体のみ実装、9章の優先順位1に相当）。
+**状態（2026-07-31）**: Feature #47は**Completed**。Feature [#49](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/49)「Engine Registry Core」も**Completed**・Closed（PR [#50](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/50)をSquash Merge・mainへ反映済み、Merge Commit: `61eca51`）。6章のデータ構造案に基づき`frontend/src/config/engineRegistry.js`（`getEngineLabel()`/`getEngineDisplayName()`/`getEngineColor()`/`getEngineDownloadType()`）を実装済み。既存画面への移行はまだ行っていない（次のFeatureは「ModelsView Migration」、9章の優先順位3に相当）。
 
 ## 1. 背景・目的
 

@@ -124,7 +124,9 @@ Architecture #30（Completed・Closed） / Investigation #29（Closed） / Paren
 
 ## Related Documents（他Epicとの責務境界）
 
-[ENGINE_REGISTRY_DESIGN.md](../ENGINE_REGISTRY_DESIGN.md)（Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46)、Completed）3章「責務境界」で、フロントエンド`EngineRegistry`（エンジン単位の静的設定）と、本ADRが扱うModels API・`ModelMetadata`（モデルインスタンス単位のデータ）が異なる軸であり互いの変更を要求しないことを整理済み。
+[ENGINE_REGISTRY_DESIGN.md](../ENGINE_REGISTRY_DESIGN.md)（Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46)「Engine UI Generalization」、進行中）3章「責務境界」で、フロントエンド`EngineRegistry`（エンジン単位の静的設定）と、本ADRが扱うModels API・`ModelMetadata`（モデルインスタンス単位のデータ）が異なる軸であり互いの変更を要求しないことを整理済み。
+
+**2026-07-31追記**: Epic #46の設計（Feature [#47](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/47)、Completed）どおり、フロントエンド`EngineRegistry`実装（Feature [#49](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/49)「Engine Registry Core」、Completed。`frontend/src/config/engineRegistry.js`）が完了した。本ADRが管理するModels API（`src/app/services/models_api.py`）・`ModelMetadata`はいずれも無変更のまま、上記の責務境界どおり独立に実装されたことを確認済み。
 
 ## Related PR
 
