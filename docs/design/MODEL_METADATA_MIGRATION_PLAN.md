@@ -1,8 +1,22 @@
 # Model Metadata Migration Plan
 
-Related: [MODEL_METADATA.md](MODEL_METADATA.md)（`ModelMetadata`のスキーマ設計）/ [Epic #1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)（Closed）/ [Epic #27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)（TrOCR学習・評価・Benchmark・Release Gate）
+Related: [MODEL_METADATA.md](MODEL_METADATA.md)（`ModelMetadata`のスキーマ設計）/ [Epic #1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)（Closed）/ [Epic #27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)（TrOCR学習・評価・Benchmark・Release Gate）/ Architecture [#30](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/30) / [ADR-0002](../adr/ADR-0002_Unified_Model_Metadata.md) / [MODEL_METADATA_ARCHITECTURE.md](MODEL_METADATA_ARCHITECTURE.md)
 
-本ドキュメントは、Unified Model Metadata Infrastructure Epicの調査Issue（Investigation: Model Metadata実運用化の影響調査）の成果物である。**コード変更は行っていない。** 現状のモデル管理方式を実地調査し、`ModelMetadata`（Feature #14で実装済み・未配線）を実運用化する場合の課題・理想構成・Migration戦略・Issue分割案・リスクを記載する。
+本ドキュメントは、Unified Model Metadata Infrastructure Epicの調査Issue（Investigation: Model Metadata実運用化の影響調査、[#29](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/29)、Closed）の成果物である。**コード変更は行っていない。** 現状のモデル管理方式を実地調査し、`ModelMetadata`（Feature #14で実装済み・未配線）を実運用化する場合の課題・理想構成・Migration戦略・Issue分割案・リスクを記載する。
+
+## 追記（2026-07-31）: Architecture #30で決定事項を確定
+
+本Investigationで「要判断」「未決定」としていた論点は、Architecture Issue #30・[ADR-0002](../adr/ADR-0002_Unified_Model_Metadata.md)・[MODEL_METADATA_ARCHITECTURE.md](MODEL_METADATA_ARCHITECTURE.md)で確定した。対応関係は以下のとおり。
+
+| 本ドキュメントの論点 | Architecture #30での決定 |
+|---|---|
+| DB vs ファイルベース（「リスク」参照） | ファイルベース（sidecar JSON）採用。DB化しない（Architecture 6.2） |
+| `engine="custom"`が未登録（「リスク」参照） | Engine Registryへ`custom`を新規登録する方針を決定（実装は後続Issue、Architecture 6.4・10章#3） |
+| model_idの生成方式（本ドキュメントでは未検討） | 新規UUID等は発行せず、既存`data/model_ids.json`（M0001形式）をそのまま再利用（Architecture 6.3） |
+| Adapter Interfaceの詳細設計 | 単一`LegacyMetadataAdapter`（形式別クラス分割はしない）に確定（Architecture 6.6） |
+| Issue分割の依存関係 | 12件のIssue・依存関係を確定（Architecture 10章、[ISSUE_MAP.md](../workitems/model-metadata/ISSUE_MAP.md)） |
+
+以降の本文（現状・問題点・理想構成・Migration戦略・Issue分割・リスク・Future Work）はInvestigation #29時点の調査記録として維持し、確定した決定内容は上記表からArchitecture成果物を参照すること。
 
 ## 現状
 

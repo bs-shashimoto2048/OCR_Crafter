@@ -74,9 +74,19 @@ Export
 
 ## 子Issue
 
-- [ ] Investigation: Model Metadata実運用化の影響調査（[#29](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/29)、完了・Close判断待ち）
+- [x] Investigation: Model Metadata実運用化の影響調査（[#29](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/29)、**Closed**）
+- [ ] Architecture: Unified Model Metadata Adapterと段階的移行方式を設計（[#30](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/30)、設計中）
+
+## Progress
+
+- [x] Investigation（#29、Closed。調査結果は[INVESTIGATION_29.md](INVESTIGATION_29.md)参照）
+- Architecture + ADR: 🔶 設計完了・PRレビュー待ち（[#30](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/30)、[ARCHITECTURE_30.md](ARCHITECTURE_30.md)）
+- 後続（Metadata生成/保存/Models連携/Inference連携/Evaluation連携/Deployment連携/Cleanup）: 未着手（Architecture決定後にIssue化）
 
 ## 関連資料
 
 - [MODEL_METADATA.md](../../design/MODEL_METADATA.md)
 - [MODEL_METADATA_MIGRATION_PLAN.md](../../design/MODEL_METADATA_MIGRATION_PLAN.md)（Investigation成果物）
+- [MODEL_METADATA_ARCHITECTURE.md](../../design/MODEL_METADATA_ARCHITECTURE.md)（Architecture #30成果物）
+- [ADR-0002_Unified_Model_Metadata.md](../../adr/ADR-0002_Unified_Model_Metadata.md)（Status: Proposed）
+- [ISSUE_MAP.md](ISSUE_MAP.md)（本Epic配下のIssue一覧）

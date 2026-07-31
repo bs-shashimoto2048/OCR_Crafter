@@ -1,6 +1,6 @@
 # [Investigation] Model Metadata実運用化の影響調査
 
-Issue: [#29](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/29)
+Issue: [#29](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/29)（**Closed**: 調査・Migration Plan・Issue分割案の作成完了により2026-07-31 Close）
 
 Parent Epic: [#28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)（Unified Model Metadata Infrastructure）
 
@@ -53,4 +53,5 @@ Parent Epic: [#28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)�
 ## 補足資料
 
 - [MODEL_METADATA.md](../../design/MODEL_METADATA.md)
-- [EPIC_UNIFIED_MODEL_METADATA.md](EPIC_UNIFIED_MODEL_METADATA.md)
+- [EPIC_28.md](EPIC_28.md)
+- ArchitectureはIssue [#30](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/30)（[ARCHITECTURE_30.md](ARCHITECTURE_30.md)）で継続する

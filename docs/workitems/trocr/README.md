@@ -31,7 +31,7 @@ OCR CrafterへTransformerベースの文字認識エンジンを追加できる�
 - [x] Epic #1のスコープ整理（Training/Evaluation/Benchmark/Release GateをEpic #27へ引き継ぎ）
 - [x] Epic #1をClose（2026-07-31 09:21:33 JST。子Issue・完了条件すべて達成）
 - [ ] Epic #27配下の実装Issue作成（[ISSUE_MAP.md](ISSUE_MAP.md)のPhase4/6/7参照: TrOCR Training/Evaluation/Benchmark/Release Gate等）
-- [x] Model Metadata実運用化Epicの新規作成（[Epic #28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28) Unified Model Metadata Infrastructure。ModelMetadata生成/保存/Models連携/Inference連携/Evaluation連携/旧モデル管理方式からの移行。Investigation [#29](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/29)完了）
+- [x] Model Metadata実運用化Epicの新規作成（[Epic #28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28) Unified Model Metadata Infrastructure。ModelMetadata生成/保存/Models連携/Inference連携/Evaluation連携/旧モデル管理方式からの移行。Investigation [#29](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/29)Closed。Architecture [#30](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/30)設計中。Epic #28専用の作業資料は独立ディレクトリ[docs/workitems/model-metadata/](../model-metadata/README.md)へ分離）
 
 ## 関連Issue
 
