@@ -8,7 +8,12 @@ import ModelIdBadge from "../components/ModelIdBadge";
 import { API_BASE, request } from "../lib/api";
 import { HELP_TEXTS } from "../lib/helpTexts";
 import { isInferenceModelInUse } from "../lib/inferenceModel";
-import { engineDisplayLabel } from "../lib/engineResolution";
+import {
+  getEngineColor,
+  getEngineDisplayName,
+  getEngineDownloadType,
+  getEngineLabel,
+} from "../config/engineRegistry";
 import { historyPreprocessLabel } from "../lib/evalHistory";
 import {
   MODEL_BADGE_LABELS,
@@ -104,6 +109,22 @@ function parseDownloadFilename(contentDisposition, fallback) {
   return fallback;
 }
 
+// ダウンロードAPIがContent-Dispositionを返さない場合のフォールバックファイル名。
+// EngineRegistry（Feature #49）のdownloadType（"zip"/"single_file"等）を分岐の起点とする。
+// downloadTypeだけではtesseract（.traineddata拡張子への置換）とcustom（拡張子を変えずそのまま）を
+// 区別できない（両者ともsingle_file）ため、tesseractのみ追加でengine idを見て判定する
+// （ENGINE_REGISTRY_DESIGN.md 7章「ModelsView」で申し送った既知の制約）。
+export function fallbackDownloadName(name, engine) {
+  const downloadType = getEngineDownloadType(engine);
+  if (downloadType === "zip") {
+    return `${name.replace(/\.ocr\.json$/i, "")}.inference.zip`;
+  }
+  if (downloadType === "single_file" && engine === "tesseract") {
+    return `${name.replace(/\.tess\.json$/i, "")}.traineddata`;
+  }
+  return name;
+}
+
 // モデル一覧の共有列定義（ヘッダーと各データ行の両方へ適用。個別に異なる幅を設定しない）。
 // 選択32px（大きめチェックボックス用）/ モデル名=minmax(320px,420px)の上限付き / Engine80 /
 // 方式85 / 作成日140 / 評価140 / 状態70
@@ -112,13 +133,13 @@ function parseDownloadFilename(contentDisposition, fallback) {
 // いっぱいまで伸ばさず、Engine列との間に大きな空白を作らない）
 export const MODEL_LIST_GRID_COLUMNS = "32px minmax(300px, 420px) 80px 85px 130px 140px 140px 70px";
 
-// 未知Engineを暗黙にPaddleOCRとみなさない（Issue #12）。既知4Engine（tesseract/paddleocr/
-// easyocr/trocr）はengineResolution.jsで判定し、customはEngine Registry未登録のためここで
-// 個別に扱う。それ以外（未知値）は"不明"（既存UI規約。frontend/src/lib/detectModel.js参照）。
+// 未知Engineを暗黙にPaddleOCRとみなさない（Issue #12）。表示ラベルはEngineRegistry
+// （Feature #49「Engine Registry Core」、frontend/src/config/engineRegistry.js）を
+// 単一の情報源とする（tesseract/paddleocr/easyocr/trocr/customいずれも同じ経路で解決し、
+// 個別のcustom分岐・engineResolution.js直接参照は行わない）。未登録の値は"不明"
+// （既存UI規約。frontend/src/lib/detectModel.js参照）。
 function engineLabelOf(engine) {
-  const normalized = String(engine || "").trim().toLowerCase();
-  if (normalized === "custom") return "カスタム";
-  return engineDisplayLabel(engine);
+  return getEngineLabel(engine) ?? "不明";
 }
 
 function familyLabelOf(family) {
@@ -528,11 +549,7 @@ export default function ModelsView({
         throw new Error(parseApiErrorText(await response.text()));
       }
       const blob = await response.blob();
-      const fallbackName = name.endsWith(".pt")
-        ? name
-        : name.endsWith(".tess.json")
-          ? `${name.replace(/\.tess\.json$/i, "")}.traineddata`
-          : `${name.replace(/\.ocr\.json$/i, "")}.inference.zip`;
+      const fallbackName = fallbackDownloadName(name, engineName(name));
       const filename = parseDownloadFilename(response.headers.get("content-disposition"), fallbackName);
       const objectUrl = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -2083,7 +2100,13 @@ export default function ModelsView({
                       </p>
                     ) : null}
                   </span>
-                  <span className="px-2 py-2 text-muted">{engineLabelOf(engineName(name))}</span>
+                  <span
+                    className="px-2 py-2 text-muted"
+                    title={getEngineDisplayName(engineName(name)) || undefined}
+                    data-engine-color={getEngineColor(engineName(name)) || undefined}
+                  >
+                    {engineLabelOf(engineName(name))}
+                  </span>
                   <span className="px-2 py-2 text-muted">{familyLabelOf(trainingFamily(name))}</span>
                   <span className="min-w-0 px-2 py-2">
                     {datasetIdOf(name) ? (

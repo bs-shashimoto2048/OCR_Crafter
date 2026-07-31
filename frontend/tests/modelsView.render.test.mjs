@@ -13,6 +13,8 @@ let server;
 let ModelsView;
 let MODEL_LIST_GRID_COLUMNS;
 
+let fallbackDownloadName;
+
 before(async () => {
   server = await createServer({
     root: process.cwd(),
@@ -20,7 +22,9 @@ before(async () => {
     server: { middlewareMode: true, hmr: false },
     optimizeDeps: { noDiscovery: true },
   });
-  ({ default: ModelsView, MODEL_LIST_GRID_COLUMNS } = await server.ssrLoadModule("/src/views/ModelsView.jsx"));
+  ({ default: ModelsView, MODEL_LIST_GRID_COLUMNS, fallbackDownloadName } = await server.ssrLoadModule(
+    "/src/views/ModelsView.jsx"
+  ));
 });
 
 after(async () => {
@@ -512,4 +516,53 @@ test("一覧の列定義: モデル名に最大幅400px・ヘッダーとデー�
   assert.ok(count >= 3, `列定義の共有回数が不足（${count}回）`);
   // 長いモデル名は省略表示＋title（Engine列との間に過剰な空白を作らず、列を押し広げない）
   assert.ok(html.includes("truncate"), "モデル名の省略表示がない");
+});
+
+// ---------------------------------------------------------------------------
+// Engine Registry Migration（Feature: ModelsView Migration）
+// Engine表示（Label/表示名/Color）・ダウンロード判定をengineRegistry.js経由へ置換したことの回帰確認。
+// ---------------------------------------------------------------------------
+
+test("一覧: Engine列は既存どおり短いラベルを表示する（見た目を変えない）", () => {
+  const html = renderToString(React.createElement(ModelsView, baseProps()));
+  assert.ok(html.includes(">Tesseract<"), "Engine列のラベル表示が変わっている");
+});
+
+test("一覧: Engine列にEngineRegistry由来のtitle・data-engine-color属性を付与する（描画される文字・レイアウトは変えない）", () => {
+  const html = renderToString(React.createElement(ModelsView, baseProps()));
+  assert.ok(html.includes('title="Tesseract"'), "表示名（getEngineDisplayName）がtitle属性に反映されていない");
+  assert.ok(html.includes('data-engine-color="sky"'), "色（getEngineColor）がdata-engine-color属性に反映されていない");
+});
+
+test("一覧: custom（分類）エンジンは短いラベル「カスタム」のまま、titleはより詳しい表示名になる", () => {
+  const html = renderToString(
+    React.createElement(
+      ModelsView,
+      baseProps({
+        models: ["model_a.tess.json", "cls_model.pt"],
+        modelInfos: {
+          "model_a.tess.json": { model_id: "M0001", engine: "tesseract", training_family: "tesseract", created_at: "2026-07-15T10:00:00" },
+          "cls_model.pt": { model_id: "M0003", engine: "custom", training_family: "classification", created_at: "2026-07-17T10:00:00" },
+        },
+      })
+    )
+  );
+  assert.ok(html.includes(">カスタム<"), "customの短いラベル表示が変わっている");
+  assert.ok(html.includes('title="カスタム（分類）"'), "customの表示名がtitle属性に反映されていない");
+});
+
+test("fallbackDownloadName: tesseractは.tess.jsonを.traineddataへ置換する（既存挙動を維持）", () => {
+  assert.equal(fallbackDownloadName("digits_20260101.tess.json", "tesseract"), "digits_20260101.traineddata");
+});
+
+test("fallbackDownloadName: paddleocr（zip）は.ocr.jsonを.inference.zipへ置換する（既存挙動を維持）", () => {
+  assert.equal(fallbackDownloadName("ocr_20260101.ocr.json", "paddleocr"), "ocr_20260101.inference.zip");
+});
+
+test("fallbackDownloadName: custom（分類、.pt）はファイル名をそのまま返す（既存挙動を維持）", () => {
+  assert.equal(fallbackDownloadName("digits_cnn_20260101.pt", "custom"), "digits_cnn_20260101.pt");
+});
+
+test("fallbackDownloadName: 未登録engineはファイル名をそのまま返す", () => {
+  assert.equal(fallbackDownloadName("unknown_model", "unknown-engine"), "unknown_model");
 });
