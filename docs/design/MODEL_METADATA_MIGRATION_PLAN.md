@@ -28,7 +28,11 @@ Feature [#34](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/34)（Lega
 
 ## 追記4（2026-07-31）: Feature #36でMetadata Reader実装完了（Migration Phase 2: Reader — Completed）
 
-Feature [#36](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/36)（Metadata Reader）**Completed**。新規`src/app/services/metadata_reader.py`へ`MetadataReader`（`read_canonical()`/`read_legacy()`/`read()`）を実装した。渡された単一Pathの読込のみ（`glob`/`os.walk`/ディレクトリスキャンなし）。Canonical sidecarは`ModelMetadata.from_dict()`へ直接委譲、Legacyは`LegacyMetadataAdapter`へ委譲。I/O・JSON解析エラーは新設`MetadataReadError`（`OSError`）で区別。[METADATA_READER_DESIGN_NOTES.md](../workitems/model-metadata/METADATA_READER_DESIGN_NOTES.md)の未決事項（`inference_model_id`優先順位・`source`のtraining/backfill区別）を決定・実装した（`legacy_metadata_adapter.py`へ後方互換な`source`引数を追加）。PR [#37](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/37)をSquash Merge・mainへ反映済み（Merge Commit: `678524f`）。**Migration Phase 2のうちReader部分が完了**。Writer/Model Catalogは未実装。次のOpen項目はModelMetadata Writer実装（[docs/workitems/model-metadata/ISSUE_MAP.md](../workitems/model-metadata/ISSUE_MAP.md)参照）。
+Feature [#36](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/36)（Metadata Reader）**Completed**。新規`src/app/services/metadata_reader.py`へ`MetadataReader`（`read_canonical()`/`read_legacy()`/`read()`）を実装した。渡された単一Pathの読込のみ（`glob`/`os.walk`/ディレクトリスキャンなし）。Canonical sidecarは`ModelMetadata.from_dict()`へ直接委譲、Legacyは`LegacyMetadataAdapter`へ委譲。I/O・JSON解析エラーは新設`MetadataReadError`（`OSError`）で区別。[METADATA_READER_DESIGN_NOTES.md](../workitems/model-metadata/METADATA_READER_DESIGN_NOTES.md)の未決事項（`inference_model_id`優先順位・`source`のtraining/backfill区別）を決定・実装した（`legacy_metadata_adapter.py`へ後方互換な`source`引数を追加）。PR [#37](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/37)をSquash Merge・mainへ反映済み（Merge Commit: `678524f`）。**Migration Phase 2のうちReader部分が完了**。
+
+## 追記5（2026-07-31）: Feature #38でMetadata Writer実装完了（Migration Phase 2: Writer — Completed）
+
+Feature [#38](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/38)（Metadata Writer）**Completed**。新規`src/app/services/metadata_writer.py`へ`MetadataWriter.write(path, metadata)`を実装した。`ModelMetadata.to_dict()`の出力を既存`atomic_write_json`+`file_lock`でそのまま書き込む単純な上書き保存のみ（既存sidecarの読み取り込みマージ処理は対象外、Directory探索なし）。渡された値が`ModelMetadata`インスタンスでない場合は既存の`InvalidModelMetadataError`を再利用、I/Oエラーは新設`MetadataWriteError`（`OSError`、`__cause__`保持）で区別。Reader（`metadata_reader.py`）は無変更。**Migration Phase 2（Reader + Writer）が完了**。次のOpen項目はModel Catalog実装（[docs/workitems/model-metadata/ISSUE_MAP.md](../workitems/model-metadata/ISSUE_MAP.md)参照）。
 
 ## 現状
 

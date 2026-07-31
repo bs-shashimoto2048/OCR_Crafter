@@ -79,6 +79,7 @@ Export
 - [x] Feature: Canonical ModelMetadata Schema（[#32](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/32)、**Completed**・Closed。PR [#33](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/33)をSquash Merge・mainへ反映済み）
 - [x] Feature: Legacy Metadata Adapter（[#34](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/34)、**Completed**・Closed。PR [#35](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/35)をSquash Merge・mainへ反映済み）
 - [x] Feature: Metadata Reader（[#36](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/36)、**Completed**・Closed。PR [#37](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/37)をSquash Merge・mainへ反映済み）
+- [ ] Feature: Metadata Writer（[#38](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/38)、実装完了・PRレビュー待ち）
 
 ## Progress
 
@@ -88,7 +89,7 @@ Export
 ✓ Canonical Schema
 ✓ Legacy Metadata Adapter
 ✓ Metadata Reader
-□ Metadata Writer
+🔶 Metadata Writer
 □ Model Catalog
 □ Training Metadata Factory
 □ Models API
@@ -103,7 +104,8 @@ Export
 - [x] Canonical ModelMetadata Schema（#32、**Completed**・Closed。PR #33をSquash Merge済み（Merge Commit: `b250c8f`）。Schema/Validation/schema_version/to_dict/from_dict/Equality/is_valid/replaceを実装。PRレビューで発見したschema_versionのbool/float誤受理（Major #1）を追加コミットで修正済み。Reader/Writer/Adapter/Catalogは対象外のまま）
 - [x] Legacy Metadata Adapter（#34、**Completed**・Closed。PR #35をSquash Merge済み（Merge Commit: `434993d`）。`OCRMetadataAdapter`/`TesseractMetadataAdapter`/`InferenceMetadataAdapter`＋委譲先の`LegacyMetadataAdapter`を実装。Filesystem非依存、Validationは`ModelMetadata.from_dict()`へ完全委譲。レビューで挙がったMinor（`inference_model_id`の優先順位・`source`のtraining/backfill区別）は[METADATA_READER_DESIGN_NOTES.md](METADATA_READER_DESIGN_NOTES.md)へ未決事項として記録し、次のReader Issueへ持ち越し）
 - [x] Metadata Reader（#36、**Completed**・Closed。PR #37をSquash Merge済み（Merge Commit: `678524f`）。`MetadataReader`（`read_canonical()`/`read_legacy()`/`read()`）を実装。METADATA_READER_DESIGN_NOTES.mdの未決事項2件を決定・実装（`inference_model_id`優先順位・`source`のtraining/backfill区別）。PRレビューで挙がったMinor（6.7のfallback表現・6.6の関数名表現）をArchitectureへ反映済み。Writer/Catalogは対象外のまま）
-- 未着手: Writer実装/Model Catalog実装/Training・Import時のMetadata生成/Models連携/Inference連携/Evaluation連携/Deployment連携/Cleanup
+- 🔶 Metadata Writer（[#38](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/38)、実装完了・PRレビュー待ち。`MetadataWriter.write(path, metadata)`を実装（`atomic_write_json`+`file_lock`再利用、単純な上書き保存のみ）。既存sidecarの読み取り込みマージは対象外（Architecture 6.8へスコープ決定を反映済み）。Reader（#36）は無変更）
+- 未着手: Model Catalog実装/Training・Import時のMetadata生成/Models連携/Inference連携/Evaluation連携/Deployment連携/Cleanup
 
 ## 関連資料
 
