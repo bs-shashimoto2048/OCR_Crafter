@@ -9,7 +9,9 @@
 >
 > **実装状況（2026-07-31）**: Feature [#32](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/32)（Canonical ModelMetadata Schema）**Completed**。PR [#33](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/33)をSquash Merge・mainへ反映済み（Merge Commit: `b250c8f`）。本ADRの「Canonical Schema」決定（既存`ModelMetadata`採用・`schema_version`はenvelope値としてdataclass外で扱う）を実装済み。
 >
-> **Legacy Metadata Adapter: Completed**。Feature [#34](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/34)により、PR [#35](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/35)をSquash Merge・mainへ反映済み（Merge Commit: `434993d`）。本ADRの「Adapter」決定（単一`LegacyMetadataAdapter`＋専用Adapter分離、Factory/Registry/Plugin/DIは導入しない）を実装済み。未決事項は[METADATA_READER_DESIGN_NOTES.md](../workitems/model-metadata/METADATA_READER_DESIGN_NOTES.md)参照。Reader/Writer/Catalog以降は未実装（次はModelMetadata Reader/Writer）。
+> **Legacy Metadata Adapter: Completed**。Feature [#34](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/34)により、PR [#35](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/35)をSquash Merge・mainへ反映済み（Merge Commit: `434993d`）。本ADRの「Adapter」決定（単一`LegacyMetadataAdapter`＋専用Adapter分離、Factory/Registry/Plugin/DIは導入しない）を実装済み。
+>
+> **Metadata Reader: Completed**。Feature [#36](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/36)により、`MetadataReader`（`read_canonical()`/`read_legacy()`/`read()`）を実装。[METADATA_READER_DESIGN_NOTES.md](../workitems/model-metadata/METADATA_READER_DESIGN_NOTES.md)の未決事項（`inference_model_id`優先順位・`source`のtraining/backfill区別）を決定・実装済み。Writer/Catalog以降は未実装（次はModelMetadata Writer）。
 
 ## Context
 

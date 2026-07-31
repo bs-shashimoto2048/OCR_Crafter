@@ -78,6 +78,7 @@ Export
 - [x] Architecture: Unified Model Metadata Adapterと段階的移行方式を設計（[#30](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/30)、**Completed**。PR [#31](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/31)をSquash Merge・mainへ反映済み）
 - [x] Feature: Canonical ModelMetadata Schema（[#32](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/32)、**Completed**・Closed。PR [#33](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/33)をSquash Merge・mainへ反映済み）
 - [x] Feature: Legacy Metadata Adapter（[#34](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/34)、**Completed**・Closed。PR [#35](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/35)をSquash Merge・mainへ反映済み）
+- [ ] Feature: Metadata Reader（[#36](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/36)、実装完了・PRレビュー待ち）
 
 ## Progress
 
@@ -87,7 +88,7 @@ Export
 ✓ Canonical Schema
 ✓ Legacy Metadata Adapter
 □ Metadata Source
-□ Metadata Reader
+🔶 Metadata Reader
 □ Metadata Writer
 □ Model Catalog
 □ Training Metadata Factory
@@ -101,8 +102,9 @@ Export
 - [x] Investigation（#29、Closed。調査結果は[INVESTIGATION_29.md](INVESTIGATION_29.md)参照）
 - [x] Architecture + ADR（#30、**Completed**。PR #31をSquash Merge済み。ADR-0002のStatusはAcceptedへ変更済み。[ARCHITECTURE_30.md](ARCHITECTURE_30.md)参照）
 - [x] Canonical ModelMetadata Schema（#32、**Completed**・Closed。PR #33をSquash Merge済み（Merge Commit: `b250c8f`）。Schema/Validation/schema_version/to_dict/from_dict/Equality/is_valid/replaceを実装。PRレビューで発見したschema_versionのbool/float誤受理（Major #1）を追加コミットで修正済み。Reader/Writer/Adapter/Catalogは対象外のまま）
-- [x] Legacy Metadata Adapter（#34、**Completed**・Closed。PR #35をSquash Merge済み（Merge Commit: `434993d`）。`OCRMetadataAdapter`/`TesseractMetadataAdapter`/`InferenceMetadataAdapter`＋委譲先の`LegacyMetadataAdapter`を実装。Filesystem非依存、Validationは`ModelMetadata.from_dict()`へ完全委譲。レビューで挙がったMinor（`inference_model_id`の優先順位・`source`のtraining/backfill区別）は[METADATA_READER_DESIGN_NOTES.md](METADATA_READER_DESIGN_NOTES.md)へ未決事項として記録し、今回は未実装のまま次のReader Issueへ持ち越し）
-- 未着手: Reader・Writer実装/Model Catalog実装/Training・Import時のMetadata生成/Models連携/Inference連携/Evaluation連携/Deployment連携/Cleanup
+- [x] Legacy Metadata Adapter（#34、**Completed**・Closed。PR #35をSquash Merge済み（Merge Commit: `434993d`）。`OCRMetadataAdapter`/`TesseractMetadataAdapter`/`InferenceMetadataAdapter`＋委譲先の`LegacyMetadataAdapter`を実装。Filesystem非依存、Validationは`ModelMetadata.from_dict()`へ完全委譲。レビューで挙がったMinor（`inference_model_id`の優先順位・`source`のtraining/backfill区別）は[METADATA_READER_DESIGN_NOTES.md](METADATA_READER_DESIGN_NOTES.md)へ未決事項として記録し、次のReader Issueへ持ち越し）
+- 🔶 Metadata Reader（[#36](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/36)、実装完了・PRレビュー待ち。`MetadataReader`（`read_canonical()`/`read_legacy()`/`read()`）を実装。METADATA_READER_DESIGN_NOTES.mdの未決事項2件を決定・実装（`inference_model_id`優先順位・`source`のtraining/backfill区別）。Writer/Catalogは対象外のまま）
+- 未着手: Writer実装/Model Catalog実装/Training・Import時のMetadata生成/Models連携/Inference連携/Evaluation連携/Deployment連携/Cleanup
 
 ## 関連資料
 
@@ -111,4 +113,4 @@ Export
 - [MODEL_METADATA_ARCHITECTURE.md](../../design/MODEL_METADATA_ARCHITECTURE.md)（Architecture #30成果物）
 - [ADR-0002_Unified_Model_Metadata.md](../../adr/ADR-0002_Unified_Model_Metadata.md)（Status: Accepted）
 - [ISSUE_MAP.md](ISSUE_MAP.md)（本Epic配下のIssue一覧）
-- [METADATA_READER_DESIGN_NOTES.md](METADATA_READER_DESIGN_NOTES.md)（Legacy Metadata Adapter #34レビューで挙がった未決事項。次のReader Issueで決定）
+- [METADATA_READER_DESIGN_NOTES.md](METADATA_READER_DESIGN_NOTES.md)（#34レビューで挙がった未決事項。#36で決定・実装済み）
