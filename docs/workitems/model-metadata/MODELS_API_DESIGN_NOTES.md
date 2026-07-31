@@ -1,6 +1,6 @@
 # Models API Design Notes
 
-Related: Epic [#28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28) / Feature [#44](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/44)（Models API） / [MODEL_METADATA_ARCHITECTURE.md](../../design/MODEL_METADATA_ARCHITECTURE.md)「Models API」
+Related: Epic [#28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28) / Feature [#44](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/44)（Models API、**Completed**・Closed。PR [#45](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/45)をSquash Merge・mainへ反映済み、Merge Commit: `7fec5fb`） / [MODEL_METADATA_ARCHITECTURE.md](../../design/MODEL_METADATA_ARCHITECTURE.md) 6.17「Models API」
 
 本ドキュメントは、Models API（Feature #44）実装にあたって行った既存`/models/info`との後方互換調査・設計判断を記録する。
 

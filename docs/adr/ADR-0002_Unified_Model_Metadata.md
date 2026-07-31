@@ -19,7 +19,9 @@
 >
 > **Training Metadata Factory: Completed**。Feature [#42](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/42)により、本ADRの「Factory」決定（単一`ModelMetadataFactory`、Engine別クラス分割はしない）どおり`create_from_training()`を実装。Reader/Writer/Catalogは利用せず、Validationは`ModelMetadata.from_dict()`へ完全委譲。`engine_version`/`task`は`ModelMetadata`に対応フィールドが無いため`extra`へ格納する（詳細は[TRAINING_METADATA_FACTORY_DESIGN_NOTES.md](../workitems/model-metadata/TRAINING_METADATA_FACTORY_DESIGN_NOTES.md)参照）。PR [#43](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/43)をSquash Merge・mainへ反映済み（Merge Commit: `fee1885`）。
 >
-> **Models API: 実装完了・PRレビュー待ち**。Feature [#44](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/44)により、`UI → Models API → Catalog / Factory / Writer`の橋渡しを行う単一`ModelsAPI` Facade（`list_models()`/`get_model()`/`exists()`/`create_metadata()`/`save_metadata()`）を実装。Catalog/Factory/Writerは無変更、Readerは直接利用しない。既存`/models/info`（`model_registry.py::list_model_infos()`）への配線は行わず、既存エンドポイントは無変更のまま維持（後方互換調査は[MODELS_API_DESIGN_NOTES.md](../workitems/model-metadata/MODELS_API_DESIGN_NOTES.md)参照）。Resolver以降は未実装（次は実際のConsumer切替またはInference連携）。
+> **Models API: Completed**。Feature [#44](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/44)により、`UI → Models API → Catalog / Factory / Writer`の橋渡しを行う単一`ModelsAPI` Facade（`list_models()`/`get_model()`/`exists()`/`create_metadata()`/`save_metadata()`）を実装。Catalog/Factory/Writerは無変更、Readerは直接利用しない。既存`/models/info`（`model_registry.py::list_model_infos()`）への配線は行わず、既存エンドポイントは無変更のまま維持（後方互換調査は[MODELS_API_DESIGN_NOTES.md](../workitems/model-metadata/MODELS_API_DESIGN_NOTES.md)参照）。PR [#45](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/45)をSquash Merge・mainへ反映済み（Merge Commit: `7fec5fb`）。
+>
+> **2026-07-31、Epic #28を一旦停止**: Models API（#44）完了をもって、ユーザー判断によりEpic #28配下の新規Feature着手を一旦停止し、UIレビュー（モデル管理・学習・評価画面）を実施する。Resolver/Evaluation/Deployment連携・TrOCR実装は、UIレビュー完了後に改めて着手要否を判断する。
 
 ## Context
 
