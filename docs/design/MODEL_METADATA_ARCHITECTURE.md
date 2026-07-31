@@ -12,7 +12,9 @@ Related: Epic [#28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28) 
 >
 > **2026-07-31追記4**: Feature [#36](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/36)（Metadata Reader）**Completed**。6.7の決定どおり、Canonical sidecar（`<model>.model_metadata.json`、命名規則を`metadata_reader.py::CANONICAL_METADATA_SIDECAR_SUFFIX`として実装）は`ModelMetadata.from_dict()`へ直接委譲、Legacyファイルは`LegacyMetadataAdapter`へ委譲する`MetadataReader`（`read_canonical()`/`read_legacy()`/`read()`）を実装した。`read()`はファイル名のみでCanonical/Legacy判定・Legacy形式種別判定を行う（内容を見て推測しない）。Filesystemアクセスは渡された単一Pathの読込のみ（`glob`/`os.walk`/ディレクトリスキャンは行わない）。I/O・JSON解析エラーは新設`MetadataReadError`（`OSError`、元例外を`__cause__`で保持）として、`UnsupportedLegacyMetadataError`（未対応形式）・`InvalidModelMetadataError`（Validation違反）と区別した。METADATA_READER_DESIGN_NOTES.mdの未決事項を本Featureで決定・実装（詳細は6.6・6.7の更新箇所、および同ノートの「決定済み」セクション参照）。PR [#37](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/37)をSquash Merge・mainへ反映済み（Merge Commit: `678524f`）。同PRレビューで挙がったMinor（6.6の関数名表現・6.7のfallback表現）を反映済み。Writer/Model Catalogは本Featureの対象外のまま、次のIssueはModelMetadata Writer実装。
 >
-> **2026-07-31追記5**: Feature [#38](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/38)（Metadata Writer）**Completed**。6.8の決定どおり、`ModelMetadata.to_dict()`の出力を`atomic_write_json`+`file_lock`（既存`services/atomic_io.py`）でそのまま書き込む`MetadataWriter.write(path, metadata)`を実装した。既存sidecarの読み取り込み（`created_at`保持等のマージ処理）は行わない（6.8を単純な上書き保存のみへ確定・旧方針の記述は削除済み）。渡された値が`ModelMetadata`インスタンスでない場合は既存の`InvalidModelMetadataError`を再利用（Writer独自のValidationは追加しない）。I/Oエラーは新設`MetadataWriteError`（`OSError`、`__cause__`保持）。PR [#39](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/39)をSquash Merge・mainへ反映済み（Merge Commit: `5b1564c`）。同PRレビューで挙がった`ModelMetadata.extra`のJSON直列化可能性に関する指摘は、コード変更せず[METADATA_WRITER_DESIGN_NOTES.md](../workitems/model-metadata/METADATA_WRITER_DESIGN_NOTES.md)へ将来検討事項として記録した。Reader（`metadata_reader.py`）は無変更。Model Catalogは本Featureの対象外のまま、次のIssueはModel Catalog実装。
+> **2026-07-31追記5**: Feature [#38](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/38)（Metadata Writer）**Completed**。6.8の決定どおり、`ModelMetadata.to_dict()`の出力を`atomic_write_json`+`file_lock`（既存`services/atomic_io.py`）でそのまま書き込む`MetadataWriter.write(path, metadata)`を実装した。既存sidecarの読み取り込み（`created_at`保持等のマージ処理）は行わない（6.8を単純な上書き保存のみへ確定・旧方針の記述は削除済み）。渡された値が`ModelMetadata`インスタンスでない場合は既存の`InvalidModelMetadataError`を再利用（Writer独自のValidationは追加しない）。I/Oエラーは新設`MetadataWriteError`（`OSError`、`__cause__`保持）。PR [#39](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/39)をSquash Merge・mainへ反映済み（Merge Commit: `5b1564c`）。同PRレビューで挙がった`ModelMetadata.extra`のJSON直列化可能性に関する指摘は、コード変更せず[METADATA_WRITER_DESIGN_NOTES.md](../workitems/model-metadata/METADATA_WRITER_DESIGN_NOTES.md)へ将来検討事項として記録した。Reader（`metadata_reader.py`）は無変更。
+>
+> **2026-07-31追記6**: Feature [#40](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/40)（Model Catalog）**Completed**。6.9の決定どおり`ModelCatalog`（`list()`/`find()`/`load()`/`exists()`）を実装した。Directory探索（`iterdir`）は`ModelCatalog`のみが行い、`MetadataReader`（無変更）へは常に単一のPathのみを渡す。同一ベースファイルにCanonical sidecarとLegacyの両方が存在する場合はCanonicalを採用しLegacyを無視（マージしない）、Canonical不在時のみLegacyを採用。Legacyのmodel_idは暫定的にファイル名を採用（`data/model_ids.json`との統合は将来のIssue）。同一model_idは走査順で先勝ちのdeduplicationを行う。**Reader/Adapter由来の例外は握りつぶさず伝播させる方針とし、6.9の元の記述にあった「invalid metadata除外」は採用しなかった**（6.9の実装確定注記で明記・元の記述を修正済み）。`ModelCatalogError`はディレクトリ探索エラーのみを表す。`inference_model.json`・`.pt`は`list()`の対象外（[MODEL_CATALOG_DESIGN_NOTES.md](../workitems/model-metadata/MODEL_CATALOG_DESIGN_NOTES.md)参照）。Writer/Factory/Resolverは本Featureの対象外のまま、次のIssueはTraining/Import時のMetadata生成（Factory）またはModels連携。
 
 ## 1. 目的
 
@@ -233,9 +235,20 @@ model_ref     = 推論エンジンがロード時に受け取る参照
 ### 6.9 Model Catalog（Registry/Repository相当） — 採用名称: `ModelCatalog`
 
 - 「Registry」はEngine Registry・`data/model_ids.json`の暗黙レジストリと語が衝突するため、モデル一覧提供の責務には`ModelCatalog`を使う
-- 責務: 一覧取得（Reader経由でCanonical+Legacy合成）・engineフィルタ・model_id検索・duplicate排除・invalid metadata除外・sort
+- 責務: 一覧取得（Reader経由でCanonical+Legacy合成）・model_id検索・duplicate排除・sort
 - 非責務: Engine Registry（Engine自体の定義）とは別責務。書き込みは行わない（Writer専任）
 - cache/refreshは6.16で扱う（今回は実装しない）
+
+**実装確定（Feature #40、スコープ決定）**:
+
+- API: `list()`（全件）・`find(model_id)`（該当が無ければ`None`）・`load(model_id)`（該当が無ければ`ModelCatalogError`）・`exists(model_id)`
+- Directory探索（`iterdir`）は`ModelCatalog`のみが行う。`MetadataReader`（6.7）へは常に単一のPathのみを渡す（Reader自体の変更は行わない）
+- Canonical優先: 同一ベースファイル（`<X>.model_metadata.json`の`<X>`部分）についてCanonicalとLegacyの両方が存在する場合、必ずCanonicalを採用しLegacyは無視する（読み取り込みマージはしない）
+- Legacy fallback: Canonicalが存在しないベースファイルのみ、対応するLegacy形式（`.ocr.json`/`.tess.json`）を`MetadataReader.read_legacy()`経由で採用する。Legacyのmodel_idは、`data/model_ids.json`（M0001形式）への統合をまだ行わず、暫定的にLegacyファイル自身のファイル名を採用する（`model_registry.py`との統合は将来のIssueで判断する）
+- **`invalid metadata除外`は採用しない**: 元の6.9の記述（“invalid metadata除外”）は本Featureでは実装していない。破損ファイル・Validation違反・未対応形式はいずれも`ModelCatalogError`へ変換せず、Reader/Adapter由来の例外（`MetadataReadError`/`InvalidModelMetadataError`/`UnsupportedLegacyMetadataError`）をそのまま呼び出し側へ伝播させる（握りつぶさない。安全な除外・診断ログは将来のIssueで検討する）
+- `ModelCatalogError`はディレクトリ探索エラー（対象ディレクトリが存在しない・権限無し・`load()`の対象未検出）のみを表す
+- `engineフィルタ`は本Featureでは実装していない（将来必要になれば`list()`の呼び出し側でフィルタするか、専用引数を追加するかを別途判断する）
+- `inference_model.json`（プロジェクトルート直下の「現在選択中モデル」ポインタ）と`.pt`（Legacy Adapter未対応）は`list()`の対象外（詳細は[MODEL_CATALOG_DESIGN_NOTES.md](../workitems/model-metadata/MODEL_CATALOG_DESIGN_NOTES.md)参照）
 
 ### 6.10 Resolver — 採用: `model_id → ModelMetadata → model_ref`の解決責務を新設するが、既存`POST /predict`は変更しない
 

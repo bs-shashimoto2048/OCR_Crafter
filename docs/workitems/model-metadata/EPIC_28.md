@@ -80,6 +80,7 @@ Export
 - [x] Feature: Legacy Metadata Adapter（[#34](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/34)、**Completed**・Closed。PR [#35](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/35)をSquash Merge・mainへ反映済み）
 - [x] Feature: Metadata Reader（[#36](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/36)、**Completed**・Closed。PR [#37](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/37)をSquash Merge・mainへ反映済み）
 - [x] Feature: Metadata Writer（[#38](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/38)、**Completed**・Closed。PR [#39](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/39)をSquash Merge・mainへ反映済み）
+- [ ] Feature: Model Catalog（[#40](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/40)、実装完了・PRレビュー待ち）
 
 ## Progress
 
@@ -90,7 +91,7 @@ Export
 ✓ Legacy Metadata Adapter
 ✓ Metadata Reader
 ✓ Metadata Writer
-□ Model Catalog
+🔶 Model Catalog
 □ Training Metadata Factory
 □ Models API
 □ Inference Resolver
@@ -105,7 +106,8 @@ Export
 - [x] Legacy Metadata Adapter（#34、**Completed**・Closed。PR #35をSquash Merge済み（Merge Commit: `434993d`）。`OCRMetadataAdapter`/`TesseractMetadataAdapter`/`InferenceMetadataAdapter`＋委譲先の`LegacyMetadataAdapter`を実装。Filesystem非依存、Validationは`ModelMetadata.from_dict()`へ完全委譲。レビューで挙がったMinor（`inference_model_id`の優先順位・`source`のtraining/backfill区別）は[METADATA_READER_DESIGN_NOTES.md](METADATA_READER_DESIGN_NOTES.md)へ未決事項として記録し、次のReader Issueへ持ち越し）
 - [x] Metadata Reader（#36、**Completed**・Closed。PR #37をSquash Merge済み（Merge Commit: `678524f`）。`MetadataReader`（`read_canonical()`/`read_legacy()`/`read()`）を実装。METADATA_READER_DESIGN_NOTES.mdの未決事項2件を決定・実装（`inference_model_id`優先順位・`source`のtraining/backfill区別）。PRレビューで挙がったMinor（6.7のfallback表現・6.6の関数名表現）をArchitectureへ反映済み。Writer/Catalogは対象外のまま）
 - [x] Metadata Writer（#38、**Completed**・Closed。PR #39をSquash Merge済み（Merge Commit: `5b1564c`）。`MetadataWriter.write(path, metadata)`を実装（`atomic_write_json`+`file_lock`再利用、単純な上書き保存のみ）。PRレビューで挙がったMinor（6.8の`created_at`保持記述の矛盾・`extra`のJSON直列化制約）をArchitecture/[METADATA_WRITER_DESIGN_NOTES.md](METADATA_WRITER_DESIGN_NOTES.md)へ反映済み。Reader（#36）は無変更）
-- 未着手: Model Catalog実装/Training・Import時のMetadata生成/Models連携/Inference連携/Evaluation連携/Deployment連携/Cleanup
+- 🔶 Model Catalog（[#40](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/40)、実装完了・PRレビュー待ち。`ModelCatalog`（`list()`/`find()`/`load()`/`exists()`）を実装。Directory探索はCatalogのみ、Canonical優先・Legacy fallback・重複排除。Reader/Adapter由来の例外は伝播（Architecture 6.9の元の「invalid metadata除外」記述は不採用と明記して修正済み）。詳細は[MODEL_CATALOG_DESIGN_NOTES.md](MODEL_CATALOG_DESIGN_NOTES.md)参照。Reader（#36）・Writer（#38）は無変更）
+- 未着手: Training・Import時のMetadata生成/Models連携/Inference連携/Evaluation連携/Deployment連携/Cleanup
 
 ## 関連資料
 
@@ -116,3 +118,4 @@ Export
 - [ISSUE_MAP.md](ISSUE_MAP.md)（本Epic配下のIssue一覧）
 - [METADATA_READER_DESIGN_NOTES.md](METADATA_READER_DESIGN_NOTES.md)（#34レビューで挙がった未決事項。#36で決定・実装済み）
 - [METADATA_WRITER_DESIGN_NOTES.md](METADATA_WRITER_DESIGN_NOTES.md)（#38レビューで挙がった将来検討事項）
+- [MODEL_CATALOG_DESIGN_NOTES.md](MODEL_CATALOG_DESIGN_NOTES.md)（#40のスコープ決定・将来検討事項）
