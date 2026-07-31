@@ -1,6 +1,6 @@
 # Training Metadata Factory Design Notes
 
-Related: Epic [#28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28) / Feature [#42](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/42)（Training Metadata Factory） / [MODEL_METADATA_ARCHITECTURE.md](../../design/MODEL_METADATA_ARCHITECTURE.md) 6.11
+Related: Epic [#28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28) / Feature [#42](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/42)（Training Metadata Factory、**Completed**・Closed。PR [#43](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/43)をSquash Merge・mainへ反映済み、Merge Commit: `fee1885`） / [MODEL_METADATA_ARCHITECTURE.md](../../design/MODEL_METADATA_ARCHITECTURE.md) 6.11
 
 本ドキュメントは、Training Metadata Factory（Feature #42）実装にあたって行ったフィールド対応・設計判断を記録する。
 

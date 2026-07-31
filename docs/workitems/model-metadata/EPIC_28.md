@@ -81,7 +81,7 @@ Export
 - [x] Feature: Metadata Reader（[#36](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/36)、**Completed**・Closed。PR [#37](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/37)をSquash Merge・mainへ反映済み）
 - [x] Feature: Metadata Writer（[#38](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/38)、**Completed**・Closed。PR [#39](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/39)をSquash Merge・mainへ反映済み）
 - [x] Feature: Model Catalog（[#40](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/40)、**Completed**・Closed。PR [#41](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/41)をSquash Merge・mainへ反映済み）
-- [ ] Feature: Training Metadata Factory（[#42](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/42)、実装完了・PRレビュー待ち）
+- [x] Feature: Training Metadata Factory（[#42](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/42)、**Completed**・Closed。PR [#43](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/43)をSquash Merge・mainへ反映済み）
 
 ## Progress
 
@@ -93,7 +93,7 @@ Export
 ✓ Metadata Reader
 ✓ Metadata Writer
 ✓ Model Catalog
-🔶 Training Metadata Factory
+✓ Training Metadata Factory
 □ Models API
 □ Inference Resolver
 □ Evaluation
@@ -108,7 +108,7 @@ Export
 - [x] Metadata Reader（#36、**Completed**・Closed。PR #37をSquash Merge済み（Merge Commit: `678524f`）。`MetadataReader`（`read_canonical()`/`read_legacy()`/`read()`）を実装。METADATA_READER_DESIGN_NOTES.mdの未決事項2件を決定・実装（`inference_model_id`優先順位・`source`のtraining/backfill区別）。PRレビューで挙がったMinor（6.7のfallback表現・6.6の関数名表現）をArchitectureへ反映済み。Writer/Catalogは対象外のまま）
 - [x] Metadata Writer（#38、**Completed**・Closed。PR #39をSquash Merge済み（Merge Commit: `5b1564c`）。`MetadataWriter.write(path, metadata)`を実装（`atomic_write_json`+`file_lock`再利用、単純な上書き保存のみ）。PRレビューで挙がったMinor（6.8の`created_at`保持記述の矛盾・`extra`のJSON直列化制約）をArchitecture/[METADATA_WRITER_DESIGN_NOTES.md](METADATA_WRITER_DESIGN_NOTES.md)へ反映済み。Reader（#36）は無変更）
 - [x] Model Catalog（#40、**Completed**・Closed。PR #41をSquash Merge済み（Merge Commit: `627b6f2`）。`ModelCatalog`（`list()`/`find()`/`load()`/`exists()`）を実装。Directory探索はCatalogのみ、Canonical優先・Legacy fallback・重複排除。Reader/Adapter由来の例外は伝播（Architecture 6.9の元の「invalid metadata除外」記述は不採用と明記して修正済み）。詳細は[MODEL_CATALOG_DESIGN_NOTES.md](MODEL_CATALOG_DESIGN_NOTES.md)参照。Reader（#36）・Writer（#38）は無変更）
-- 🔶 Training Metadata Factory（[#42](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/42)、実装完了・PRレビュー待ち。`ModelMetadataFactory.create_from_training()`を実装（Architecture 6.11）。Reader/Writer/Catalogは利用せず、Validationは`ModelMetadata.from_dict()`へ完全委譲。`engine_version`/`task`は対応フィールドが無いため`extra`へ格納。詳細は[TRAINING_METADATA_FACTORY_DESIGN_NOTES.md](TRAINING_METADATA_FACTORY_DESIGN_NOTES.md)参照）
+- [x] Training Metadata Factory（#42、**Completed**・Closed。PR #43をSquash Merge済み（Merge Commit: `fee1885`）。`ModelMetadataFactory.create_from_training()`を実装（Architecture 6.11）。Reader/Writer/Catalogは利用せず、Validationは`ModelMetadata.from_dict()`へ完全委譲。`engine_version`/`task`は対応フィールドが無いため`extra`へ格納。詳細は[TRAINING_METADATA_FACTORY_DESIGN_NOTES.md](TRAINING_METADATA_FACTORY_DESIGN_NOTES.md)参照）
 - 未着手: Models API連携/Inference連携/Evaluation連携/Deployment連携/Cleanup
 
 ## 関連資料
