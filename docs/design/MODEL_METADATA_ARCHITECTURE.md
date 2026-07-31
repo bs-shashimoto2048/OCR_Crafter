@@ -4,6 +4,8 @@ Related: Epic [#28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28) 
 
 本ドキュメントはArchitecture Issue #30の成果物であり、Investigation #29の調査結果を前提に、`ModelMetadata`をSingle Source of Truthへ段階的に移行するための設計を確定する。**本ドキュメント自体はコード変更を伴わない。**
 
+> **2026-07-31追記**: PR [#31](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/31)のレビュー承認・Squash Merge（Squash Commit: `ce04863`）によりIssue #30はCompleted・Closed、[ADR-0002](../adr/ADR-0002_Unified_Model_Metadata.md)のStatusはAcceptedへ変更された。以降のFeature Issue（Canonical ModelMetadata Schema整備以降）は本ドキュメントの決定に基づいて進める。
+
 ## 1. 目的
 
 モデルに関する情報（識別・表示・追跡）を、複数の独立した永続化機構から`ModelMetadata`（Feature #14で実装済みのdataclass）へ段階的に統一する。既存の保存形式・API・UIとの後方互換を維持しながら、Consumer（Models/Inference/Evaluation/Deployment/Export）が最終的に同一のMetadataを参照する構成へ移行する。

@@ -1,11 +1,11 @@
 # ADR-0002: Unified Model Metadataと段階的Migration方式
 
-- **Status**: Proposed
-- **Date**: 2026-07-31（Proposed）
-- **Related Issue**: Architecture [#30](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/30) / Investigation [#29](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/29) / Parent Epic [#28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)
-- **Related PR**: 作成後に追記
+- **Status**: Accepted
+- **Date**: 2026-07-31（Proposed）/ 2026-07-31（Accepted）
+- **Related Issue**: Architecture [#30](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/30)（Completed・Closed） / Investigation [#29](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/29)（Closed） / Parent Epic [#28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)
+- **Related PR**: [#31](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/31)（Squash Merge済み。Squash Commit: `ce04863`）
 
-> このADRはArchitecture Issue #30の成果物であり、Investigation #29の調査結果を前提とする。PRレビュー承認後に`Proposed`から`Accepted`へ変更する。
+> このADRはArchitecture Issue #30の成果物であり、Investigation #29の調査結果を前提とする。PR #31のレビュー承認・mainへのSquash Mergeを受けて、本ADRのStatusを**Proposed→Accepted**へ変更した。以降、本ADRの決定は正式な設計判断として扱い、Epic #28配下のFeature Issue（Canonical ModelMetadata Schema整備以降）はこの決定に基づいて進める。
 
 ## Context
 
@@ -103,8 +103,8 @@ Investigation #29でこの状況を詳細調査した結果、モデルに関す
 
 ## Related Issue
 
-Architecture #30 / Investigation #29 / Parent Epic #28
+Architecture #30（Completed・Closed） / Investigation #29（Closed） / Parent Epic #28
 
 ## Related PR
 
-作成後に追記（PR Open時点では本ADRのStatusは`Proposed`のまま維持する）
+[#31](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/31)（Squash Merge済み。Squash Commit: `ce04863`）

@@ -2,15 +2,15 @@
 
 Related: Epic [#28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28) / Architecture [#30](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/30)
 
-本ドキュメントは、Architecture [#30](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/30)（[MODEL_METADATA_ARCHITECTURE.md](../../design/MODEL_METADATA_ARCHITECTURE.md)「Issue分割」章）で決定した、Epic #28配下の後続Issue構成の追跡表である。**Issue自体はまだ作成していない**（本Issue #30の対象外。作成はArchitectureのレビュー・Accepted判断後）。
+本ドキュメントは、Architecture [#30](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/30)（[MODEL_METADATA_ARCHITECTURE.md](../../design/MODEL_METADATA_ARCHITECTURE.md)「Issue分割」章）で決定した、Epic #28配下の後続Issue構成の追跡表である。Architecture #30はPR [#31](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/31)のSquash Mergeによりmainへ反映済み・Closed。次のOpen項目は「Canonical ModelMetadata Schema整備」である。
 
 ## Issue一覧（提案）
 
 | # | Issue | 依存 | 概要 | 状態 |
 |---|---|---|---|---|
 | 1 | Investigation | なし | Model Metadata実運用化の影響調査 | Closed（[#29](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/29)） |
-| 2 | Architecture + ADR | 1 | Adapter設計・保存先決定・Migration戦略確定 | 設計完了・PRレビュー待ち（[#30](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/30)） |
-| 3 | Canonical ModelMetadata Schema整備 | 2 | 既存`ModelMetadata` dataclassのSchema確定（追加フィールドの要否判断含む） | 未作成 |
+| 2 | Architecture + ADR | 1 | Adapter設計・保存先決定・Migration戦略確定 | **Completed**（[#30](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/30)、PR [#31](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/31)Squash Merge済み。ADR-0002はAccepted） |
+| 3 | Canonical ModelMetadata Schema整備 | 2 | 既存`ModelMetadata` dataclassのSchema確定（追加フィールドの要否判断含む） | 次のOpen項目（未作成） |
 | 4 | Legacy Metadata Adapter実装 | 3 | `.ocr.json`/`.tess.json`/`.pt`/`inference_model.json`→`ModelMetadata`変換（読み取り専用） | 未作成 |
 | 5 | ModelMetadata Reader/Writer実装 | 3 | Canonical sidecar読込・原子的書込（新規モデルのみ） | 未作成 |
 | 6 | Model Catalog / Registry実装 | 4, 5 | 一覧・フィルタ・legacy合成・重複排除 | 未作成 |

@@ -1,6 +1,6 @@
 # [Architecture] Unified Model Metadata Adapterと段階的移行方式を設計
 
-Issue: [#30](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/30)
+Issue: [#30](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/30)（**Completed / Closed**: PR [#31](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/31)をSquash Merge・mainへ反映済み。Squash Commit: `ce04863`）
 
 Parent Epic: [#28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)（Unified Model Metadata Infrastructure）
 
