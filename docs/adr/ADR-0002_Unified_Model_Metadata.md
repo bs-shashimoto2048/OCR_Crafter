@@ -11,7 +11,9 @@
 >
 > **Legacy Metadata Adapter: Completed**。Feature [#34](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/34)により、PR [#35](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/35)をSquash Merge・mainへ反映済み（Merge Commit: `434993d`）。本ADRの「Adapter」決定（単一`LegacyMetadataAdapter`＋専用Adapter分離、Factory/Registry/Plugin/DIは導入しない）を実装済み。
 >
-> **Metadata Reader: Completed**。Feature [#36](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/36)により、`MetadataReader`（`read_canonical()`/`read_legacy()`/`read()`）を実装。PR [#37](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/37)をSquash Merge・mainへ反映済み（Merge Commit: `678524f`）。[METADATA_READER_DESIGN_NOTES.md](../workitems/model-metadata/METADATA_READER_DESIGN_NOTES.md)の未決事項（`inference_model_id`優先順位・`source`のtraining/backfill区別）を決定・実装済み。Writer/Catalog以降は未実装（次はModelMetadata Writer）。
+> **Metadata Reader: Completed**。Feature [#36](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/36)により、`MetadataReader`（`read_canonical()`/`read_legacy()`/`read()`）を実装。PR [#37](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/37)をSquash Merge・mainへ反映済み（Merge Commit: `678524f`）。[METADATA_READER_DESIGN_NOTES.md](../workitems/model-metadata/METADATA_READER_DESIGN_NOTES.md)の未決事項（`inference_model_id`優先順位・`source`のtraining/backfill区別）を決定・実装済み。
+>
+> **Metadata Writer: Completed**。Feature [#38](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/38)により、`MetadataWriter.write(path, metadata)`を実装（`atomic_write_json`+`file_lock`を再利用した単純な上書き保存のみ、既存sidecarの読み取り込みマージは対象外）。I/Oエラーは新設`MetadataWriteError`。Catalog以降は未実装（次はModel Catalog）。
 
 ## Context
 
