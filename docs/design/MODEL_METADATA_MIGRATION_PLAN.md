@@ -18,9 +18,9 @@ Related: [MODEL_METADATA.md](MODEL_METADATA.md)（`ModelMetadata`のスキーマ
 
 以降の本文（現状・問題点・理想構成・Migration戦略・Issue分割・リスク・Future Work）はInvestigation #29時点の調査記録として維持し、確定した決定内容は上記表からArchitecture成果物を参照すること。
 
-## 追記2（2026-07-31）: Feature #32でCanonical Schema実装（Migration Phase 1準備）
+## 追記2（2026-07-31）: Feature #32でCanonical Schema実装完了（Migration Phase 1: Canonical Schema — Completed）
 
-Feature [#32](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/32)（Canonical ModelMetadata Schema）により、`src/app/services/model_metadata.py`へ`schema_version`（envelope値・`MODEL_METADATA_SCHEMA_VERSION = 1`）・`is_valid()`・`replace()`を追加した。Adapter/Reader/Writer/Catalog（Migration Phase 1本体）はまだ未実装であり、永続化（JSON保存・読込）も行っていない。次のOpen項目はLegacy Metadata Adapter実装（[docs/workitems/model-metadata/ISSUE_MAP.md](../workitems/model-metadata/ISSUE_MAP.md)参照）。
+Feature [#32](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/32)（Canonical ModelMetadata Schema）**Completed**。`src/app/services/model_metadata.py`へ`schema_version`（envelope値・`MODEL_METADATA_SCHEMA_VERSION = 1`、bool/floatを誤受理しない厳密int検証）・`is_valid()`・`replace()`を追加し、PR [#33](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/33)をSquash Merge・mainへ反映済み（Merge Commit: `b250c8f`）。Migration Phase 1のうちCanonical Schema部分は完了。Adapter/Reader/Writer/Catalog（Phase 1の残り）はまだ未実装であり、永続化（JSON保存・読込）も行っていない。次のOpen項目はLegacy Metadata Adapter実装（[docs/workitems/model-metadata/ISSUE_MAP.md](../workitems/model-metadata/ISSUE_MAP.md)参照）。
 
 ## 現状
 

@@ -76,14 +76,31 @@ Export
 
 - [x] Investigation: Model Metadata実運用化の影響調査（[#29](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/29)、**Closed**）
 - [x] Architecture: Unified Model Metadata Adapterと段階的移行方式を設計（[#30](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/30)、**Completed**。PR [#31](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/31)をSquash Merge・mainへ反映済み）
-- [ ] Feature: Canonical ModelMetadata Schema（[#32](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/32)、実装中。次のOpen項目はLegacy Metadata Adapter実装）
+- [x] Feature: Canonical ModelMetadata Schema（[#32](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/32)、**Completed**・Closed。PR [#33](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/33)をSquash Merge・mainへ反映済み）
+- [ ] Feature: Legacy Metadata Adapter（次のOpen項目、未作成）
 
 ## Progress
 
+```
+✓ Investigation
+✓ Architecture
+✓ Canonical Schema
+□ Legacy Metadata Adapter
+□ Metadata Reader
+□ Metadata Writer
+□ Model Catalog
+□ Training Metadata Factory
+□ Models API
+□ Inference Resolver
+□ Evaluation
+□ Deployment
+□ Cleanup
+```
+
 - [x] Investigation（#29、Closed。調査結果は[INVESTIGATION_29.md](INVESTIGATION_29.md)参照）
 - [x] Architecture + ADR（#30、**Completed**。PR #31をSquash Merge済み。ADR-0002のStatusはAcceptedへ変更済み。[ARCHITECTURE_30.md](ARCHITECTURE_30.md)参照）
-- 🔶 Feature: Canonical ModelMetadata Schema（[#32](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/32)、実装完了・PRレビュー待ち。Schema/Validation/schema_version/to_dict/from_dict/Equality/is_valid/replaceを実装。Reader/Writer/Adapter/Catalogは対象外）
-- 未着手（Canonical Schema整備後にIssue化）: Legacy Metadata Adapter実装/Reader・Writer実装/Model Catalog実装/Training・Import時のMetadata生成/Models連携/Inference連携/Evaluation連携/Deployment連携/Cleanup
+- [x] Canonical ModelMetadata Schema（#32、**Completed**・Closed。PR #33をSquash Merge済み（Merge Commit: `b250c8f`）。Schema/Validation/schema_version/to_dict/from_dict/Equality/is_valid/replaceを実装。PRレビューで発見したschema_versionのbool/float誤受理（Major #1）を追加コミットで修正済み。Reader/Writer/Adapter/Catalogは対象外のまま）
+- 未着手: Legacy Metadata Adapter実装/Reader・Writer実装/Model Catalog実装/Training・Import時のMetadata生成/Models連携/Inference連携/Evaluation連携/Deployment連携/Cleanup
 
 ## 関連資料
 

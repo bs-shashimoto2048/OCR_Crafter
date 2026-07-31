@@ -6,7 +6,7 @@ Related: Epic [#28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28) 
 
 > **2026-07-31追記**: PR [#31](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/31)のレビュー承認・Squash Merge（Squash Commit: `ce04863`）によりIssue #30はCompleted・Closed、[ADR-0002](../adr/ADR-0002_Unified_Model_Metadata.md)のStatusはAcceptedへ変更された。以降のFeature Issue（Canonical ModelMetadata Schema整備以降）は本ドキュメントの決定に基づいて進める。
 >
-> **2026-07-31追記2**: Feature [#32](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/32)（Canonical ModelMetadata Schema）を実装した。6.2の決定どおり`schema_version`（`MODEL_METADATA_SCHEMA_VERSION = 1`）をdataclassのフィールドにはせず、`to_dict()`/`from_dict()`のenvelope値として実装。`is_valid()`（例外を送出しない`from_dict()`）・`replace()`（`dataclasses.replace()`の薄いラッパー）を追加。同値性は`@dataclass(frozen=True)`既定の`__eq__`をそのまま採用し、カスタム実装は追加していない（過剰実装を避けるため）。`copy()`は、frozenかつ`extra`もdeep copy済みで不変性が保証されているため実装しなかった（既定の値渡し・`replace()`で十分と判断）。永続化（Reader/Writer/Adapter/Catalog）は本Featureの対象外のまま。
+> **2026-07-31追記2**: Feature [#32](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/32)（Canonical ModelMetadata Schema）**Completed**。6.2の決定どおり`schema_version`（`MODEL_METADATA_SCHEMA_VERSION = 1`）をdataclassのフィールドにはせず、`to_dict()`/`from_dict()`のenvelope値として実装。`is_valid()`（例外を送出しない`from_dict()`）・`replace()`（`dataclasses.replace()`の薄いラッパー）を追加。同値性は`@dataclass(frozen=True)`既定の`__eq__`をそのまま採用し、カスタム実装は追加していない（過剰実装を避けるため）。`copy()`は、frozenかつ`extra`もdeep copy済みで不変性が保証されているため実装しなかった（既定の値渡し・`replace()`で十分と判断）。PRレビューでschema_versionがbool/floatを誤って`1`と同一視して受理する不具合が見つかり、型を明示的に検証する修正を追加コミットで反映（PR [#33](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/33)、Squash Merge・Merge Commit: `b250c8f`）。永続化（Reader/Writer/Adapter/Catalog）は本Featureの対象外のまま、次のIssueはLegacy Metadata Adapter。
 
 ## 1. 目的
 
