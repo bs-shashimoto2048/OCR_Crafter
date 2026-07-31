@@ -18,7 +18,7 @@ Issue: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)（**Close
 
 ✅ Engine Registry（[#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9)、Closed。PR [#10](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/10)でmainへマージ済み。`src/app/services/engine_registry.py`。MVP範囲（Handler群未実装。Future Work参照）
 
-✅ Model Metadata（[#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14)、Closed。PR [#15](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/15)でmainへマージ済み。`src/app/services/model_metadata.py`。**共通スキーマの実装のみ**で、既存コードへは依然未配線（実運用化は別Epicで扱う。詳細下記）
+✅ Model Metadata（[#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14)、Closed。PR [#15](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/15)でmainへマージ済み。`src/app/services/model_metadata.py`。**共通スキーマの実装のみ**で、既存コードへは依然未配線（実運用化は[Epic #28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)で扱う。詳細下記）
 
 ✅ Engine判定既存バグ修正（Backend側[#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)、Closed。PR [#13](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/13)。Frontend側[#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)、Closed。PR [#22](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/22)（merge commit `1b93b75`）。`resolve_engine_id()`経由の明示的判定へ統一、`frontend/src/lib/engineResolution.js`で未知Engineの暗黙PaddleOCRフォールバックを是正）
 
@@ -47,9 +47,9 @@ Issue: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)（**Close
 - Benchmark（Benchmark Runner/Center連携）
 - Release Gate / Deployment（本番リリース判定へのTrOCR組み込み）
 
-### Model Metadata実運用化Epic（別Epic・未作成）
+### Model Metadata実運用化Epic
 
-TrOCRに限らない、**既存コード全体への`ModelMetadata`の本格配線**を扱う、Epic #27とは別責務のEpic。まだGitHub Issueは作成していない。
+[Epic #28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)（Unified Model Metadata Infrastructure）。TrOCRに限らない、**既存コード全体への`ModelMetadata`の本格配線**を扱う、Epic #27とは別責務のEpic。Investigation（[#29](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/29)）完了、Migration計画は[MODEL_METADATA_MIGRATION_PLAN.md](../../design/MODEL_METADATA_MIGRATION_PLAN.md)参照。
 
 - ModelMetadata生成
 - ModelMetadata保存
@@ -60,7 +60,7 @@ TrOCRに限らない、**既存コード全体への`ModelMetadata`の本格配�
 
 参考: CI依存関係修正（[#6](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/6)、PR [#7](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/7)でmainへマージ済み）／既存のDB初期化テスト課題（[#8](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/8)、Open、Epic対象外の既存不具合）
 
-**Future Work（Epic #1範囲内・未着手。上記いずれかの後続責務が対応するまでの暫定記録）**: 【最優先】`ModelMetadata`dataclassは実運用で未使用（既存コードへ一切未配線。対応は上記「Model Metadata実運用化Epic（別Epic・未作成）」の責務）／カスタム分類モデル（`engine="custom"`）のModel Metadata対応／device選択ロジックの共通化候補／TrOCRのmodel_ref解決方式の見直し／PipelineレベルでのTrOCREngineインスタンス再利用／`/predict`の同期推論実行（Thread Pool未使用）／preview・batch系エンドポイントへのmodel_ref必須検証拡張／Backend Engine RegistryをAPI経由でFrontendへ提供する案／`OcrBatchView.jsx`・`RapidOCRView.jsx`へのTrOCR対応／TrOCRモデル参照の永続化／Engine選択UIの共通Component化／Engine Registry Handler化（`ENGINE_BUILDERS`スタイルの`recognize()`実装）。詳細は[ISSUE_MAP.md](ISSUE_MAP.md)の「Future Work」参照。
+**Future Work（Epic #1範囲内・未着手。上記いずれかの後続責務が対応するまでの暫定記録）**: 【最優先】`ModelMetadata`dataclassは実運用で未使用（既存コードへ一切未配線。対応は[Epic #28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)の責務）／カスタム分類モデル（`engine="custom"`）のModel Metadata対応／device選択ロジックの共通化候補／TrOCRのmodel_ref解決方式の見直し／PipelineレベルでのTrOCREngineインスタンス再利用／`/predict`の同期推論実行（Thread Pool未使用）／preview・batch系エンドポイントへのmodel_ref必須検証拡張／Backend Engine RegistryをAPI経由でFrontendへ提供する案／`OcrBatchView.jsx`・`RapidOCRView.jsx`へのTrOCR対応／TrOCRモデル参照の永続化／Engine選択UIの共通Component化／Engine Registry Handler化（`ENGINE_BUILDERS`スタイルの`recognize()`実装）。詳細は[ISSUE_MAP.md](ISSUE_MAP.md)の「Future Work」参照。
 
 ## 背景
 
@@ -76,7 +76,7 @@ TrOCRの追加によって、TransformerベースのEnd-to-End文字認識モデ
 - 将来のRecognition Backend追加を妨げない共通基盤（Engine Capability/Engine Registry/Model Metadata）を確立する
 - 既存OCRエンジンの動作とデータ互換性を維持する
 
-TrOCRの学習・評価・Benchmark・Release Gate統合は[Epic #27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)の目的とする。Model Metadataの実運用化（既存コード全体への本格配線）は別Epic（未作成）の目的とする。
+TrOCRの学習・評価・Benchmark・Release Gate統合は[Epic #27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)の目的とする。Model Metadataの実運用化（既存コード全体への本格配線）は[Epic #28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)の目的とする。
 
 ## 対象範囲候補
 
@@ -103,7 +103,7 @@ TrOCRの学習・評価・Benchmark・Release Gate統合は[Epic #27](https://gi
 - 未調査の汎用Pluginシステム実装
 - 既存OCRエンジンの全面置換
 - TrOCR学習・評価・Benchmark・Release Gate統合（[Epic #27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)へ引き継ぎ）
-- Model Metadataの実運用化（既存コードへの本格配線。別Epic・未作成へ引き継ぎ）
+- Model Metadataの実運用化（既存コードへの本格配線。[Epic #28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)へ引き継ぎ）
 
 ## 完了条件
 
@@ -136,7 +136,7 @@ Epicの完了条件は、子Issueがすべて完了し、以下が確認でき�
 ## 後続Epic
 
 - [Epic #27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)（TrOCR学習・評価・Benchmark・Release Gate統合）
-- Model Metadata実運用化Epic（別Epic・未作成。ModelMetadata生成/保存/Models連携/Inference連携/Evaluation連携/旧モデル管理方式からの移行を扱う）
+- [Epic #28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)（Unified Model Metadata Infrastructure。ModelMetadata生成/保存/Models連携/Inference連携/Evaluation連携/旧モデル管理方式からの移行を扱う）
 
 ## 関連資料
 

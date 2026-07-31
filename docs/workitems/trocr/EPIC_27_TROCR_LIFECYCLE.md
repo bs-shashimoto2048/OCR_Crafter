@@ -4,7 +4,7 @@ Issue: [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)
 
 Parent: なし（[Epic #1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)の後続Epic。Epic #1は既存OCR推論経路へのTrOCR統合が完了し、Closed 2026-07-31）
 
-**責務の範囲（2026-07-31整理）**: 本Epicは**TrOCR固有**のライフサイクル（Training/Evaluation/Benchmark/Release Gate）のみを扱う。`ModelMetadata`の既存コードへの本格配線（生成・保存・Models連携・Inference連携・Evaluation連携・旧モデル管理方式からの移行）は、TrOCRに限らない別責務のため、別Epic（未作成）で扱う。本Epicの「TrOCR学習成果物の保存」は、その別Epicの決定（`ModelMetadata`経由か既存`.ocr.json`/`.tess.json`パターン踏襲か）を前提として進める。
+**責務の範囲（2026-07-31整理）**: 本Epicは**TrOCR固有**のライフサイクル（Training/Evaluation/Benchmark/Release Gate）のみを扱う。`ModelMetadata`の既存コードへの本格配線（生成・保存・Models連携・Inference連携・Evaluation連携・旧モデル管理方式からの移行）は、TrOCRに限らない別責務のため、[Epic #28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)（Unified Model Metadata Infrastructure）で扱う。本Epicの「TrOCR学習成果物の保存」は、Epic #28の決定（`ModelMetadata`経由か既存`.ocr.json`/`.tess.json`パターン踏襲か）を前提として進める。
 
 ## 背景
 
@@ -40,7 +40,7 @@ Engine Registry → resolve_engine_id() → OCR Pipeline → {PaddleOCR, EasyOCR
 
 ⬜ Documentation（ユーザーマニュアル・チュートリアル。学習成果物ができてから実用的な内容を書く）
 
-**Model Metadata本格連携（ModelMetadataの生成・保存・Models/Inference/Evaluation連携・旧モデル管理方式からの移行）は、本Epicのスコープ外。別Epic（未作成）の責務。** 本Epicで学習成果物の保存方式を決める際は、その別Epicの決定を前提とする（詳細は[Epic #1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)・[ISSUE_MAP.md](ISSUE_MAP.md)の「Future Work」参照）。
+**Model Metadata本格連携（ModelMetadataの生成・保存・Models/Inference/Evaluation連携・旧モデル管理方式からの移行）は、本Epicのスコープ外。[Epic #28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)（Unified Model Metadata Infrastructure）の責務。** 本Epicで学習成果物の保存方式を決める際は、Epic #28の決定を前提とする（詳細は[Epic #1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)・[ISSUE_MAP.md](ISSUE_MAP.md)の「Future Work」参照）。
 
 ## 対象範囲候補
 
@@ -60,12 +60,12 @@ Engine Registry → resolve_engine_id() → OCR Pipeline → {PaddleOCR, EasyOCR
 - PARSeq/ABINet/ViTSTR/Donut等、TrOCR以外の新規Recognitionエンジン
 - 文書レイアウト解析
 - 既存OCRエンジン（Tesseract/PaddleOCR/EasyOCR）の学習・評価・Benchmark・Release Gateロジックの全面再設計
-- `ModelMetadata`の既存コードへの本格配線（生成・保存・Models/Inference/Evaluation連携・旧モデル管理方式からの移行。別Epic・未作成の責務）
+- `ModelMetadata`の既存コードへの本格配線（生成・保存・Models/Inference/Evaluation連携・旧モデル管理方式からの移行。[Epic #28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)の責務）
 
 ## 完了条件
 
 - TrOCR学習が実行できる
-- TrOCRモデルを保存・識別できる（保存方式は別Epicの`ModelMetadata`実運用化方針、または既存`.ocr.json`/`.tess.json`パターン踏襲のいずれかに従う）
+- TrOCRモデルを保存・識別できる（保存方式は[Epic #28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)の`ModelMetadata`実運用化方針、または既存`.ocr.json`/`.tess.json`パターン踏襲のいずれかに従う）
 - TrOCRモデル評価が実行できる
 - Datasetとの系譜を追跡できる
 - Experimentとの系譜を追跡できる
@@ -84,7 +84,7 @@ Engine Registry → resolve_engine_id() → OCR Pipeline → {PaddleOCR, EasyOCR
 
 ## 関連Epic（別責務）
 
-Model Metadata実運用化Epic（未作成）。`ModelMetadata`の生成・保存・Models連携・Inference連携・Evaluation連携・旧モデル管理方式からの移行を扱う、TrOCRに限らない別責務のEpic。
+[Epic #28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)（Unified Model Metadata Infrastructure）。`ModelMetadata`の生成・保存・Models連携・Inference連携・Evaluation連携・旧モデル管理方式からの移行を扱う、TrOCRに限らない別責務のEpic。Investigation（[#29](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/29)）完了、Migration計画は[MODEL_METADATA_MIGRATION_PLAN.md](../../design/MODEL_METADATA_MIGRATION_PLAN.md)参照。
 
 ## 関連資料
 
