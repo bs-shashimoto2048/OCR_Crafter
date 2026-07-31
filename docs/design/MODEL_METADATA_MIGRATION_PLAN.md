@@ -32,7 +32,7 @@ Feature [#36](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/36)（Meta
 
 ## 追記5（2026-07-31）: Feature #38でMetadata Writer実装完了（Migration Phase 2: Writer — Completed）
 
-Feature [#38](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/38)（Metadata Writer）**Completed**。新規`src/app/services/metadata_writer.py`へ`MetadataWriter.write(path, metadata)`を実装した。`ModelMetadata.to_dict()`の出力を既存`atomic_write_json`+`file_lock`でそのまま書き込む単純な上書き保存のみ（既存sidecarの読み取り込みマージ処理は対象外、Directory探索なし）。渡された値が`ModelMetadata`インスタンスでない場合は既存の`InvalidModelMetadataError`を再利用、I/Oエラーは新設`MetadataWriteError`（`OSError`、`__cause__`保持）で区別。Reader（`metadata_reader.py`）は無変更。**Migration Phase 2（Reader + Writer）が完了**。次のOpen項目はModel Catalog実装（[docs/workitems/model-metadata/ISSUE_MAP.md](../workitems/model-metadata/ISSUE_MAP.md)参照）。
+Feature [#38](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/38)（Metadata Writer）**Completed**。新規`src/app/services/metadata_writer.py`へ`MetadataWriter.write(path, metadata)`を実装した。`ModelMetadata.to_dict()`の出力を既存`atomic_write_json`+`file_lock`でそのまま書き込む単純な上書き保存のみ（既存sidecarの読み取り込みマージ処理は対象外、Directory探索なし）。渡された値が`ModelMetadata`インスタンスでない場合は既存の`InvalidModelMetadataError`を再利用、I/Oエラーは新設`MetadataWriteError`（`OSError`、`__cause__`保持）で区別。Reader（`metadata_reader.py`）は無変更。PR [#39](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/39)をSquash Merge・mainへ反映済み（Merge Commit: `5b1564c`）。**Migration Phase 2（Reader + Writer）が完了**。次のOpen項目はModel Catalog実装（[docs/workitems/model-metadata/ISSUE_MAP.md](../workitems/model-metadata/ISSUE_MAP.md)参照）。
 
 ## 現状
 

@@ -12,7 +12,7 @@ Related: Epic [#28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28) 
 >
 > **2026-07-31追記4**: Feature [#36](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/36)（Metadata Reader）**Completed**。6.7の決定どおり、Canonical sidecar（`<model>.model_metadata.json`、命名規則を`metadata_reader.py::CANONICAL_METADATA_SIDECAR_SUFFIX`として実装）は`ModelMetadata.from_dict()`へ直接委譲、Legacyファイルは`LegacyMetadataAdapter`へ委譲する`MetadataReader`（`read_canonical()`/`read_legacy()`/`read()`）を実装した。`read()`はファイル名のみでCanonical/Legacy判定・Legacy形式種別判定を行う（内容を見て推測しない）。Filesystemアクセスは渡された単一Pathの読込のみ（`glob`/`os.walk`/ディレクトリスキャンは行わない）。I/O・JSON解析エラーは新設`MetadataReadError`（`OSError`、元例外を`__cause__`で保持）として、`UnsupportedLegacyMetadataError`（未対応形式）・`InvalidModelMetadataError`（Validation違反）と区別した。METADATA_READER_DESIGN_NOTES.mdの未決事項を本Featureで決定・実装（詳細は6.6・6.7の更新箇所、および同ノートの「決定済み」セクション参照）。PR [#37](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/37)をSquash Merge・mainへ反映済み（Merge Commit: `678524f`）。同PRレビューで挙がったMinor（6.6の関数名表現・6.7のfallback表現）を反映済み。Writer/Model Catalogは本Featureの対象外のまま、次のIssueはModelMetadata Writer実装。
 >
-> **2026-07-31追記5**: Feature [#38](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/38)（Metadata Writer）**Completed**。6.8の決定どおり、`ModelMetadata.to_dict()`の出力を`atomic_write_json`+`file_lock`（既存`services/atomic_io.py`）でそのまま書き込む`MetadataWriter.write(path, metadata)`を実装した。既存sidecarの読み取り込み（`created_at`保持等のマージ処理）は本Featureのスコープに含めない（6.8の実装確定注記参照）。渡された値が`ModelMetadata`インスタンスでない場合は既存の`InvalidModelMetadataError`を再利用（Writer独自のValidationは追加しない）。I/Oエラーは新設`MetadataWriteError`（`OSError`、`__cause__`保持）。Reader（`metadata_reader.py`）は無変更。Model Catalogは本Featureの対象外のまま、次のIssueはModel Catalog実装。
+> **2026-07-31追記5**: Feature [#38](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/38)（Metadata Writer）**Completed**。6.8の決定どおり、`ModelMetadata.to_dict()`の出力を`atomic_write_json`+`file_lock`（既存`services/atomic_io.py`）でそのまま書き込む`MetadataWriter.write(path, metadata)`を実装した。既存sidecarの読み取り込み（`created_at`保持等のマージ処理）は行わない（6.8を単純な上書き保存のみへ確定・旧方針の記述は削除済み）。渡された値が`ModelMetadata`インスタンスでない場合は既存の`InvalidModelMetadataError`を再利用（Writer独自のValidationは追加しない）。I/Oエラーは新設`MetadataWriteError`（`OSError`、`__cause__`保持）。PR [#39](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/39)をSquash Merge・mainへ反映済み（Merge Commit: `5b1564c`）。同PRレビューで挙がった`ModelMetadata.extra`のJSON直列化可能性に関する指摘は、コード変更せず[METADATA_WRITER_DESIGN_NOTES.md](../workitems/model-metadata/METADATA_WRITER_DESIGN_NOTES.md)へ将来検討事項として記録した。Reader（`metadata_reader.py`）は無変更。Model Catalogは本Featureの対象外のまま、次のIssueはModel Catalog実装。
 
 ## 1. 目的
 
@@ -222,15 +222,11 @@ model_ref     = 推論エンジンがロード時に受け取る参照
 - I/O・JSON解析エラーは`MetadataReadError`（`OSError`のサブクラス）として、`UnsupportedLegacyMetadataError`（形式未対応）・`InvalidModelMetadataError`（Validation違反）と型で区別する
 - ファイル名判定（`.model_metadata.json`/`.ocr.json`/`.tess.json`/`inference_model.json`）は、実際の命名規則（`ocr_pipeline.py::_register_ocr_model()`が`ocr_<engine>_<timestamp>.ocr.json`、`tesseract_pipeline.py::register_tesseract_model()`が`<lang>.tess.json`）では互いに衝突しないことを確認済み
 
-### 6.8 Writer — 採用: 新規モデルのみへの原子的書込
+### 6.8 Writer — 採用: 新規モデルのみへの原子的書込（Feature #38で確定）
 
 - 責務: Canonical Metadata保存（`atomic_write_json`+`file_lock`を再利用）・schema_version付与・directory作成不要（既存`models/`へ書くのみ）
 - 新規モデルのみを書込対象とする段階的方式（Phase 2）。既存モデルの一括書き換えはMigration方針に含めない（14章）
-- overwrite方針: 同一model_idへの再書込は許可する（例: コメント編集時のような部分更新）。ただし`created_at`は初回書込時の値を保持し、`updated_at`のみ更新する
-
-**実装確定（Feature #38、スコープ決定）**:
-
-- `MetadataWriter.write(path, metadata)`は`ModelMetadata.to_dict()`の出力を`atomic_write_json`+`file_lock`でそのまま書き込む単純な上書き保存のみを実装した。**既存sidecarを読み込んで`created_at`を保持する・部分更新するといった読み取り込みのマージ処理は本Issueのスコープに含めない**（Read-Modify-Writeであり、「書くだけ」というWriterの責務を超えるため）。`created_at`の保持が必要な場合は、呼び出し側（将来のCatalog/Resolver層）が既存Metadataを読み込んだ上で`ModelMetadata.replace()`等により値を引き継いだインスタンスを構築し、Writerへ渡す設計とする
+- **overwrite方針**: `MetadataWriter.write(path, metadata)`は`ModelMetadata.to_dict()`の出力を`atomic_write_json`+`file_lock`でそのまま書き込む**単純な上書き保存のみ**を行う。**Writerは既存sidecarを読み込まない・マージしない**（`created_at`の保持を含め、既存Metadataとの部分更新・引き継ぎは一切行わない）。これはRead-Modify-Writeであり、「書くだけ」というWriterの責務を超えるため、本Issueのスコープに含めない。`created_at`の保持等が将来必要になった場合は、Model CatalogまたはMigration専用の仕組みが既存Metadataを読み込んだ上で`ModelMetadata.replace()`等により値を引き継いだ新しいインスタンスを構築し、Writerへ渡す設計とする
 - 渡された値が`ModelMetadata`インスタンスでない場合は、既存の`InvalidModelMetadataError`を再利用する（Writer独自の例外・Validationロジックは追加しない）
 - I/Oエラーは新設`MetadataWriteError`（`OSError`のサブクラス）として、`__cause__`で元例外を保持する
 
