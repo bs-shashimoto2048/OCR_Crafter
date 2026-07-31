@@ -371,6 +371,25 @@ def test_from_dict_rejects_unsupported_schema_version():
         ModelMetadata.from_dict({"schema_version": 999, "model_id": "M0001", "engine_id": "tesseract"})
 
 
+@pytest.mark.parametrize(
+    "invalid_version",
+    [True, False, 1.0, "1", 0, -1, 2, 999],
+    ids=["bool_True", "bool_False", "float_1.0", "str_1", "int_0", "int_-1", "int_2", "int_999"],
+)
+def test_from_dict_rejects_non_strict_int_or_unsupported_schema_version(invalid_version):
+    """schema_versionは厳密なint型のみ受理する（PRレビューMajor #1: bool/floatの誤受理を修正）。
+
+    Pythonでは`bool`が`int`のサブクラスで`True == 1`・`False == 0`が成立し、`1.0 == 1`も成立
+    するため、素朴なvalue比較だけではこれらを`1`と誤って同一視してしまう。型を明示的に検証する
+    ことで、`True`・`False`・`1.0`・`"1"`（文字列）・範囲外の整数（`0`/`-1`/`2`/`999`）を
+    すべて拒否できることを確認する。
+    """
+    with pytest.raises(InvalidModelMetadataError):
+        ModelMetadata.from_dict(
+            {"schema_version": invalid_version, "model_id": "M0001", "engine_id": "tesseract"}
+        )
+
+
 def test_from_dict_rejects_unsupported_schema_version_before_checking_other_fields():
     """schema_version不正時は、他のフィールドが有効でも拒否される（version検証が先に走る）。"""
     with pytest.raises(InvalidModelMetadataError):

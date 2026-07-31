@@ -160,19 +160,30 @@ class ModelMetadata:
         必須フィールド（model_id/engine_id）の欠損・型不正は
         InvalidModelMetadataError として明確に送出する。
 
-        `schema_version`キーが含まれる場合は既知のバージョン（現状v1のみ）と一致するか検証する
-        （未知の将来バージョンをそれと知らずに現行スキーマとして誤解釈しないため）。キー自体が
-        無い入力（`schema_version`導入前の`to_dict()`出力・Adapterが変換した旧データ相当）は
-        検証をスキップする（後方互換）。
+        `schema_version`キーが含まれる場合は既知のバージョン（現状v1のみ）と厳密なint型で
+        一致するか検証する（未知の将来バージョンをそれと知らずに現行スキーマとして誤解釈しない
+        ため）。キー自体が無い入力（`schema_version`導入前の`to_dict()`出力・Adapterが変換した
+        旧データ相当）は検証をスキップする（後方互換）。
+
+        型チェックは`in`によるvalue比較の前に行う。Pythonでは`bool`が`int`のサブクラスであり
+        `True == 1`・`False == 0`が成立するため、素朴な`value not in _SUPPORTED_SCHEMA_VERSIONS`
+        判定だけでは`True`・`1.0`のような非int値を`1`と誤って同一視してしまう
+        （PRレビューで指摘・確認済みの不具合。Major #1）。
         """
         if not isinstance(data, Mapping):
             raise InvalidModelMetadataError(f"data must be a mapping, got {type(data)!r}")
 
-        if "schema_version" in data and data["schema_version"] not in _SUPPORTED_SCHEMA_VERSIONS:
-            raise InvalidModelMetadataError(
-                f"unsupported schema_version: {data['schema_version']!r} "
-                f"(supported: {_SUPPORTED_SCHEMA_VERSIONS!r})"
-            )
+        if "schema_version" in data:
+            version = data["schema_version"]
+            if (
+                isinstance(version, bool)
+                or not isinstance(version, int)
+                or version not in _SUPPORTED_SCHEMA_VERSIONS
+            ):
+                raise InvalidModelMetadataError(
+                    f"schema_version must be a strict int in {_SUPPORTED_SCHEMA_VERSIONS!r}, "
+                    f"got {version!r} ({type(version)!r})"
+                )
 
         known_fields = {f.name for f in dataclasses.fields(cls)}
         kwargs = {k: v for k, v in data.items() if k in known_fields}
