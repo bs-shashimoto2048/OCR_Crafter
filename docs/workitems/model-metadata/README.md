@@ -2,7 +2,7 @@
 
 ## 状態
 
-**Epic [#28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)は現在Open。** Investigation（[#29](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/29)）完了・Closed。Architecture（[#30](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/30)）**Completed**（PR [#31](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/31)をSquash Merge・mainへ反映済み、ADR-0002はAccepted）。Canonical ModelMetadata Schema（[#32](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/32)）**Completed**・Closed（PR [#33](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/33)をSquash Merge・mainへ反映済み、Merge Commit: `b250c8f`）。Legacy Metadata Adapter（[#34](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/34)）**Completed**・Closed（PR [#35](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/35)をSquash Merge・mainへ反映済み、Merge Commit: `434993d`）。Metadata Reader（[#36](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/36)）**Completed**・Closed（PR [#37](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/37)をSquash Merge・mainへ反映済み、Merge Commit: `678524f`）。Metadata Writer（[#38](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/38)）**Completed**・Closed（PR [#39](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/39)をSquash Merge・mainへ反映済み、Merge Commit: `5b1564c`）。Model Catalog（[#40](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/40)）**Completed**・Closed（PR [#41](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/41)をSquash Merge・mainへ反映済み、Merge Commit: `627b6f2`）。Training Metadata Factory（[#42](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/42)）**Completed**・Closed（PR [#43](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/43)をSquash Merge・mainへ反映済み、Merge Commit: `fee1885`）。次のOpen項目は**Models API・Models画面連携**（未作成）。
+**Epic [#28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)は現在Open。** Investigation（[#29](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/29)）完了・Closed。Architecture（[#30](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/30)）**Completed**（PR [#31](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/31)をSquash Merge・mainへ反映済み、ADR-0002はAccepted）。Canonical ModelMetadata Schema（[#32](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/32)）**Completed**・Closed（PR [#33](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/33)をSquash Merge・mainへ反映済み、Merge Commit: `b250c8f`）。Legacy Metadata Adapter（[#34](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/34)）**Completed**・Closed（PR [#35](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/35)をSquash Merge・mainへ反映済み、Merge Commit: `434993d`）。Metadata Reader（[#36](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/36)）**Completed**・Closed（PR [#37](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/37)をSquash Merge・mainへ反映済み、Merge Commit: `678524f`）。Metadata Writer（[#38](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/38)）**Completed**・Closed（PR [#39](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/39)をSquash Merge・mainへ反映済み、Merge Commit: `5b1564c`）。Model Catalog（[#40](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/40)）**Completed**・Closed（PR [#41](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/41)をSquash Merge・mainへ反映済み、Merge Commit: `627b6f2`）。Training Metadata Factory（[#42](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/42)）**Completed**・Closed（PR [#43](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/43)をSquash Merge・mainへ反映済み、Merge Commit: `fee1885`）。Models API（[#44](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/44)）は実装完了・PRレビュー待ち。次のOpen項目は**Consumer切替（`/models/info`のCatalog経由化）**（未作成）。
 
 本ディレクトリは、[Epic #1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)（Transformer OCR対応基盤とTrOCR統合）の実装過程で発見された「`ModelMetadata`が実運用で未配線」という課題に対応するため新設したEpic #28専用の作業資料である。TrOCRに限らない、既存コード全体への`ModelMetadata`の本格配線を扱う。TrOCR固有のTraining/Evaluation/Benchmark/Release Gateは[Epic #27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)（`docs/workitems/trocr/`）の責務であり、本Epicとは分離管理する。
 
@@ -30,7 +30,9 @@
 - [x] Model Catalog Design Notes作成（[MODEL_CATALOG_DESIGN_NOTES.md](MODEL_CATALOG_DESIGN_NOTES.md)。スコープ決定・将来検討事項を記録）
 - [x] Feature Issue作成・実装完了: Training Metadata Factory（[#42](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/42)、**Completed**・Closed。PR [#43](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/43)Squash Merge済み）
 - [x] Training Metadata Factory Design Notes作成（[TRAINING_METADATA_FACTORY_DESIGN_NOTES.md](TRAINING_METADATA_FACTORY_DESIGN_NOTES.md)。フィールド対応・`extra`衝突検出の設計判断を記録）
-- [ ] 次のOpen項目: Models API・Models画面連携（[ISSUE_MAP.md](ISSUE_MAP.md)参照）
+- [x] Feature Issue作成・実装完了: Models API（[#44](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/44)、実装完了・PRレビュー待ち）
+- [x] Models API Design Notes作成（[MODELS_API_DESIGN_NOTES.md](MODELS_API_DESIGN_NOTES.md)。`/models/info`後方互換調査・`ModelsAPIError`スコープを記録）
+- [ ] 次のOpen項目: Consumer切替（`/models/info`のCatalog経由化）またはInference連携（[ISSUE_MAP.md](ISSUE_MAP.md)参照）
 - [ ] 後続Feature Issue作成（Cleanupまで）
 
 ## 関連Issue
@@ -44,6 +46,7 @@
 - Feature: [#38](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/38) [Feature] Metadata Writer（**Completed**・Closed。PR [#39](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/39)Squash Merge済み）
 - Feature: [#40](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/40) [Feature] Model Catalog（**Completed**・Closed。PR [#41](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/41)Squash Merge済み）
 - Feature: [#42](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/42) [Feature] Training Metadata Factory（**Completed**・Closed。PR [#43](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/43)Squash Merge済み）
+- Feature: [#44](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/44) [Feature] Models API（実装完了・PRレビュー待ち）
 
 ## 作業資料
 
@@ -55,6 +58,7 @@
 - [METADATA_WRITER_DESIGN_NOTES.md](METADATA_WRITER_DESIGN_NOTES.md)（#38レビューで挙がった将来検討事項）
 - [MODEL_CATALOG_DESIGN_NOTES.md](MODEL_CATALOG_DESIGN_NOTES.md)（#40のスコープ決定・将来検討事項）
 - [TRAINING_METADATA_FACTORY_DESIGN_NOTES.md](TRAINING_METADATA_FACTORY_DESIGN_NOTES.md)（#42のフィールド対応・設計判断）
+- [MODELS_API_DESIGN_NOTES.md](MODELS_API_DESIGN_NOTES.md)（#44の`/models/info`後方互換調査・設計判断）
 - [../../design/MODEL_METADATA.md](../../design/MODEL_METADATA.md)（`ModelMetadata` dataclass設計、Feature #14）
 - [../../design/MODEL_METADATA_MIGRATION_PLAN.md](../../design/MODEL_METADATA_MIGRATION_PLAN.md)（Investigation #29成果物）
 - [../../design/MODEL_METADATA_ARCHITECTURE.md](../../design/MODEL_METADATA_ARCHITECTURE.md)（Architecture #30成果物）
