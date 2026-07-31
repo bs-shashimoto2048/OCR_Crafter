@@ -82,6 +82,7 @@ Export
 - [x] Feature: Metadata Writer（[#38](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/38)、**Completed**・Closed。PR [#39](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/39)をSquash Merge・mainへ反映済み）
 - [x] Feature: Model Catalog（[#40](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/40)、**Completed**・Closed。PR [#41](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/41)をSquash Merge・mainへ反映済み）
 - [x] Feature: Training Metadata Factory（[#42](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/42)、**Completed**・Closed。PR [#43](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/43)をSquash Merge・mainへ反映済み）
+- [ ] Feature: Models API（[#44](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/44)、実装完了・PRレビュー待ち）
 
 ## Progress
 
@@ -94,7 +95,7 @@ Export
 ✓ Metadata Writer
 ✓ Model Catalog
 ✓ Training Metadata Factory
-□ Models API
+🔶 Models API
 □ Inference Resolver
 □ Evaluation
 □ Deployment
@@ -109,7 +110,8 @@ Export
 - [x] Metadata Writer（#38、**Completed**・Closed。PR #39をSquash Merge済み（Merge Commit: `5b1564c`）。`MetadataWriter.write(path, metadata)`を実装（`atomic_write_json`+`file_lock`再利用、単純な上書き保存のみ）。PRレビューで挙がったMinor（6.8の`created_at`保持記述の矛盾・`extra`のJSON直列化制約）をArchitecture/[METADATA_WRITER_DESIGN_NOTES.md](METADATA_WRITER_DESIGN_NOTES.md)へ反映済み。Reader（#36）は無変更）
 - [x] Model Catalog（#40、**Completed**・Closed。PR #41をSquash Merge済み（Merge Commit: `627b6f2`）。`ModelCatalog`（`list()`/`find()`/`load()`/`exists()`）を実装。Directory探索はCatalogのみ、Canonical優先・Legacy fallback・重複排除。Reader/Adapter由来の例外は伝播（Architecture 6.9の元の「invalid metadata除外」記述は不採用と明記して修正済み）。詳細は[MODEL_CATALOG_DESIGN_NOTES.md](MODEL_CATALOG_DESIGN_NOTES.md)参照。Reader（#36）・Writer（#38）は無変更）
 - [x] Training Metadata Factory（#42、**Completed**・Closed。PR #43をSquash Merge済み（Merge Commit: `fee1885`）。`ModelMetadataFactory.create_from_training()`を実装（Architecture 6.11）。Reader/Writer/Catalogは利用せず、Validationは`ModelMetadata.from_dict()`へ完全委譲。`engine_version`/`task`は対応フィールドが無いため`extra`へ格納。詳細は[TRAINING_METADATA_FACTORY_DESIGN_NOTES.md](TRAINING_METADATA_FACTORY_DESIGN_NOTES.md)参照）
-- 未着手: Models API連携/Inference連携/Evaluation連携/Deployment連携/Cleanup
+- 🔶 Models API（[#44](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/44)、実装完了・PRレビュー待ち。`ModelsAPI`（`list_models()`/`get_model()`/`exists()`/`create_metadata()`/`save_metadata()`）をFacadeとして実装（Architecture 6.17）。Catalog/Factory/Writerは無変更、Readerは直接利用しない。既存`/models/info`への配線は行わず既存エンドポイントを無変更のまま維持（後方互換調査は[MODELS_API_DESIGN_NOTES.md](MODELS_API_DESIGN_NOTES.md)参照）。新設`ModelsAPIError`はFacade呼び出し形状不正のみ対象）
+- 未着手: Consumer切替（`/models/info`のCatalog経由化）/Inference連携/Evaluation連携/Deployment連携/Cleanup
 
 ## 関連資料
 
@@ -122,3 +124,4 @@ Export
 - [METADATA_WRITER_DESIGN_NOTES.md](METADATA_WRITER_DESIGN_NOTES.md)（#38レビューで挙がった将来検討事項）
 - [MODEL_CATALOG_DESIGN_NOTES.md](MODEL_CATALOG_DESIGN_NOTES.md)（#40のスコープ決定・将来検討事項）
 - [TRAINING_METADATA_FACTORY_DESIGN_NOTES.md](TRAINING_METADATA_FACTORY_DESIGN_NOTES.md)（#42のフィールド対応・設計判断）
+- [MODELS_API_DESIGN_NOTES.md](MODELS_API_DESIGN_NOTES.md)（#44の`/models/info`後方互換調査・設計判断）
