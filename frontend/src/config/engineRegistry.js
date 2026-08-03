@@ -93,6 +93,17 @@ const ENGINE_REGISTRY = {
   },
 };
 
+// Registry内部状態は呼び出し側から一切変更できない（PR #54レビューMajor #1対応）。
+// supportedDevices配列を持つエントリのみ、配列自体とエントリ本体をfreezeする
+// （汎用のdeepFreeze utilityは導入せず、本Registryが実際に持つ配列フィールドに限定する）。
+for (const entry of Object.values(ENGINE_REGISTRY)) {
+  if (Array.isArray(entry.supportedDevices)) {
+    Object.freeze(entry.supportedDevices);
+  }
+  Object.freeze(entry);
+}
+Object.freeze(ENGINE_REGISTRY);
+
 const KNOWN_ENGINE_IDS = Object.keys(ENGINE_REGISTRY);
 
 // 前後空白の除去・小文字化のみを正規化として行う（別名/alias変換は行わない）。
@@ -165,14 +176,17 @@ export function getTrainingSelectableEngines() {
     .map((entry) => ({ id: entry.id, label: entry.label }));
 }
 
-// 学習時にサポートされる演算デバイスID一覧（"cpu" | "gpu"）。未登録・未対応はnull。
+// 学習時にサポートされる演算デバイスID一覧（"cpu" | "gpu"）。未登録・未対応は空配列。
+// Registry内部の配列（frozen）をそのまま返さず、呼び出しごとに新しい配列を返す
+// （戻り値を変更してもRegistry内部・以降の呼び出し結果へ影響しない）。
 export function getEngineSupportedDevices(value) {
-  return getEngineEntry(value)?.supportedDevices ?? null;
+  const devices = getEngineEntry(value)?.supportedDevices;
+  return Array.isArray(devices) ? [...devices] : [];
 }
 
 // 指定デバイスIDをそのエンジンの学習でサポートするか。
 export function isEngineDeviceSupported(value, deviceId) {
-  return Boolean(getEngineEntry(value)?.supportedDevices?.includes(deviceId));
+  return getEngineSupportedDevices(value).includes(deviceId);
 }
 
 // 学習画面の「エンジン固有設定」パネル種別（"paddleocr" | "tesseract" | "unsupported"）。

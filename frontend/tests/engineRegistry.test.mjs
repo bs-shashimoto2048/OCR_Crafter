@@ -165,8 +165,8 @@ test("getEngineSupportedDevices: エンジンごとの対応デバイス", () =>
   assert.deepEqual(getEngineSupportedDevices("easyocr"), []);
 });
 
-test("getEngineSupportedDevices: 未登録engineはnull", () => {
-  assert.equal(getEngineSupportedDevices("unknown-engine"), null);
+test("getEngineSupportedDevices: 未登録engineは空配列", () => {
+  assert.deepEqual(getEngineSupportedDevices("unknown-engine"), []);
 });
 
 test("isEngineDeviceSupported: Tesseractはcpuのみ、PaddleOCRはcpu/gpu両方、EasyOCRはどちらも非対応", () => {
@@ -182,6 +182,69 @@ test("isEngineDeviceSupported: 未登録engineは全デバイスfalse（全対�
   assert.equal(isEngineDeviceSupported("unknown-engine", "cpu"), false);
   assert.equal(isEngineDeviceSupported("unknown-engine", "gpu"), false);
   assert.equal(isEngineDeviceSupported(null, "cpu"), false);
+});
+
+// ---------------------------------------------------------------------------
+// Registry内部状態の不変性（PR #54レビューMajor #1対応）
+// 呼び出し側が戻り値を変更しても、Registry内部状態・以降の呼び出し結果へ影響しないことを確認する。
+// ---------------------------------------------------------------------------
+
+test("getTrainingSelectableEngines: 戻り値を変更しても次回呼び出し結果へ影響しない（順序・内容も維持）", () => {
+  const first = getTrainingSelectableEngines();
+  first.push({ id: "fake", label: "Fake" });
+  first[0].label = "HACKED";
+
+  const second = getTrainingSelectableEngines();
+  assert.equal(second.length, 3, "2回目の呼び出し結果の件数が変化している");
+  assert.deepEqual(second, [
+    { id: "paddleocr", label: "PaddleOCR" },
+    { id: "tesseract", label: "Tesseract" },
+    { id: "easyocr", label: "EasyOCR" },
+  ]);
+});
+
+test("getEngineSupportedDevices: 戻り値を変更してもRegistry内部・以降の呼び出しへ影響しない", () => {
+  const first = getEngineSupportedDevices("paddleocr");
+  first.push("unexpected");
+
+  const second = getEngineSupportedDevices("paddleocr");
+  assert.deepEqual(second, ["cpu", "gpu"]);
+  assert.ok(!second.includes("unexpected"), "unexpectedがRegistry内部へ混入している");
+});
+
+test("getEngineSupportedDevices: あるEngineの戻り値変更が他Engineへ波及しない（cross-engine isolation）", () => {
+  const paddle = getEngineSupportedDevices("paddleocr");
+  paddle.push("unexpected");
+  paddle.length = 0; // さらに配列自体を空にする破壊的操作も試す
+
+  assert.deepEqual(getEngineSupportedDevices("tesseract"), ["cpu"]);
+  assert.deepEqual(getEngineSupportedDevices("easyocr"), []);
+  assert.deepEqual(getEngineSupportedDevices("paddleocr"), ["cpu", "gpu"], "PaddleOCR自身への再取得も影響を受けない");
+});
+
+test("getEngineSupportedDevices: 未登録Engineの空配列を変更しても、その後の呼び出し結果は空のまま", () => {
+  const first = getEngineSupportedDevices("unknown-engine");
+  first.push("unexpected");
+
+  const second = getEngineSupportedDevices("unknown-engine");
+  assert.deepEqual(second, []);
+});
+
+test("getEngineEntry: 戻り値はfrozenであり、フィールドを変更しようとするとエラーになりRegistry内部状態は変化しない", () => {
+  const entry = getEngineEntry("tesseract");
+  assert.throws(() => {
+    entry.trainingSupported = false;
+  });
+  assert.equal(isEngineTrainingSupported("tesseract"), true);
+  assert.equal(getEngineLabel("tesseract"), "Tesseract");
+});
+
+test("getEngineEntry: supportedDevices配列もfrozenであり、push()はエラーになる", () => {
+  const entry = getEngineEntry("paddleocr");
+  assert.throws(() => {
+    entry.supportedDevices.push("unexpected");
+  });
+  assert.deepEqual(getEngineSupportedDevices("paddleocr"), ["cpu", "gpu"]);
 });
 
 // ---------- 設定パネル種別 ----------
