@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import Button from "../components/Button";
 import Card from "../components/Card";
 import EmptyState from "../components/EmptyState";
+import { getEngineLabel } from "../config/engineRegistry";
 import { request } from "../lib/api";
 import {
   buildBenchmarkRecommendations,
@@ -19,6 +20,13 @@ import { latestEvalOf } from "../lib/modelEval";
 import { buildModelComparison, buildWinLoss, formatMetricValue, recommendModel } from "../lib/modelCompare";
 
 const SCROLL_AREA = "dark-scroll [overscroll-behavior:contain] [scrollbar-gutter:stable]";
+
+// Engine表示名（Engine Registry経由）。未登録Engineへ既知Engineの表示名を
+// フォールバックしない（"不明"を返す）。フィルタ値・row.engine自体（生のid）は変更しない、
+// 表示テキストのみをこの関数経由へ置換する
+export function engineDisplayText(engine) {
+  return getEngineLabel(engine) ?? "不明";
+}
 
 function formatDateTime(value) {
   if (!value) return "-";
@@ -277,7 +285,7 @@ export default function BenchmarkCenterView({ projectId, onOpenEvaluation, notif
             <option value="">Engine: すべて</option>
             {engineOptions.map((e) => (
               <option key={e} value={e}>
-                {e}
+                {engineDisplayText(e)}
               </option>
             ))}
           </select>
@@ -342,7 +350,7 @@ export default function BenchmarkCenterView({ projectId, onOpenEvaluation, notif
                   <td className="min-w-0 max-w-[14rem] truncate px-1.5 py-1.5 text-text" title={row.model_name}>
                     {row.model_name}
                   </td>
-                  <td className="whitespace-nowrap px-1.5 py-1.5 text-muted">{row.engine}</td>
+                  <td className="whitespace-nowrap px-1.5 py-1.5 text-muted">{engineDisplayText(row.engine)}</td>
                   <td className="whitespace-nowrap px-1.5 py-1.5 text-muted">{row.dataset_name || "-"}</td>
                   <td className="whitespace-nowrap px-1.5 py-1.5 text-muted">{row.experiment_id || "-"}</td>
                   <td className="whitespace-nowrap px-1.5 py-1.5 text-muted">{row.preprocess_version ? `v${row.preprocess_version}` : "-"}</td>
@@ -455,7 +463,7 @@ export default function BenchmarkCenterView({ projectId, onOpenEvaluation, notif
                     <td className="px-2 py-1.5 text-muted">Engine</td>
                     {selectedRows.map((row) => (
                       <td key={row.model_name} className="px-2 py-1.5 text-text">
-                        {row.engine}
+                        {engineDisplayText(row.engine)}
                       </td>
                     ))}
                   </tr>
