@@ -12,7 +12,7 @@
 > ```text
 > Architecture: Completed
 > Evaluation Schema: Completed
-> Common Metric Calculator: Not Started
+> Common Metric Calculator: Implemented, PR review pending (Issue #65)
 > Evaluation Dispatcher / Runner: Not Started
 > Tesseract Predictor Adapter: Not Started
 > PaddleOCR Predictor: Not Started
@@ -26,6 +26,8 @@
 > Feature [#63](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/63)「Common Evaluation Schema実装」は**Completed**・Closed（PR [#64](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/64)をSquash Merge・mainへ反映済み、Merge Commit: `4663dd0`）。`OcrEvalTarget.options`（ターゲット単位のEngine固有オプション）、`OcrEvaluationMetrics`/`OcrEvaluationSampleResult`/`OcrEvaluationConfusion`/`OcrEvaluationResult`（内部共通Result Schema）を実装済み。既存`POST /api/ocr/evaluate`のresponse_model・返却dictは無変更（未配線）。次の実装対象はCommon Metric Calculator。詳細は[docs/workitems/trocr/COMMON_EVALUATION_SCHEMA_63.md](../workitems/trocr/COMMON_EVALUATION_SCHEMA_63.md)参照。
 >
 > **PR #64レビュー指摘対応（数値Validation強化）**: 共通Result Schemaの数値項目（count系: `sample_count`/`exact_match_count`/`edit_distance`/`confusion.count`、float系: `exact_match_rate`/`cer`/`character_accuracy`/`confidence`/`duration_ms`）へ、(1) NaN/Infinity/-Infinityの明示的な拒否、(2) 数値文字列（`"5"`等）の暗黙変換の廃止（count系はstrict int、float系はint/floatのみ許可）を追加した。既存Request Schema（`OcrEvalTarget`/`OcrEvaluateRequest`の`psm`等）は対象外。`confidence=None`/`confidence=0.0`/`cer>1`/`character_accuracy<0`/`duration_ms=0`は引き続き許可する。また、クリーン環境（`outputs/app.db`退避）ではIssue #8（`test_dataset_registry.py::test_register_ocr_model_records_dataset_lineage`）が本PRと無関係な既知の失敗として残ることを確認済み（本PRでは修正しない）。
+>
+> Feature [#65](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/65)「Common Evaluation Metric Calculator」にて`src/app/services/evaluation_metrics.py`を新設し、Engine非依存の`calculate_sample_metrics`/`calculate_evaluation_metrics`/`aggregate_confusions`を実装済み（PRレビュー待ち）。既存`ocr_evaluation.py`のCER（マイクロ平均）・完全一致・confusion集計と出力が完全一致することをテストで直接検証した。既存`ocr_evaluation.py`への配線は見送り（logger名依存の既存テストへの副作用を避けるため独立実装とした、詳細は[COMMON_EVALUATION_METRICS_65.md](../workitems/trocr/COMMON_EVALUATION_METRICS_65.md)参照）。次の実装対象はEvaluation Dispatcher / Runner。
 
 ## Context
 
