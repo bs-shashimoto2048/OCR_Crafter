@@ -17,7 +17,7 @@ Related: Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46)�
 - 本Epic（#46）の「Evaluation UI Implementation」は、Epic #27配下のMulti-engine Evaluation API設計・実装完了後まで**依存待ち（⏸）**とする
 - **Epic間の責務境界**: Evaluation UIの見た目・画面責務の一般化はEpic #46、Evaluation Backend（Dispatcher・TrOCR対応）はEpic #27の責務。TrOCR本体の学習・推論はEpic #27、Engine Registry・UI側のデータ駆動化はEpic #46のまま維持する
 
-次のDesign Issueとして、Epic #27配下に[Design] Multi-engine Evaluation API Architectureを作成し、Backend評価API側の設計から着手する。
+次のDesign Issueとして、Epic #27配下にDesign [#61](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/61)「Multi-engine Evaluation API Architecture」を作成済み・調査中（実装は未着手）。成果物: [docs/design/MULTI_ENGINE_EVALUATION_API.md](design/MULTI_ENGINE_EVALUATION_API.md)・[ADR-0003（Proposed）](adr/ADR-0003_Multi_Engine_Evaluation.md)。
 
 ---
 

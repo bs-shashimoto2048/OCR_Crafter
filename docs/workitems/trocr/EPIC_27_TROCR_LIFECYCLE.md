@@ -30,7 +30,7 @@ Engine Registry → resolve_engine_id() → OCR Pipeline → {PaddleOCR, EasyOCR
 
 ⬜ Training（`services/trocr_pipeline.py`学習Backend。Hugging Face Transformers経由、`VisionEncoderDecoderModel`+`Seq2SeqTrainer`。公式`unilm/trocr`（fairseq）は不採用。詳細は[ARCHITECTURE_DRAFT.md](ARCHITECTURE_DRAFT.md)・[ADR-0001](../../adr/ADR-0001_Trocr_Architecture.md)参照）
 
-⬜ Evaluation（評価連携の方針決定・confidence算出方法の確定。`ocr_evaluation.py`のTesseract専用制約への対応可否を含む）
+⬜ Evaluation（評価連携の方針決定・confidence算出方法の確定。`ocr_evaluation.py`のTesseract専用制約への対応可否を含む。Design [#61](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/61)「Multi-engine Evaluation API Architecture」として調査中。成果物: [MULTI_ENGINE_EVALUATION_API.md](../../design/MULTI_ENGINE_EVALUATION_API.md)・[ADR-0003（Proposed）](../../adr/ADR-0003_Multi_Engine_Evaluation.md)）
 
 ⬜ Benchmark（Benchmark Runner/Benchmark Centerへの`ENGINE_CATALOG`/`ENGINE_BUILDERS`登録）
 
