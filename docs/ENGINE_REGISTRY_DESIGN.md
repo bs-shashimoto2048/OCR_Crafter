@@ -4,7 +4,7 @@ Related: Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46)�
 
 **本ドキュメントは設計のみを対象とする。実装（`EngineRegistry`本体・UI変更・TrOCR追加・Models API変更・Resolver変更）は一切行わない。実装は後続Feature（Engine Registry Core等）で個別に着手する。**
 
-**状態（2026-08-03）**: Feature #47・Feature #49・Refactor #51（ModelsView Migration）・Refactor [#53](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/53)「TrainingViewをEngine Registryへ移行」はいずれも**Completed**（PR [#54](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/54)をSquash Merge・mainへ反映済み、Merge Commit: `cb6a8ce`）。`TrainingView.jsx`のOCRタイプ選択肢・Engine表示名・学習可否・デバイス対応可否・エンジン固有設定パネル・ジョブスナップショットをRegistry経由へ移行し、UIの見た目は変更していない（既存レンダリング回帰テスト44件が無修正のまま全件成功）。PR #54マージ前レビューで指摘されたRegistry内部状態の不変性（Major #1）も、`Object.freeze()`＋配列Getterのコピー返却により修正済み。詳細は7章「TrainingView」・11章「Future Work」・[docs/workitems/engine-ui/TRAININGVIEW_MIGRATION.md](workitems/engine-ui/TRAININGVIEW_MIGRATION.md)参照。次のFeatureは「Benchmark画面をEngine Registryへ移行」。
+**状態（2026-08-03）**: Feature #47・Feature #49・Refactor #51（ModelsView Migration）・Refactor [#53](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/53)「TrainingViewをEngine Registryへ移行」はいずれも**Completed**（PR [#54](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/54)をSquash Merge・mainへ反映済み、Merge Commit: `cb6a8ce`）。`TrainingView.jsx`のOCRタイプ選択肢・Engine表示名・学習可否・デバイス対応可否・エンジン固有設定パネル・ジョブスナップショットをRegistry経由へ移行し、UIの見た目は変更していない（既存レンダリング回帰テスト44件が無修正のまま全件成功）。PR #54マージ前レビューで指摘されたRegistry内部状態の不変性（Major #1）も、`Object.freeze()`＋配列Getterのコピー返却により修正済み。詳細は7章「TrainingView」・11章「Future Work」・[docs/workitems/engine-ui/TRAININGVIEW_MIGRATION.md](workitems/engine-ui/TRAININGVIEW_MIGRATION.md)参照。Refactor [#55](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/55)「BenchmarkView Engine Registry Design」は**実装完了・PRレビュー待ち**（設計のみ、Productionコード変更なし）。`BenchmarkView.jsx`（Backend `ENGINE_CATALOG`由来のvariant key軸）と`BenchmarkCenterView.jsx`（canonical engine id軸）が構造的に異なる2つの「Engine」概念を扱っていることを整理した。詳細は[docs/BENCHMARK_ENGINE_REGISTRY_DESIGN.md](BENCHMARK_ENGINE_REGISTRY_DESIGN.md)参照。
 
 ## 1. 背景・目的
 
@@ -187,15 +187,15 @@ export const ENGINE_REGISTRY = {
 - **Registry化できる**: デフォルトwhitelist（`TESSERACT_WHITELIST_DEFAULT`固定引き渡し、`App.jsx:4820`）→ Registry `defaultEvalWhitelist`。将来的な対象モデル一覧のフィルタ条件（現状Tesseract固定）→ Registry `evaluable`フラグでの絞り込みへ置換可能。
 - **できない（Registry対象外、より大きな課題）**: 画面全体がTesseract固有語彙（"eng.traineddata"、PSM等）で構成されており、PaddleOCR/EasyOCRにすら対応していない。これは**TrOCR以前の一般化課題**であり、Registryの導入だけでは解決しない。本画面の一般化は、Registry移行とは別の、より大きなFeature（Evaluation画面の多エンジン対応）として切り出すべきである（9章）。
 
-### BenchmarkView.jsx
+### BenchmarkView.jsx / BenchmarkCenterView.jsx
 
-- **Registry化できる**: モデル一覧の拡張子フィルタ（`.tess.json`/`.ocr.json`、4.3表）→ Registry `fileExtensions`。
-- **できない（Registry対象外）**: `selectedEngines`は`tesseract_model`/`tesseract_base`/`paddleocr_official`/`paddleocr_custom`という、**エンジンIDとは異なる軸**（「公式モデルか学習済みモデルか」というバリアント軸）の固定4値である。フラットな`ENGINE_REGISTRY`（エンジンID単位）ではこの軸を素直に表現できず、Registryに「バリアント」という第2軸を持たせるか、本画面はエンジンID単位のRegistryとは別に独自のバリアント一覧を持ち続けるかの判断が必要（本Featureでは判断せず、実装Feature側の検討事項として申し送る）。
+**状態（2026-08-03）**: Refactor [#55](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/55)「BenchmarkView Engine Registry Design」により詳細調査・設計を実施（**実装完了・PRレビュー待ち**、設計のみ）。詳細は[BENCHMARK_ENGINE_REGISTRY_DESIGN.md](BENCHMARK_ENGINE_REGISTRY_DESIGN.md)参照。以下は本章時点の要約（詳細調査により裏付け・精緻化済み）。
 
-### BenchmarkCenterView.jsx
-
-- **Registry化できる**: 現状生のengine文字列をそのまま表示している箇所（フィルタの`<option>`テキスト、結果行の表示）→ Registry `label`に置換するだけで完了する、最小リスクの適用箇所。
-- **できない**: 特になし。本画面は既にエンジン集合をデータから動的導出しており、Registry導入は「表示の質」を上げるのみで構造変更を伴わない。
+- **BenchmarkView.jsx — Registry化できる**: モデル一覧の拡張子フィルタ（`.tess.json`/`.ocr.json`）→ Registryに`fileExtensions`相当のフィールドを追加すれば一部移行可能（Registry拡張が前提、未実施）。
+- **BenchmarkView.jsx — できない（Registry対象外）**: `selectedEngines`（`tesseract_model`/`tesseract_base`/`paddleocr_official`/`paddleocr_custom`）は、**エンジンIDとは異なる軸**（Backend `ENGINE_CATALOG`が定義する「モデル取得元＝自作/公式/ベースライン」のvariant key）であり、Registryが扱うエンジン単体の静的情報とは別概念であることを確認した。Registryへ第2軸を持たせるのではなく、Backend `ENGINE_CATALOG`を正としてBenchmark固有概念のまま維持するのが妥当と判断した。
+- **BenchmarkCenterView.jsx — Registry化できる**: 現状生のengine文字列をそのまま表示している箇所（フィルタの`<option>`テキスト、結果行の表示）→ Registry `getEngineLabel()`に置換するだけで完了する、最小リスクの適用箇所（**完全移行可能**、他画面と異なりRegistryの軸と完全一致）。
+- **BenchmarkCenterView.jsx — できない**: 特になし。本画面は既にエンジン集合をデータから動的導出しており、Registry導入は「表示の質」を上げるのみで構造変更を伴わない。
+- **TrOCR対応**: 両画面ともフロントエンド側の障害はほぼ無く、TrOCR追加の障害はBackend（`ENGINE_CATALOG`へのvariant key追加・Benchmark実行経路の実装）に集中していることを確認した（Epic #27の責務）。
 
 ## 8. TrOCR追加時の検証（「Registryへ追加するだけ」で済むか）
 
