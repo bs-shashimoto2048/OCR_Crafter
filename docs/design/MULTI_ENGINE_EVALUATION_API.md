@@ -8,7 +8,7 @@ Related: Issue [#61](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/61)
 
 **Evaluation UIの一般化（`OcrEvaluationView.jsx`等）はBackend実装完了待ち**（Epic #46側、責務境界は変更なし）。
 
-次の実装対象は**Common Evaluation Schema**（Feature Issueを別途作成、19章のPhase 3に相当）。Issue分割案（19章）は確定版として整理済み。実装（Schema/Dispatcher/Predictor/Metrics/API接続）はいずれも本ドキュメント時点では未着手。
+**Common Evaluation Schema実装中**（Feature [#63](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/63)、19章のPhase 3に相当。`OcrEvalTarget.options`・`OcrEvaluationMetrics`/`OcrEvaluationSampleResult`/`OcrEvaluationConfusion`/`OcrEvaluationResult`を実装、**Implemented, PR review pending**。PR #64のレビューを受け、共通Result Schemaの数値項目（count系/float系）へ非有限値（NaN/Infinity/-Infinity）拒否・数値文字列拒否のstrict Validationを追加済み（既存Request Schemaの`psm`等は対象外）。詳細は[docs/workitems/trocr/COMMON_EVALUATION_SCHEMA_63.md](../workitems/trocr/COMMON_EVALUATION_SCHEMA_63.md)参照）。Issue分割案（19章）は確定版として整理済み。Dispatcher/Predictor/Metrics Calculator/API接続は本ドキュメント時点では未着手。
 
 ---
 
