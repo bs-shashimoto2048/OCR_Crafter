@@ -13,6 +13,8 @@ let server;
 let ModelsView;
 let MODEL_LIST_GRID_COLUMNS;
 
+let fallbackDownloadName;
+
 before(async () => {
   server = await createServer({
     root: process.cwd(),
@@ -20,7 +22,9 @@ before(async () => {
     server: { middlewareMode: true, hmr: false },
     optimizeDeps: { noDiscovery: true },
   });
-  ({ default: ModelsView, MODEL_LIST_GRID_COLUMNS } = await server.ssrLoadModule("/src/views/ModelsView.jsx"));
+  ({ default: ModelsView, MODEL_LIST_GRID_COLUMNS, fallbackDownloadName } = await server.ssrLoadModule(
+    "/src/views/ModelsView.jsx"
+  ));
 });
 
 after(async () => {
@@ -512,4 +516,146 @@ test("一覧の列定義: モデル名に最大幅400px・ヘッダーとデー�
   assert.ok(count >= 3, `列定義の共有回数が不足（${count}回）`);
   // 長いモデル名は省略表示＋title（Engine列との間に過剰な空白を作らず、列を押し広げない）
   assert.ok(html.includes("truncate"), "モデル名の省略表示がない");
+});
+
+// ---------------------------------------------------------------------------
+// Engine Registry Migration（Feature: ModelsView Migration）
+// Engine表示（Label/表示名/Color）・ダウンロード判定をengineRegistry.js経由へ置換したことの回帰確認。
+// ---------------------------------------------------------------------------
+
+test("一覧: Engine列は既存どおり短いラベルを表示する（見た目を変えない）", () => {
+  const html = renderToString(React.createElement(ModelsView, baseProps()));
+  assert.ok(html.includes(">Tesseract<"), "Engine列のラベル表示が変わっている");
+});
+
+test("一覧: Engine列にEngineRegistry由来のtitle・data-engine-color属性を付与する（描画される文字・レイアウトは変えない）", () => {
+  const html = renderToString(React.createElement(ModelsView, baseProps()));
+  assert.ok(html.includes('title="Tesseract"'), "表示名（getEngineDisplayName）がtitle属性に反映されていない");
+  assert.ok(html.includes('data-engine-color="sky"'), "色（getEngineColor）がdata-engine-color属性に反映されていない");
+});
+
+test("一覧: custom（分類）エンジンは短いラベル「カスタム」のまま、titleはより詳しい表示名になる", () => {
+  const html = renderToString(
+    React.createElement(
+      ModelsView,
+      baseProps({
+        models: ["model_a.tess.json", "cls_model.pt"],
+        modelInfos: {
+          "model_a.tess.json": { model_id: "M0001", engine: "tesseract", training_family: "tesseract", created_at: "2026-07-15T10:00:00" },
+          "cls_model.pt": { model_id: "M0003", engine: "custom", training_family: "classification", created_at: "2026-07-17T10:00:00" },
+        },
+      })
+    )
+  );
+  assert.ok(html.includes(">カスタム<"), "customの短いラベル表示が変わっている");
+  assert.ok(html.includes('title="カスタム（分類）"'), "customの表示名がtitle属性に反映されていない");
+});
+
+test("fallbackDownloadName: tesseractは.tess.jsonを.traineddataへ置換する（既存挙動を維持）", () => {
+  assert.equal(fallbackDownloadName("digits_20260101.tess.json", "tesseract"), "digits_20260101.traineddata");
+});
+
+test("fallbackDownloadName: paddleocr（zip）は.ocr.jsonを.inference.zipへ置換する（既存挙動を維持）", () => {
+  assert.equal(fallbackDownloadName("ocr_20260101.ocr.json", "paddleocr"), "ocr_20260101.inference.zip");
+});
+
+test("fallbackDownloadName: custom（分類、.pt）はファイル名をそのまま返す（既存挙動を維持）", () => {
+  assert.equal(fallbackDownloadName("digits_cnn_20260101.pt", "custom"), "digits_cnn_20260101.pt");
+});
+
+test("fallbackDownloadName: 未登録engineはファイル名をそのまま返す", () => {
+  assert.equal(fallbackDownloadName("unknown_model", "unknown-engine"), "unknown_model");
+});
+
+// ---------------------------------------------------------------------------
+// Engine別 表示レビュー（PR #52レビュー指摘: Major「テストカバレッジ不足」対応）
+// PaddleOCR/EasyOCR/TrOCR/未登録Engine/空値について、一覧のEngine列（表示ラベル・
+// title・data-engine-color属性）を個別に確認する。Production側の実装（ModelsView.jsx）は
+// 変更しない（テスト追加のみ）。
+// ---------------------------------------------------------------------------
+
+// 1モデルのみの一覧をレンダリングし、Engine列（1件目のデータ行）のHTMLを返す。
+function renderSingleModelHtml(name, engine) {
+  return renderToString(
+    React.createElement(
+      ModelsView,
+      baseProps({
+        models: [name],
+        modelInfos: {
+          [name]: { model_id: "M0001", engine, training_family: "ocr", created_at: "2026-07-15T10:00:00" },
+        },
+        latest: { any: name, byType: {} },
+      })
+    )
+  );
+}
+
+test("PaddleOCR: 表示ラベル・title・data-engine-colorがRegistry値どおり（見た目は既存仕様のまま）", () => {
+  const html = renderSingleModelHtml("model_p.ocr.json", "paddleocr");
+  assert.ok(html.includes(">PaddleOCR<"), "PaddleOCRの表示ラベルが変わっている");
+  assert.ok(html.includes('title="PaddleOCR"'), "PaddleOCRの表示名（getEngineDisplayName）がtitle属性に反映されていない");
+  assert.ok(html.includes('data-engine-color="violet"'), "PaddleOCRの色（getEngineColor）がdata-engine-color属性に反映されていない");
+});
+
+test("EasyOCR: 表示ラベル・title・data-engine-colorがRegistry値どおり（見た目は既存仕様のまま）", () => {
+  const html = renderSingleModelHtml("model_e.easyocr", "easyocr");
+  assert.ok(html.includes(">EasyOCR<"), "EasyOCRの表示ラベルが変わっている");
+  assert.ok(html.includes('title="EasyOCR"'), "EasyOCRの表示名（getEngineDisplayName）がtitle属性に反映されていない");
+  assert.ok(html.includes('data-engine-color="amber"'), "EasyOCRの色（getEngineColor）がdata-engine-color属性に反映されていない");
+});
+
+test("TrOCR: 表示ラベルは「TrOCR」、PaddleOCR/カスタムへフォールバックしない（TrOCR機能自体は追加しない、表示のみ確認）", () => {
+  const html = renderSingleModelHtml("model_t.trocr", "trocr");
+  assert.ok(html.includes(">TrOCR<"), "TrOCRの表示ラベルが「TrOCR」になっていない");
+  assert.ok(!html.includes(">PaddleOCR<"), "TrOCRがPaddleOCRへフォールバックしている");
+  assert.ok(!html.includes(">カスタム<"), "TrOCRがカスタムへフォールバックしている");
+  assert.ok(html.includes('title="TrOCR"'), "TrOCRの表示名（getEngineDisplayName）がtitle属性に反映されていない");
+  assert.ok(html.includes('data-engine-color="emerald"'), "TrOCRの色（getEngineColor）がdata-engine-color属性に反映されていない");
+});
+
+test("未登録Engine: 既知Engineへフォールバックせず「不明」表示、title・data-engine-color属性は付与されない", () => {
+  const html = renderSingleModelHtml("model_x.unknown", "some-unregistered-engine");
+  assert.ok(html.includes(">不明<"), "未登録Engineが既存のunknown表示方針（不明）のまま表示されていない");
+  for (const wrongLabel of [">Tesseract<", ">PaddleOCR<", ">EasyOCR<", ">TrOCR<", ">カスタム<"]) {
+    assert.ok(!html.includes(wrongLabel), `未登録Engineが特定の既知Engine（${wrongLabel}）へフォールバックしている`);
+  }
+  // getEngineDisplayName/getEngineColorがnullを返すため、title/data-engine-color属性自体が
+  // 出力されない（Reactはundefined propの属性を省略する。文字列"null"/"undefined"にはならない）
+  assert.ok(!html.includes('title="null"') && !html.includes('title="undefined"'), "title属性が不正な文字列になっている");
+  assert.ok(
+    !html.includes('data-engine-color="null"') && !html.includes('data-engine-color="undefined"'),
+    "data-engine-color属性が不正な文字列になっている"
+  );
+});
+
+test("空値（null/undefined/空文字）: engineName()の既存フォールバック（||\"custom\"）によりカスタム表示のまま（本PRでの変更なし）", () => {
+  // engineName(name) は infoOf(name).engine || "custom" であり、本PR以前から
+  // null/undefined/空文字は "custom" へフォールバックする（ModelsView.jsx側の既存実装、
+  // 本PRでは無変更）。そのためRegistry呼び出しに渡る前に"custom"へ正規化され、
+  // 表示は一貫して「カスタム」になる（"null"/"undefined"の文字列表示にはならない）。
+  for (const engineValue of [null, undefined, ""]) {
+    const html = renderSingleModelHtml("model_null.pt", engineValue);
+    assert.ok(html.includes(">カスタム<"), `engine=${String(engineValue)}のとき「カスタム」にならない`);
+    assert.ok(!html.includes(">null<") && !html.includes(">undefined<"), "engine値がそのまま文字列表示されている");
+  }
+});
+
+test("空値（前後空白のみ）: Registry側の正規化により「不明」表示（既存のunknown表示方針を維持）", () => {
+  // "   "（空白のみ）はJSの||では真値のため engineName() は"custom"へフォールバックしない。
+  // engineRegistry.js側のnormalize()がtrimした結果空文字となり、未登録として扱われ「不明」になる。
+  const html = renderSingleModelHtml("model_blank.pt", "   ");
+  assert.ok(html.includes(">不明<"), "前後空白のみのengine値が「不明」表示にならない");
+  assert.ok(!html.includes(">カスタム<"), "前後空白のみのengine値がカスタムへフォールバックしている");
+});
+
+test("fallbackDownloadName: TrOCRは.ocr.jsonにも.ptにも誤分類せず、ファイル名をそのまま返す", () => {
+  const result = fallbackDownloadName("trocr_model_20260101", "trocr");
+  assert.equal(result, "trocr_model_20260101");
+  assert.ok(!result.endsWith(".inference.zip"), "TrOCRが.ocr.json由来のzip名に誤分類されている");
+  assert.ok(!result.endsWith(".traineddata"), "TrOCRがtesseract由来のtraineddata名に誤分類されている");
+});
+
+test("fallbackDownloadName: 未登録EngineはTesseract/PaddleOCR/customいずれの命名規則にも推測変換しない", () => {
+  const result = fallbackDownloadName("some_model.dat", "some-unregistered-engine");
+  assert.equal(result, "some_model.dat", "未登録Engineがファイル名をそのまま返していない（特定Engine向けに推測変換された）");
 });
