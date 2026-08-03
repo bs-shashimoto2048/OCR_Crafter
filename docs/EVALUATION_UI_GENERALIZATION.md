@@ -4,7 +4,20 @@ Related: Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46)�
 
 **本ドキュメントは調査・設計のみを対象とする。実装（Productionコード変更・Engine Registry変更・Models API変更・Backend変更・CSS変更・TrOCR実装・Evaluation実装）は一切行わない。**
 
-**状態（2026-08-03）**: 調査中に作成。評価関連の3画面（`OcrEvaluationView.jsx`/`BenchmarkView.jsx`/`BenchmarkCenterView.jsx`）は、責務・Engineの軸・依存API・Registry対応状況がいずれも異なり、単純な「Engine Registryへ置換するだけ」の移行では済まないことを確認した。本ドキュメントはその実態を整理し、段階的なMigration案とFuture Work候補を提示する。
+**状態（2026-08-03）**: **Completed**。Design [#59](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/59)「Evaluation UI Generalization Design」として承認され、PR [#60](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/60)をSquash Merge・mainへ反映済み（Merge Commit: `ccb172d`、設計のみ・Productionコード変更なし）。評価関連の3画面（`OcrEvaluationView.jsx`/`BenchmarkView.jsx`/`BenchmarkCenterView.jsx`）は、責務・Engineの軸・依存API・Registry対応状況がいずれも異なり、単純な「Engine Registryへ置換するだけ」の移行では済まないことを確認した。本ドキュメントはその実態を整理し、段階的なMigration案とFuture Work候補を提示する。
+
+以下が確定した設計判断である。
+
+- `OcrEvaluationView.jsx`はTesseract専用のモデル単体評価画面（Engine軸自体が存在しない）
+- `BenchmarkView.jsx`はBenchmark Variant Key軸の実行画面
+- `BenchmarkCenterView.jsx`はcanonical Engine ID軸の結果閲覧画面（既に5Engine表示可能、Refactor #57で対応済み）
+- **3画面は責務・データ軸が異なるため、無理に統合しない**（各画面の役割は維持し、個別に一般化する）
+- `OcrEvaluationView.jsx`の一般化には、Backend評価API（`POST /api/ocr/evaluate`）のマルチEngine対応が前提として必要（whitelist/PSM等のTesseract固有機能はEngine Registryのデータでは代替できない）
+- TrOCR Evaluation UIは、Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)配下のBackend Evaluation API対応が完了した後に実施する
+- 本Epic（#46）の「Evaluation UI Implementation」は、Epic #27配下のMulti-engine Evaluation API設計・実装完了後まで**依存待ち（⏸）**とする
+- **Epic間の責務境界**: Evaluation UIの見た目・画面責務の一般化はEpic #46、Evaluation Backend（Dispatcher・TrOCR対応）はEpic #27の責務。TrOCR本体の学習・推論はEpic #27、Engine Registry・UI側のデータ駆動化はEpic #46のまま維持する
+
+次のDesign Issueとして、Epic #27配下に[Design] Multi-engine Evaluation API Architectureを作成し、Backend評価API側の設計から着手する。
 
 ---
 
