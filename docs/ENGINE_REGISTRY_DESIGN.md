@@ -4,7 +4,7 @@ Related: Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46)�
 
 **本ドキュメントは設計のみを対象とする。実装（`EngineRegistry`本体・UI変更・TrOCR追加・Models API変更・Resolver変更）は一切行わない。実装は後続Feature（Engine Registry Core等）で個別に着手する。**
 
-**状態（2026-07-31）**: Feature #47は**Completed**。Feature [#49](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/49)「Engine Registry Core」も**Completed**・Closed（PR [#50](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/50)をSquash Merge・mainへ反映済み、Merge Commit: `61eca51`）。6章のデータ構造案に基づき`frontend/src/config/engineRegistry.js`（`getEngineLabel()`/`getEngineDisplayName()`/`getEngineColor()`/`getEngineDownloadType()`）を実装済み。既存画面への移行はまだ行っていない（次のFeatureは「ModelsView Migration」、9章の優先順位3に相当）。
+**状態（2026-08-03）**: Feature #47・Feature #49は**Completed**。Refactor [#51](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/51)「ModelsView Migration」も**Completed**・Closed（PR [#52](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/52)をSquash Merge・mainへ反映済み、Merge Commit: `185090c`）。`ModelsView.jsx`のEngine Label/Display Name/Color/Download TypeをすべてRegistry経由（`getEngineLabel()`/`getEngineDisplayName()`/`getEngineColor()`/`getEngineDownloadType()`）へ移行し、UIの見た目は変更していない（既存レンダリング回帰テストで確認済み）。詳細は7章「ModelsView」・11章「Future Work」参照。次のFeatureは「TrainingView Migration」（9章の優先順位5に相当）。
 
 ## 1. 背景・目的
 
@@ -165,8 +165,13 @@ export const ENGINE_REGISTRY = {
 
 ### ModelsView.jsx
 
-- **Registry化できる**: `engineLabelOf()`（4.2表の#6）→ Registry `label`参照へ置換。`isOcrFamily()`/`familyLabelOf()`（`training_family`ホワイトリスト）→ Registry `family`から導出。`handleDownload()`の拡張子3分岐（4.3表）→ Registry `downloadStrategy`/`fileExtensions`から導出。
-- **できない（Registry対象外）**: 「モデルカルテ」詳細・比較ビューが参照する`ocr_training_params`・`dataset_split_counts`・`model_size_mb`等、約15項目のモデルインスタンス固有データ（3章の通りModels API/ModelMetadataの軸）。「モデル評価」ボタンがTesseractのみ対象モデルを事前設定する遷移ロジック（`App.jsx:4431-4434`）は、Registryの`evaluable`フラグだけでは解決しない——評価画面（`OcrEvaluationView`）自体が他エンジンに未対応であるため、Registry側を直しても評価画面側の一般化が別途必要（後述）。
+**状態（2026-08-03）**: **Completed**。Refactor [#51](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/51)「ModelsView Migration」により、PR [#52](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/52)をSquash Merge・mainへ反映済み（Merge Commit: `185090c`）。
+
+- **移行済み**: `engineLabelOf()`をRegistry `getEngineLabel()`参照へ置換（既存表示ラベルは完全維持）。Engine列へ`getEngineDisplayName()`（`title`属性）・`getEngineColor()`（`data-engine-color`属性）を追加。`handleDownload()`のフォールバックファイル名判定を`getEngineDownloadType()`起点の`fallbackDownloadName()`へ置換。**UIの見た目・レイアウトは変更していない**（既存レンダリング回帰テスト24件＋新規15件、計39件で確認済み）。
+- **未移行（意図的にScope外）**: `isOcrFamily()`/`familyLabelOf()`（`training_family`の`["ocr","tesseract"]`固定ホワイトリスト）は、当初4.2/7章で「Registry化できる」候補として挙げていたが、本Featureでは対象外とした（Issue #51の明示的なScope外指定）。次のFeature以降での判断とする。
+- **Engine色（`data-engine-color`）は非表示のDOM属性としてのみ実装**: 実際に色付き表示するUI（バッジ・アイコン等）はまだ存在しない。実表示への適用は将来のUI改善Featureの対象（6章「具体値は今回決定しない」を参照。色の実際の値自体も暫定）。
+- **Download処理の既知の制約**: `downloadType`はtesseract/customがともに`"single_file"`で同値のため、`downloadType`単独ではこの2エンジンを判別できない。`fallbackDownloadName()`は`engine === "tesseract"`という個別のengine id判定を追加で残しており、Registry単体でのDownload処理の完全な一般化には至っていない（11章「Future Work」参照）。
+- **できない（Registry対象外のまま）**: 「モデルカルテ」詳細・比較ビューが参照する`ocr_training_params`・`dataset_split_counts`・`model_size_mb`等、約15項目のモデルインスタンス固有データ（3章の通りModels API/ModelMetadataの軸）。「モデル評価」ボタンがTesseractのみ対象モデルを事前設定する遷移ロジック（`App.jsx:4431-4434`）は、Registryの`evaluable`フラグだけでは解決しない——評価画面（`OcrEvaluationView`）自体が他エンジンに未対応であるため、Registry側を直しても評価画面側の一般化が別途必要（後述）。
 
 ### TrainingView.jsx
 
@@ -227,3 +232,15 @@ Epic #28の「1 Issue = 1 Consumer」原則を踏襲し、1度に全画面を移
 - Inference Resolver・Evaluation・Deployment連携（Epic #28の後続Issue）
 - バックエンド`engine_registry.py`/`engine_capability.py`とフロントエンドEngineRegistryの統合（3章で触れた将来検討事項。新規APIエンドポイント追加が必要になるため、本Featureのスコープ外かつ別Issueで判断する）
 - `OcrEvaluationView.jsx`のTesseract以外のエンジンへの一般化そのもの（7章・8章で「Registry単体では解決しない」と整理したが、その一般化自体の設計・実装は本Featureの対象外）
+
+## 11. Future Work（ModelsView Migrationレビューで残った事項）
+
+PR [#52](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/52)のマージ前レビューで挙がったMinor・Suggestionは、いずれも今回のFeatureでは対応していない。**以下は「未実装」であり、実装済みと誤解しないこと。**
+
+- **`fallbackDownloadName()`の`engine === "tesseract"`直接比較**: Registryの`getEngineDownloadType()`等が内部で行うid正規化（trim・小文字化）を経由しない、生の文字列比較のまま残っている。実データは常に正規化済み小文字のため現状の機能影響はないが、一貫性の観点で改善余地がある。
+- **`downloadType`の粒度不足**: tesseract/customが同じ`"single_file"`のため、両者を区別するには`engine === "tesseract"`という個別判定が今なお必要。`fileExtensions`/`modelFormat`相当のフィールドをRegistryへ追加すれば、この最後のハードコード分岐も解消できる（6章のデータ構造案で当初想定していたが、Engine Registry Core（Feature #49）では未実装のまま）。
+- **`engineRegistry.js`（Feature #49実装）の`getEngineLabel()`ドキュメントコメント**: 「表示名取得と同じ値を返す」と記載しているが、`custom`エントリでは`label`（カスタム）と`displayName`（カスタム（分類））が異なり、ModelsView Migrationはこの差異を実際に利用している。コメントが実態と不整合なまま残っている。
+- **Issue/PR本文への`isOcrFamily()`未移行の明記漏れ**: コード自体は正しく無変更だが、Issue #51・PR #52本文には明記されていなかった（本ドキュメント7章「ModelsView.jsx」へ記録することで対応）。
+- **ラベルテーブル統合（9章の優先順位1）が未着手のまま**: `ResultBadge.jsx`・`ocrCandidates.js`・`PreprocessView.jsx`・`RapidOCRView.jsx`の独自ラベルテーブル（4.2章）は、ModelsView Migrationでは対象外のまま残っている。9章の推奨順位ではModelsView移行（優先度3）より先に行うべき項目だったが、実際にはModelsView移行が先行した。次のFeatureで改めて優先度を判断する。
+
+これらはいずれも動作上のバグではなく、設計・実装の継続的な改善事項として記録する。次のFeature（TrainingView Migration等）着手時に、対応するかどうかを個別に判断する。
