@@ -4,9 +4,13 @@ Issue: [#61](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/61)
 
 Parent Epic: [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)（TrOCR学習・評価・Benchmark・Release Gate統合）
 
-Related: Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46) / Design [#59](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/59) / [docs/EVALUATION_UI_GENERALIZATION.md](../../EVALUATION_UI_GENERALIZATION.md) / [ADR-0001](../../adr/ADR-0001_Trocr_Architecture.md) / [ADR-0002](../../adr/ADR-0002_Unified_Model_Metadata.md) / [ADR-0003（Proposed）](../../adr/ADR-0003_Multi_Engine_Evaluation.md) / [docs/design/MULTI_ENGINE_EVALUATION_API.md](../../design/MULTI_ENGINE_EVALUATION_API.md)（本Issueの主成果物）
+Related: Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46) / Design [#59](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/59) / [docs/EVALUATION_UI_GENERALIZATION.md](../../EVALUATION_UI_GENERALIZATION.md) / [ADR-0001](../../adr/ADR-0001_Trocr_Architecture.md) / [ADR-0002](../../adr/ADR-0002_Unified_Model_Metadata.md) / [ADR-0003（Accepted）](../../adr/ADR-0003_Multi_Engine_Evaluation.md) / [docs/design/MULTI_ENGINE_EVALUATION_API.md](../../design/MULTI_ENGINE_EVALUATION_API.md)（本Issueの主成果物）
 
 **本Issueは調査・設計のみ。実装は一切行わない。**
+
+## 実施結果（2026-08-03）
+
+**Completed**・Closed。PR [#62](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/62)をSquash Merge・mainへ反映済み（Merge Commit: `34aea57`）。本ドキュメントで整理したArchitecture（案B: 共通Evaluation Runner + Engine別Predictor）は[ADR-0003](../../adr/ADR-0003_Multi_Engine_Evaluation.md)としてAcceptedとなった。次の実装対象はCommon Evaluation Schema（Feature Issueを別途作成）。以下の調査結果・Design Decision・Issue分割案は確定版として扱う。
 
 ## 調査範囲
 

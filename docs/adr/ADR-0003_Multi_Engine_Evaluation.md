@@ -1,11 +1,29 @@
 # ADR-0003: Multi-engine Evaluation Architecture
 
-- **Status**: Proposed
-- **Date**: 2026-08-03（Proposed）
-- **Related Issue**: Design [#61](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/61)（Multi-engine Evaluation API Architecture） / Parent Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27) / Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46) / Design [#59](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/59)
-- **Related PR**: 未マージ（Issue #61調査中）
+- **Status**: Accepted
+- **Date**: 2026-08-03（Proposed）/ 2026-08-03（Accepted）
+- **Related Issue**: Design [#61](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/61)（Multi-engine Evaluation API Architecture、**Completed**・Closed） / Parent Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27) / Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46) / Design [#59](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/59)
+- **Related PR**: [#62](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/62)（Squash Merge済み。Squash Commit: `34aea57`）
 
-> 本ADRはDesign Issue #61の成果物であり、調査結果の詳細は[docs/design/MULTI_ENGINE_EVALUATION_API.md](../design/MULTI_ENGINE_EVALUATION_API.md)を前提とする。PR承認後にStatusを`Proposed`→`Accepted`へ変更する予定。**現時点ではProposedのまま据え置く（実装は一切行わない）。**
+> 本ADRはDesign Issue #61の成果物であり、調査結果の詳細は[docs/design/MULTI_ENGINE_EVALUATION_API.md](../design/MULTI_ENGINE_EVALUATION_API.md)を前提とする。PR #62のレビュー承認・mainへのSquash Mergeを受けて、本ADRのStatusを**Proposed→Accepted**へ変更した。以降、本ADRの決定は正式な設計判断として扱う。
+>
+> **Implementation Status（2026-08-03）**:
+>
+> ```text
+> Architecture: Completed
+> Evaluation Schema: Not Started
+> Common Metric Calculator: Not Started
+> Evaluation Dispatcher / Runner: Not Started
+> Tesseract Predictor Adapter: Not Started
+> PaddleOCR Predictor: Not Started
+> EasyOCR Predictor: Not Started
+> TrOCR Predictor: Not Started
+> Multi-engine API Integration: Not Started
+> Evaluation UI Integration: Blocked by Backend implementation
+> Cleanup: Not Started
+> ```
+>
+> 次の実装対象はCommon Evaluation Schema（子Issue未作成→作成予定）。
 
 ## Context
 

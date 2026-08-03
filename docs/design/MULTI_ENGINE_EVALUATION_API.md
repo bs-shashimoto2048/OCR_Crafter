@@ -1,10 +1,14 @@
 # Multi-engine Evaluation API Architecture
 
-Related: Issue [#61](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/61)（Design: Multi-engine Evaluation API Architecture） / Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)（TrOCR学習・評価・Benchmark・Release Gate統合） / Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46)（Engine UI Generalization） / Design [#59](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/59) / [docs/EVALUATION_UI_GENERALIZATION.md](../EVALUATION_UI_GENERALIZATION.md) / ADR [0001](../adr/ADR-0001_Trocr_Architecture.md) / ADR [0002](../adr/ADR-0002_Unified_Model_Metadata.md) / [docs/design/ENGINE_REGISTRY.md](ENGINE_REGISTRY.md) / [docs/design/ENGINE_CAPABILITY.md](ENGINE_CAPABILITY.md) / [docs/design/TROCR_BACKEND.md](TROCR_BACKEND.md)
+Related: Issue [#61](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/61)（Design: Multi-engine Evaluation API Architecture、**Completed**・Closed） / ADR [0003（Accepted）](../adr/ADR-0003_Multi_Engine_Evaluation.md) / Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)（TrOCR学習・評価・Benchmark・Release Gate統合） / Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46)（Engine UI Generalization） / Design [#59](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/59) / [docs/EVALUATION_UI_GENERALIZATION.md](../EVALUATION_UI_GENERALIZATION.md) / ADR [0001](../adr/ADR-0001_Trocr_Architecture.md) / ADR [0002](../adr/ADR-0002_Unified_Model_Metadata.md) / [docs/design/ENGINE_REGISTRY.md](ENGINE_REGISTRY.md) / [docs/design/ENGINE_CAPABILITY.md](ENGINE_CAPABILITY.md) / [docs/design/TROCR_BACKEND.md](TROCR_BACKEND.md)
 
 **本ドキュメントは調査・設計のみを対象とする。実装（Dispatcher実装・Evaluator実装・API変更・TrOCR評価実装・Engine Registry変更・Models API変更・OcrEvaluationView変更・Benchmark変更）は一切行わない。**
 
-**状態（2026-08-03）**: Design。Issue #61として調査中。
+**状態（2026-08-03）**: **Architecture: Accepted**。Issue #61はCompleted・Closed。PR [#62](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/62)をSquash Merge・mainへ反映済み（Merge Commit: `34aea57`）。本ドキュメントの設計判断（7章の採用Architecture＝案B「共通Evaluation Runner + Engine別Predictor」、13章のModel Resolution方針、16章の後方互換方針＝既存APIを維持・拡張）は[ADR-0003（Accepted）](../adr/ADR-0003_Multi_Engine_Evaluation.md)として正式に確定した。
+
+**Evaluation UIの一般化（`OcrEvaluationView.jsx`等）はBackend実装完了待ち**（Epic #46側、責務境界は変更なし）。
+
+次の実装対象は**Common Evaluation Schema**（Feature Issueを別途作成、19章のPhase 3に相当）。Issue分割案（19章）は確定版として整理済み。実装（Schema/Dispatcher/Predictor/Metrics/API接続）はいずれも本ドキュメント時点では未着手。
 
 ---
 
