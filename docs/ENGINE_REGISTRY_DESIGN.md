@@ -4,7 +4,7 @@ Related: Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46)�
 
 **本ドキュメントは設計のみを対象とする。実装（`EngineRegistry`本体・UI変更・TrOCR追加・Models API変更・Resolver変更）は一切行わない。実装は後続Feature（Engine Registry Core等）で個別に着手する。**
 
-**状態（2026-08-03）**: Feature #47・Feature #49・Refactor #51（ModelsView Migration）は**Completed**。Refactor [#53](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/53)「TrainingViewをEngine Registryへ移行」は**実装完了・PRレビュー待ち**。`TrainingView.jsx`のOCRタイプ選択肢・Engine表示名・学習可否・デバイス対応可否・エンジン固有設定パネル・ジョブスナップショットをRegistry経由へ移行し、UIの見た目は変更していない（既存レンダリング回帰テスト44件が無修正のまま全件成功）。詳細は7章「TrainingView」・11章「Future Work」・[docs/workitems/engine-ui/TRAININGVIEW_MIGRATION.md](workitems/engine-ui/TRAININGVIEW_MIGRATION.md)参照。
+**状態（2026-08-03）**: Feature #47・Feature #49・Refactor #51（ModelsView Migration）・Refactor [#53](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/53)「TrainingViewをEngine Registryへ移行」はいずれも**Completed**（PR [#54](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/54)をSquash Merge・mainへ反映済み、Merge Commit: `cb6a8ce`）。`TrainingView.jsx`のOCRタイプ選択肢・Engine表示名・学習可否・デバイス対応可否・エンジン固有設定パネル・ジョブスナップショットをRegistry経由へ移行し、UIの見た目は変更していない（既存レンダリング回帰テスト44件が無修正のまま全件成功）。PR #54マージ前レビューで指摘されたRegistry内部状態の不変性（Major #1）も、`Object.freeze()`＋配列Getterのコピー返却により修正済み。詳細は7章「TrainingView」・11章「Future Work」・[docs/workitems/engine-ui/TRAININGVIEW_MIGRATION.md](workitems/engine-ui/TRAININGVIEW_MIGRATION.md)参照。次のFeatureは「Benchmark画面をEngine Registryへ移行」。
 
 ## 1. 背景・目的
 
@@ -175,9 +175,10 @@ export const ENGINE_REGISTRY = {
 
 ### TrainingView.jsx
 
-**状態（2026-08-03）**: **実装完了・PRレビュー待ち**。Refactor [#53](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/53)「TrainingViewをEngine Registryへ移行」により実装。詳細は[TRAININGVIEW_MIGRATION.md](workitems/engine-ui/TRAININGVIEW_MIGRATION.md)参照。
+**状態（2026-08-03）**: **Completed**。Refactor [#53](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/53)「TrainingViewをEngine Registryへ移行」により実装。PR [#54](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/54)をSquash Merge・mainへ反映済み（Merge Commit: `cb6a8ce`）。詳細は[TRAININGVIEW_MIGRATION.md](workitems/engine-ui/TRAININGVIEW_MIGRATION.md)参照。
 
-- **移行済み**: 学習エンジン`<select>`の3択ハードコード→`getTrainingSelectableEngines()`（新設）で動的生成。エンジン表示名（`engineDisplayLabel`等）→`getEngineLabel()`。学習可否（epochs入力disabled・実行操作ブロック表示ゲート）→`isEngineTrainingSupported()`（新設）へ一本化。デバイス選択ボタンのselectable条件→`getEngineSupportedDevices()`/`isEngineDeviceSupported()`（新設）。エンジン固有設定パネルの分岐→`getEngineTrainingPanel()`（新設、"paddleocr"/"tesseract"/"unsupported"の明示的な値。暗黙のPaddleOCRフォールバックを廃止）。ジョブスナップショットのラベル・フィールドレイアウト→`getEngineLabel()`/`getEngineSnapshotType()`（新設）。**UIの見た目・既存3Engineの挙動は変更していない**（既存レンダリング回帰テスト44件が無修正のまま全件成功）。
+- **移行済み**: 学習エンジン`<select>`の3択ハードコード→`getTrainingSelectableEngines()`（新設）で動的生成。エンジン表示名（`engineDisplayLabel`等）→`getEngineLabel()`。学習可否（epochs入力disabled・実行操作ブロック表示ゲート）→`isEngineTrainingSupported()`（新設）へ一本化。デバイス選択ボタンのselectable条件→`getEngineSupportedDevices()`/`isEngineDeviceSupported()`（新設）。エンジン固有設定パネルの分岐→`getEngineTrainingPanel()`（新設、"paddleocr"/"tesseract"/"unsupported"の明示的な値。暗黙のPaddleOCRフォールバックを廃止）。ジョブスナップショットのラベル・フィールドレイアウト→`getEngineLabel()`/`getEngineSnapshotType()`（新設）。**UIの見た目・既存3Engineの挙動は変更していない**（既存レンダリング回帰テスト44件が無修正のまま全件成功）。TrOCRは`trainingSupported=false`／`trainingSelectable=false`のまま（選択肢に表示しない）。
+- **Registry内部状態の不変性（PR #54マージ前レビューMajor #1、修正済み）**: `ENGINE_REGISTRY`の各エントリ・`supportedDevices`配列を`Object.freeze()`し、`getEngineSupportedDevices()`は呼び出しごとに新しい配列のコピーを返すよう変更した。呼び出し側が戻り値を変更してもRegistry内部状態・以降の呼び出し結果へ影響しない（テストで確認済み）。
 - **意図的にRegistry化しなかった（Future Work、11章参照）**: Tesseract固有の「デバイス選択UI自体を常時ロックする」挙動（`isTesseractEngine`直接比較のまま）。「最大イテレーション/学習回数」等の用語切替、OCRタイプ`<option>`の補足文言（学習UI固有の説明文であり汎用Engine capabilityではないため）。
 - **できない（Registry対象外）**: 「エンジン固有設定」パネルの実際のフォーム内容（Tesseractの PSM/Charset/Whitelist、PaddleOCRのBatch/Workers/AMP等）はエンジンごとに全く異なる入力項目であり、Registryは「どの専用コンポーネントを描画するか」の分岐先を提供できても、フォーム自体をデータ化して消せるものではない（設計方針2章の通り）。
 
@@ -248,11 +249,17 @@ PR [#52](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/52)のマージ�
 
 これらはいずれも動作上のバグではなく、設計・実装の継続的な改善事項として記録する。次のFeature（TrainingView Migration等）着手時に、対応するかどうかを個別に判断する。
 
-### Refactor #53「TrainingView Migration」で新たに残った事項
+### Refactor #53「TrainingView Migration」で残った事項
 
-PR（レビュー未実施）で挙がる可能性がある指摘に先立ち、実装時点で判明している未対応事項を記録する。**以下も「未実装」であり、実装済みと誤解しないこと。**
+PR [#54](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/54)のマージ前レビューで挙がったMajor #1（Registry内部状態の不変性）は`Object.freeze()`＋配列Getterのコピー返却により対応済み（PR #54で修正・Squash Merge済み）。**以下のMinor・Suggestion相当の事項は今回のFeatureでは対応していない。「未実装」であり、実装済みと誤解しないこと。**
 
 - **Tesseractの「デバイス選択UI常時ロック」挙動が未Registry化**: `TrainingView.jsx`の`isTesseractEngine`（`ocrEngine === "tesseract"`直接比較）が、デバイスボタンの`clickable`/`selected`/`fixedCpu`判定に残っている。`supportedDevices`のみからの一般化は、EasyOCR（対応デバイス0件）との区別が難しく回帰リスクが高いため、意図的に見送った（詳細は[TRAININGVIEW_MIGRATION.md](workitems/engine-ui/TRAININGVIEW_MIGRATION.md)「デバイス対応」参照）。
 - **OCRタイプ`<option>`の補足文言（`TRAINING_ENGINE_OPTION_SUFFIX`）はTrainingView.jsx内のローカル定数のまま**: 「（学習可）」「（推論専用）」等の学習UI固有の説明文はRegistryへ追加していない。Registryへ統合するかどうかは未判断。
 - **「最大イテレーション/学習回数」等の用語切替も`isTesseractEngine`直接比較のまま**: 表示名・学習可否・デバイス・設定パネル・スナップショットは移行済みだが、この用語切替は対象外とした（プレゼンテーション上の言い回しであり、Engine capabilityの一部ではないと判断したため）。
+- **EasyOCRの`supportedDevices`と学習未対応状態の意味を明確化する余地**: `supportedDevices=[]`は「学習における対応デバイス」というTraining専用スコープであり、`src/app/services/engine_capability.py`の`supports_cpu=True`/`supports_cuda=True`（推論としては両デバイス対応）とは別概念。この区別はコードコメントに記載済みだが、フィールド名（`supportedDevices`）だけでは読み取りにくく、将来Backend Capability全体との対応表だと誤解される恐れがある（PR #54レビューMinor）。
+- **Registry Getterの戻り値ポリシーを今後も維持すること**: 配列を返すGetter（`getEngineSupportedDevices()`等）は必ず呼び出しごとに新しいコピーを返し、Registry内部オブジェクトへの参照を外部へ漏らさない（`getEngineEntry()`の戻り値はfrozen）。Registryへ新しい配列・オブジェクト型フィールドを追加する際は、同じ方針（freeze＋コピー返却）を踏襲すること。
 - **ラベルテーブル統合（9章の優先順位1）は本Featureでも未着手のまま**（ModelsView Migration時点から継続）。
+
+### 開発上の注意事項: テストファイル追加時の`package.json`登録
+
+`frontend/package.json`の`npm test`スクリプトはテストファイルを明示列挙する方式であり、glob等による自動検出は行われない。Feature #49（Engine Registry Core）で新規作成した`tests/engineRegistry.test.mjs`がこの登録から漏れており、Refactor #51（ModelsView Migration）完了時点までの2回の完了報告で「npm test全通過」と報告した内容には、実際にはこの13件が含まれていなかった（Refactor #53で登録漏れを修正し、以降は`npm test`の実測件数に含まれている）。**新規テストファイルを追加する場合は、`frontend/package.json`の`test`スクリプトへの追記を必ず行うこと。** `node --test <ファイル名>`単体では成功していても、`npm test`（CI等が実行する経路）には反映されない点に注意する。

@@ -1,6 +1,6 @@
 # TrainingView Migration 作業記録
 
-Related: Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46)（Engine UI Generalization） / Refactor [#53](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/53)（TrainingViewをEngine Registryへ移行） / [ENGINE_REGISTRY_DESIGN.md](../../ENGINE_REGISTRY_DESIGN.md) / Engine Registry Core [#49](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/49) / ModelsView Migration [#51](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/51)
+Related: Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46)（Engine UI Generalization） / Refactor [#53](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/53)（TrainingViewをEngine Registryへ移行、**Completed**・Closed。PR [#54](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/54)をSquash Merge・mainへ反映済み、Merge Commit: `cb6a8ce`） / [ENGINE_REGISTRY_DESIGN.md](../../ENGINE_REGISTRY_DESIGN.md) / Engine Registry Core [#49](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/49) / ModelsView Migration [#51](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/51)
 
 本ドキュメントは、`TrainingView.jsx`のEngine固有処理を`frontend/src/config/engineRegistry.js`へ移行した作業（Refactor #53）の記録である。
 
@@ -83,9 +83,24 @@ Related: Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46)�
 
 `src/app/`配下・`App.jsx`・API呼び出し（`onStartOcrTraining`等のコールバック呼び出し形式）はいずれも変更していない。
 
+## Registry内部状態の不変性（PR #54マージ前レビューMajor #1、対応済み）
+
+PR #54のマージ前レビューで、`ENGINE_REGISTRY`の内部オブジェクト・配列が呼び出し側から変更可能である（`getEngineEntry()`・`getEngineSupportedDevices()`がRegistry内部の参照をそのまま返していた）ことが指摘された。以下の対応をPR #54内で実施し、mainへ反映済み。
+
+- `ENGINE_REGISTRY`の各エントリ・`supportedDevices`配列を`Object.freeze()`（呼び出し側が`entry.trainingSupported = false`や`entry.supportedDevices.push()`を試みると`TypeError`になり、Registry内部状態は変化しない）
+- `getEngineSupportedDevices()`は呼び出しごとに新しい配列のコピーを返す（未登録Engineの戻り値も`null`から`[]`へ変更）
+- `getTrainingSelectableEngines()`は既存の`Array.map()/filter()`連鎖により元から毎回新規配列・オブジェクトを返していたことを確認（Production側の変更は不要だった）
+- `frontend/tests/engineRegistry.test.mjs`へ、戻り値変更が次回呼び出し・他Engine・Registry内部へ波及しないことを検証するテストを6件追加
+
 ## Future Work
 
 - Tesseractの「デバイス選択UI常時ロック」挙動の一般化（現状は`isTesseractEngine`直接比較のまま）
 - `TRAINING_ENGINE_OPTION_SUFFIX`（学習UI固有の補足文言）をRegistryへ統合するかどうかの判断
 - `engineRegistry.js`のラベルテーブル統合（ENGINE_REGISTRY_DESIGN.md 9章優先順位1）は本Featureでも未着手のまま
+- EasyOCRの`supportedDevices=[]`が「学習における対応デバイス」という専用スコープであり、Backend Capability（`supports_cpu`/`supports_cuda`）の一般的な意味とは異なることを、フィールド名だけでは読み取りにくい（将来の命名見直し余地）
+- Registry Getterの戻り値ポリシー（freeze＋配列コピー返却）を、今後Registryへ新しいフィールドを追加する際も踏襲すること
 - TrainingView以外の画面（Benchmark/Evaluation）のEngine Registry移行
+
+## 開発上の注意事項
+
+`frontend/package.json`の`npm test`スクリプトはテストファイルを明示列挙する方式である。Feature #49（Engine Registry Core）で新規作成した`tests/engineRegistry.test.mjs`がこの登録から漏れており、Refactor #51（ModelsView Migration）完了時点までの完了報告で「npm test全通過」と報告した内容には、実際にはこの13件が含まれていなかった（Refactor #53で修正）。**新規テストファイルを追加する場合は、必ず`frontend/package.json`の`test`スクリプトへ追記すること。**
