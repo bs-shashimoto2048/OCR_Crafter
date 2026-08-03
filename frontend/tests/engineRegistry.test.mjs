@@ -15,6 +15,13 @@ import {
   getEngineDownloadType,
   getEngineEntry,
   getEngineLabel,
+  getEngineSnapshotType,
+  getEngineSupportedDevices,
+  getEngineTrainingPanel,
+  getTrainingSelectableEngines,
+  isEngineDeviceSupported,
+  isEngineTrainingSelectable,
+  isEngineTrainingSupported,
   listEngineIds,
 } from "../src/config/engineRegistry.js";
 
@@ -110,6 +117,100 @@ test("getEngineDownloadType: 既知5エンジンのダウンロード方式", ()
 
 test("getEngineDownloadType: 未登録はnull", () => {
   assert.equal(getEngineDownloadType("unknown-engine"), null);
+});
+
+// ---------------------------------------------------------------------------
+// TrainingView Migration（Feature #53）向けに追加したフィールド・公開API
+// ---------------------------------------------------------------------------
+
+// ---------- 学習可否（trainingSupported） ----------
+
+test("isEngineTrainingSupported: PaddleOCR/Tesseractはtrue、EasyOCR/TrOCRはfalse", () => {
+  assert.equal(isEngineTrainingSupported("paddleocr"), true);
+  assert.equal(isEngineTrainingSupported("tesseract"), true);
+  assert.equal(isEngineTrainingSupported("easyocr"), false);
+  assert.equal(isEngineTrainingSupported("trocr"), false);
+});
+
+test("isEngineTrainingSupported: custom・未登録・null/undefined/空文字はfalse（学習可能と誤認させない）", () => {
+  for (const value of ["custom", "unknown-engine", null, undefined, "", "   "]) {
+    assert.equal(isEngineTrainingSupported(value), false, `value=${String(value)}`);
+  }
+});
+
+// ---------- 選択肢（trainingSelectable / getTrainingSelectableEngines） ----------
+
+test("isEngineTrainingSelectable: PaddleOCR/Tesseract/EasyOCRはtrue、TrOCR/customはfalse", () => {
+  assert.equal(isEngineTrainingSelectable("paddleocr"), true);
+  assert.equal(isEngineTrainingSelectable("tesseract"), true);
+  assert.equal(isEngineTrainingSelectable("easyocr"), true);
+  assert.equal(isEngineTrainingSelectable("trocr"), false);
+  assert.equal(isEngineTrainingSelectable("custom"), false);
+});
+
+test("getTrainingSelectableEngines: 既存UIと同じ順序・内容（PaddleOCR→Tesseract→EasyOCR）でTrOCR/customを含まない", () => {
+  const engines = getTrainingSelectableEngines();
+  assert.deepEqual(engines, [
+    { id: "paddleocr", label: "PaddleOCR" },
+    { id: "tesseract", label: "Tesseract" },
+    { id: "easyocr", label: "EasyOCR" },
+  ]);
+});
+
+// ---------- デバイス対応可否 ----------
+
+test("getEngineSupportedDevices: エンジンごとの対応デバイス", () => {
+  assert.deepEqual(getEngineSupportedDevices("tesseract"), ["cpu"]);
+  assert.deepEqual(getEngineSupportedDevices("paddleocr"), ["cpu", "gpu"]);
+  assert.deepEqual(getEngineSupportedDevices("easyocr"), []);
+});
+
+test("getEngineSupportedDevices: 未登録engineはnull", () => {
+  assert.equal(getEngineSupportedDevices("unknown-engine"), null);
+});
+
+test("isEngineDeviceSupported: Tesseractはcpuのみ、PaddleOCRはcpu/gpu両方、EasyOCRはどちらも非対応", () => {
+  assert.equal(isEngineDeviceSupported("tesseract", "cpu"), true);
+  assert.equal(isEngineDeviceSupported("tesseract", "gpu"), false);
+  assert.equal(isEngineDeviceSupported("paddleocr", "cpu"), true);
+  assert.equal(isEngineDeviceSupported("paddleocr", "gpu"), true);
+  assert.equal(isEngineDeviceSupported("easyocr", "cpu"), false);
+  assert.equal(isEngineDeviceSupported("easyocr", "gpu"), false);
+});
+
+test("isEngineDeviceSupported: 未登録engineは全デバイスfalse（全対応扱いにならない）", () => {
+  assert.equal(isEngineDeviceSupported("unknown-engine", "cpu"), false);
+  assert.equal(isEngineDeviceSupported("unknown-engine", "gpu"), false);
+  assert.equal(isEngineDeviceSupported(null, "cpu"), false);
+});
+
+// ---------- 設定パネル種別 ----------
+
+test("getEngineTrainingPanel: paddleocr/tesseractは専用パネル、easyocr/trocrはunsupported", () => {
+  assert.equal(getEngineTrainingPanel("paddleocr"), "paddleocr");
+  assert.equal(getEngineTrainingPanel("tesseract"), "tesseract");
+  assert.equal(getEngineTrainingPanel("easyocr"), "unsupported");
+  assert.equal(getEngineTrainingPanel("trocr"), "unsupported");
+});
+
+test("getEngineTrainingPanel: 未登録engineはnull（呼び出し側でPaddleOCRへフォールバックしないこと）", () => {
+  assert.equal(getEngineTrainingPanel("unknown-engine"), null);
+  assert.equal(getEngineTrainingPanel(null), null);
+  assert.equal(getEngineTrainingPanel(""), null);
+});
+
+// ---------- ジョブスナップショット種別 ----------
+
+test("getEngineSnapshotType: tesseractのみtesseract、それ以外（paddleocr/easyocr/trocr）はgeneric", () => {
+  assert.equal(getEngineSnapshotType("tesseract"), "tesseract");
+  assert.equal(getEngineSnapshotType("paddleocr"), "generic");
+  assert.equal(getEngineSnapshotType("easyocr"), "generic");
+  assert.equal(getEngineSnapshotType("trocr"), "generic");
+});
+
+test("getEngineSnapshotType: 未登録engineはnull（tesseract扱いにもgeneric扱いにも決め打ちしない）", () => {
+  assert.equal(getEngineSnapshotType("unknown-engine"), null);
+  assert.equal(getEngineSnapshotType(undefined), null);
 });
 
 // ---------- Regression: 既存のengineResolution.js等（本Featureでは変更しない）に影響しないこと ----------

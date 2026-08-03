@@ -2,6 +2,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Card from "../components/Card";
 import Button from "../components/Button";
 import InfoTooltip from "../components/InfoTooltip";
+import {
+  getEngineLabel,
+  getEngineSnapshotType,
+  getEngineSupportedDevices,
+  getEngineTrainingPanel,
+  getTrainingSelectableEngines,
+  isEngineDeviceSupported,
+  isEngineTrainingSupported,
+} from "../config/engineRegistry";
 import { PADDLEOCR_OFFICIAL_MODELS_TOOLTIP } from "../lib/paddleocrOfficialTooltip";
 import { autoTestRatio, normalizeRatioInput, summarizeRatios } from "../lib/ratio";
 import AugmentationSettingsPanel from "../components/AugmentationSettingsPanel";
@@ -33,6 +42,15 @@ import {
 const OCR_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 // Tesseract学習対象文字セット（A-Z / 0-9 / 小文字筆記体 k,l,t / 記号 + -）
 const TESSERACT_CHARSET_DEFAULT = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789klt+-";
+
+// OCRタイプ選択肢の補足テキスト（Engineの学習可否・文字セット等、Registryが持たない
+// 学習UI固有の説明文のみをここで保持する。id・表示名・順序はgetTrainingSelectableEngines()
+// （Engine Registry、frontend/src/config/engineRegistry.js）から取得する）
+const TRAINING_ENGINE_OPTION_SUFFIX = {
+  paddleocr: "（学習可）",
+  tesseract: "（学習可 / A-Z・0-9・筆記体klt・記号+-）",
+  easyocr: "（推論専用）",
+};
 
 // 次回学習の設定（インライン編集）のタブ（3カテゴリ＝学習設定＋オーグメンテーション＋エンジン設定。
 // 設定値・保存処理は従来のstateを共有する）。定義は lib/trainingSettingsTabs.js を共通ソースとする
@@ -494,12 +512,14 @@ export default function TrainingView({
       }),
     [ocrPreprocessCurrentConfig]
   );
-  // 次回学習の設定のカテゴリサマリー表示用ラベル
-  const engineDisplayLabel = ocrEngine === "paddleocr" ? "PaddleOCR" : ocrEngine === "tesseract" ? "Tesseract" : "EasyOCR";
+  // 次回学習の設定のカテゴリサマリー表示用ラベル。未登録Engineへフォールバックしない
+  // （Engine Registry由来。既存3Engine分の表示文言は変更しない）
+  const engineTrainingPanel = getEngineTrainingPanel(ocrEngine);
+  const engineDisplayLabel = getEngineLabel(ocrEngine) ?? "不明";
   const engineSummaryLabel =
-    ocrEngine === "tesseract"
+    engineTrainingPanel === "tesseract"
       ? "eng.traineddata / PSM 7"
-      : ocrEngine === "easyocr"
+      : !isEngineTrainingSupported(ocrEngine)
         ? "学習対象外（推論専用）"
         : `初期化: ${ocrInitSourceType === "scratch" ? "scratch" : "既存OCRモデル"} / Batch ${batchSize || "-"}`;
   const ocrNextAction = ocrDatasetReady ? "train" : "dataset";
@@ -676,9 +696,12 @@ export default function TrainingView({
                                 <div>
                                   <label className="app-label">OCRタイプ</label>
                                   <select value={ocrEngine} onChange={(e) => setOcrEngine(e.target.value)} className="app-select">
-                                    <option value="paddleocr">PaddleOCR（学習可）</option>
-                                    <option value="tesseract">Tesseract（学習可 / A-Z・0-9・筆記体klt・記号+-）</option>
-                                    <option value="easyocr">EasyOCR（推論専用）</option>
+                                    {getTrainingSelectableEngines().map(({ id, label }) => (
+                                      <option key={id} value={id}>
+                                        {label}
+                                        {TRAINING_ENGINE_OPTION_SUFFIX[id] ?? ""}
+                                      </option>
+                                    ))}
                                   </select>
                                 </div>
                                 <div>
@@ -691,7 +714,7 @@ export default function TrainingView({
                                     className="app-input"
                                     value={epochs}
                                     onChange={(e) => setEpochs(e.target.value)}
-                                    disabled={ocrEngine === "easyocr"}
+                                    disabled={!isEngineTrainingSupported(ocrEngine)}
                                   />
                                   <p className="mt-1 text-[11px] text-muted">
                                     {isTesseractEngine
@@ -713,7 +736,10 @@ export default function TrainingView({
                                       // 選択可能なボタンは色付きで発光させる（Auto=青）。未選択でも背景をカードより明るくし操作可能と分かるようにする
                                       glow: "border-accent/80 bg-slate-700/70 text-blue-200 shadow-[0_0_10px_rgba(88,166,255,0.55)] hover:bg-accent/20",
                                       selectedClass: "border-accent bg-accent text-white shadow-[0_0_14px_rgba(88,166,255,0.75)]",
-                                      selectable: !isTesseractEngine && ocrEngine !== "easyocr",
+                                      // autoは「複数デバイスから自動選択する」という意味のため、
+                                      // Registry上で複数デバイスに対応しているEngineのみ選択可能とする
+                                      // （Tesseract=cpuのみ・EasyOCR=対応デバイスなし、のため両方とも自動的にfalseになる）
+                                      selectable: (getEngineSupportedDevices(ocrEngine)?.length ?? 0) > 1,
                                       hint: "GPUが利用可能ならGPUを使用します",
                                     },
                                     {
@@ -721,7 +747,7 @@ export default function TrainingView({
                                       label: "CPU",
                                       glow: "border-cyan-400/80 bg-slate-700/70 text-cyan-100 shadow-[0_0_10px_rgba(34,211,238,0.55)] hover:bg-cyan-400/15",
                                       selectedClass: "border-cyan-300 bg-cyan-500/80 text-white shadow-[0_0_14px_rgba(34,211,238,0.75)]",
-                                      selectable: ocrEngine !== "easyocr",
+                                      selectable: isEngineDeviceSupported(ocrEngine, "cpu"),
                                       hint: "CPUで学習します",
                                     },
                                     {
@@ -732,8 +758,7 @@ export default function TrainingView({
                                       // GPUハードが検出されていれば選択可能として点灯する
                                       // （torch/paddleのCUDA対応状況は実行時に解決されるためUIではブロックしない）
                                       selectable:
-                                        !isTesseractEngine &&
-                                        ocrEngine !== "easyocr" &&
+                                        isEngineDeviceSupported(ocrEngine, "gpu") &&
                                         Boolean(systemCheck?.gpu_available || systemCheck?.gpu_name),
                                       hint: systemCheck?.gpu_name
                                         ? `GPUで学習します（${systemCheck.gpu_name}）`
@@ -1146,13 +1171,9 @@ export default function TrainingView({
                           {settingsTab === "engine" ? (
                             <div role="tabpanel" id="settings-panel-engine" aria-labelledby="settings-tab-engine" className="space-y-2">
                               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">
-                                エンジン固有設定（{ocrEngine === "paddleocr" ? "PaddleOCR" : isTesseractEngine ? "Tesseract" : "EasyOCR"}）
+                                エンジン固有設定（{engineDisplayLabel}）
                               </p>
-                              {ocrEngine === "easyocr" ? (
-                                <div className="rounded-lg border border-amber-300/40 bg-amber-300/10 p-3 text-sm text-amber-100">
-                                  EasyOCR はこのUIでは学習対象外です。推論画面でのみ利用できます。
-                                </div>
-                              ) : isTesseractEngine ? (
+                              {engineTrainingPanel === "tesseract" ? (
                                 <>
                                   <div className="grid grid-cols-2 gap-2">
                                     <div>
@@ -1244,7 +1265,7 @@ export default function TrainingView({
                                     未導入の場合は学習開始時に導入手順つきでエラーになります。
                                   </p>
                                 </>
-                              ) : (
+                              ) : engineTrainingPanel === "paddleocr" ? (
                                 <>
                                   <div className="space-y-2 rounded-lg border border-border/70 bg-card/50 p-3">
                                     <p className="text-xs font-semibold text-slate-100">初期重み</p>
@@ -1515,6 +1536,14 @@ export default function TrainingView({
                                     </div>
                                   </div>
                                 </>
+                              ) : (
+                                // Registryが返すtrainingPanelがtesseract/paddleocrいずれでもない場合
+                                // （EasyOCR・TrOCR・未登録Engine）。PaddleOCR設定は表示しない
+                                <div className="rounded-lg border border-amber-300/40 bg-amber-300/10 p-3 text-sm text-amber-100">
+                                  {ocrEngine === "easyocr"
+                                    ? "EasyOCR はこのUIでは学習対象外です。推論画面でのみ利用できます。"
+                                    : "このエンジンはこのUIでは学習対象外です。"}
+                                </div>
                               )}
                             </div>
                           ) : null}
@@ -1555,6 +1584,13 @@ export default function TrainingView({
             {/* 実行時設定（ジョブ開始時のスナップショット・読み取り専用）。
                 低い画面でも次回学習設定の高さを確保するため折り畳み可能（初期は閉・1行サマリー表示。情報は開けば全て見える） */}
             {jobInfo ? (
+              // Registry由来のラベルを優先し、未登録Engine（TrOCR等）は生のengine値を
+              // そのまま表示する（"Tesseract"/"PaddleOCR"へ誤って揃えない。既存挙動と同じ
+              // フォールバック順: Registryラベル→生のengine値→"--"）
+              (() => {
+                const jobEngineLabel = getEngineLabel(jobInfo.engine) ?? (jobInfo.engine || "--");
+                const jobSnapshotType = getEngineSnapshotType(jobInfo.engine);
+                return (
               <div className="shrink-0 rounded-xl border border-border/80 bg-card/55">
                 <button
                   type="button"
@@ -1571,25 +1607,17 @@ export default function TrainingView({
                   <span className="ml-auto min-w-0 truncate text-[11px] font-normal text-muted">
                     {runtimeSettingsOpen
                       ? "このジョブ開始時の値（読み取り専用）"
-                      : `${
-                          String(jobInfo.engine || "") === "tesseract"
-                            ? "Tesseract"
-                            : String(jobInfo.engine || "") === "paddleocr"
-                              ? "PaddleOCR"
-                              : jobInfo.engine || "--"
-                        }・${String(jobInfo.dataset_dir || "--").split(/[\\/]/).slice(-1)[0] || "--"}`}
+                      : `${jobEngineLabel}・${String(jobInfo.dataset_dir || "--").split(/[\\/]/).slice(-1)[0] || "--"}`}
                   </span>
                 </button>
                 <div className={runtimeSettingsOpen ? "grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 px-3 pb-3 text-sm" : "hidden"}>
                   <span className="text-muted">OCRタイプ</span>
-                  <span className="font-semibold text-text">
-                    {String(jobInfo.engine || "") === "tesseract" ? "Tesseract" : String(jobInfo.engine || "") === "paddleocr" ? "PaddleOCR" : jobInfo.engine || "--"}
-                  </span>
+                  <span className="font-semibold text-text">{jobEngineLabel}</span>
                   <span className="text-muted">Base Model</span>
                   <span className="min-w-0 truncate text-text" title={String(jobInfo.init_source_value || "")}>
                     {jobInfo.init_source_value || "--"}
                   </span>
-                  {String(jobInfo.engine || "") === "tesseract" ? (
+                  {jobSnapshotType === "tesseract" ? (
                     <>
                       <span className="text-muted">PSM</span>
                       <span className="text-text">{jobInfo.max_text_length ?? "--"}</span>
@@ -1612,6 +1640,8 @@ export default function TrainingView({
                   </span>
                 </div>
               </div>
+                );
+              })()
             ) : null}
 
             {/* 学習方式の固定表示は実行概要の「方式」行と重複するため、切替が必要なallモードのみ表示
@@ -1944,7 +1974,7 @@ export default function TrainingView({
                 </section>
 
 
-                {ocrEngine !== "easyocr" ? (
+                {isEngineTrainingSupported(ocrEngine) ? (
                   <>
                     {/* 実行操作は左ペイン末尾の固定領域（設定をスクロールしても常に見える。position:fixedは不使用） */}
                     <div className="shrink-0 space-y-2 rounded-xl border border-border/80 bg-card/45 p-3">

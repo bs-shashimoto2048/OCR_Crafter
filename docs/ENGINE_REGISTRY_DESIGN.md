@@ -4,7 +4,7 @@ Related: Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46)�
 
 **本ドキュメントは設計のみを対象とする。実装（`EngineRegistry`本体・UI変更・TrOCR追加・Models API変更・Resolver変更）は一切行わない。実装は後続Feature（Engine Registry Core等）で個別に着手する。**
 
-**状態（2026-08-03）**: Feature #47・Feature #49は**Completed**。Refactor [#51](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/51)「ModelsView Migration」も**Completed**・Closed（PR [#52](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/52)をSquash Merge・mainへ反映済み、Merge Commit: `185090c`）。`ModelsView.jsx`のEngine Label/Display Name/Color/Download TypeをすべてRegistry経由（`getEngineLabel()`/`getEngineDisplayName()`/`getEngineColor()`/`getEngineDownloadType()`）へ移行し、UIの見た目は変更していない（既存レンダリング回帰テストで確認済み）。詳細は7章「ModelsView」・11章「Future Work」参照。次のFeatureは「TrainingView Migration」（9章の優先順位5に相当）。
+**状態（2026-08-03）**: Feature #47・Feature #49・Refactor #51（ModelsView Migration）は**Completed**。Refactor [#53](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/53)「TrainingViewをEngine Registryへ移行」は**実装完了・PRレビュー待ち**。`TrainingView.jsx`のOCRタイプ選択肢・Engine表示名・学習可否・デバイス対応可否・エンジン固有設定パネル・ジョブスナップショットをRegistry経由へ移行し、UIの見た目は変更していない（既存レンダリング回帰テスト44件が無修正のまま全件成功）。詳細は7章「TrainingView」・11章「Future Work」・[docs/workitems/engine-ui/TRAININGVIEW_MIGRATION.md](workitems/engine-ui/TRAININGVIEW_MIGRATION.md)参照。
 
 ## 1. 背景・目的
 
@@ -175,8 +175,11 @@ export const ENGINE_REGISTRY = {
 
 ### TrainingView.jsx
 
-- **Registry化できる**: 学習エンジン`<select>`の3択ハードコード（4.3表）→ Registryを`trainable===true`でフィルタした一覧から動的生成。デバイス選択可否（`isTesseractEngine`等の3分岐、4.3表）→ Registry `hardware`から導出。エンジンラベル・タブ見出し（`isTesseractEngine?...`の各所）→ Registry `label`。
-- **できない（Registry対象外）**: 「エンジン固有設定」タブの実際のフォーム内容（Tesseractの PSM/Charset/Whitelist、PaddleOCRのBatch/Workers/AMP等）はエンジンごとに全く異なる入力項目であり、Registryは「どの専用コンポーネントを描画するか」の分岐先を提供できても、フォーム自体をデータ化して消せるものではない（設計方針2章の通り）。
+**状態（2026-08-03）**: **実装完了・PRレビュー待ち**。Refactor [#53](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/53)「TrainingViewをEngine Registryへ移行」により実装。詳細は[TRAININGVIEW_MIGRATION.md](workitems/engine-ui/TRAININGVIEW_MIGRATION.md)参照。
+
+- **移行済み**: 学習エンジン`<select>`の3択ハードコード→`getTrainingSelectableEngines()`（新設）で動的生成。エンジン表示名（`engineDisplayLabel`等）→`getEngineLabel()`。学習可否（epochs入力disabled・実行操作ブロック表示ゲート）→`isEngineTrainingSupported()`（新設）へ一本化。デバイス選択ボタンのselectable条件→`getEngineSupportedDevices()`/`isEngineDeviceSupported()`（新設）。エンジン固有設定パネルの分岐→`getEngineTrainingPanel()`（新設、"paddleocr"/"tesseract"/"unsupported"の明示的な値。暗黙のPaddleOCRフォールバックを廃止）。ジョブスナップショットのラベル・フィールドレイアウト→`getEngineLabel()`/`getEngineSnapshotType()`（新設）。**UIの見た目・既存3Engineの挙動は変更していない**（既存レンダリング回帰テスト44件が無修正のまま全件成功）。
+- **意図的にRegistry化しなかった（Future Work、11章参照）**: Tesseract固有の「デバイス選択UI自体を常時ロックする」挙動（`isTesseractEngine`直接比較のまま）。「最大イテレーション/学習回数」等の用語切替、OCRタイプ`<option>`の補足文言（学習UI固有の説明文であり汎用Engine capabilityではないため）。
+- **できない（Registry対象外）**: 「エンジン固有設定」パネルの実際のフォーム内容（Tesseractの PSM/Charset/Whitelist、PaddleOCRのBatch/Workers/AMP等）はエンジンごとに全く異なる入力項目であり、Registryは「どの専用コンポーネントを描画するか」の分岐先を提供できても、フォーム自体をデータ化して消せるものではない（設計方針2章の通り）。
 
 ### OcrEvaluationView.jsx
 
@@ -244,3 +247,12 @@ PR [#52](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/52)のマージ�
 - **ラベルテーブル統合（9章の優先順位1）が未着手のまま**: `ResultBadge.jsx`・`ocrCandidates.js`・`PreprocessView.jsx`・`RapidOCRView.jsx`の独自ラベルテーブル（4.2章）は、ModelsView Migrationでは対象外のまま残っている。9章の推奨順位ではModelsView移行（優先度3）より先に行うべき項目だったが、実際にはModelsView移行が先行した。次のFeatureで改めて優先度を判断する。
 
 これらはいずれも動作上のバグではなく、設計・実装の継続的な改善事項として記録する。次のFeature（TrainingView Migration等）着手時に、対応するかどうかを個別に判断する。
+
+### Refactor #53「TrainingView Migration」で新たに残った事項
+
+PR（レビュー未実施）で挙がる可能性がある指摘に先立ち、実装時点で判明している未対応事項を記録する。**以下も「未実装」であり、実装済みと誤解しないこと。**
+
+- **Tesseractの「デバイス選択UI常時ロック」挙動が未Registry化**: `TrainingView.jsx`の`isTesseractEngine`（`ocrEngine === "tesseract"`直接比較）が、デバイスボタンの`clickable`/`selected`/`fixedCpu`判定に残っている。`supportedDevices`のみからの一般化は、EasyOCR（対応デバイス0件）との区別が難しく回帰リスクが高いため、意図的に見送った（詳細は[TRAININGVIEW_MIGRATION.md](workitems/engine-ui/TRAININGVIEW_MIGRATION.md)「デバイス対応」参照）。
+- **OCRタイプ`<option>`の補足文言（`TRAINING_ENGINE_OPTION_SUFFIX`）はTrainingView.jsx内のローカル定数のまま**: 「（学習可）」「（推論専用）」等の学習UI固有の説明文はRegistryへ追加していない。Registryへ統合するかどうかは未判断。
+- **「最大イテレーション/学習回数」等の用語切替も`isTesseractEngine`直接比較のまま**: 表示名・学習可否・デバイス・設定パネル・スナップショットは移行済みだが、この用語切替は対象外とした（プレゼンテーション上の言い回しであり、Engine capabilityの一部ではないと判断したため）。
+- **ラベルテーブル統合（9章の優先順位1）は本Featureでも未着手のまま**（ModelsView Migration時点から継続）。
