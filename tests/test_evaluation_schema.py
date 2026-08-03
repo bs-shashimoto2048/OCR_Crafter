@@ -1,6 +1,9 @@
 """Multi-engine Evaluation API共通Schema（Issue #63）のテスト。既存OcrEvaluateRequest/OcrEvalTargetの後方互換と、
 新設OcrEvaluationMetrics/SampleResult/Confusion/Resultの検証を確認する。"""
 
+import json
+import math
+
 import pytest
 from pydantic import ValidationError
 
@@ -439,3 +442,258 @@ def test_existing_api_payload_shape_from_frontend_still_parses():
     dumped_targets = [t.model_dump() for t in req.targets]
     assert dumped_targets[0]["engine"] == "tesseract"
     assert "options" in dumped_targets[0]
+
+
+# ---------------------------------------------------------------------------
+# 非有限値（NaN/Infinity/-Infinity）の拒否（PR #64レビュー指摘対応）
+# ---------------------------------------------------------------------------
+
+
+NON_FINITE_VALUES = [float("nan"), float("inf"), float("-inf")]
+
+
+@pytest.mark.parametrize("value", NON_FINITE_VALUES)
+def test_metrics_cer_rejects_non_finite(value):
+    with pytest.raises(ValidationError):
+        OcrEvaluationMetrics(cer=value)
+
+
+@pytest.mark.parametrize("value", NON_FINITE_VALUES)
+def test_metrics_character_accuracy_rejects_non_finite(value):
+    with pytest.raises(ValidationError):
+        OcrEvaluationMetrics(character_accuracy=value)
+
+
+@pytest.mark.parametrize("value", NON_FINITE_VALUES)
+def test_metrics_exact_match_rate_rejects_non_finite(value):
+    with pytest.raises(ValidationError):
+        OcrEvaluationMetrics(exact_match_rate=value)
+
+
+@pytest.mark.parametrize("value", NON_FINITE_VALUES)
+def test_sample_confidence_rejects_non_finite(value):
+    with pytest.raises(ValidationError):
+        OcrEvaluationSampleResult(image="a.png", ground_truth="ABC", confidence=value)
+
+
+@pytest.mark.parametrize("value", NON_FINITE_VALUES)
+def test_sample_duration_ms_rejects_non_finite(value):
+    with pytest.raises(ValidationError):
+        OcrEvaluationSampleResult(image="a.png", ground_truth="ABC", duration_ms=value)
+
+
+@pytest.mark.parametrize("value", NON_FINITE_VALUES)
+def test_sample_cer_rejects_non_finite(value):
+    with pytest.raises(ValidationError):
+        OcrEvaluationSampleResult(image="a.png", ground_truth="ABC", cer=value)
+
+
+@pytest.mark.parametrize("value", NON_FINITE_VALUES)
+def test_result_duration_ms_rejects_non_finite(value):
+    with pytest.raises(ValidationError):
+        OcrEvaluationResult(engine_id="tesseract", duration_ms=value)
+
+
+def test_non_finite_rejection_is_not_silently_converted():
+    """非有限値はnullや0.0へ自動変換されず、明示的なValidation Errorになる（値の黙殺禁止）。"""
+    with pytest.raises(ValidationError) as exc_info:
+        OcrEvaluationMetrics(cer=float("inf"))
+    assert "cer" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# 数値文字列の拒否（PR #64レビュー指摘対応）
+# ---------------------------------------------------------------------------
+
+
+def test_metrics_sample_count_rejects_numeric_string():
+    with pytest.raises(ValidationError):
+        OcrEvaluationMetrics(sample_count="5")
+
+
+def test_metrics_exact_match_count_rejects_numeric_string():
+    with pytest.raises(ValidationError):
+        OcrEvaluationMetrics(exact_match_count="1")
+
+
+def test_sample_edit_distance_rejects_numeric_string():
+    with pytest.raises(ValidationError):
+        OcrEvaluationSampleResult(image="a.png", ground_truth="ABC", edit_distance="2")
+
+
+def test_confusion_count_rejects_numeric_string():
+    with pytest.raises(ValidationError):
+        OcrEvaluationConfusion(kind="sub", count="1")
+
+
+def test_metrics_cer_rejects_numeric_string():
+    with pytest.raises(ValidationError):
+        OcrEvaluationMetrics(cer="0.5")
+
+
+def test_sample_confidence_rejects_numeric_string():
+    with pytest.raises(ValidationError):
+        OcrEvaluationSampleResult(image="a.png", ground_truth="ABC", confidence="0.9")
+
+
+def test_sample_duration_ms_rejects_numeric_string():
+    with pytest.raises(ValidationError):
+        OcrEvaluationSampleResult(image="a.png", ground_truth="ABC", duration_ms="10")
+
+
+def test_result_duration_ms_rejects_numeric_string():
+    with pytest.raises(ValidationError):
+        OcrEvaluationResult(engine_id="tesseract", duration_ms="10")
+
+
+# ---------------------------------------------------------------------------
+# 型境界（count系strict int／float系int・float許容）
+# ---------------------------------------------------------------------------
+
+
+def test_count_rejects_float_value():
+    """count系は厳密なintのみ許可し、整数値相当のfloat（1.0等）も拒否する。"""
+    with pytest.raises(ValidationError):
+        OcrEvaluationMetrics(sample_count=1.0)
+    with pytest.raises(ValidationError):
+        OcrEvaluationSampleResult(image="a.png", ground_truth="ABC", edit_distance=1.0)
+    with pytest.raises(ValidationError):
+        OcrEvaluationConfusion(kind="sub", count=1.0)
+
+
+def test_count_rejects_bool_value():
+    with pytest.raises(ValidationError):
+        OcrEvaluationMetrics(sample_count=True)
+    with pytest.raises(ValidationError):
+        OcrEvaluationSampleResult(image="a.png", ground_truth="ABC", edit_distance=False)
+    with pytest.raises(ValidationError):
+        OcrEvaluationConfusion(kind="sub", count=True)
+    with pytest.raises(ValidationError):
+        OcrEvaluationResult(engine_id="tesseract", sample_count=True)
+
+
+def test_float_field_accepts_int_value():
+    """float系はintを許可し、内部でfloatへ変換される。"""
+    s = OcrEvaluationSampleResult(image="a.png", ground_truth="ABC", confidence=1)
+    assert s.confidence == 1.0
+    assert isinstance(s.confidence, float)
+
+
+def test_float_field_accepts_zero_and_none_confidence():
+    s_zero = OcrEvaluationSampleResult(image="a.png", ground_truth="ABC", confidence=0.0)
+    assert s_zero.confidence == 0.0
+    s_none = OcrEvaluationSampleResult(image="a.png", ground_truth="ABC", confidence=None)
+    assert s_none.confidence is None
+
+
+def test_float_field_rejects_bool():
+    with pytest.raises(ValidationError):
+        OcrEvaluationMetrics(cer=True)
+    with pytest.raises(ValidationError):
+        OcrEvaluationSampleResult(image="a.png", ground_truth="ABC", confidence=False)
+    with pytest.raises(ValidationError):
+        OcrEvaluationResult(engine_id="tesseract", duration_ms=True)
+
+
+def test_float_field_rejects_numeric_string():
+    with pytest.raises(ValidationError):
+        OcrEvaluationSampleResult(image="a.png", ground_truth="ABC", confidence="1")
+
+
+def test_cer_greater_than_one_still_allowed():
+    m = OcrEvaluationMetrics(cer=2.5)
+    assert m.cer == 2.5
+
+
+def test_character_accuracy_negative_still_allowed():
+    m = OcrEvaluationMetrics(character_accuracy=-1.5)
+    assert m.character_accuracy == -1.5
+
+
+# ---------------------------------------------------------------------------
+# JSON serialization（NaN/Infinityが出力に含まれないことの確認）
+# ---------------------------------------------------------------------------
+
+
+def test_json_serialization_minimal_result():
+    r = OcrEvaluationResult(engine_id="tesseract")
+    parsed = json.loads(r.model_dump_json())
+    assert parsed["engine_id"] == "tesseract"
+    assert parsed["metrics"]["sample_count"] == 0
+
+
+def test_json_serialization_full_result():
+    r = OcrEvaluationResult(
+        evaluation_id="ev-1",
+        engine_id="paddleocr",
+        model_ref="official:en_PP-OCRv5_mobile_rec",
+        duration_ms=1234.5,
+        sample_count=2,
+        metrics=OcrEvaluationMetrics(sample_count=2, exact_match_count=1, exact_match_rate=0.5, cer=0.1, character_accuracy=0.9),
+        samples=[
+            OcrEvaluationSampleResult(image="a.png", ground_truth="AB", prediction="AB", exact_match=True, confidence=0.0),
+            OcrEvaluationSampleResult(image="b.png", ground_truth="CD", prediction=None, error="failed", confidence=None),
+        ],
+        confusions=[OcrEvaluationConfusion(kind="sub", expected="A", predicted="4", count=1)],
+        warnings=["w1"],
+        engine_details={"device": "cpu"},
+    )
+    parsed = json.loads(r.model_dump_json())
+    assert parsed["engine_id"] == "paddleocr"
+    assert parsed["samples"][1]["error"] == "failed"
+    assert parsed["samples"][1]["confidence"] is None
+    assert parsed["samples"][0]["confidence"] == 0.0
+    assert parsed["confusions"][0]["kind"] == "sub"
+
+
+def test_json_serialization_sample_confidence_none():
+    r = OcrEvaluationResult(
+        engine_id="trocr",
+        samples=[OcrEvaluationSampleResult(image="a.png", ground_truth="AB", prediction="AB", confidence=None)],
+    )
+    parsed = json.loads(r.model_dump_json())
+    assert parsed["samples"][0]["confidence"] is None
+
+
+def test_json_serialization_nested_options():
+    target = OcrEvalTarget(engine="trocr", model="m", options={"device": "cpu", "nested": {"a": [1, 2, 3]}})
+    parsed = json.loads(target.model_dump_json())
+    assert parsed["options"] == {"device": "cpu", "nested": {"a": [1, 2, 3]}}
+
+
+def test_json_serialization_nested_engine_details():
+    r = OcrEvaluationResult(engine_id="tesseract", engine_details={"psm": 7, "nested": {"whitelist": ["A", "B"]}})
+    parsed = json.loads(r.model_dump_json())
+    assert parsed["engine_details"] == {"psm": 7, "nested": {"whitelist": ["A", "B"]}}
+
+
+def test_json_serialization_never_contains_nan_or_infinity_tokens():
+    """SchemaがNaN/Infinityを拒否するため、正常な値のJSON出力に非標準トークンが含まれないことを確認する。"""
+    r = OcrEvaluationResult(
+        engine_id="tesseract",
+        duration_ms=100.0,
+        metrics=OcrEvaluationMetrics(sample_count=1, exact_match_count=1, exact_match_rate=1.0, cer=0.0, character_accuracy=1.0),
+        samples=[OcrEvaluationSampleResult(image="a.png", ground_truth="A", prediction="A", confidence=0.0, duration_ms=1.0)],
+    )
+    raw = r.model_dump_json()
+    assert "NaN" not in raw
+    assert "Infinity" not in raw
+    parsed = json.loads(raw)
+    assert math.isfinite(parsed["duration_ms"])
+
+
+# ---------------------------------------------------------------------------
+# Confusion変換意図（既存API変換処理は未実装。内部共通表現の記録のみ）
+# ---------------------------------------------------------------------------
+
+
+def test_confusion_records_legacy_from_as_expected():
+    """既存ocr_evaluation.pyのconfusions要素の'from'キーは、内部共通Schemaでは'expected'として表現する。"""
+    c = OcrEvaluationConfusion(kind="sub", expected="O", predicted="0", count=1)
+    assert c.expected == "O"
+
+
+def test_confusion_records_legacy_to_as_predicted():
+    """既存ocr_evaluation.pyのconfusions要素の'to'キーは、内部共通Schemaでは'predicted'として表現する。"""
+    c = OcrEvaluationConfusion(kind="sub", expected="O", predicted="0", count=1)
+    assert c.predicted == "0"

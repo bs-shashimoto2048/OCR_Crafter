@@ -1,3 +1,4 @@
+import math
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
@@ -272,30 +273,44 @@ class OcrEvaluateRequest(BaseModel):
 # Architectureのうち、共通Request/Result Schemaのみを実装する。
 # 既存 POST /api/ocr/evaluate の response_model へは設定せず、既存APIの返却dictも変更しない
 # （Dispatcher/Runner/Predictor/API接続は後続Issueの責務）。
+#
+# 数値Validation方針（PR #64レビュー指摘対応）:
+# - count系（sample_count/exact_match_count/edit_distance/confusion.count）は
+#   `Field(strict=True)`により厳密なintのみ許可する（bool/float/数値文字列を拒否）。
+#   既存Request Schema（OcrEvalTarget/OcrEvaluateRequest）の`psm`等はstrict化しない
+#   （本方針は今回追加した共通Result Schemaの数値項目のみが対象）。
+# - float系（exact_match_rate/cer/character_accuracy/confidence/duration_ms）は
+#   `Field(strict=True)`によりint/floatのみ許可し（bool/数値文字列を拒否）、
+#   `_reject_non_finite()`によりNaN/Infinity/-Infinityを明示的なValidation Errorとして拒否する
+#   （既存の`ge=0.0`等の範囲制約は、値の妥当な範囲を示すものであり、非有限値の拒否とは独立させる）。
 
 
-def _reject_bool_value(value: Any) -> Any:
-    """boolはintのサブクラスであり暗黙にintへ変換されうるため、数値フィールドでは明示的に拒否する。"""
-    if isinstance(value, bool):
-        raise ValueError("bool値は数値として受理しません")
+def _reject_non_finite(value: Optional[float]) -> Optional[float]:
+    """NaN/Infinity/-Infinityを明示的に拒否する（nullや0.0へ自動変換しない）。"""
+    if value is not None and not math.isfinite(value):
+        raise ValueError("NaN/Infinity/-Infinityは許可しません")
     return value
 
 
 class OcrEvaluationMetrics(BaseModel):
     """Engine横断で共通化可能な評価指標のみを持つ（WER/Precision/Recall/F1は現状未実装のため含めない）。"""
 
-    sample_count: int = Field(default=0, ge=0, description="評価対象サンプル数")
-    exact_match_count: int = Field(default=0, ge=0, description="完全一致件数")
-    exact_match_rate: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="完全一致率（0-1）")
+    sample_count: int = Field(default=0, strict=True, ge=0, description="評価対象サンプル数")
+    exact_match_count: int = Field(default=0, strict=True, ge=0, description="完全一致件数")
+    exact_match_rate: Optional[float] = Field(default=None, strict=True, ge=0.0, le=1.0, description="完全一致率（0-1）")
     # CERは編集距離の総和/正解文字数の総和（マイクロ平均）。挿入が多いと1を超えうるため上限を設けない
-    cer: Optional[float] = Field(default=None, ge=0.0, description="Character Error Rate（既存仕様上1を超える場合がある）")
+    cer: Optional[float] = Field(
+        default=None, strict=True, ge=0.0, description="Character Error Rate（既存仕様上1を超える場合がある）"
+    )
     # character_accuracy = 1 - cer のCER派生値。cerが1を超える場合は負値になりうるため下限を設けない
-    character_accuracy: Optional[float] = Field(default=None, description="文字正解率（1-cer。CER>1のとき負値になりうる）")
+    character_accuracy: Optional[float] = Field(
+        default=None, strict=True, description="文字正解率（1-cer。CER>1のとき負値になりうる）"
+    )
 
-    @field_validator("sample_count", "exact_match_count", "exact_match_rate", "cer", "character_accuracy", mode="before")
+    @field_validator("exact_match_rate", "cer", "character_accuracy", mode="after")
     @classmethod
-    def _no_bool(cls, value: Any) -> Any:
-        return _reject_bool_value(value)
+    def _no_non_finite(cls, value: Optional[float]) -> Optional[float]:
+        return _reject_non_finite(value)
 
 
 class OcrEvaluationSampleResult(BaseModel):
@@ -305,18 +320,18 @@ class OcrEvaluationSampleResult(BaseModel):
     ground_truth: str = Field(..., description="正解文字列（空文字を許容する）")
     prediction: Optional[str] = Field(default=None, description="推論結果（推論失敗時はNone、空文字は有効な結果として扱う）")
     exact_match: Optional[bool] = Field(default=None, strict=True, description="完全一致か（未計算時はNone）")
-    edit_distance: Optional[int] = Field(default=None, ge=0, description="編集距離（未計算時はNone）")
-    cer: Optional[float] = Field(default=None, ge=0.0, description="このサンプルのCER相当値（未計算時はNone）")
+    edit_distance: Optional[int] = Field(default=None, strict=True, ge=0, description="編集距離（未計算時はNone）")
+    cer: Optional[float] = Field(default=None, strict=True, ge=0.0, description="このサンプルのCER相当値（未計算時はNone）")
     # confidence: 取得できないEngine（TrOCR等）ではNone。0.0は実測値として許可し、
     # 未取得値をNoneではなく0.0で埋めることは禁止する（捏造禁止）
-    confidence: Optional[float] = Field(default=None, description="推論confidence（None=未取得。0.0は実測値として許可）")
+    confidence: Optional[float] = Field(default=None, strict=True, description="推論confidence（None=未取得。0.0は実測値として許可）")
     error: Optional[str] = Field(default=None, description="このサンプルの処理エラー（内部例外全文や絶対パスを自動格納しない）")
-    duration_ms: Optional[float] = Field(default=None, ge=0.0, description="このサンプルの処理時間（未計測時はNone）")
+    duration_ms: Optional[float] = Field(default=None, strict=True, ge=0.0, description="このサンプルの処理時間（未計測時はNone）")
 
-    @field_validator("edit_distance", "cer", "confidence", "duration_ms", mode="before")
+    @field_validator("cer", "confidence", "duration_ms", mode="after")
     @classmethod
-    def _no_bool(cls, value: Any) -> Any:
-        return _reject_bool_value(value)
+    def _no_non_finite(cls, value: Optional[float]) -> Optional[float]:
+        return _reject_non_finite(value)
 
 
 class OcrEvaluationConfusion(BaseModel):
@@ -325,17 +340,15 @@ class OcrEvaluationConfusion(BaseModel):
     task候補の expected/predicted のみの2フィールド構造は、sub/del/insの区別を保持できず
     既存構造からの情報量が失われるため採用せず、kindを保持したまま expected/predicted という
     分かりやすい名前へ読み替えた（from→expected, to→predicted。無理な変換ではなく命名の整理）。
+
+    countの下限は0とする。既存実装のCounter出力は通常1以上を返すが、共通Schemaとしては
+    中間生成・空集計・将来の変換処理も表現できるよう0を許可する（負値のみ拒否）。
     """
 
     kind: str = Field(..., description='混同種別（既存実装: "sub"=置換 / "del"=脱落 / "ins"=挿入）')
     expected: str = Field(default="", description="正解側の文字（既存dictの'from'。insertionでは空文字）")
     predicted: str = Field(default="", description="推論側の文字（既存dictの'to'。deletionでは空文字）")
-    count: int = Field(default=0, ge=0, description="出現回数")
-
-    @field_validator("count", mode="before")
-    @classmethod
-    def _no_bool(cls, value: Any) -> Any:
-        return _reject_bool_value(value)
+    count: int = Field(default=0, strict=True, ge=0, description="出現回数（既存Counter出力は通常1以上だが0を許可する）")
 
 
 class OcrEvaluationResult(BaseModel):
@@ -351,20 +364,22 @@ class OcrEvaluationResult(BaseModel):
     dataset_id: Optional[str] = Field(default=None, description="Dataset識別子（現状概念が確定していないため未使用可）")
     started_at: Optional[str] = Field(default=None, description="開始時刻（文字列保持。timezone変換は行わない）")
     finished_at: Optional[str] = Field(default=None, description="終了時刻（文字列保持）")
-    duration_ms: Optional[float] = Field(default=None, ge=0.0, description="処理時間")
+    duration_ms: Optional[float] = Field(default=None, strict=True, ge=0.0, description="処理時間")
     # metrics.sample_count と意味が重複しうるが、Design #61本文・本Issue双方の候補に明記されているため
     # 両方保持する。整合チェック（両者を一致させる責務）は後続Evaluation Runner実装Issueで行う
-    sample_count: int = Field(default=0, ge=0, description="サンプル数（metrics.sample_countとの整合は後続Runnerが担う）")
+    sample_count: int = Field(
+        default=0, strict=True, ge=0, description="サンプル数（metrics.sample_countとの整合は後続Runnerが担う）"
+    )
     metrics: OcrEvaluationMetrics = Field(default_factory=OcrEvaluationMetrics, description="共通評価指標")
     samples: list[OcrEvaluationSampleResult] = Field(default_factory=list, description="画像単位の結果")
     confusions: list[OcrEvaluationConfusion] = Field(default_factory=list, description="混同集計")
     warnings: list[str] = Field(default_factory=list, description="警告メッセージ一覧")
     engine_details: dict[str, Any] = Field(default_factory=dict, description="Engine固有情報（Path等の自動追加はしない）")
 
-    @field_validator("duration_ms", "sample_count", mode="before")
+    @field_validator("duration_ms", mode="after")
     @classmethod
-    def _no_bool(cls, value: Any) -> Any:
-        return _reject_bool_value(value)
+    def _no_non_finite(cls, value: Optional[float]) -> Optional[float]:
+        return _reject_non_finite(value)
 
     @field_validator("engine_id", mode="before")
     @classmethod
