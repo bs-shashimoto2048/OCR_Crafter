@@ -6,7 +6,7 @@ Parent Epic: [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)�
 
 Related: Design [#61](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/61)（Multi-engine Evaluation API Architecture、Completed・Closed） / [ADR-0003（Accepted）](../../adr/ADR-0003_Multi_Engine_Evaluation.md) / [docs/design/MULTI_ENGINE_EVALUATION_API.md](../../design/MULTI_ENGINE_EVALUATION_API.md)
 
-PR: 作成後に追記（本ドキュメントは実装コミットと同時に作成しているため、PR作成直後に更新する）
+PR: [#64](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/64)（Open。Mergeは未実施）
 
 ## 実装Schema
 
