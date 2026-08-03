@@ -8,7 +8,7 @@ Related: Issue [#61](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/61)
 
 **Evaluation UIの一般化（`OcrEvaluationView.jsx`等）はBackend実装完了待ち**（Epic #46側、責務境界は変更なし）。
 
-**Common Evaluation Schema実装中**（Feature [#63](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/63)、19章のPhase 3に相当。`OcrEvalTarget.options`・`OcrEvaluationMetrics`/`OcrEvaluationSampleResult`/`OcrEvaluationConfusion`/`OcrEvaluationResult`を実装、**Implemented, PR review pending**。PR #64のレビューを受け、共通Result Schemaの数値項目（count系/float系）へ非有限値（NaN/Infinity/-Infinity）拒否・数値文字列拒否のstrict Validationを追加済み（既存Request Schemaの`psm`等は対象外）。詳細は[docs/workitems/trocr/COMMON_EVALUATION_SCHEMA_63.md](../workitems/trocr/COMMON_EVALUATION_SCHEMA_63.md)参照）。Issue分割案（19章）は確定版として整理済み。Dispatcher/Predictor/Metrics Calculator/API接続は本ドキュメント時点では未着手。
+**Common Evaluation Schema: Completed**（Feature [#63](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/63)、19章のPhase 3に相当。**Completed**・Closed。PR [#64](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/64)をSquash Merge・mainへ反映済み、Merge Commit: `4663dd0`）。`OcrEvalTarget.options`・`OcrEvaluationMetrics`/`OcrEvaluationSampleResult`/`OcrEvaluationConfusion`/`OcrEvaluationResult`を実装。count系はstrict int、float系はint/floatのみ許可し、bool・数値文字列・非有限値（NaN/Infinity/-Infinity）を拒否する（既存Request Schemaの`psm`等は対象外）。confidenceはnullableで実測`0.0`を許可、`options`/`engine_details`のJSON serializable性はAPI Integration境界の責務とし本Schemaでは検証しない。`sample_count`の重複（Result/metrics）はRunnerで整合方針を確定する暫定方針のまま。既存APIは無変更・未配線。クリーン環境ではIssue #8のみ既知の失敗として残る（本Featureとは無関係）。詳細は[docs/workitems/trocr/COMMON_EVALUATION_SCHEMA_63.md](../workitems/trocr/COMMON_EVALUATION_SCHEMA_63.md)参照。次の実装対象はCommon Metric Calculator。Issue分割案（19章）は確定版として整理済み。Dispatcher/Predictor/API接続は本ドキュメント時点では未着手。
 
 ---
 
