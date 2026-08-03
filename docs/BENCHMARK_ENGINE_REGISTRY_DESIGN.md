@@ -1,8 +1,19 @@
 # Benchmark Engine Registry Design
 
-Related: Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46)（Engine UI Generalization） / Refactor [#55](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/55)（BenchmarkView Engine Registry Design） / [ENGINE_REGISTRY_DESIGN.md](ENGINE_REGISTRY_DESIGN.md) / Engine Registry Core [#49](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/49) / ModelsView Migration [#51](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/51) / TrainingView Migration [#53](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/53)
+Related: Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46)（Engine UI Generalization） / Refactor [#55](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/55)（BenchmarkView Engine Registry Design、**Completed**・Closed。PR [#56](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/56)をSquash Merge・mainへ反映済み、Merge Commit: `2965df7`） / [ENGINE_REGISTRY_DESIGN.md](ENGINE_REGISTRY_DESIGN.md) / Engine Registry Core [#49](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/49) / ModelsView Migration [#51](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/51) / TrainingView Migration [#53](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/53)
 
 **本ドキュメントは調査・設計のみを対象とする。実装（Engine Registry変更・`BenchmarkView.jsx`/`BenchmarkCenterView.jsx`変更・TrOCR追加・Backend変更）は一切行わない。**
+
+**状態（2026-08-03）**: **Completed**。本設計は承認され、以下が確定した設計判断として決定した。
+
+- `BenchmarkView.jsx`の`selectedEngines`は**canonical Engine IDではない**。Backend `ENGINE_CATALOG`由来の**Benchmark Variant Key**（`tesseract_model`/`tesseract_base`/`paddleocr_official`/`paddleocr_custom`/`easyocr`）である
+- `BenchmarkCenterView.jsx`の`row.engine`は**canonical Engine ID**（`engineRegistry.js`と同じ軸）である
+- Runner（BenchmarkView）とCenter（BenchmarkCenterView）は責務・データ軸が異なるため、**無理に統合しない**
+- `BenchmarkView.jsx`のVariant Key構造は**Engine Registryへ移さない**（Backend `ENGINE_CATALOG`を正としてBenchmark固有概念のまま維持する）
+- `BenchmarkCenterView.jsx`の表示ラベルのみ、Engine Registryへの移行が可能と判断した（次のFeature: 「BenchmarkCenterViewのEngine表示をRegistryへ移行」）
+- Benchmark RunnerへのTrOCR対応は、主にBackend `ENGINE_CATALOG`側の対応が前提であり、Epic #27（TrOCR本体）の責務である
+
+次のFeatureは「BenchmarkCenterViewのEngine表示をRegistryへ移行」（本ドキュメント9章 Migration Plan Phase 1に相当）。`selectedEngines`初期値の再検討・2画面の役割説明改善は8章「UIレビュー」記載のとおりFuture Workのまま。
 
 ## 1. 現状
 
@@ -132,10 +143,10 @@ Benchmark関連の画面は独立した2つに分かれている。
 - **Tesseract依存**: `selectedEngines`の初期値（`BenchmarkView.jsx:44`）が`tesseract_base: true`のみtrueで他はfalseという初期選択になっており、初見時にTesseract以外のEngineが実行対象外に見える（構造的な偏りではなく初期値の選択のみ）。
 - **将来TrOCR追加時の障害**: フロントエンドには実質的な障害は無い（7章参照）。障害はBackendの`ENGINE_CATALOG`・Benchmark実行経路の未実装のみ。
 
-**改善案（将来検討、本Featureでは未実施）**:
-1. `BenchmarkCenterView.jsx`の`row.engine`表示を`getEngineLabel()`経由へ置換（5章「完全移行可能」）。
-2. 2画面の役割の違いをUI上に一言説明として明示。
-3. `selectedEngines`初期値の妥当性（Tesseract baseのみ既定ON）を再検討。
+**改善案（Future Work、本Featureでは未実施）**:
+1. `BenchmarkCenterView.jsx`の`row.engine`表示を`getEngineLabel()`経由へ置換（5章「完全移行可能」、次のFeatureで対応）。
+2. **Future Work**: 2画面（Runner/Center）の役割の違いをUI上に一言説明として明示する。
+3. **Future Work**: `selectedEngines`初期値の妥当性（Tesseract baseのみ既定ON）を再検討する。
 
 ## 9. Migration Plan（将来Feature向けの叩き台）
 
