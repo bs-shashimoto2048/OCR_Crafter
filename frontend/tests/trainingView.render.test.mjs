@@ -701,3 +701,179 @@ test("jobInfoなしのrunningでもクラッシュしない", () => {
   const html = render({ jobStatus: "running", jobId: "j1", jobInfo: null });
   assert.ok(html.length > 0);
 });
+
+// ---------------------------------------------------------------------------
+// Engine Registry Migration（Refactor: TrainingViewをEngine Registryへ移行 #53）
+// OCRタイプ選択肢・表示名・学習可否・デバイス対応可否・設定パネル・スナップショット表示を
+// engineRegistry.js経由へ置換したことの回帰確認。既存3Engine（PaddleOCR/Tesseract/EasyOCR）の
+// 挙動は変えず、TrOCR値・未登録Engineが渡ってもPaddleOCRへ暗黙フォールバックしないことを確認する。
+// ---------------------------------------------------------------------------
+
+function epochsInputTag(html) {
+  const match = html.match(/<input[^>]*value="1000"[^>]*>/);
+  return match ? match[0] : "";
+}
+
+function deviceButtonTag(html, label) {
+  const match = new RegExp(`<button[^>]*>\\s*${label}\\s*</button>`).exec(html);
+  return match ? match[0] : "";
+}
+
+// ---------- Engine選択肢 ----------
+
+test("Engine選択肢: PaddleOCR→Tesseract→EasyOCRの順で、valueと表示名は既存どおり。TrOCR/customは表示しない", () => {
+  const html = render({ initialSettingsTab: "training-settings" }).replaceAll("<!-- -->", "");
+  const paddleIdx = html.indexOf('value="paddleocr"');
+  const tessIdx = html.indexOf('value="tesseract"');
+  const easyIdx = html.indexOf('value="easyocr"');
+  assert.ok(paddleIdx !== -1 && tessIdx !== -1 && easyIdx !== -1, "既存3Engineのoptionが揃っていない");
+  assert.ok(paddleIdx < tessIdx && tessIdx < easyIdx, "option順序がPaddleOCR→Tesseract→EasyOCRでない");
+  assert.ok(html.includes("PaddleOCR（学習可）"), "PaddleOCRの表示名・補足文が変わっている");
+  assert.ok(html.includes("Tesseract（学習可 / A-Z・0-9・筆記体klt・記号+-）"), "Tesseractの表示名・補足文が変わっている");
+  assert.ok(html.includes("EasyOCR（推論専用）"), "EasyOCRの表示名・補足文が変わっている");
+  assert.ok(!html.includes('value="trocr"'), "TrOCRが選択肢へ追加されている");
+  assert.ok(!html.includes('value="custom"'), "customが選択肢へ追加されている");
+});
+
+// ---------- Engine表示名 ----------
+
+function renderClean(overrides = {}) {
+  return render(overrides).replaceAll("<!-- -->", "");
+}
+
+test("Engine表示名: エンジン固有設定の見出しはPaddleOCR/Tesseract/EasyOCRで既存どおり", () => {
+  assert.ok(renderClean({ ocrEngine: "paddleocr", initialSettingsTab: "engine" }).includes("エンジン固有設定（PaddleOCR）"));
+  assert.ok(renderClean({ ocrEngine: "tesseract", initialSettingsTab: "engine" }).includes("エンジン固有設定（Tesseract）"));
+  assert.ok(renderClean({ ocrEngine: "easyocr", initialSettingsTab: "engine" }).includes("エンジン固有設定（EasyOCR）"));
+});
+
+test("Engine表示名: 未登録Engineは「不明」、PaddleOCR/Tesseractへ誤表示しない", () => {
+  const html = renderClean({ ocrEngine: "some-unknown-engine", initialSettingsTab: "engine" });
+  assert.ok(html.includes("エンジン固有設定（不明）"));
+  assert.ok(!html.includes("エンジン固有設定（PaddleOCR）"));
+  assert.ok(!html.includes("エンジン固有設定（Tesseract）"));
+});
+
+test("Engine表示名: TrOCR値が渡っても「TrOCR」と正しく表示され、PaddleOCR/Tesseractに誤表示されない（TrOCR機能追加ではなく表示のみの確認）", () => {
+  const html = renderClean({ ocrEngine: "trocr", initialSettingsTab: "engine" });
+  assert.ok(html.includes("エンジン固有設定（TrOCR）"));
+  assert.ok(!html.includes("エンジン固有設定（PaddleOCR）"));
+  assert.ok(!html.includes("エンジン固有設定（Tesseract）"));
+});
+
+// ---------- 学習可否 ----------
+
+test("学習可否: PaddleOCR/Tesseractは学習回数入力が有効・「実行操作」ブロックを表示する", () => {
+  for (const engine of ["paddleocr", "tesseract"]) {
+    const editHtml = render({ ocrEngine: engine, initialSettingsTab: "training-settings" });
+    assert.ok(!epochsInputTag(editHtml).includes("disabled"), `${engine}: 学習回数入力が無効化されている`);
+    const summaryHtml = render({ ocrEngine: engine });
+    assert.ok(summaryHtml.includes("実行操作"), `${engine}: 実行操作ブロックが表示されない`);
+  }
+});
+
+test("学習可否: EasyOCR/TrOCR/未登録Engineは学習回数入力が無効・「実行操作」ブロックを表示しない（API呼び出し不可）", () => {
+  for (const engine of ["easyocr", "trocr", "some-unknown-engine"]) {
+    const editHtml = render({ ocrEngine: engine, initialSettingsTab: "training-settings" });
+    assert.ok(epochsInputTag(editHtml).includes("disabled"), `${engine}: 学習回数入力が有効なまま`);
+    const summaryHtml = render({ ocrEngine: engine });
+    assert.ok(!summaryHtml.includes("実行操作"), `${engine}: 実行操作ブロックが表示されてしまっている`);
+  }
+});
+
+// ---------- デバイス対応可否 ----------
+
+test("デバイス対応可否: PaddleOCRはAuto/CPU/GPUいずれも選択可能（GPU検出時）", () => {
+  const html = render({ ocrEngine: "paddleocr", initialSettingsTab: "training-settings", systemCheck: { gpu_available: true } });
+  for (const label of ["Auto", "CPU", "GPU"]) {
+    assert.ok(!deviceButtonTag(html, label).includes("disabled"), `PaddleOCR/${label}が無効化されている`);
+  }
+});
+
+test("デバイス対応可否: TesseractはCPU固定でボタン操作不可（既存挙動を維持）", () => {
+  const html = render({ ocrEngine: "tesseract", initialSettingsTab: "training-settings", systemCheck: { gpu_available: true } });
+  for (const label of ["Auto", "CPU", "GPU"]) {
+    assert.ok(deviceButtonTag(html, label).includes("disabled"), `Tesseract/${label}が有効化されている`);
+  }
+});
+
+test("デバイス対応可否: EasyOCR/未登録Engineは全ボタンが選択不可（未登録Engineが全対応扱いにならない）", () => {
+  for (const engine of ["easyocr", "some-unknown-engine"]) {
+    const html = render({ ocrEngine: engine, initialSettingsTab: "training-settings", systemCheck: { gpu_available: true } });
+    for (const label of ["Auto", "CPU", "GPU"]) {
+      assert.ok(deviceButtonTag(html, label).includes("disabled"), `${engine}/${label}が有効化されている`);
+    }
+  }
+});
+
+// ---------- Engine固有設定パネル ----------
+
+test("設定パネル: PaddleOCRは初期重みパネルを表示する", () => {
+  const html = render({ ocrEngine: "paddleocr", initialSettingsTab: "engine" });
+  assert.ok(html.includes("初期重み"));
+  assert.ok(!html.includes("学習対象外です"));
+});
+
+test("設定パネル: Tesseractは専用パネル（Base Model・PSM）を表示する", () => {
+  const html = render({ ocrEngine: "tesseract", initialSettingsTab: "engine" });
+  assert.ok(html.includes("Base Model"));
+  assert.ok(html.includes("eng.traineddata"));
+  assert.ok(!html.includes("初期重み"));
+});
+
+test("設定パネル: EasyOCRは既存の学習対象外通知をそのまま表示する", () => {
+  const html = render({ ocrEngine: "easyocr", initialSettingsTab: "engine" });
+  assert.ok(html.includes("EasyOCR はこのUIでは学習対象外です。推論画面でのみ利用できます。"));
+  assert.ok(!html.includes("初期重み"));
+});
+
+test("設定パネル: TrOCR値は未対応表示になり、PaddleOCR設定を表示しない（暗黙のPaddleOCRフォールバックなし）", () => {
+  const html = render({ ocrEngine: "trocr", initialSettingsTab: "engine" });
+  assert.ok(html.includes("このエンジンはこのUIでは学習対象外です。"));
+  assert.ok(!html.includes("初期重み"));
+});
+
+test("設定パネル: 未登録Engineは未対応表示になり、PaddleOCR設定を表示しない（暗黙のPaddleOCRフォールバックなし）", () => {
+  const html = render({ ocrEngine: "some-unknown-engine", initialSettingsTab: "engine" });
+  assert.ok(html.includes("このエンジンはこのUIでは学習対象外です。"));
+  assert.ok(!html.includes("初期重み"));
+});
+
+// ---------- ジョブスナップショット ----------
+
+test("スナップショット: PaddleOCRは最大文字数・エポック数を表示する", () => {
+  const html = render({ jobId: "j1", jobInfo: { engine: "paddleocr", max_text_length: 8, epochs: 100 } });
+  assert.ok(html.includes("PaddleOCR"));
+  assert.ok(html.includes("最大文字数"));
+  assert.ok(html.includes("エポック数"));
+});
+
+test("スナップショット: TesseractはPSM・最大iterationを表示する", () => {
+  const html = render({ jobId: "j1", jobInfo: { engine: "tesseract", max_text_length: 7, epochs: 1500 } });
+  assert.ok(html.includes("Tesseract"));
+  assert.ok(html.includes("PSM"));
+  assert.ok(html.includes("最大iteration"));
+});
+
+test("スナップショット: EasyOCR値でも正しく「EasyOCR」と表示される", () => {
+  const html = render({ jobId: "j1", jobInfo: { engine: "easyocr" } });
+  assert.ok(html.includes("EasyOCR"));
+  assert.ok(!html.includes("PaddleOCR"));
+});
+
+test("スナップショット: TrOCR値でも正しく「TrOCR」と表示され、PaddleOCRの誤ラベルにならない", () => {
+  const html = render({ jobId: "j1", jobInfo: { engine: "trocr" } });
+  assert.ok(html.includes("TrOCR"));
+  assert.ok(!html.includes("PaddleOCR"));
+});
+
+test("スナップショット: 未登録Engineは生のengine値をそのまま表示する（PaddleOCR扱いしない）", () => {
+  const html = render({ jobId: "j1", jobInfo: { engine: "some-unknown-engine" } });
+  assert.ok(html.includes("some-unknown-engine"));
+  assert.ok(!html.includes("PaddleOCR"));
+});
+
+test("スナップショット: engine未設定は「--」を表示する", () => {
+  const html = render({ jobId: "j1", jobInfo: { max_text_length: 8 } });
+  assert.ok(html.includes("--"));
+});
