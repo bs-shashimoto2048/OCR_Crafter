@@ -1,6 +1,6 @@
 # Benchmark Engine Registry Design
 
-Related: Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46)（Engine UI Generalization） / Refactor [#55](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/55)（BenchmarkView Engine Registry Design、**Completed**・Closed。PR [#56](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/56)をSquash Merge・mainへ反映済み、Merge Commit: `2965df7`） / [ENGINE_REGISTRY_DESIGN.md](ENGINE_REGISTRY_DESIGN.md) / Engine Registry Core [#49](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/49) / ModelsView Migration [#51](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/51) / TrainingView Migration [#53](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/53)
+Related: Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46)（Engine UI Generalization） / Refactor [#55](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/55)（BenchmarkView Engine Registry Design、**Completed**・Closed。PR [#56](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/56)をSquash Merge・mainへ反映済み、Merge Commit: `2965df7`） / Refactor [#57](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/57)（BenchmarkCenterViewのEngine表示をRegistryへ移行、**Completed**・Closed。PR [#58](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/58)をSquash Merge・mainへ反映済み、Merge Commit: `89b9f9e`） / [ENGINE_REGISTRY_DESIGN.md](ENGINE_REGISTRY_DESIGN.md) / Engine Registry Core [#49](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/49) / ModelsView Migration [#51](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/51) / TrainingView Migration [#53](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/53)
 
 **本ドキュメントは調査・設計のみを対象とする。実装（Engine Registry変更・`BenchmarkView.jsx`/`BenchmarkCenterView.jsx`変更・TrOCR追加・Backend変更）は一切行わない。**
 
@@ -10,10 +10,22 @@ Related: Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46)�
 - `BenchmarkCenterView.jsx`の`row.engine`は**canonical Engine ID**（`engineRegistry.js`と同じ軸）である
 - Runner（BenchmarkView）とCenter（BenchmarkCenterView）は責務・データ軸が異なるため、**無理に統合しない**
 - `BenchmarkView.jsx`のVariant Key構造は**Engine Registryへ移さない**（Backend `ENGINE_CATALOG`を正としてBenchmark固有概念のまま維持する）
-- `BenchmarkCenterView.jsx`の表示ラベルのみ、Engine Registryへの移行が可能と判断した（次のFeature: 「BenchmarkCenterViewのEngine表示をRegistryへ移行」）
+- `BenchmarkCenterView.jsx`の表示ラベルのみ、Engine Registryへの移行が可能と判断した
+
+**Refactor #57「BenchmarkCenterViewのEngine表示をRegistryへ移行」も完了**（本ドキュメント9章 Migration Plan Phase 1に相当）。PR [#58](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/58)をSquash Merge・mainへ反映済み（Merge Commit: `89b9f9e`）。実施内容:
+
+- Engineフィルタの表示値（`<option>`テキスト）をRegistry化
+- 一覧テーブルのEngine表示をRegistry化
+- 比較テーブルのEngine表示をRegistry化
+- フィルタ内部値（`value`属性・`filters.engine`）はcanonical Engine IDのまま変更していない
+- unknown Engineは`getEngineLabel() ?? "不明"`により安全に「不明」表示（既知Engineへのフォールバックなし）
+- TrOCRは既存結果の表示対応のみ（機能追加ではない）
+- `BenchmarkView.jsx`のVariant Key構造・Backend `ENGINE_CATALOG`は無変更
+- CSS・レイアウトの変更なし（文字列表示のみの変更）
+
 - Benchmark RunnerへのTrOCR対応は、主にBackend `ENGINE_CATALOG`側の対応が前提であり、Epic #27（TrOCR本体）の責務である
 
-次のFeatureは「BenchmarkCenterViewのEngine表示をRegistryへ移行」（本ドキュメント9章 Migration Plan Phase 1に相当）。`selectedEngines`初期値の再検討・2画面の役割説明改善は8章「UIレビュー」記載のとおりFuture Workのまま。
+次のFeatureは「Evaluation UI Generalization」（`OcrEvaluationView`/`BenchmarkView`/`BenchmarkCenterView`が並存し、責務・Engine軸が異なるため、まず調査・設計Issueを作成予定）。`selectedEngines`初期値の再検討・2画面の役割説明改善は8章「UIレビュー」記載のとおりFuture Workのまま。
 
 ## 1. 現状
 
