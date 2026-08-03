@@ -11,7 +11,7 @@
 >
 > ```text
 > Architecture: Completed
-> Evaluation Schema: Not Started
+> Evaluation Schema: Implemented, PR review pending (Issue #63)
 > Common Metric Calculator: Not Started
 > Evaluation Dispatcher / Runner: Not Started
 > Tesseract Predictor Adapter: Not Started
@@ -23,7 +23,7 @@
 > Cleanup: Not Started
 > ```
 >
-> 次の実装対象はCommon Evaluation Schema（子Issue未作成→作成予定）。
+> Feature [#63](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/63)「Common Evaluation Schema実装」にて`OcrEvalTarget.options`（ターゲット単位のEngine固有オプション）、`OcrEvaluationMetrics`/`OcrEvaluationSampleResult`/`OcrEvaluationConfusion`/`OcrEvaluationResult`（内部共通Result Schema）を実装済み（PRレビュー待ち）。既存`POST /api/ocr/evaluate`のresponse_model・返却dictは無変更。次の実装対象はCommon Metric Calculator。詳細は[docs/workitems/trocr/COMMON_EVALUATION_SCHEMA_63.md](../workitems/trocr/COMMON_EVALUATION_SCHEMA_63.md)参照。
 
 ## Context
 
