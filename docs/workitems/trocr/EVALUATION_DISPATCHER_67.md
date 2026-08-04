@@ -97,13 +97,13 @@ class EnginePredictor(Protocol):
 
 ## 次のIssue
 
-Engine別Predictor実装（Tesseract Predictor Adapterを含む。Common Evaluation Metric Calculator（Issue #65）を利用する最初のPredictorとなる想定）。次に着手するのは**Evaluation Runner**。
+Evaluation Runner（Issue [#69](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/69)、実装済み・PRレビュー待ち）。その次はEngine別Predictor実装（Tesseract Predictor Adapterを含む。Common Evaluation Metric Calculator（Issue #65）を利用する最初のPredictorとなる想定）。
 
 ## Future Work（マージ前レビューMinor/Suggestion指摘）
 
 PR #68マージ前レビューで挙がった指摘。いずれもBlocker・Majorではなく、今回のマージは妨げない（Productionコードは今回変更していない）。
 
-- **Minor**: `register(engine_id, predictor)`が、渡された`engine_id`引数と`predictor.engine_id`属性の一致を検証していない（キーと属性が食い違って登録される可能性がある）。**この検証は、最初の実PredictorとなるTesseract Predictor Adapter実装前までに再検討する。**
+- ~~**Minor**: `register(engine_id, predictor)`が、渡された`engine_id`引数と`predictor.engine_id`属性の一致を検証していない（キーと属性が食い違って登録される可能性がある）。~~ **解消済み（Issue [#69](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/69)「Evaluation Runner」で対応）**: `EvaluationDispatcher.register()`へ整合性検証を追加し、不一致時は`EvaluationDispatcherError`を送出する（既存20件のDispatcherテストは無修正のまま成功、新規2件を追加）。詳細は[EVALUATION_RUNNER_69.md](EVALUATION_RUNNER_69.md)参照。
 - **Minor**: `dispatch()`の「Backend Registry上はsupportedだが`register()`未実施」ケース（`EvaluationDispatcherError`を送出しPredictorを呼ばないこと）を直接検証する専用テストが無い（`resolve()`側のみ検証済み）
 - **Suggestion**: 「register()未実施」ケースの例外を、汎用`EvaluationDispatcherError`ではなく専用の`PredictorNotRegisteredError`として分離する案
 - **Suggestion**: `test_dispatcher_module_has_no_ocr_engine_dependencies`のDependency検査を、単純な部分文字列一致からASTベースのimport解析へ強化する案

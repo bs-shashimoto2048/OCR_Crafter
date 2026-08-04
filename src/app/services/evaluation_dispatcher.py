@@ -72,15 +72,25 @@ class EvaluationDispatcher:
         return str(engine_id).strip().lower()
 
     def register(self, engine_id: str, predictor: EnginePredictor) -> None:
-        """engine_idに対してPredictorを登録する（重複登録は拒否）。
+        """engine_idに対してPredictorを登録する（重複登録・engine_id不一致は拒否）。
 
         Backend Engine Registryへの存在確認・Capability確認はここでは行わない
         （`resolve()`の責務）。register()自体はBackend Registryの内容に関わらず
         任意のengine_id文字列を受け付ける（テスト用途を含め柔軟にするため）。
+
+        Issue #69（Evaluation Runner）でPredictorを実利用する最初のIssueとなったことを
+        受け、engine_id引数と`predictor.engine_id`の一致検証を追加した（Issue #67時点の
+        Future Work）。誤ったキーで登録されたPredictorがdispatch経路で気付かれないまま
+        使われることを防ぐ。
         """
         key = self._normalize_key(engine_id)
         if key in self._predictors:
             raise EvaluationDispatcherError(f"predictor already registered for engine: {key!r}")
+        if self._normalize_key(predictor.engine_id) != key:
+            raise EvaluationDispatcherError(
+                f"predictor.engine_id ({predictor.engine_id!r}) does not match "
+                f"the registration key ({key!r})"
+            )
         self._predictors[key] = predictor
 
     def resolve(self, engine_id: str) -> EnginePredictor:

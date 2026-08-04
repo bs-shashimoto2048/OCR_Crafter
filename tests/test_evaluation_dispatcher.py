@@ -72,6 +72,21 @@ def test_register_duplicate_rejected_case_insensitive():
         dispatcher.register("TESSERACT", MockPredictor(engine_id="tesseract"))
 
 
+def test_register_engine_id_matches_key_succeeds():
+    """register keyとpredictor.engine_id（大小文字違いを含む）が一致すれば登録できる。"""
+    dispatcher = EvaluationDispatcher(registry=_supported_registry())
+    predictor = MockPredictor(engine_id="Tesseract")
+    dispatcher.register("tesseract", predictor)
+    assert dispatcher.resolve("tesseract") is predictor
+
+
+def test_register_engine_id_mismatch_rejected():
+    """register keyとpredictor.engine_idが食い違う場合はEvaluationDispatcherError（Issue #69で追加）。"""
+    dispatcher = EvaluationDispatcher(registry=_supported_registry())
+    with pytest.raises(EvaluationDispatcherError):
+        dispatcher.register("tesseract", MockPredictor(engine_id="paddleocr"))
+
+
 # ---------------------------------------------------------------------------
 # resolve
 # ---------------------------------------------------------------------------
