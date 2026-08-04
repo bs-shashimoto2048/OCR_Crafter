@@ -36,7 +36,7 @@ Evaluation（評価連携の方針決定・confidence算出方法の確定。`oc
 Evaluation
   ✅ Multi-engine Evaluation API Design
   ✅ Common Evaluation Schema
-  ⬜ Common Metric Calculator
+  🔧 Common Metric Calculator（実装済み・PRレビュー待ち）
   ⬜ Evaluation Dispatcher / Runner
   ⬜ Tesseract Predictor Adapter
   ⬜ PaddleOCR Predictor
@@ -49,7 +49,9 @@ Evaluation
 
 Multi-engine Evaluation API Design（Design [#61](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/61)、**Completed**・Closed。PR [#62](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/62)をSquash Merge・mainへ反映済み、Merge Commit: `34aea57`）。採用Architecture: 共通Evaluation Runner + Engine別Predictorへ分離、canonical engine_idによるDispatcher、Benchmark Variant Keyとは別責務として維持、既存APIを後方互換で拡張。成果物: [MULTI_ENGINE_EVALUATION_API.md](../../design/MULTI_ENGINE_EVALUATION_API.md)・[ADR-0003（Accepted）](../../adr/ADR-0003_Multi_Engine_Evaluation.md)。
 
-Common Evaluation Schema実装（Feature [#63](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/63)、**Completed**・Closed。PR [#64](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/64)をSquash Merge・mainへ反映済み、Merge Commit: `4663dd0`）。`OcrEvalTarget.options`（ターゲット単位のEngine固有オプション）と、`OcrEvaluationMetrics`/`OcrEvaluationSampleResult`/`OcrEvaluationConfusion`/`OcrEvaluationResult`（後続Runnerが使う内部共通Result Schema）を実装。count系はstrict int、float系はint/floatのみ許可しbool・数値文字列・非有限値（NaN/Infinity/-Infinity）を拒否、confidenceはnullableで実測`0.0`を許可。`options`/`engine_details`のJSON serializable性はAPI Integration境界の責務、`sample_count`重複はRunnerで整合方針を確定する暫定方針のまま。既存API・Dispatcher・Predictor・Metric Calculatorは無変更（未配線）。クリーン環境ではIssue #8のみ既知の失敗として残る（無関係）。詳細は[COMMON_EVALUATION_SCHEMA_63.md](COMMON_EVALUATION_SCHEMA_63.md)参照。次の実装対象はCommon Metric Calculator。
+Common Evaluation Schema実装（Feature [#63](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/63)、**Completed**・Closed。PR [#64](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/64)をSquash Merge・mainへ反映済み、Merge Commit: `4663dd0`）。`OcrEvalTarget.options`（ターゲット単位のEngine固有オプション）と、`OcrEvaluationMetrics`/`OcrEvaluationSampleResult`/`OcrEvaluationConfusion`/`OcrEvaluationResult`（後続Runnerが使う内部共通Result Schema）を実装。count系はstrict int、float系はint/floatのみ許可しbool・数値文字列・非有限値（NaN/Infinity/-Infinity）を拒否、confidenceはnullableで実測`0.0`を許可。`options`/`engine_details`のJSON serializable性はAPI Integration境界の責務、`sample_count`重複はRunnerで整合方針を確定する暫定方針のまま。既存API・Dispatcher・Predictor・Metric Calculatorは無変更（未配線）。クリーン環境ではIssue #8のみ既知の失敗として残る（無関係）。詳細は[COMMON_EVALUATION_SCHEMA_63.md](COMMON_EVALUATION_SCHEMA_63.md)参照。
+
+Common Evaluation Metric Calculator実装（Feature [#65](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/65)、**実装済み・PRレビュー待ち**）。`src/app/services/evaluation_metrics.py`を新設し、`calculate_sample_metrics`/`calculate_evaluation_metrics`/`aggregate_confusions`を実装。CERは既存仕様どおりマイクロ平均、character_accuracyは負値許容、confusionは`from→expected`/`to→predicted`変換。`sample_count`重複は`metrics.sample_count`をCanonicalとする方針を確定。既存`ocr_evaluation.py`への配線は見送り（Tesseract Predictor Adapter Issueへ持ち越し）。詳細は[COMMON_EVALUATION_METRICS_65.md](COMMON_EVALUATION_METRICS_65.md)参照。次の実装対象はEvaluation Dispatcher / Runner。
 
 ⬜ Benchmark（Benchmark Runner/Benchmark Centerへの`ENGINE_CATALOG`/`ENGINE_BUILDERS`登録）
 
