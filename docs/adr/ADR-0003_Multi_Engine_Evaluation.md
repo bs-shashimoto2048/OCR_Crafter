@@ -13,7 +13,8 @@
 > Architecture: Completed
 > Evaluation Schema: Completed
 > Common Metric Calculator: Completed
-> Evaluation Dispatcher / Runner: Not Started
+> Evaluation Dispatcher: Implemented, PR review pending (Issue #67)
+> Evaluation Runner: Not Started
 > Tesseract Predictor Adapter: Not Started
 > PaddleOCR Predictor: Not Started
 > EasyOCR Predictor: Not Started
@@ -31,7 +32,7 @@
 >
 > **Future Work（PR #66レビューMinor指摘）**: (1) 新Calculator単独でのU+FFFD loggerテスト追加候補（`caplog.at_level(..., logger="src.app.services.evaluation_metrics")`）、(2) 空GTサンプルのedit distanceがAggregate分子（`dist_total`）へ加算される既存仕様の明文化、(3) Tesseract Adapter Issue着手時のlogger移行方針の具体化、(4) `ocr_evaluation.py`との重複実装（`normalize_compare`/`levenshtein_ops`）解消、(5) confusion top-N（既存APIの`confusions`相当）適用はRunner責務として整理。詳細は[docs/workitems/trocr/COMMON_EVALUATION_METRICS_65.md](../workitems/trocr/COMMON_EVALUATION_METRICS_65.md)参照。
 >
-> Feature [#65](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/65)「Common Evaluation Metric Calculator」にて`src/app/services/evaluation_metrics.py`を新設し、Engine非依存の`calculate_sample_metrics`/`calculate_evaluation_metrics`/`aggregate_confusions`を実装済み（PRレビュー待ち）。既存`ocr_evaluation.py`のCER（マイクロ平均）・完全一致・confusion集計と出力が完全一致することをテストで直接検証した。既存`ocr_evaluation.py`への配線は見送り（logger名依存の既存テストへの副作用を避けるため独立実装とした、詳細は[COMMON_EVALUATION_METRICS_65.md](../workitems/trocr/COMMON_EVALUATION_METRICS_65.md)参照）。次の実装対象はEvaluation Dispatcher / Runner。
+> Feature [#67](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/67)「Evaluation Dispatcher」にて`src/app/services/evaluation_dispatcher.py`を新設し、`EvaluationDispatcher`（`register`/`resolve`/`dispatch`）と`EnginePredictor` Protocolを実装済み（PR [#68](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/68)レビュー待ち）。Backend `EngineCapability.supports_evaluation`を初めて参照する実装であり、Dispatcherのみが参照しPredictor側は参照しない設計とした。Unknown Engineは`UnknownEvaluationEngineError`、Unsupported Engine（Capability上`supports_evaluation=False`）は`UnsupportedEvaluationEngineError`を送出する。**Evaluation DispatcherとEvaluation Runnerは別責務・別完了項目として扱う**（Dispatcherのみ実装済み、Runnerは未着手）。Backend Engine Registry・Capability以外への依存はない（Predictor実装・Runner・API・Benchmark等は未着手）。詳細は[docs/workitems/trocr/EVALUATION_DISPATCHER_67.md](../workitems/trocr/EVALUATION_DISPATCHER_67.md)参照。
 
 ## Context
 

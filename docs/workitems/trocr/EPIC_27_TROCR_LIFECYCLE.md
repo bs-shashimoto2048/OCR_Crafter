@@ -37,8 +37,8 @@ Evaluation
   ✅ Multi-engine Evaluation API Design
   ✅ Common Evaluation Schema
   ✅ Common Metric Calculator
-  🔧 Evaluation Dispatcher（Implemented, PR review pending (Issue #67 / PR #68)）
-  ⬜ Evaluation Runner（Not Started）
+  🔧 Evaluation Dispatcher（PR #68レビュー待ち）
+  ⬜ Evaluation Runner
   ⬜ Tesseract Predictor Adapter
   ⬜ PaddleOCR Predictor
   ⬜ EasyOCR Predictor
@@ -52,7 +52,9 @@ Multi-engine Evaluation API Design（Design [#61](https://github.com/bs-shashimo
 
 Common Evaluation Schema実装（Feature [#63](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/63)、**Completed**・Closed。PR [#64](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/64)をSquash Merge・mainへ反映済み、Merge Commit: `4663dd0`）。`OcrEvalTarget.options`（ターゲット単位のEngine固有オプション）と、`OcrEvaluationMetrics`/`OcrEvaluationSampleResult`/`OcrEvaluationConfusion`/`OcrEvaluationResult`（後続Runnerが使う内部共通Result Schema）を実装。count系はstrict int、float系はint/floatのみ許可しbool・数値文字列・非有限値（NaN/Infinity/-Infinity）を拒否、confidenceはnullableで実測`0.0`を許可。`options`/`engine_details`のJSON serializable性はAPI Integration境界の責務、`sample_count`重複はRunnerで整合方針を確定する暫定方針のまま。既存API・Dispatcher・Predictor・Metric Calculatorは無変更（未配線）。クリーン環境ではIssue #8のみ既知の失敗として残る（無関係）。詳細は[COMMON_EVALUATION_SCHEMA_63.md](COMMON_EVALUATION_SCHEMA_63.md)参照。
 
-Common Evaluation Metric Calculator実装（Feature [#65](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/65)、**Completed**・Closed。PR [#66](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/66)をSquash Merge・mainへ反映済み、Merge Commit: `b2de141`）。`src/app/services/evaluation_metrics.py`を新設し、`calculate_sample_metrics`/`calculate_evaluation_metrics`/`aggregate_confusions`を実装。CERは既存仕様どおりマイクロ平均、character_accuracyは負値許容、confusionは`from→expected`/`to→predicted`変換。`sample_count`重複は`metrics.sample_count`をCanonicalとする方針を確定。既存`ocr_evaluation.py`への配線は見送り（logger名互換問題を含めTesseract Predictor Adapter Issueへ持ち越し）。詳細・Future Work（レビューMinor5件）は[COMMON_EVALUATION_METRICS_65.md](COMMON_EVALUATION_METRICS_65.md)参照。次の実装対象はEvaluation Dispatcher（Feature #67としてPR #68レビュー待ち。詳細はPR #68マージ後に本ドキュメントへ反映する）。
+Common Evaluation Metric Calculator実装（Feature [#65](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/65)、**Completed**・Closed。PR [#66](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/66)をSquash Merge・mainへ反映済み、Merge Commit: `b2de141`）。`src/app/services/evaluation_metrics.py`を新設し、`calculate_sample_metrics`/`calculate_evaluation_metrics`/`aggregate_confusions`を実装。CERは既存仕様どおりマイクロ平均、character_accuracyは負値許容、confusionは`from→expected`/`to→predicted`変換。`sample_count`重複は`metrics.sample_count`をCanonicalとする方針を確定。既存`ocr_evaluation.py`への配線は見送り（logger名互換問題を含めTesseract Predictor Adapter Issueへ持ち越し）。詳細・Future Work（レビューMinor5件）は[COMMON_EVALUATION_METRICS_65.md](COMMON_EVALUATION_METRICS_65.md)参照。次の実装対象はEvaluation Dispatcher（Feature #67、詳細は次段落参照）。
+
+Evaluation Dispatcher実装（Feature [#67](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/67)、**Implemented, PR review pending**。PR [#68](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/68)レビュー待ち）。`src/app/services/evaluation_dispatcher.py`を新設し`EvaluationDispatcher`（register/resolve/dispatch）と`EnginePredictor` Protocolを実装。Backend `EngineCapability.supports_evaluation`を初めて参照（Dispatcherのみ）。tesseractのみ`supports_evaluation=True`、paddleocr/easyocr/trocrは登録済みだが`supports_evaluation=False`（Unsupported Engineは`UnsupportedEvaluationEngineError`）、customはBackend Engine Registry未登録のため`UnknownEvaluationEngineError`。**Evaluation DispatcherとEvaluation Runnerは別責務・別完了項目として扱う**（Dispatcherのみ実装済み、Runnerは未着手）。Backend Engine Registry・Capability以外への依存なし（Predictor実装・Runner・API・UIは未着手）。詳細は[EVALUATION_DISPATCHER_67.md](EVALUATION_DISPATCHER_67.md)参照。次の実装対象はEngine別Predictor実装。
 
 ⬜ Benchmark（Benchmark Runner/Benchmark Centerへの`ENGINE_CATALOG`/`ENGINE_BUILDERS`登録）
 
