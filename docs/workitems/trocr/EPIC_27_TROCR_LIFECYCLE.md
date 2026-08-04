@@ -37,7 +37,7 @@ Evaluation
   ✅ Multi-engine Evaluation API Design
   ✅ Common Evaluation Schema
   ✅ Common Metric Calculator
-  🔧 Evaluation Dispatcher（PR #68レビュー待ち）
+  ✅ Evaluation Dispatcher
   ⬜ Evaluation Runner
   ⬜ Tesseract Predictor Adapter
   ⬜ PaddleOCR Predictor
@@ -54,7 +54,7 @@ Common Evaluation Schema実装（Feature [#63](https://github.com/bs-shashimoto2
 
 Common Evaluation Metric Calculator実装（Feature [#65](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/65)、**Completed**・Closed。PR [#66](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/66)をSquash Merge・mainへ反映済み、Merge Commit: `b2de141`）。`src/app/services/evaluation_metrics.py`を新設し、`calculate_sample_metrics`/`calculate_evaluation_metrics`/`aggregate_confusions`を実装。CERは既存仕様どおりマイクロ平均、character_accuracyは負値許容、confusionは`from→expected`/`to→predicted`変換。`sample_count`重複は`metrics.sample_count`をCanonicalとする方針を確定。既存`ocr_evaluation.py`への配線は見送り（logger名互換問題を含めTesseract Predictor Adapter Issueへ持ち越し）。詳細・Future Work（レビューMinor5件）は[COMMON_EVALUATION_METRICS_65.md](COMMON_EVALUATION_METRICS_65.md)参照。次の実装対象はEvaluation Dispatcher（Feature #67、詳細は次段落参照）。
 
-Evaluation Dispatcher実装（Feature [#67](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/67)、**Implemented, PR review pending**。PR [#68](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/68)レビュー待ち）。`src/app/services/evaluation_dispatcher.py`を新設し`EvaluationDispatcher`（register/resolve/dispatch）と`EnginePredictor` Protocolを実装。Backend `EngineCapability.supports_evaluation`を初めて参照（Dispatcherのみ）。tesseractのみ`supports_evaluation=True`、paddleocr/easyocr/trocrは登録済みだが`supports_evaluation=False`（Unsupported Engineは`UnsupportedEvaluationEngineError`）、customはBackend Engine Registry未登録のため`UnknownEvaluationEngineError`。**Evaluation DispatcherとEvaluation Runnerは別責務・別完了項目として扱う**（Dispatcherのみ実装済み、Runnerは未着手）。Backend Engine Registry・Capability以外への依存なし（Predictor実装・Runner・API・UIは未着手）。詳細は[EVALUATION_DISPATCHER_67.md](EVALUATION_DISPATCHER_67.md)参照。次の実装対象はEngine別Predictor実装。
+Evaluation Dispatcher実装（Feature [#67](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/67)、**Completed**・Closed。PR [#68](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/68)をSquash Merge・mainへ反映済み、Merge Commit: `83e4eec`）。`src/app/services/evaluation_dispatcher.py`を新設し`EvaluationDispatcher`（register/resolve/dispatchのみ）と`EnginePredictor` Protocolを実装。Backend `EngineCapability.supports_evaluation`を初めて参照（Dispatcherのみ）。tesseractのみ`supports_evaluation=True`、paddleocr/easyocr/trocrは登録済みだが`supports_evaluation=False`（Unsupported Engineは`UnsupportedEvaluationEngineError`）、customはBackend Engine Registry未登録のため`UnknownEvaluationEngineError`。**Evaluation DispatcherとEvaluation Runnerは別責務・別完了項目として扱う**（Dispatcherのみ実装済み、Runnerは未着手）。Backend Engine Registry・Capability以外への依存なし（Predictor実装・Runner・API・UIは未着手）。マージ前レビューはBlocker/Majorなし・Minor 2件/Suggestion 3件（Future Workへ記録、Productionコード変更なし）でApprove。詳細・Future Workは[EVALUATION_DISPATCHER_67.md](EVALUATION_DISPATCHER_67.md)参照。次の実装対象はEvaluation Runner。
 
 ⬜ Benchmark（Benchmark Runner/Benchmark Centerへの`ENGINE_CATALOG`/`ENGINE_BUILDERS`登録）
 

@@ -6,9 +6,11 @@ Parent Epic: [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)�
 
 Related: Design [#61](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/61)（Multi-engine Evaluation API Architecture、Completed・Closed） / [ADR-0003（Accepted）](../../adr/ADR-0003_Multi_Engine_Evaluation.md) / [docs/design/MULTI_ENGINE_EVALUATION_API.md](../../design/MULTI_ENGINE_EVALUATION_API.md)
 
-PR: [#68](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/68)（Open・レビュー待ち。Mergeは未実施）
+PR: [#68](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/68)（Squash Merge済み。Squash Commit: `83e4eec`）
 
-**状態**: Implemented, PR review pending。
+**状態**: **Completed**・Closed。
+
+**マージ前レビュー結果**: Blocker 0件・Major 0件・Minor 2件・Suggestion 3件、Conclusion: Approve推奨（レビュー内容に基づき承認・マージ済み）。Minor/SuggestionはProductionコードを変更せず、下記「Future Work」へ記録した。
 
 **前提の訂正（実装開始時点）**: 本Featureの実装開始時点では、Issue #65（Common Evaluation Metric Calculator）/ PR #66 はいずれもOpenのままでありmainへは未反映であった。本Feature（Evaluation Dispatcher）はDependency制約上、Backend Engine Registry・Capability以外（`evaluation_metrics.py`を含む）に一切依存しない設計であるため、PR #66の未マージ状態が本Issueの実装を妨げないことを確認した上で、当時のmain（PR #66を含まない状態）からブランチを作成して着手した。**その後、Issue #65 / PR #66はSquash Merge済み（Merge Commit: `b2de141`）でありCompleted・Closedである。** 本Feature（Evaluation Dispatcher）はmain最新化のためのrebaseを実施済みで、PR #66由来の`evaluation_metrics.py`とは競合しない（Dispatcherは引き続き`evaluation_metrics.py`に依存しない）。
 
@@ -95,7 +97,17 @@ class EnginePredictor(Protocol):
 
 ## 次のIssue
 
-Engine別Predictor実装（Tesseract Predictor Adapterを含む。Common Evaluation Metric Calculator（Issue #65）を利用する最初のPredictorとなる想定）
+Engine別Predictor実装（Tesseract Predictor Adapterを含む。Common Evaluation Metric Calculator（Issue #65）を利用する最初のPredictorとなる想定）。次に着手するのは**Evaluation Runner**。
+
+## Future Work（マージ前レビューMinor/Suggestion指摘）
+
+PR #68マージ前レビューで挙がった指摘。いずれもBlocker・Majorではなく、今回のマージは妨げない（Productionコードは今回変更していない）。
+
+- **Minor**: `register(engine_id, predictor)`が、渡された`engine_id`引数と`predictor.engine_id`属性の一致を検証していない（キーと属性が食い違って登録される可能性がある）。**この検証は、最初の実PredictorとなるTesseract Predictor Adapter実装前までに再検討する。**
+- **Minor**: `dispatch()`の「Backend Registry上はsupportedだが`register()`未実施」ケース（`EvaluationDispatcherError`を送出しPredictorを呼ばないこと）を直接検証する専用テストが無い（`resolve()`側のみ検証済み）
+- **Suggestion**: 「register()未実施」ケースの例外を、汎用`EvaluationDispatcherError`ではなく専用の`PredictorNotRegisteredError`として分離する案
+- **Suggestion**: `test_dispatcher_module_has_no_ocr_engine_dependencies`のDependency検査を、単純な部分文字列一致からASTベースのimport解析へ強化する案
+- **Suggestion**: `resolve()`/`dispatch()`に`None`・空文字engine_idを渡した場合の挙動を明示的にテストする案
 
 ## テスト
 

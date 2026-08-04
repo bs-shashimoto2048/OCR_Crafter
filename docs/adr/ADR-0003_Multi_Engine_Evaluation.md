@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-08-03（Proposed）/ 2026-08-03（Accepted）
 - **Related Issue**: Design [#61](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/61)（Multi-engine Evaluation API Architecture、**Completed**・Closed） / Parent Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27) / Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46) / Design [#59](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/59)
-- **Related PR**: [#62](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/62)（Squash Merge済み。Squash Commit: `34aea57`） / [#64](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/64)（Common Evaluation Schema実装、Squash Merge済み。Squash Commit: `4663dd0`） / [#66](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/66)（Common Evaluation Metric Calculator実装、Squash Merge済み。Squash Commit: `b2de141`）
+- **Related PR**: [#62](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/62)（Squash Merge済み。Squash Commit: `34aea57`） / [#64](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/64)（Common Evaluation Schema実装、Squash Merge済み。Squash Commit: `4663dd0`） / [#66](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/66)（Common Evaluation Metric Calculator実装、Squash Merge済み。Squash Commit: `b2de141`） / [#68](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/68)（Evaluation Dispatcher実装、Squash Merge済み。Squash Commit: `83e4eec`）
 
 > 本ADRはDesign Issue #61の成果物であり、調査結果の詳細は[docs/design/MULTI_ENGINE_EVALUATION_API.md](../design/MULTI_ENGINE_EVALUATION_API.md)を前提とする。PR #62のレビュー承認・mainへのSquash Mergeを受けて、本ADRのStatusを**Proposed→Accepted**へ変更した。以降、本ADRの決定は正式な設計判断として扱う。
 >
@@ -13,7 +13,7 @@
 > Architecture: Completed
 > Evaluation Schema: Completed
 > Common Metric Calculator: Completed
-> Evaluation Dispatcher: Implemented, PR review pending (Issue #67)
+> Evaluation Dispatcher: Completed (Issue #67 / PR #68)
 > Evaluation Runner: Not Started
 > Tesseract Predictor Adapter: Not Started
 > PaddleOCR Predictor: Not Started
@@ -32,7 +32,7 @@
 >
 > **Future Work（PR #66レビューMinor指摘）**: (1) 新Calculator単独でのU+FFFD loggerテスト追加候補（`caplog.at_level(..., logger="src.app.services.evaluation_metrics")`）、(2) 空GTサンプルのedit distanceがAggregate分子（`dist_total`）へ加算される既存仕様の明文化、(3) Tesseract Adapter Issue着手時のlogger移行方針の具体化、(4) `ocr_evaluation.py`との重複実装（`normalize_compare`/`levenshtein_ops`）解消、(5) confusion top-N（既存APIの`confusions`相当）適用はRunner責務として整理。詳細は[docs/workitems/trocr/COMMON_EVALUATION_METRICS_65.md](../workitems/trocr/COMMON_EVALUATION_METRICS_65.md)参照。
 >
-> Feature [#67](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/67)「Evaluation Dispatcher」にて`src/app/services/evaluation_dispatcher.py`を新設し、`EvaluationDispatcher`（`register`/`resolve`/`dispatch`）と`EnginePredictor` Protocolを実装済み（PR [#68](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/68)レビュー待ち）。Backend `EngineCapability.supports_evaluation`を初めて参照する実装であり、Dispatcherのみが参照しPredictor側は参照しない設計とした。Unknown Engineは`UnknownEvaluationEngineError`、Unsupported Engine（Capability上`supports_evaluation=False`）は`UnsupportedEvaluationEngineError`を送出する。**Evaluation DispatcherとEvaluation Runnerは別責務・別完了項目として扱う**（Dispatcherのみ実装済み、Runnerは未着手）。Backend Engine Registry・Capability以外への依存はない（Predictor実装・Runner・API・Benchmark等は未着手）。詳細は[docs/workitems/trocr/EVALUATION_DISPATCHER_67.md](../workitems/trocr/EVALUATION_DISPATCHER_67.md)参照。
+> Feature [#67](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/67)「Evaluation Dispatcher」は**Completed**・Closed（PR [#68](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/68)をSquash Merge・mainへ反映済み、Merge Commit: `83e4eec`）。`src/app/services/evaluation_dispatcher.py`を新設し、`EvaluationDispatcher`（`register`/`resolve`/`dispatch`のみ）と`EnginePredictor` Protocolを実装。Backend `EngineCapability.supports_evaluation`を初めて参照する実装であり、Dispatcherのみが参照しPredictor側は参照しない設計とした。実際の値はtesseractのみ`supports_evaluation=True`、paddleocr/easyocr/trocrはRegistry登録済みだが`supports_evaluation=False`、customはBackend Engine Registry未登録。Unknown Engineは`UnknownEvaluationEngineError`、Unsupported Engine（Capability上`supports_evaluation=False`）は`UnsupportedEvaluationEngineError`を送出する。**Evaluation DispatcherとEvaluation Runnerは別責務・別完了項目として扱う**（Dispatcherのみ実装済み、Runnerは未着手）。Backend Engine Registry・Capability以外への依存はない（Predictor実装・Runner・API・Benchmark等は未着手）。マージ前レビューはBlocker/Majorなし・Minor 2件/Suggestion 3件（Future Workへ記録、Productionコード変更なし）でApprove。詳細は[docs/workitems/trocr/EVALUATION_DISPATCHER_67.md](../workitems/trocr/EVALUATION_DISPATCHER_67.md)参照。次の実装対象はEvaluation Runner。
 
 ## Context
 
