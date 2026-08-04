@@ -6,9 +6,9 @@ Parent Epic: [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)�
 
 Related: Design [#61](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/61)（Multi-engine Evaluation API Architecture、Completed・Closed） / Feature [#63](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/63)（Common Evaluation Schema、Completed・Closed） / [ADR-0003（Accepted）](../../adr/ADR-0003_Multi_Engine_Evaluation.md) / [docs/design/MULTI_ENGINE_EVALUATION_API.md](../../design/MULTI_ENGINE_EVALUATION_API.md)
 
-PR: [#66](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/66)（Open。Mergeは未実施）
+PR: [#66](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/66)（Squash Merge済み。Squash Commit: `b2de141`）
 
-**状態**: Implemented, PR review pending。
+**状態**: **Completed**・Closed。レビュー結果はApprove推奨（Blocker・Majorなし）。
 
 ## 現行Metrics仕様（調査結果、`src/app/services/ocr_evaluation.py`）
 
@@ -87,8 +87,16 @@ Tesseract評価の実際の配線は、既存の[docs/design/MULTI_ENGINE_EVALUA
 
 ## 次のIssue
 
-Evaluation Dispatcher / Runner（`EvaluationDispatcher`本体、`EnginePredictor`契約、Tesseract Predictor Adapterの配線判断を含む）
+Evaluation Dispatcher / Runner（`EvaluationDispatcher`本体、`EnginePredictor`契約、Tesseract Predictor Adapterの配線判断を含む）。**Evaluation Dispatcher**はFeature [#67](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/67)として着手済み（PR [#68](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/68)レビュー待ち）。DispatcherとRunnerは別責務・別Issueとして扱う。
 
 ## テスト
 
 `tests/test_evaluation_metrics.py`（新規46テスト）。Exact Match/Edit Distance/CER/Aggregate/Confusion/Validation/Compatibilityの各カテゴリを網羅。既存`tests/test_cer_metrics.py`（7テスト）は無修正のまま全件成功を確認済み。
+
+## Future Work（PR #66レビューMinor指摘）
+
+1. **新Calculator単独でのU+FFFD loggerテスト追加候補**: `tests/test_evaluation_metrics.py`には現状、既存実装との出力値比較テストのみがあり、`evaluation_metrics.normalize_compare()`自身がU+FFFD検出時に正しく警告ログを発火することを直接検証するテスト（`caplog.at_level(..., logger="src.app.services.evaluation_metrics")`）が無い。次のドキュメント/テスト更新機会に追加する
+2. **空GTサンプルのedit distanceがAggregate分子へ加算される既存仕様の明文化**: `ground_truth=""`かつ`prediction!=""`のサンプルは、sample単位では`cer=None`だが、`calculate_evaluation_metrics()`では`edit_distance`（Noneではない実数）がそのまま`dist_total`へ加算され、`ref_total`へは`0`しか寄与しない。既存`evaluate_ocr()`の集計ロジックと同一の挙動であり正しい再現だが、仕様として目立つ形で明記されていなかった（本節で明記済み。第43〜46行「Empty GT / Empty Dataset」参照）
+3. **Tesseract Adapter着手時のlogger移行方針の具体化**: 現状「改めて判断する」とのみ記載。次Issue（Tesseract Predictor Adapter）着手時に、最低限「既存テストの`caplog`logger指定を`evaluation_metrics`へ更新した上で移設する」という選択肢を候補として検討する
+4. **`ocr_evaluation.py`との重複実装解消**: `normalize_compare`/`levenshtein_ops`が`ocr_evaluation.py`側と`evaluation_metrics.py`側の2箇所に存在する状態。将来的にどちらかへ一本化するか、Compatibilityテストによる同期担保を継続するかを、Tesseract Adapter Issueで判断する
+5. **confusion top-N（既存APIの`confusions`相当）の適用はRunner責務として整理**: `aggregate_confusions()`は全件を返す設計であり、既存APIの`confusions`（上位10件）相当のtop-N適用は行わない。将来のRunner実装が必要に応じて`result[:10]`等でスライスする方針とする

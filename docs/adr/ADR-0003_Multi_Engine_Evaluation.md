@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-08-03（Proposed）/ 2026-08-03（Accepted）
 - **Related Issue**: Design [#61](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/61)（Multi-engine Evaluation API Architecture、**Completed**・Closed） / Parent Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27) / Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46) / Design [#59](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/59)
-- **Related PR**: [#62](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/62)（Squash Merge済み。Squash Commit: `34aea57`） / [#64](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/64)（Common Evaluation Schema実装、Squash Merge済み。Squash Commit: `4663dd0`）
+- **Related PR**: [#62](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/62)（Squash Merge済み。Squash Commit: `34aea57`） / [#64](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/64)（Common Evaluation Schema実装、Squash Merge済み。Squash Commit: `4663dd0`） / [#66](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/66)（Common Evaluation Metric Calculator実装、Squash Merge済み。Squash Commit: `b2de141`）
 
 > 本ADRはDesign Issue #61の成果物であり、調査結果の詳細は[docs/design/MULTI_ENGINE_EVALUATION_API.md](../design/MULTI_ENGINE_EVALUATION_API.md)を前提とする。PR #62のレビュー承認・mainへのSquash Mergeを受けて、本ADRのStatusを**Proposed→Accepted**へ変更した。以降、本ADRの決定は正式な設計判断として扱う。
 >
@@ -12,7 +12,7 @@
 > ```text
 > Architecture: Completed
 > Evaluation Schema: Completed
-> Common Metric Calculator: Implemented, PR review pending (Issue #65)
+> Common Metric Calculator: Completed
 > Evaluation Dispatcher / Runner: Not Started
 > Tesseract Predictor Adapter: Not Started
 > PaddleOCR Predictor: Not Started
@@ -26,6 +26,10 @@
 > Feature [#63](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/63)「Common Evaluation Schema実装」は**Completed**・Closed（PR [#64](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/64)をSquash Merge・mainへ反映済み、Merge Commit: `4663dd0`）。`OcrEvalTarget.options`（ターゲット単位のEngine固有オプション）、`OcrEvaluationMetrics`/`OcrEvaluationSampleResult`/`OcrEvaluationConfusion`/`OcrEvaluationResult`（内部共通Result Schema）を実装済み。既存`POST /api/ocr/evaluate`のresponse_model・返却dictは無変更（未配線）。次の実装対象はCommon Metric Calculator。詳細は[docs/workitems/trocr/COMMON_EVALUATION_SCHEMA_63.md](../workitems/trocr/COMMON_EVALUATION_SCHEMA_63.md)参照。
 >
 > **PR #64レビュー指摘対応（数値Validation強化）**: 共通Result Schemaの数値項目（count系: `sample_count`/`exact_match_count`/`edit_distance`/`confusion.count`、float系: `exact_match_rate`/`cer`/`character_accuracy`/`confidence`/`duration_ms`）へ、(1) NaN/Infinity/-Infinityの明示的な拒否、(2) 数値文字列（`"5"`等）の暗黙変換の廃止（count系はstrict int、float系はint/floatのみ許可）を追加した。既存Request Schema（`OcrEvalTarget`/`OcrEvaluateRequest`の`psm`等）は対象外。`confidence=None`/`confidence=0.0`/`cer>1`/`character_accuracy<0`/`duration_ms=0`は引き続き許可する。また、クリーン環境（`outputs/app.db`退避）ではIssue #8（`test_dataset_registry.py::test_register_ocr_model_records_dataset_lineage`）が本PRと無関係な既知の失敗として残ることを確認済み（本PRでは修正しない）。
+>
+> Feature [#65](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/65)「Common Evaluation Metric Calculator」は**Completed**・Closed（PR [#66](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/66)をSquash Merge・mainへ反映済み、Merge Commit: `b2de141`）。`src/app/services/evaluation_metrics.py`を新設し、既存Tesseractと同一のNFC正規化・trim・Levenshtein edit operations・sample単位CER/完全一致/edit distance・マイクロ平均CER・`character_accuracy = 1 - CER`・confusion集計を実装。`OcrEvaluationResult.sample_count`と`metrics.sample_count`の重複は**`metrics.sample_count`をCanonicalとする**方針を確定。既存Tesseract評価経路（`ocr_evaluation.py`）への配線は行っていない（logger名互換問題により実装を移設せず独立実装とし、既存実装との出力一致は直接比較テストで担保。**logger名の互換問題（U+FFFD警告の出力元logger名不一致）はTesseract Predictor Adapter Issueで解決する**）。confusionの決定的sort（count降順→kind→expected→predicted）は本Calculator内でのみ導入したものであり、**既存API（`POST /api/ocr/evaluate`）の`confusions`/`confusions_full`の並び順へはまだ反映されていない**。クリーン環境ではIssue #8のみ既知の失敗として残る（本Featureとは無関係）。
+>
+> **Future Work（PR #66レビューMinor指摘）**: (1) 新Calculator単独でのU+FFFD loggerテスト追加候補（`caplog.at_level(..., logger="src.app.services.evaluation_metrics")`）、(2) 空GTサンプルのedit distanceがAggregate分子（`dist_total`）へ加算される既存仕様の明文化、(3) Tesseract Adapter Issue着手時のlogger移行方針の具体化、(4) `ocr_evaluation.py`との重複実装（`normalize_compare`/`levenshtein_ops`）解消、(5) confusion top-N（既存APIの`confusions`相当）適用はRunner責務として整理。詳細は[docs/workitems/trocr/COMMON_EVALUATION_METRICS_65.md](../workitems/trocr/COMMON_EVALUATION_METRICS_65.md)参照。
 >
 > Feature [#65](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/65)「Common Evaluation Metric Calculator」にて`src/app/services/evaluation_metrics.py`を新設し、Engine非依存の`calculate_sample_metrics`/`calculate_evaluation_metrics`/`aggregate_confusions`を実装済み（PRレビュー待ち）。既存`ocr_evaluation.py`のCER（マイクロ平均）・完全一致・confusion集計と出力が完全一致することをテストで直接検証した。既存`ocr_evaluation.py`への配線は見送り（logger名依存の既存テストへの副作用を避けるため独立実装とした、詳細は[COMMON_EVALUATION_METRICS_65.md](../workitems/trocr/COMMON_EVALUATION_METRICS_65.md)参照）。次の実装対象はEvaluation Dispatcher / Runner。
 
