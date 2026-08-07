@@ -6,8 +6,14 @@ Design #61（docs/design/MULTI_ENGINE_EVALUATION_API.md）・ADR-0003で確定�
 Schema（Issue #63）を接続する共通Evaluation Loopのみを実装する。
 
 Runnerが担当するもの: Predictorを1回だけ解決・Dataset全Sampleの順次処理・Predictor呼び出し・
-Sample Result生成・エラーSample生成・Metrics/Confusion集計・timing・warnings・Result組み立て・
-`sample_count`同期。
+Predictor戻り値契約（`PredictionResult`）の検証・Sample Result生成・エラーSample生成・
+Metrics/Confusion集計・timing・warnings・Result組み立て・`sample_count`同期。
+
+Sample Failure Boundary: 1Sampleあたりの`try`/`except`は、`recognize()`の呼び出しだけでなく、
+戻り値の契約検証・値の取得・`calculate_sample_metrics()`の呼び出しまでを一体として保護する。
+Predictorが契約に反する値を返した場合や、Schema Validationが失敗した場合も、そのSample1件の
+失敗として隔離し、Run全体を中断しない（Unknown/Unsupported Engine・Predictor未register等の
+「Run開始前エラー」は区別してそのまま上位へ伝播させる）。
 
 Runnerが担当しないもの（Predictor実装・Runner外の責務）: Engine固有モデルload・Engine固有前処理・
 Datasetディレクトリ探索・GT CSV読込・API Request解析・HTTP Error変換・DB保存・履歴保存・
@@ -112,8 +118,29 @@ class EvaluationRunner:
 
         for sample in samples:
             sample_start_counter = self._perf_counter()
+            # Sample Failure Boundary: recognize()の呼び出しだけでなく、戻り値の契約検証
+            # （PredictionResultであること）・値の取得・calculate_sample_metrics()（型検証・
+            # Schema検証を含む）まで、このSampleの処理全体を1つのtryで保護する。1 Sampleの
+            # 異常（Predictorの契約違反・不正な戻り値・Schema Validation失敗等）が後続Sampleの
+            # 処理やRun全体を中断しないようにするため（Issue #69レビューMajor #1の是正）。
             try:
                 prediction = predictor.recognize(sample.image, **args)
+                # Predictorの戻り値契約を明示的に検証する。PredictionResult以外（生文字列・
+                # None・dict・tuple等）は暗黙変換せず、Sample failureとして扱う
+                # （raw stringをPredictionResult(text=...)へ勝手に補完しない）。
+                if not isinstance(prediction, PredictionResult):
+                    raise TypeError(
+                        f"predictor.recognize() did not return a PredictionResult "
+                        f"(got {type(prediction).__name__})"
+                    )
+                duration_ms = _elapsed_ms(sample_start_counter, self._perf_counter())
+                sample_result = calculate_sample_metrics(
+                    image=sample.image,
+                    ground_truth=sample.ground_truth,
+                    prediction=prediction.text,
+                    confidence=prediction.confidence,
+                    duration_ms=duration_ms,
+                )
             except Exception as exc:  # noqa: BLE001 - Sample単位エラーとして意図的に全例外を捕捉する
                 duration_ms = _elapsed_ms(sample_start_counter, self._perf_counter())
                 sample_results.append(
@@ -132,20 +159,13 @@ class EvaluationRunner:
                 failed_count += 1
                 continue
 
-            duration_ms = _elapsed_ms(sample_start_counter, self._perf_counter())
-            if prediction.confidence is None:
+            # ここに到達するのは成功Sampleのみ（confidence欠損カウント・Confusion集計対象は
+            # 成功Sampleに限定する）。
+            if sample_result.confidence is None:
                 missing_confidence_count += 1
-            sample_results.append(
-                calculate_sample_metrics(
-                    image=sample.image,
-                    ground_truth=sample.ground_truth,
-                    prediction=prediction.text,
-                    confidence=prediction.confidence,
-                    duration_ms=duration_ms,
-                )
-            )
+            sample_results.append(sample_result)
             # Confusionは成功Sampleからのみ集計する（失敗Sampleはprediction自体が存在しないため対象外）。
-            confusion_pairs.append((sample.ground_truth, prediction.text))
+            confusion_pairs.append((sample.ground_truth, sample_result.prediction))
 
         # metrics.sample_countをCanonicalとする方針（Issue #65）に合わせ、result.sample_countと
         # 常に一致させる。失敗Sampleも含めた全件を渡すことで両者を自然に一致させる
@@ -183,6 +203,18 @@ class EvaluationRunner:
 
 
 def _elapsed_ms(start_counter: float, end_counter: float) -> float:
+    """`perf_counter`の差分をmsへ変換する。
+
+    負のdurationを`max(0, ...)`等で握りつぶすことは意図的に行わない。本番環境の
+    `time.perf_counter()`はmonotonicであり逆行しないため、負の差分は原理上発生しない。
+    テストで注入したclockが逆行した場合、この関数自体は単に負の値を返す（推測で補正しない）。
+    その負の値は`OcrEvaluationSampleResult.duration_ms`（`ge=0.0`）のSchema Validationで
+    拒否され、Sample Failure Boundary（`EvaluationRunner.run()`のtry/except）内で発生した
+    他の例外と同様にSample failureへ変換される。clock injectionはテスト決定性のためだけの
+    仕組みであり、Predictor/Sample処理の失敗と区別する専用の「Runner infrastructure error」
+    経路は今回追加しない（本番のmonotonic clockでは到達しない状態を区別する複雑さを
+    正当化できないため）。
+    """
     return round((end_counter - start_counter) * 1000, 3)
 
 

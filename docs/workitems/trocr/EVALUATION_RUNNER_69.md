@@ -116,15 +116,40 @@ image / ground_truth / prediction / exact_match / edit_distance / cer / confiden
 duration_ms / error=None
 ```
 
-## Sample失敗時（Sample単位エラー）
+## Sample失敗時（Sample単位エラー・Sample Failure Boundary）
 
-Predictorの`recognize()`が例外を送出しても、Run全体は中断しない。失敗Sampleとして記録し、
-残りのSampleの処理を継続する。
+**マージ前レビューMajor #1の是正（本節を更新）**: 当初実装では`try`/`except`が
+`predictor.recognize()`の呼び出しのみを保護しており、その戻り値を処理する後続コード
+（`PredictionResult`かどうかの検証・`.text`/`.confidence`の取得・`calculate_sample_metrics()`
+の呼び出し）は保護対象外だった。そのため、Predictorが`PredictionResult`以外（生文字列・
+`None`・`dict`等）を返した場合や、`calculate_sample_metrics()`自体がSchema Validationで
+失敗した場合（不正な型・非有限値・負のduration等）に、そのSampleの処理どころか**Run全体が
+例外で中断し、それまでの全Sampleの結果が失われる**という問題があった。
+
+**Sample Failure Boundary**を、以下の一連の処理全体を1つの`try`で囲む形へ拡張した。
+
+```text
+1. predictor.recognize()の呼び出し
+2. 戻り値がPredictionResultであることの検証（isinstance）
+3. PredictionResultからのtext/confidence取得
+4. calculate_sample_metrics()の呼び出し（Schema Validationを含む）
+```
+
+この範囲内で発生したいかなる`Exception`も、そのSample1件のみの失敗として隔離し、Run全体は
+中断せず後続Sampleの処理を継続する。
 
 ```text
 prediction=None / exact_match=None / edit_distance=None / cer=None / confidence=None
 error=<安全なメッセージ> / duration_msは計測
 ```
+
+### Predictor戻り値契約の検証
+
+`recognize()`の戻り値が`PredictionResult`のインスタンスであることを`isinstance()`で明示的に
+検証する。**暗黙変換は一切行わない**（生文字列を`PredictionResult(text=...)`へ自動的に
+包み直す、`dict`から`text`/`confidence`キーを探して復元する、等は行わない）。契約に反する
+戻り値（生文字列・`None`・`dict`・`tuple`・任意のオブジェクト）は`TypeError`を送出し、
+Sample Failure Boundaryの範囲内であるため即座にSample failureへ変換される。
 
 ### Run開始前エラー と Sample単位エラーの区別
 
@@ -137,9 +162,12 @@ error=<安全なメッセージ> / duration_msは計測
 上記はすべて`dispatcher.resolve(engine_id)`（`run()`冒頭、Sampleループの外）で発生しうるため、
 Runnerは意図的にこの呼び出しを`try`で囲まない。
 
-**Sample単位エラー**（Resultへ記録して継続）:
+**Sample単位エラー**（Resultへ記録して継続。`Exception`のみを捕捉し`BaseException`
+＝`KeyboardInterrupt`/`SystemExit`等は握りつぶさずそのまま伝播する）:
 
-- `predictor.recognize()`中の例外（全例外クラスを対象。特定の例外型に限定しない）
+- `predictor.recognize()`中の例外
+- 戻り値が`PredictionResult`ではない場合の契約違反（`TypeError`）
+- `calculate_sample_metrics()`中の例外（型不正・Schema Validation失敗を含む）
 
 ## Error Message方針
 
@@ -159,6 +187,19 @@ Path/トークン/ユーザー名Sanitizerを実装する必要がない）。�
   Common Schemaはstring保持のためISO 8601へ変換）・`duration_ms`
 - `now`/`perf_counter`をコンストラクタ引数として注入可能にし、テストではFake Clockを使用
   （実時刻・実`perf_counter`に依存しない決定的なテストを実現）
+
+### Clock injectionとSample Failure Boundaryの関係（マージ前レビュー対応）
+
+`time.perf_counter()`は本番環境ではmonotonic（単調増加）であり、逆行することは原理上ない。
+負のdurationを`max(0, ...)`等で握りつぶす実装は**意図的に追加していない**（推測でタイミング値を
+補正しない）。
+
+テストで注入したclockが逆行し、結果として負の`duration_ms`が計算された場合、その値は
+`OcrEvaluationSampleResult.duration_ms`（`ge=0.0`）のSchema Validationで拒否される。この
+`ValidationError`はSample Failure Boundaryの範囲内で発生するため、他の契約違反・型不正と
+同様にSample failureへ変換される。clock injectionはテスト決定性のためだけの仕組みであり、
+本番のmonotonic clockでは到達し得ない状態を区別する専用の「Runner infrastructure error」
+経路は、複雑さを正当化できないため今回は追加していない。
 
 ## Metrics集計方針（sample_count）
 
@@ -225,6 +266,15 @@ cer=None / character_accuracy=None / samples=[] / confusions=[] /
 warnings=["evaluation dataset was empty"]
 ```
 
+**`dispatcher.resolve(engine_id)`はSample総数に関わらず必ず1回実行される**（前述「Predictor解決・
+再利用」参照）。そのため`samples=[]`であっても、Unknown Engine・Unsupported Engine・Predictor
+未registerであればEmpty Datasetでも失敗する（`recognize()`は0回のまま、上記のRun開始前エラーが
+そのまま伝播する）。「Empty DatasetならPredictor不要」という代替案と比較した結果、resolve()を
+先に行う判断を維持した。理由: (1) resolve()自体は軽量な処理（Registry存在確認・Capability確認・
+登録済みPredictor辞書lookup）であり、Empty Datasetであっても実行コストは無視できる。(2) Unknown
+Engine・Unsupported Engine・未register設定ミスを、Dataset内容に関わらず即座に検知できる方が、
+Datasetが空のときだけ設定ミスが見逃されるより一貫性がある。
+
 ## Dispatcher engine_id整合性検証（Issue #67 Future Workの再検討）
 
 Issue #67で残した「`register(engine_id, predictor)`と`predictor.engine_id`の一致検証」を、
@@ -263,9 +313,21 @@ Metric Calculator（Issue #65）を実際に配線する最初のPredictorとな
 
 ## テスト
 
-`tests/test_evaluation_runner.py`（新規24テスト）。Empty Dataset/Success/Predictor Reuse/
-Errors/Metrics/Result/Immutability/Dispatcher整合性の各カテゴリを網羅。Mock PredictorとFake
-Clockのみ使用、実OCR処理なし。既存`tests/test_evaluation_dispatcher.py`（22件、うちengine_id
-整合性検証2件を今回追加）・`tests/test_evaluation_metrics.py`（46件）・
+`tests/test_evaluation_runner.py`（34テスト。初回実装時24件 + マージ前レビューMajor #1是正で
+10件追加）。Empty Dataset/Success/Predictor Reuse/Errors/Predictor contract violation/
+Post-recognize failure/All malformed predictions/BaseException/Metrics/Confusion/Result/
+Immutability/Dispatcher整合性の各カテゴリを網羅。Mock PredictorとFake Clockのみ使用、実OCR
+処理なし。既存`tests/test_evaluation_dispatcher.py`（22件、うちengine_id整合性検証2件を
+Issue #69初回実装時に追加）・`tests/test_evaluation_metrics.py`（46件）・
 `tests/test_evaluation_schema.py`（88件）・`tests/test_cer_metrics.py`（7件）は無修正のまま
 全件成功を確認済み。
+
+### マージ前レビューMajor #1是正（Sample Failure Boundaryの拡張）
+
+PR #70のマージ前レビューで指摘されたMajor #1（`predictor.recognize()`の呼び出し自体しか
+`try`/`except`で保護されておらず、戻り値の後続処理で発生した例外がRun全体を中断していた）を
+是正した。修正対象は`src/app/services/evaluation_runner.py`のみ（`EvaluationDispatcher`
+Productionコードは今回変更しない）。詳細は上記「Sample失敗時（Sample単位エラー・Sample
+Failure Boundary）」参照。追加した10件のテストで、Predictor契約違反（生文字列/`None`/dict）・
+`calculate_sample_metrics()`起因のpost-recognize failure・全Sample契約違反・
+`KeyboardInterrupt`/`SystemExit`の非捕捉を検証した。

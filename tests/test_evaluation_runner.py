@@ -152,6 +152,16 @@ def test_success_multiple_samples_mismatch_and_confidence_none():
     assert "confidence was unavailable for 1 samples" in result.warnings
 
 
+def test_confidence_zero_is_not_treated_as_unavailable():
+    """confidence=0.0は実測値として保持され、「未取得」（confidence unavailable）扱いされない。"""
+    predictor = MockPredictor(results=[PredictionResult(text="A", confidence=0.0)])
+    dispatcher = _dispatcher_with_predictor(predictor)
+    runner = _runner(dispatcher)
+    result = runner.run(engine_id="tesseract", samples=[EvaluationInputSample(image="a.png", ground_truth="A")])
+    assert result.samples[0].confidence == 0.0
+    assert result.warnings == []
+
+
 def test_success_records_duration_per_sample():
     predictor = MockPredictor(results=[PredictionResult(text="ABC", confidence=0.5)])
     dispatcher = _dispatcher_with_predictor(predictor)
@@ -234,6 +244,140 @@ def test_predictor_not_registered_propagates():
     dispatcher = EvaluationDispatcher(registry=_registry("tesseract"))
     runner = _runner(dispatcher)
     with pytest.raises(EvaluationDispatcherError):
+        runner.run(engine_id="tesseract", samples=[EvaluationInputSample(image="a.png", ground_truth="A")])
+
+
+# ---------------------------------------------------------------------------
+# Predictor contract violation（Sample Failure Boundary、レビューMajor #1是正）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "malformed_return",
+    ["raw-string", None, {"text": "hi", "confidence": 0.5}],
+    ids=["raw_string", "none", "dict"],
+)
+def test_predictor_contract_violation_becomes_sample_failure_others_continue(malformed_return):
+    """PredictionResult以外の戻り値はSample failureとして隔離し、Runは成功・後続Sampleも処理する。"""
+    predictor = MockPredictor(
+        results=[
+            PredictionResult(text="A"),
+            malformed_return,
+            PredictionResult(text="B"),
+        ]
+    )
+    dispatcher = _dispatcher_with_predictor(predictor)
+    runner = _runner(dispatcher)
+
+    samples = [
+        EvaluationInputSample(image="0.png", ground_truth="A"),
+        EvaluationInputSample(image="1.png", ground_truth="A"),
+        EvaluationInputSample(image="2.png", ground_truth="B"),
+    ]
+    result = runner.run(engine_id="tesseract", samples=samples)
+
+    assert result.sample_count == 3
+    assert result.metrics.sample_count == 3
+    assert result.samples[0].error is None
+    assert result.samples[0].prediction == "A"
+    assert result.samples[1].error is not None
+    assert result.samples[1].prediction is None
+    assert result.samples[1].exact_match is None
+    assert result.samples[1].edit_distance is None
+    assert result.samples[1].cer is None
+    assert result.samples[1].confidence is None
+    assert result.samples[2].error is None
+    assert result.samples[2].prediction == "B"
+    # 後続Sample（index 2）も呼ばれていること
+    assert len(predictor.calls) == 3
+    # error Sampleはconfusion集計から除外される（成功2件分のみ、共に完全一致でconfusionなし）
+    assert result.confusions == []
+    assert "1 samples failed during inference" in result.warnings
+
+
+def test_predictor_contract_violation_error_message_has_no_raw_repr():
+    """契約違反時のerrorも例外クラス名のみ（生の戻り値のreprを含めない）。"""
+    predictor = MockPredictor(results=["raw-string-with-/secret/path"])
+    dispatcher = _dispatcher_with_predictor(predictor)
+    runner = _runner(dispatcher)
+    result = runner.run(engine_id="tesseract", samples=[EvaluationInputSample(image="a.png", ground_truth="A")])
+    assert result.samples[0].error == "TypeError"
+    assert "/secret/path" not in (result.samples[0].error or "")
+
+
+# ---------------------------------------------------------------------------
+# Post-recognize failure（recognize()自体は成功するが、その後のSample処理で例外）
+# ---------------------------------------------------------------------------
+
+
+def test_post_recognize_failure_from_calculate_sample_metrics_becomes_sample_failure():
+    """recognize()はPredictionResultを返すが、text等の内容がcalculate_sample_metrics()で
+    型エラーとなるケース（isinstance(prediction, PredictionResult)は通過する）。"""
+    predictor = MockPredictor(
+        results=[
+            PredictionResult(text="A"),
+            PredictionResult(text=123),  # type: ignore[arg-type]  - textが非文字列
+            PredictionResult(text="B"),
+        ]
+    )
+    dispatcher = _dispatcher_with_predictor(predictor)
+    runner = _runner(dispatcher)
+
+    samples = [
+        EvaluationInputSample(image="0.png", ground_truth="A"),
+        EvaluationInputSample(image="1.png", ground_truth="A"),
+        EvaluationInputSample(image="2.png", ground_truth="B"),
+    ]
+    result = runner.run(engine_id="tesseract", samples=samples)
+
+    assert result.sample_count == 3
+    assert result.samples[1].error is not None
+    assert result.samples[1].prediction is None
+    assert result.samples[0].error is None
+    assert result.samples[2].error is None
+    assert len(predictor.calls) == 3
+
+
+# ---------------------------------------------------------------------------
+# All malformed predictions
+# ---------------------------------------------------------------------------
+
+
+def test_all_malformed_predictions_result_still_returned():
+    predictor = MockPredictor(results=["a", None, {"text": "x"}])
+    dispatcher = _dispatcher_with_predictor(predictor)
+    runner = _runner(dispatcher)
+
+    samples = [EvaluationInputSample(image=f"{i}.png", ground_truth="A") for i in range(3)]
+    result = runner.run(engine_id="tesseract", samples=samples)
+
+    assert result.sample_count == 3
+    assert result.metrics.sample_count == 3
+    assert result.metrics.exact_match_count == 0
+    assert result.metrics.cer is None
+    assert result.confusions == []
+    assert "3 samples failed during inference" in result.warnings
+    assert all(s.error is not None for s in result.samples)
+
+
+# ---------------------------------------------------------------------------
+# BaseException（KeyboardInterrupt/SystemExit）はSample failureへ変換されず伝播する
+# ---------------------------------------------------------------------------
+
+
+def test_keyboard_interrupt_is_not_converted_to_sample_failure():
+    predictor = MockPredictor(results=[None], exceptions={0: KeyboardInterrupt()})
+    dispatcher = _dispatcher_with_predictor(predictor)
+    runner = _runner(dispatcher)
+    with pytest.raises(KeyboardInterrupt):
+        runner.run(engine_id="tesseract", samples=[EvaluationInputSample(image="a.png", ground_truth="A")])
+
+
+def test_system_exit_is_not_converted_to_sample_failure():
+    predictor = MockPredictor(results=[None], exceptions={0: SystemExit()})
+    dispatcher = _dispatcher_with_predictor(predictor)
+    runner = _runner(dispatcher)
+    with pytest.raises(SystemExit):
         runner.run(engine_id="tesseract", samples=[EvaluationInputSample(image="a.png", ground_truth="A")])
 
 
@@ -388,6 +532,18 @@ def test_result_contains_all_expected_fields():
     assert result.duration_ms is not None
     assert result.samples
     assert isinstance(result.warnings, list)
+    assert result.engine_details == {}
+
+
+def test_predictor_supplied_engine_details_are_discarded_not_leaked():
+    """PredictionResult.engine_detailsにPredictorが値を入れても、Result.engine_detailsは
+    常に空dictのまま（今回は統合しない方針。捏造も情報漏洩もしないことの確認）。"""
+    predictor = MockPredictor(
+        results=[PredictionResult(text="A", engine_details={"model_path": "/secret/model.bin"})]
+    )
+    dispatcher = _dispatcher_with_predictor(predictor)
+    runner = _runner(dispatcher)
+    result = runner.run(engine_id="tesseract", samples=[EvaluationInputSample(image="a.png", ground_truth="A")])
     assert result.engine_details == {}
 
 
