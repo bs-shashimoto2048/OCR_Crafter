@@ -6,9 +6,11 @@ Parent Epic: [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)�
 
 Related: Design [#61](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/61) / Feature [#63](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/63)（Common Evaluation Schema、Completed） / Feature [#65](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/65)（Common Evaluation Metric Calculator、Completed） / Feature [#67](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/67)（Evaluation Dispatcher、Completed） / Feature [#69](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/69)（Evaluation Runner、Completed） / [ADR-0003（Accepted）](../../adr/ADR-0003_Multi_Engine_Evaluation.md) / [docs/design/MULTI_ENGINE_EVALUATION_API.md](../../design/MULTI_ENGINE_EVALUATION_API.md)
 
-PR: [#72](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/72)（Open・レビュー待ち）
+PR: [#72](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/72)（Squash Merge済み。Squash Commit: `f8c7883`）
 
-**状態**: Implemented, PR review pending。
+**状態**: **Completed**・Closed。
+
+**マージ前レビュー結果**: Blocker 0件・Major 0件・Minor 3件・Suggestion 1件、Conclusion: Approve推奨。Productionコードの追加修正は行わず、Minor/SuggestionはFuture Workへ記録した（本節末尾「Future Work」参照）。
 
 ## 最重要原則
 
@@ -175,3 +177,29 @@ Future Workとして記録: `PredictionResult`（および将来的な`EnginePre
 - `tests/test_tesseract_evaluation_predictor.py`（新規）
 
 `src/app/services/ocr_evaluation.py`・`evaluation_dispatcher.py`・`evaluation_runner.py`・`main.py`・`frontend/`はいずれも無変更。Runner/Dispatcherへの変更は不要だった。
+
+## Future Work（マージ前レビューMinor/Suggestion指摘）
+
+PR #72マージ前レビューで挙がった指摘。いずれもBlocker・Majorではなく、今回のマージは妨げない（Productionコードは今回追加修正していない）。
+
+### Minor 1
+
+`tests/test_tesseract_evaluation_predictor.py`に`confidence=0.0`を明示的に検証するテストがない。実装は値をそのまま透過するため現在の挙動は正しいが、回帰防止用テスト追加候補として記録する。
+
+### Minor 2
+
+`tesseract_pipeline.py::recognize_line()`（本Issueでは無変更）が理論上NaN/Infinity confidenceを返し得る（TSVのconf列パース時、文字列が偶然`"nan"`/`"inf"`等であればPythonが例外を出さず変換してしまうため）。現状:
+
+- `PredictionResult`へそのまま渡る
+- Common Evaluation Schema（`OcrEvaluationSampleResult`の`_reject_non_finite`）が非有限値を拒否する
+- RunnerのSample Failure BoundaryでSample単位失敗として隔離される（Run全体は落ちない）
+
+本PRでは`tesseract_pipeline.py`を変更しない。
+
+### Minor 3
+
+`PredictionResult`が`evaluation_runner.py`に定義されているため、`Predictor → Runner`という依存方向になる（循環参照はない）。PaddleOCR/EasyOCR/TrOCR Predictor追加前後で、第三モジュール（`src/app/services/evaluation_types.py`または同等の共通型モジュール）への切り出しを再検討する。
+
+### Suggestion
+
+`EnginePredictor` Protocolの戻り値型具体化（案A/B/C）について、`ADR-0003`のFeature #71段落へ一文追加済み（Decision本文は変更していない）。次のPaddleOCR Predictor実装時に、この記録を起点に再判断する。
