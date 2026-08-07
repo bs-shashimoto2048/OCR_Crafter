@@ -200,6 +200,7 @@ def _paddleocr_capability() -> EngineCapability:
         supports_dictionary_postprocess=True,
         supports_orientation=True,
         supports_recognition=True,
+        supports_evaluation=True,
         supports_export=True,
         supported_export_formats=["paddle_inference"],
         supports_cpu=True,

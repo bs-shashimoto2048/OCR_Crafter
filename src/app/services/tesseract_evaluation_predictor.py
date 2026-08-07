@@ -38,7 +38,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from .evaluation_runner import PredictionResult
+from .evaluation_types import PredictionResult
 from .ocr_evaluation import build_recognizer
 from .tesseract_pipeline import DEFAULT_PSM, TESSERACT_WHITELIST_DEFAULT
 
