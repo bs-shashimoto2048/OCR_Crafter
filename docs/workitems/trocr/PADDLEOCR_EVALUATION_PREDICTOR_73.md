@@ -263,6 +263,8 @@ custom Unknown維持）。
 - `tests/test_evaluation_metrics.py`（46件）
 - `tests/test_evaluation_schema.py`（88件）
 - `tests/test_cer_metrics.py`（7件）
+
+**マージ前レビューでの是正**: マージ前レビューで、paddleocr未インストールCI環境に依存するテスト不具合を検出し、module stubによりCI非依存化した（`test_fallback_reader_construction_when_cached_reader_is_none`。Productionコードは変更していない）。
 - `tests/test_benchmark.py`・`tests/test_engine_capability.py`（PaddleOCR/Capability関連の既存回帰確認）
 
 ## Production変更範囲

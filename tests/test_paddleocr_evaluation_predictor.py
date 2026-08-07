@@ -7,6 +7,9 @@
 差し替えることで、既存のTSV/dict解析・「最大confidence採用」集約ルールを変更なく検証する）。
 """
 
+import sys
+import types
+
 import pytest
 
 from src.app.services.engine_capability import EngineCapability
@@ -218,10 +221,27 @@ def test_build_once_reader_constructed_exactly_once(monkeypatch):
 
 def test_fallback_reader_construction_when_cached_reader_is_none(monkeypatch):
     """`_get_paddle_text_recognition_reader`がNoneを返す場合、`_create_paddleocr_instance`
-    経由のフォールバック構築が呼ばれる（既存benchmark.pyの`_build_paddleocr_runner`と同じ引数）。"""
+    経由のフォールバック構築が呼ばれる（既存benchmark.pyの`_build_paddleocr_runner`と同じ引数）。
+
+    Predictor構築内の`from paddleocr import PaddleOCR`という実importは、実パッケージが
+    インストールされているかどうかに関わらず本テストが常に決定的に動作するよう、
+    ここでのみ`paddleocr`moduleをstubへ差し替える（`monkeypatch.setitem`はテスト終了時に
+    自動で元に戻すため、他テストへsys.modulesの汚染は残らない）。stubはimportを通すためだけの
+    ものであり、本来の検証対象である`_create_paddleocr_instance()`のmockはそのまま維持する
+    （fallback readerが正しく保持され、recognize()で利用可能であることを確認する）。
+    """
+    stub = types.ModuleType("paddleocr")
+
+    class StubPaddleOCR:
+        pass
+
+    stub.PaddleOCR = StubPaddleOCR
+    monkeypatch.setitem(sys.modules, "paddleocr", stub)
+
     captured = {}
 
     def fake_create_instance(paddleocr_cls, **kwargs):
+        captured["paddleocr_cls"] = paddleocr_cls
         captured.update(kwargs)
         return MockPaddleReader(raw_results=[_new_paddleocr_result("A", 0.5)])
 
@@ -230,6 +250,7 @@ def test_fallback_reader_construction_when_cached_reader_is_none(monkeypatch):
     predictor = PaddleOCREvaluationPredictor(project_id="p1", model="en_PP-OCRv5_mobile_rec")
     result = predictor.recognize("image.png")
     assert result.text == "A"
+    assert captured.get("paddleocr_cls") is StubPaddleOCR
     assert captured.get("text_recognition_model_name") == "en_PP-OCRv5_mobile_rec"
     assert "rec_model_dir" not in captured
 
