@@ -15,8 +15,11 @@ OCR実行・model load・推論処理・画像読込・Dataset探索・API処理
 Job管理・Benchmark Variant判定。
 
 依存先はBackend Engine Registry（`engine_registry.py`）・Engine Capability
-（`engine_capability.py`）のみ。Tesseract/PaddleOCR/EasyOCR/TrOCR固有コード、
-`ocr_evaluation.py`、Runner、Benchmarkへは一切依存しない。
+（`engine_capability.py`）・Evaluation共通型（`evaluation_types.py`）のみ。
+Tesseract/PaddleOCR/EasyOCR/TrOCR固有コード、`ocr_evaluation.py`、Runner、Benchmarkへは
+一切依存しない（`evaluation_types.py`はRunner・Dispatcher・各Predictorのいずれからも参照
+できる独立した葉モジュールであり、Runnerモジュール自体への依存ではない。Issue #73で
+`EnginePredictor.recognize()`の戻り値型を`Any`から`PredictionResult`へ具体化した際に追加）。
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ from __future__ import annotations
 from typing import Any, Optional, Protocol
 
 from .engine_registry import EngineRegistry, create_default_registry, resolve_engine_id
+from .evaluation_types import PredictionResult
 
 
 class EvaluationDispatcherError(Exception):
@@ -39,18 +43,20 @@ class UnsupportedEvaluationEngineError(EvaluationDispatcherError):
 
 
 class EnginePredictor(Protocol):
-    """Engine別評価Predictorの最小Interface（本Issueでは実装クラスを作らない）。
+    """Engine別評価Predictorの最小Interface。
 
-    `dispatch()`は`recognize()`の引数・戻り値の形状を一切関知せず、そのまま橋渡しするだけ
-    である（OCR処理・画像読込・モデルloadはPredictor実装側の責務。将来的な想定形状は
-    Design #61にある`recognize(image_path: str) -> tuple[str, float | None]`だが、
-    本Protocolはそれを強制しない）。Capability（`supports_evaluation`等）はDispatcher側
-    でのみ参照し、Predictor自身は参照・保持しない。
+    `dispatch()`は`recognize()`の引数の形状を一切関知せず、そのまま橋渡しするだけである
+    （OCR処理・画像読込・モデルloadはPredictor実装側の責務）。戻り値型は`PredictionResult`
+    （`evaluation_types.py`）へIssue #73で具体化したが、これは静的な型注釈にすぎず、
+    実行時の型強制ではない（`Protocol`は`@runtime_checkable`ではないため`isinstance()`に
+    よる検証はできない。実行時の契約検証はRunner側の`isinstance(prediction, PredictionResult)`
+    チェック＝Sample Failure Boundaryが担う）。Capability（`supports_evaluation`等）は
+    Dispatcher側でのみ参照し、Predictor自身は参照・保持しない。
     """
 
     engine_id: str
 
-    def recognize(self, *args: Any, **kwargs: Any) -> Any: ...
+    def recognize(self, *args: Any, **kwargs: Any) -> PredictionResult: ...
 
 
 class EvaluationDispatcher:

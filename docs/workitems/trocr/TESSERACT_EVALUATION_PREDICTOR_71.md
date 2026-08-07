@@ -133,6 +133,8 @@ Issue #69で残した「`EnginePredictor.recognize()`の戻り値`Any`を`Predic
 
 Future Workとして記録: `PredictionResult`（および将来的な`EnginePredictor`の型引数）を、Dispatcher・Runner双方が依存できる独立モジュール（例: `evaluation_types.py`）へ切り出す設計変更を、PaddleOCR/EasyOCR/TrOCR Predictor追加時に改めて検討する。
 
+**追記（Issue #73）**: 2つ目の実Predictor（PaddleOCR）追加時にこのFuture Workを実施し、`evaluation_types.py`への切り出し・Protocol型具体化の両方を完了した。詳細は本ファイル末尾「Future Work」節のMinor 3/Suggestion、および[PADDLEOCR_EVALUATION_PREDICTOR_73.md](PADDLEOCR_EVALUATION_PREDICTOR_73.md)参照。
+
 ## Dispatcher predictor.engine_id属性欠損（Scope外）
 
 `TesseractEvaluationPredictor`には`engine_id = "tesseract"`をクラス属性として持たせているため、Issue #67で指摘された「`predictor.engine_id`属性欠損時に`AttributeError`が送出される」問題には該当しない。`EvaluationDispatcher`の汎用的な例外改善自体は今回Scope外のまま（Dispatcher側のFuture Work）。
@@ -198,8 +200,8 @@ PR #72マージ前レビューで挙がった指摘。いずれもBlocker・Majo
 
 ### Minor 3
 
-`PredictionResult`が`evaluation_runner.py`に定義されているため、`Predictor → Runner`という依存方向になる（循環参照はない）。PaddleOCR/EasyOCR/TrOCR Predictor追加前後で、第三モジュール（`src/app/services/evaluation_types.py`または同等の共通型モジュール）への切り出しを再検討する。
+~~`PredictionResult`が`evaluation_runner.py`に定義されているため、`Predictor → Runner`という依存方向になる（循環参照はない）。PaddleOCR/EasyOCR/TrOCR Predictor追加前後で、第三モジュール（`src/app/services/evaluation_types.py`または同等の共通型モジュール）への切り出しを再検討する。~~ **解消済み（Issue [#73](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/73)「PaddleOCR Evaluation Predictor」で対応）**: `PredictionResult`を`src/app/services/evaluation_types.py`（独立した葉モジュール）へ切り出し、`evaluation_runner.py`は既存import互換のため再エクスポートするのみとした（`tesseract_evaluation_predictor.py`のimportも`evaluation_types.py`直接参照へ更新）。既存テストは無修正のまま全件成功を確認済み。詳細は[PADDLEOCR_EVALUATION_PREDICTOR_73.md](PADDLEOCR_EVALUATION_PREDICTOR_73.md)参照。
 
 ### Suggestion
 
-`EnginePredictor` Protocolの戻り値型具体化（案A/B/C）について、`ADR-0003`のFeature #71段落へ一文追加済み（Decision本文は変更していない）。次のPaddleOCR Predictor実装時に、この記録を起点に再判断する。
+~~`EnginePredictor` Protocolの戻り値型具体化（案A/B/C）について、`ADR-0003`のFeature #71段落へ一文追加済み（Decision本文は変更していない）。次のPaddleOCR Predictor実装時に、この記録を起点に再判断する。~~ **対応済み（Issue #73）**: `PredictionResult`の第三モジュール切り出しにより循環importなく具体化可能となったため、`EnginePredictor.recognize()`の戻り値型を`Any`から`PredictionResult`へ変更した（静的型注釈のみ、実行時強制ではない）。
