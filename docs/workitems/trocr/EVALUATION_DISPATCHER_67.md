@@ -97,7 +97,7 @@ class EnginePredictor(Protocol):
 
 ## 次のIssue
 
-Evaluation Runner（Issue [#69](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/69)、実装済み・PRレビュー待ち）。その次はEngine別Predictor実装（Tesseract Predictor Adapterを含む。Common Evaluation Metric Calculator（Issue #65）を利用する最初のPredictorとなる想定）。
+Evaluation Runner（Issue [#69](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/69)、**Completed**・Closed。PR [#70](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/70)、Merge Commit: `c5bd7eb`）。その次はEngine別Predictor実装（Tesseract Predictor Adapterを含む。Common Evaluation Metric Calculator（Issue #65）を利用する最初のPredictorとなる想定）。
 
 ## Future Work（マージ前レビューMinor/Suggestion指摘）
 

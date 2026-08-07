@@ -38,7 +38,7 @@ Evaluation
   ✅ Common Evaluation Schema
   ✅ Common Metric Calculator
   ✅ Evaluation Dispatcher
-  🔧 Evaluation Runner（実装済み・PRレビュー待ち）
+  ✅ Evaluation Runner
   ⬜ Tesseract Predictor Adapter
   ⬜ PaddleOCR Predictor
   ⬜ EasyOCR Predictor
@@ -56,7 +56,7 @@ Common Evaluation Metric Calculator実装（Feature [#65](https://github.com/bs-
 
 Evaluation Dispatcher実装（Feature [#67](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/67)、**Completed**・Closed。PR [#68](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/68)をSquash Merge・mainへ反映済み、Merge Commit: `83e4eec`）。`src/app/services/evaluation_dispatcher.py`を新設し`EvaluationDispatcher`（register/resolve/dispatchのみ）と`EnginePredictor` Protocolを実装。Backend `EngineCapability.supports_evaluation`を初めて参照（Dispatcherのみ）。tesseractのみ`supports_evaluation=True`、paddleocr/easyocr/trocrは登録済みだが`supports_evaluation=False`（Unsupported Engineは`UnsupportedEvaluationEngineError`）、customはBackend Engine Registry未登録のため`UnknownEvaluationEngineError`。**Evaluation DispatcherとEvaluation Runnerは別責務・別完了項目として扱う**（Dispatcherのみ実装済み、Runnerは未着手）。Backend Engine Registry・Capability以外への依存なし（Predictor実装・Runner・API・UIは未着手）。マージ前レビューはBlocker/Majorなし・Minor 2件/Suggestion 3件（Future Workへ記録、Productionコード変更なし）でApprove。詳細・Future Workは[EVALUATION_DISPATCHER_67.md](EVALUATION_DISPATCHER_67.md)参照。次の実装対象はEvaluation Runner。
 
-Evaluation Runner実装（Feature [#69](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/69)、**Implemented, PR review pending**）。`src/app/services/evaluation_runner.py`を新設し、Dispatcher・Predictor・Metric Calculator・Common Schemaを接続する共通Evaluation Loopを実装。`resolve()`をrun開始時に1回だけ呼びPredictorを全Sampleで再利用（TrOCRのbuild-once設計前提）。Sample単位の推論例外は失敗Sampleとして記録しRunを継続、Unknown/Unsupported Engine・未registerは「Run開始前エラー」として上位へ伝播し区別する。エラーメッセージは例外クラス名のみ保持。`metrics.sample_count`は入力総数と一致（失敗Sampleを含めて集計する既存Calculator設計を利用）。Confusionは成功Sampleのみから全件集計（top-N制限なし）。Issue #67のFuture Workだった`register()`のengine_id整合性検証も本Issueで`EvaluationDispatcher.register()`へ追加した（既存Dispatcherテストは無修正のまま成功）。Predictor実装・API接続・Job化は未着手。詳細は[EVALUATION_RUNNER_69.md](EVALUATION_RUNNER_69.md)参照。次の実装対象はTesseract Predictor Adapter。
+Evaluation Runner実装（Feature [#69](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/69)、**Completed**・Closed。PR [#70](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/70)をSquash Merge・mainへ反映済み、Merge Commit: `c5bd7eb`）。`src/app/services/evaluation_runner.py`を新設し、Dispatcher・Predictor・Metric Calculator・Common Schemaを接続する共通Evaluation Loopを実装。`resolve()`をrun開始時に1回だけ呼びPredictorを全Sampleで再利用（TrOCRのbuild-once設計前提）。malformedな`PredictionResult`（生文字列/`None`/dict/tuple等）・`calculate_sample_metrics()`のSchema Validation失敗を含むSample単位の異常はSample Failure Boundaryで隔離しRunを継続（`BaseException`は捕捉しない）。Unknown/Unsupported Engine・未registerは「Run開始前エラー」として上位へ伝播し区別する。エラーメッセージは例外クラス名のみ保持。`result.sample_count == metrics.sample_count`（失敗Sampleを含む入力総数、CER/exact match/confusionからは除外）。Issue #67のFuture Workだった`register()`のengine_id整合性検証も本Issueで`EvaluationDispatcher.register()`へ追加した（既存Dispatcherテストは無修正のまま成功）。修正後の再レビューはBlocker/Majorなし・Minor 2件（Future Workへ記録）でApprove。Predictor実装・API接続・Job化は未着手。詳細は[EVALUATION_RUNNER_69.md](EVALUATION_RUNNER_69.md)参照。次の実装対象はTesseract Predictor Adapter。
 
 ⬜ Benchmark（Benchmark Runner/Benchmark Centerへの`ENGINE_CATALOG`/`ENGINE_BUILDERS`登録）
 

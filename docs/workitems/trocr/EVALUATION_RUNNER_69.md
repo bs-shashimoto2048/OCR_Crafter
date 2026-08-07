@@ -6,9 +6,13 @@ Parent Epic: [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)�
 
 Related: Design [#61](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/61) / Feature [#63](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/63)（Common Evaluation Schema、Completed） / Feature [#65](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/65)（Common Evaluation Metric Calculator、Completed） / Feature [#67](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/67)（Evaluation Dispatcher、Completed） / [ADR-0003（Accepted）](../../adr/ADR-0003_Multi_Engine_Evaluation.md) / [docs/design/MULTI_ENGINE_EVALUATION_API.md](../../design/MULTI_ENGINE_EVALUATION_API.md)
 
-PR: [#70](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/70)（Open・レビュー待ち）
+PR: [#70](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/70)（Squash Merge済み。Squash Commit: `c5bd7eb`）
 
-**状態**: Implemented, PR review pending。
+**状態**: **Completed**・Closed。
+
+**マージ前レビュー結果（初回）**: Blocker 0件・Major 1件・Minor 2件・Suggestion 3件、Conclusion: Changes Requested。Major #1（Sample単位の`try`/`except`が`predictor.recognize()`の呼び出し自体にしか及んでおらず、戻り値の契約違反や`calculate_sample_metrics()`のSchema Validation失敗でRun全体が中断していた問題）を是正（`fix: isolate evaluation sample failures (#69)`）。
+
+**マージ前レビュー結果（修正後・再レビュー）**: Blocker 0件・Major 0件・Minor 2件・Suggestion 0件、Conclusion: Approve推奨。Major #1の解消を確認。残るMinor 2件は本節末尾「Future Work」へ記録し、Productionコードの追加修正は行っていない。
 
 ## Runnerの責務
 
@@ -330,4 +334,49 @@ PR #70のマージ前レビューで指摘されたMajor #1（`predictor.recogni
 Productionコードは今回変更しない）。詳細は上記「Sample失敗時（Sample単位エラー・Sample
 Failure Boundary）」参照。追加した10件のテストで、Predictor契約違反（生文字列/`None`/dict）・
 `calculate_sample_metrics()`起因のpost-recognize failure・全Sample契約違反・
-`KeyboardInterrupt`/`SystemExit`の非捕捉を検証した。
+`KeyboardInterrupt`/`SystemExit`の非捕捉を検証した。修正後の再レビューでMajor #1の解消を確認
+（Blocker 0件・Major 0件・Minor 2件・Suggestion 0件、Approve推奨）。
+
+## Future Work（マージ前レビューMinor指摘・既存Future Work）
+
+いずれもBlocker・Majorではなく、今回のマージは妨げない。
+
+### Minor 1（修正後レビューで新規発見）
+
+Injected clockが同一Sample内で連続して逆行した場合、`except`ハンドラ内で失敗Sample用に
+計算する`duration_ms`自体も負値となり、`OcrEvaluationSampleResult`構築時のSchema Validation
+Errorが（`except`ハンドラ自身の処理であるため）どの`try`にも保護されずRun全体へ伝播する
+可能性がある。
+
+ただし:
+
+- Productionの`time.perf_counter()`はmonotonicであり、この状態は原理上到達不能
+- コミット済み`FakeClock`テストヘルパーも単調増加のみで、どのテストもこの経路を踏まない
+- 現時点では修正不要
+
+Tesseract Predictor Adapterまたは実クロックでの実運用接続時に、実害がないことを再確認する。
+
+### Minor 2（修正後レビューで新規発見）
+
+malformed Predictor resultの永続テスト（`tests/test_evaluation_runner.py`）は現在、以下を
+parametrizeでカバーしている。
+
+- raw string
+- None
+- dict
+
+`tuple`（`(text, confidence)`形式。既存Tesseract評価の慣習に近い形）については、マージ前
+レビュー時に手動実測（`isinstance(prediction, PredictionResult)`により正しくSample failureへ
+変換されることを確認済み）したが、専用の永続テストは追加していない。Future Workとして
+追加候補を記録する。
+
+### 既存Future Work（Issue #67から継続）
+
+- `EnginePredictor` Protocolの戻り値`Any`を`PredictionResult`へ具体化する検討
+  （Tesseract Predictor Adapter着手前に再検討する）
+- `PredictionResult.engine_details`の`OcrEvaluationResult.engine_details`への統合方針
+  （複数Sampleの`engine_details`をどう集約するかが未確定なため、今回は常に空dictを返す）
+- `EvaluationDispatcher.register()`が`predictor.engine_id`属性が完全に欠損している場合に
+  意図した`EvaluationDispatcherError`ではなく素の`AttributeError`を送出する問題
+  （今回は`evaluation_dispatcher.py`を変更しないため未対応のまま。Dispatcher側のFuture Work
+  として継続）
