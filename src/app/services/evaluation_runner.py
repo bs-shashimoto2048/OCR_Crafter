@@ -18,6 +18,11 @@ Predictorが契約に反する値を返した場合や、Schema Validationが失
 Runnerが担当しないもの（Predictor実装・Runner外の責務）: Engine固有モデルload・Engine固有前処理・
 Datasetディレクトリ探索・GT CSV読込・API Request解析・HTTP Error変換・DB保存・履歴保存・
 Job管理・Benchmark・UI。実Predictor実装・API接続・Job化は本Issueでは一切行わない。
+
+`PredictionResult`はIssue #73で`.evaluation_types`モジュールへ切り出した（全PredictorがRunner
+モジュールへ依存する構造を是正するため）。本モジュールは既存importとの後方互換のため
+`PredictionResult`を引き続き再エクスポートする（`from .evaluation_runner import PredictionResult`
+は今後も動作する）。
 """
 
 from __future__ import annotations
@@ -31,6 +36,9 @@ from typing import Any, Callable, Mapping, Optional, Sequence
 from ..schemas import OcrEvaluationResult, OcrEvaluationSampleResult
 from .evaluation_dispatcher import EvaluationDispatcher
 from .evaluation_metrics import aggregate_confusions, calculate_evaluation_metrics, calculate_sample_metrics
+from .evaluation_types import PredictionResult  # noqa: F401 - 既存importとの後方互換のため再エクスポートする
+
+__all__ = ["EvaluationInputSample", "EvaluationRunner", "PredictionResult"]
 
 
 @dataclass(frozen=True)
@@ -39,22 +47,6 @@ class EvaluationInputSample:
 
     image: str
     ground_truth: str
-
-
-@dataclass(frozen=True)
-class PredictionResult:
-    """Predictor（`EnginePredictor.recognize()`）がRunnerへ返すことを期待する最小出力契約。
-
-    `evaluation_dispatcher.py`の`EnginePredictor` Protocol自体は本Issueで変更しない
-    （`recognize(*args, **kwargs) -> Any`のまま。実Predictorがまだ存在しないため型を
-    強制する必要が薄く、Scope上もDispatcher変更はengine_id整合性検証のみに限定する）。
-    本Runnerは、Predictorの戻り値がこの`PredictionResult`であることを前提として扱う
-    （将来のPredictor実装Issueが従うべき契約として、ここで明確化する）。
-    """
-
-    text: str
-    confidence: Optional[float] = None
-    engine_details: Optional[Mapping[str, Any]] = None
 
 
 def _sanitize_error(exc: BaseException) -> str:

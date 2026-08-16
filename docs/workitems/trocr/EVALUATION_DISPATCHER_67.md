@@ -46,14 +46,14 @@ Backend Engine Registry（`create_default_registry()`）には`tesseract`/`paddl
 
 Backend `EngineCapability.supports_evaluation`を参照するのは`EvaluationDispatcher.resolve()`のみ。`EnginePredictor`はCapabilityを一切参照・保持しない（Dispatcherが唯一の参照元という要件を満たす）。
 
-現状の実際の値（`engine_capability.py`のBuiltin Capability）: `tesseract`のみ`supports_evaluation=True`、`paddleocr`/`easyocr`/`trocr`は`False`（既存`ocr_evaluation.py`がTesseractのみ実装している事実と一致）。
+現状の実際の値（`engine_capability.py`のBuiltin Capability）: `tesseract`・`paddleocr`は`supports_evaluation=True`、`easyocr`/`trocr`は`False`（**Issue #73（PaddleOCR Evaluation Predictor）でpaddleocrをFalse→Trueへ変更済み**。Issue #67時点はtesseractのみTrueだった）。
 
-#### Capability実値（`create_default_registry()`で検証済み）
+#### Capability実値（`create_default_registry()`で検証済み。2026年時点の最新値）
 
 | Engine    | Registry登録 | supports_evaluation | resolve結果                        |
 | --------- | ---------: | ------------------: | -------------------------------- |
 | tesseract |        yes |                true | 登録済Predictorを返す                  |
-| paddleocr |        yes |               false | UnsupportedEvaluationEngineError |
+| paddleocr |        yes |                true | 登録済Predictorを返す（Issue #73でTrueへ変更） |
 | easyocr   |        yes |               false | UnsupportedEvaluationEngineError |
 | trocr     |        yes |               false | UnsupportedEvaluationEngineError |
 | custom    |         no |                該当なし | UnknownEvaluationEngineError     |
@@ -75,6 +75,8 @@ class EnginePredictor(Protocol):
 ```
 
 `typing.Protocol`による構造的型付け（`docs/design/ENGINE_REGISTRY.md`のHandler設計と同じ方針）。`recognize()`の引数・戻り値の形状は本Issueでは規定しない（`dispatch()`はそのまま転送するのみ）。実装クラスは作成していない（次のPredictor実装Issueの責務）。
+
+**Issue #73での更新**: 2つ目の実Predictor（PaddleOCR）追加にあたり、戻り値型を`Any`から`PredictionResult`（`evaluation_types.py`、循環import防止のための独立した葉モジュールへ切り出し）へ具体化した。`recognize(self, *args: Any, **kwargs: Any) -> PredictionResult`。ただし静的型注釈のみで実行時強制ではない（`Protocol`は`@runtime_checkable`ではない）。実行時の契約検証は引き続きRunner側の`isinstance()`チェック（Sample Failure Boundary）が担う。
 
 ### Dependency
 

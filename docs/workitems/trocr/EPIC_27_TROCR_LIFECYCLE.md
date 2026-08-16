@@ -40,7 +40,7 @@ Evaluation
   ✅ Evaluation Dispatcher
   ✅ Evaluation Runner
   ✅ Tesseract Predictor Adapter
-  ⬜ PaddleOCR Predictor
+  🔧 PaddleOCR Predictor（実装済み・PRレビュー待ち）
   ⬜ EasyOCR Predictor
   ⬜ TrOCR Predictor
   ⬜ Multi-engine API Integration
@@ -59,6 +59,8 @@ Evaluation Dispatcher実装（Feature [#67](https://github.com/bs-shashimoto2048
 Evaluation Runner実装（Feature [#69](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/69)、**Completed**・Closed。PR [#70](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/70)をSquash Merge・mainへ反映済み、Merge Commit: `c5bd7eb`）。`src/app/services/evaluation_runner.py`を新設し、Dispatcher・Predictor・Metric Calculator・Common Schemaを接続する共通Evaluation Loopを実装。`resolve()`をrun開始時に1回だけ呼びPredictorを全Sampleで再利用（TrOCRのbuild-once設計前提）。malformedな`PredictionResult`（生文字列/`None`/dict/tuple等）・`calculate_sample_metrics()`のSchema Validation失敗を含むSample単位の異常はSample Failure Boundaryで隔離しRunを継続（`BaseException`は捕捉しない）。Unknown/Unsupported Engine・未registerは「Run開始前エラー」として上位へ伝播し区別する。エラーメッセージは例外クラス名のみ保持。`result.sample_count == metrics.sample_count`（失敗Sampleを含む入力総数、CER/exact match/confusionからは除外）。Issue #67のFuture Workだった`register()`のengine_id整合性検証も本Issueで`EvaluationDispatcher.register()`へ追加した（既存Dispatcherテストは無修正のまま成功）。修正後の再レビューはBlocker/Majorなし・Minor 2件（Future Workへ記録）でApprove。Predictor実装・API接続・Job化は未着手。詳細は[EVALUATION_RUNNER_69.md](EVALUATION_RUNNER_69.md)参照。次の実装対象はTesseract Predictor Adapter。
 
 Tesseract Evaluation Predictor Adapter実装（Feature [#71](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/71)、**Completed**・Closed。PR [#72](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/72)をSquash Merge・mainへ反映済み、Merge Commit: `f8c7883`）。`src/app/services/tesseract_evaluation_predictor.py`を新設し、既存Tesseract評価推論経路（`ocr_evaluation.py::build_recognizer`）を`EnginePredictor`としてEvaluation Runnerから利用可能にした。新しいModel Resolver・PSM/whitelist優先順位・前処理ロジックは実装せず既存処理をそのまま再利用（既存Tesseract評価結果は無変更）。build-oneはmodel解決関連のみで、実OCR実行はSample単位のまま。confidence取得不能時は`None`を保持（捏造しない）。engine_detailsは常に`None`（利用先なし・Path露出回避）。モデル解決失敗はPredictor construction時に伝播（Run開始前エラー相当）、OCR失敗はRunnerのSample Failure Boundaryが隔離する。`EnginePredictor` Protocolの`Any`戻り値は具体化しなかった（案B、循環import回避）。マージ前レビューはBlocker/Majorなし・Minor 3件/Suggestion 1件（Future Workへ記録）でApprove。詳細は[TESSERACT_EVALUATION_PREDICTOR_71.md](TESSERACT_EVALUATION_PREDICTOR_71.md)参照。次の実装対象はPaddleOCR Evaluation Predictor。
+
+PaddleOCR Evaluation Predictor実装（Feature [#73](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/73)、**Implemented, PR review pending**）。`src/app/services/paddleocr_evaluation_predictor.py`を新設し、既存PaddleOCR推論経路（`predict.py`のreader構築ヘルパー・`_run_paddleocr()`。専用の評価経路は既存になく、`benchmark.py`が使う同じヘルパーを直接再利用）を`EnginePredictor`化した。official/custom判定は既存`_predict_with_paddleocr()`と同一順序、BenchmarkのVariant Key軸は持ち込まずcanonical engine_id="paddleocr"の1つに統一。既存の「複数検出結果のうち最大confidence採用」ルールをそのまま踏襲（confidenceは常にfloat、検出0件時は0.0）。2つ目の実Predictor追加にあたり`PredictionResult`を`evaluation_types.py`へ切り出し（Issue #71 Future Work解消）、`EnginePredictor.recognize()`の戻り値型も具体化した（循環importなし）。`paddleocr.supports_evaluation`を`True`へ変更（API自動有効化なしを確認済み）。既存`POST /api/predict`・`ocr_evaluation.py`・`benchmark.py`は無変更。詳細は[PADDLEOCR_EVALUATION_PREDICTOR_73.md](PADDLEOCR_EVALUATION_PREDICTOR_73.md)参照。次の実装対象はEasyOCR Evaluation Predictor。
 
 ⬜ Benchmark（Benchmark Runner/Benchmark Centerへの`ENGINE_CATALOG`/`ENGINE_BUILDERS`登録）
 
