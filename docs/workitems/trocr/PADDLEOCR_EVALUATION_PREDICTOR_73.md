@@ -6,9 +6,11 @@ Parent Epic: [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)�
 
 Related: Feature [#63](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/63)（Common Evaluation Schema、Completed） / Feature [#65](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/65)（Common Evaluation Metric Calculator、Completed） / Feature [#67](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/67)（Evaluation Dispatcher、Completed） / Feature [#69](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/69)（Evaluation Runner、Completed） / Feature [#71](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/71)（Tesseract Evaluation Predictor Adapter、Completed） / [ADR-0003（Accepted）](../../adr/ADR-0003_Multi_Engine_Evaluation.md) / [docs/design/MULTI_ENGINE_EVALUATION_API.md](../../design/MULTI_ENGINE_EVALUATION_API.md)
 
-PR: [#74](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/74)（Open・レビュー待ち）
+PR: [#74](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/74)（Squash Merge済み。Squash Commit: `b1749f7`）
 
-**状態**: Implemented, PR review pending。
+**状態**: **Completed**・Closed。
+
+**マージ前レビュー結果**: Blocker 0件・Major 0件（初回レビューで検出したMajor 1件はCI環境依存のテスト不具合、修正後のBlocker/Major/Minorはなし）・Conclusion: Approve推奨。
 
 ## 最重要原則
 
