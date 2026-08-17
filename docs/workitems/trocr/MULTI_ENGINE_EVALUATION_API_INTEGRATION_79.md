@@ -6,7 +6,7 @@ Parent Epic: [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)�
 
 Related: Design [#61](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/61) / Feature [#63](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/63)（Common Evaluation Schema、Completed） / Feature [#65](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/65)（Common Evaluation Metric Calculator、Completed） / Feature [#67](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/67)（Evaluation Dispatcher、Completed） / Feature [#69](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/69)（Evaluation Runner、Completed） / Feature [#71](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/71)（Tesseract Evaluation Predictor Adapter、Completed） / Feature [#73](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/73)（PaddleOCR Evaluation Predictor、Completed） / Feature [#75](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/75)（EasyOCR Evaluation Predictor、Completed） / Feature [#77](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/77)（TrOCR Evaluation Predictor、Completed） / [ADR-0003（Accepted）](../../adr/ADR-0003_Multi_Engine_Evaluation.md) / [docs/design/MULTI_ENGINE_EVALUATION_API.md](../../design/MULTI_ENGINE_EVALUATION_API.md)
 
-PR: （作成後追記）
+PR: [#80](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/80)（Open・レビュー待ち）
 
 **状態**: Implemented, PR review pending。
 
