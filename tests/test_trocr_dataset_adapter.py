@@ -174,6 +174,22 @@ def test_malformed_line_empty_ground_truth_raises(tmp_path):
         load_trocr_training_samples(tmp_path, split="train")
 
 
+def test_malformed_line_whitespace_only_ground_truth_raises(tmp_path):
+    """マージ前レビューで検出: text.strip()せずに空判定すると"   "（空白のみ）が
+    truthyのまま通ってしまう不具合があったための回帰テスト。"""
+    _touch_image(tmp_path / "train" / "images" / "a.png")
+    (tmp_path / "train.txt").write_text("train/images/a.png\t   \n", encoding="utf-8")
+    with pytest.raises(TrocrDatasetError, match="empty ground truth text"):
+        load_trocr_training_samples(tmp_path, split="train")
+
+
+def test_ground_truth_text_is_stripped(tmp_path):
+    _touch_image(tmp_path / "train" / "images" / "a.png")
+    (tmp_path / "train.txt").write_text("train/images/a.png\t  ABC  \n", encoding="utf-8")
+    samples = load_trocr_training_samples(tmp_path, split="train")
+    assert samples[0].text == "ABC"
+
+
 def test_missing_image_raises(tmp_path):
     (tmp_path / "train.txt").write_text("train/images/does_not_exist.png\tABC\n", encoding="utf-8")
     tmp_path.mkdir(exist_ok=True)

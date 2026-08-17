@@ -62,6 +62,15 @@ Investigation #88で確定した実装分割の第1段階として、既存OCR D
 - 本ドキュメント（新規）
 - `docs/workitems/trocr/EPIC_27_TROCR_LIFECYCLE.md`・`docs/workitems/trocr/ISSUE_MAP.md`を更新（Feature #90の進捗を反映）
 
+## マージ前レビューでの是正
+
+セルフレビューで、`_parse_manifest_line()`が`rel_path`のみ`strip()`し`text`（groundtruth）を
+`strip()`せずに空判定していたため、空白のみのgroundtruth（例: `"path\t   "`）が
+truthyのまま素通りしてしまう不具合を検出した。既存`_read_dataset_pairs()`は`text.strip()`
+してから空判定しているのと不整合だったため、同じ扱いへ修正（`text`をstripしてから
+空判定・stripした値を返す）。回帰テスト`test_malformed_line_whitespace_only_ground_truth_raises`・
+`test_ground_truth_text_is_stripped`を追加。
+
 ## Out of Scope（次Issue以降）
 
 - TrOCR Training Backend Core（Hugging Face Processor/Trainer接続）

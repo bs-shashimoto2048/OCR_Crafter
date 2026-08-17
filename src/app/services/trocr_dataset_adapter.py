@@ -115,6 +115,9 @@ def _parse_manifest_line(line: str, line_number: int, split: str) -> tuple[str, 
         raise TrocrDatasetError(f"{split}.txt line {line_number}: missing tab separator: {line!r}")
     rel_path, _, text = line.partition("\t")
     rel_path = rel_path.strip()
+    # 既存_read_dataset_pairs()と同じくtextもstripしてから空判定する（空白のみの
+    # groundtruthを非空と誤判定しない。stripしないとtext=="   "がtruthyのまま通ってしまう）
+    text = text.strip()
     if not rel_path:
         raise TrocrDatasetError(f"{split}.txt line {line_number}: empty image path")
     if not text:
