@@ -264,6 +264,7 @@ def _trocr_capability() -> EngineCapability:
         supports_dictionary_postprocess=True,
         supports_orientation=True,
         supports_recognition=True,
+        supports_evaluation=True,
         supports_export=True,
         supported_export_formats=["safetensors", "pytorch_bin"],
         supports_cpu=True,
