@@ -6,9 +6,11 @@ Parent Epic: [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)�
 
 Related: Feature [#63](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/63)（Common Evaluation Schema、Completed） / Feature [#65](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/65)（Common Evaluation Metric Calculator、Completed） / Feature [#67](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/67)（Evaluation Dispatcher、Completed） / Feature [#69](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/69)（Evaluation Runner、Completed） / Feature [#71](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/71)（Tesseract Evaluation Predictor Adapter、Completed） / Feature [#73](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/73)（PaddleOCR Evaluation Predictor、Completed） / [ADR-0003（Accepted）](../../adr/ADR-0003_Multi_Engine_Evaluation.md) / [docs/design/MULTI_ENGINE_EVALUATION_API.md](../../design/MULTI_ENGINE_EVALUATION_API.md)
 
-PR: [#76](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/76)（Open・レビュー待ち）
+PR: [#76](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/76)（Squash Merge済み。Squash Commit: `1d5923a`）
 
-**状態**: Implemented, PR review pending。
+**状態**: **Completed**・Closed。
+
+**マージ前レビュー結果**: Blocker 0件・Major 0件・Minor 1件・Suggestion 2件、Conclusion: Approve推奨。Minor/SuggestionはProductionコードを変更せず、下記「Future Work」へ記録した。
 
 ## 最重要原則
 
@@ -206,6 +208,19 @@ recognize呼び出し回数=Sample数・success/failure/confidence/metrics/confu
 `POST /api/predict`・`POST /api/ocr/evaluate`への接続、`src/app/main.py`の変更、TrOCR
 Predictor実装は本Issueに含まない。実EasyOCRモデルのダウンロード・ネットワーク・GPUに
 依存しないよう、全テストはReader取得ヘルパーをmockしている。
+
+## Future Work（マージ前レビューMinor/Suggestion指摘）
+
+PR #76マージ前レビューで挙がった指摘。いずれもBlocker・Majorではなく、今回のマージは妨げない（Productionコードは今回変更していない）。
+
+### Minor
+
+同一confidence値が複数ある場合のtie-break（同値時にどちらが選ばれるか）を専用に検証するテストが無い。既存`_run_easyocr()`はPython組み込み`max()`の既存挙動（同値時は先勝ち）をそのまま利用しており、本Predictorはこれを再実装していないため現状の機能問題はない。回帰防止用テスト追加候補として記録する。
+
+### Suggestion
+
+- `easyocr_evaluation_predictor.py`のmodule docstring内、実装前調査結果のMarkdown表で長い説明が改行されテーブル構文が崩れている箇所がある（ドキュメント可読性のみ、実行時動作に影響なし）。将来の可読性向上のため一行化を検討する。
+- NaN/Infinity confidenceに対する明示的な専用テストは、Tesseract・PaddleOCR・EasyOCRのいずれにも存在しない（各Predictorとも既存Common Evaluation Schema `_reject_non_finite` + RunnerのSample Failure Boundaryという共通の安全網に委ねている）。3エンジン共通のFuture Workとして一本化して記録することを検討する。
 
 ## 次のIssue
 
