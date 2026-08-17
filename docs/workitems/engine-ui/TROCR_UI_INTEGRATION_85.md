@@ -2,7 +2,7 @@
 
 Related: Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46)（Engine UI Generalization） / Feature [#85](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/85)（TrOCR UI Integration） / Feature [#83](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/83)（Evaluation UI Implementation、[EVALUATION_UI_IMPLEMENTATION_83.md](EVALUATION_UI_IMPLEMENTATION_83.md)） / InferenceViewのTrOCR対応（Issue #23、既存） / Refactor [#51](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/51)（ModelsView Migration） / Refactor [#53](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/53)（TrainingView Migration） / Refactor [#57](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/57)（BenchmarkCenterView Label Migration）
 
-**状態**: Completed・Closed。
+**状態**: Completed・Closed。PR [#86](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/86)をSquash Merge・mainへ反映済み、Merge Commit: `1384beb`。Issue #85はPR本文の`Closes #85`によりマージ時に自動Close。
 
 ## 目的
 
