@@ -111,6 +111,21 @@ class TrOCREngine:
     def model_ref(self) -> str:
         return self._model_ref
 
+    @property
+    def processor(self) -> Any:
+        """ロード済みProcessor本体（Issue #92: TrOCR Training Backend Coreが再利用する）。
+
+        `load()`のmodel_ref解決・device解決・transformers依存guardを複製せず、本Engineの
+        build-once契約をそのまま学習にも適用するために公開する。推論（`predict()`/
+        `predict_file()`）の既存契約・戻り値は変更しない。
+        """
+        return self._processor
+
+    @property
+    def model(self) -> Any:
+        """ロード済みModel本体（Issue #92参照。用途は`processor`と同じ）。"""
+        return self._model
+
     @classmethod
     def load(
         cls,
