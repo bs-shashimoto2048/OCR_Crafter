@@ -28,7 +28,7 @@ Engine Registry → resolve_engine_id() → OCR Pipeline → {PaddleOCR, EasyOCR
 
 ## Progress
 
-⬜ Training（`services/trocr_pipeline.py`学習Backend。Hugging Face Transformers経由、`VisionEncoderDecoderModel`+`Seq2SeqTrainer`。公式`unilm/trocr`（fairseq）は不採用。詳細は[ARCHITECTURE_DRAFT.md](ARCHITECTURE_DRAFT.md)・[ADR-0001](../../adr/ADR-0001_Trocr_Architecture.md)参照）
+⬜ Training（`services/trocr_pipeline.py`学習Backend。Hugging Face Transformers経由、`VisionEncoderDecoderModel`+`Seq2SeqTrainer`。公式`unilm/trocr`（fairseq）は不採用。詳細は[ARCHITECTURE_DRAFT.md](ARCHITECTURE_DRAFT.md)・[ADR-0001](../../adr/ADR-0001_Trocr_Architecture.md)参照）。実装前調査（Investigation [#88](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/88)、**Completed**・Closed）で既存Training Call Graph・Dataset/Artifact/Model Metadata/Experiment lineage契約・Training UI前提を確定し、実装Issue 5件（Dataset Adapter → Training Backend Core → Job Integration → Artifact Registration → Training UI）への分割案を策定した。Productionコード変更なし。詳細は[TROCR_TRAINING_INVESTIGATION_88.md](TROCR_TRAINING_INVESTIGATION_88.md)参照。
 
 Evaluation（評価連携の方針決定・confidence算出方法の確定。`ocr_evaluation.py`のTesseract専用制約への対応可否を含む）
 
@@ -43,8 +43,8 @@ Evaluation
   ✅ PaddleOCR Predictor
   ✅ EasyOCR Predictor
   ✅ TrOCR Predictor
-  🔧 Multi-engine API Integration（実装済み・PRレビュー待ち）
-  ⏸ Evaluation UI Integration（Backend完了後、Epic #46で再開）
+  ✅ Multi-engine API Integration
+  ✅ Evaluation UI Integration（Epic #46 Feature #83/#85で完了）
   ⬜ Cleanup
 ```
 
@@ -66,13 +66,15 @@ EasyOCR Evaluation Predictor実装（Feature [#75](https://github.com/bs-shashim
 
 TrOCR Evaluation Predictor実装（Feature [#77](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/77)、**Completed**・Closed。PR [#78](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/78)をSquash Merge・mainへ反映済み、Merge Commit: `28c1bcf`）。`src/app/services/trocr_evaluation_predictor.py`を新設し、既存TrOCR単一画像推論コア（`trocr_engine.py::TrOCREngine`）を`EnginePredictor`化した。既存`predict.py::_predict_with_trocr()`は呼び出しのたびに`TrOCREngine.load()`し直す設計のためこの関数は呼ばず、`TrOCREngine`自身のbuild-once契約（`load()`で1回・`predict_file()`を繰り返し呼ぶ）を直接利用。TrOCR用のmodel resolutionは既存に存在しないため、Evaluation専用の新Resolverや`"latest"`等の特殊値フォールバックは発明していない。confidenceは`TrOCRResult`が属性自体を持たないため常に`None`（独自変換なし）。`trocr.supports_evaluation`を`True`へ変更した結果、既定Registry登録済みの4エンジン（tesseract/paddleocr/easyocr/trocr）全てがTrueとなった（API自動有効化なしを確認済み）。マージ前レビューはBlocker/Majorなし・Minor 2件/Suggestion 1件（Future Workへ記録）でApprove。既存`POST /api/predict`・`ocr_evaluation.py`・`benchmark.py`・`trocr_engine.py`は無変更。詳細は[TROCR_EVALUATION_PREDICTOR_77.md](TROCR_EVALUATION_PREDICTOR_77.md)参照。次の実装対象はMulti-engine API Integration。
 
-Multi-engine Evaluation API Integration実装（Feature [#79](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/79)、**Implemented, PR review pending**）。既存`POST /api/ocr/evaluate`の`ocr_evaluation.py::evaluate_ocr()`は1行も変更せず、全targetが`engine="tesseract"`のリクエストは無条件に既存経路を通す（実コード調査の結果、既存呼び出し元は100%tesseractのみだったため完全に後方互換）。1つでも非Tesseractエンジンを含むリクエストのみ、新設`src/app/services/evaluation_multi_engine.py::run_multi_engine_evaluation()`（Composition Root + target単位のDispatcher/Runner）へルーティングする。Predictorはrequestごと・target単位でbuild-once（グローバルSingletonなし）。前処理はTesseract固有のCRNN入力整形を新経路では行わず`none`/`manual`の2モードに限定（`training`系は非Tesseractエンジンを含むリクエストでは拒否、Future Work）。Responseは新規DTOを追加せず既存キー命名（targets/rows/comparison）に寄せた辞書へ変換（comparisonは常に`None`、Future Work）。既存`ocr_evaluation.py`・`evaluation_runner.py`・`evaluation_dispatcher.py`・4つのPredictor・`schemas.py`・`frontend/`は無変更。詳細は[MULTI_ENGINE_EVALUATION_API_INTEGRATION_79.md](MULTI_ENGINE_EVALUATION_API_INTEGRATION_79.md)参照。
+Multi-engine Evaluation API Integration実装（Feature [#79](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/79)、**Completed**・Closed。PR [#80](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/80)をSquash Merge・mainへ反映済み、Merge Commit: `e496b91`）。既存`POST /api/ocr/evaluate`の`ocr_evaluation.py::evaluate_ocr()`は1行も変更せず、全targetが`engine="tesseract"`のリクエストは無条件に既存経路を通す（実コード調査の結果、既存呼び出し元は100%tesseractのみだったため完全に後方互換）。1つでも非Tesseractエンジンを含むリクエストのみ、新設`src/app/services/evaluation_multi_engine.py::run_multi_engine_evaluation()`（Composition Root + target単位のDispatcher/Runner）へルーティングする。Predictorはrequestごと・target単位でbuild-once（グローバルSingletonなし）。前処理はTesseract固有のCRNN入力整形を新経路では行わず`none`/`manual`の2モードに限定（`training`系は非Tesseractエンジンを含むリクエストでは拒否、Future Work）。Responseは新規DTOを追加せず既存キー命名（targets/rows/comparison）に寄せた辞書へ変換（comparisonは常に`None`、Future Work）。マージ前レビューでMajor #1（`options.get(key) or default`がpsm=0/charset=""等の正当なfalsy値を誤ってdefaultへ書き換える不具合）を検出・同PRで修正。既存`ocr_evaluation.py`・`evaluation_runner.py`・`evaluation_dispatcher.py`・4つのPredictor・`schemas.py`は無変更。詳細は[MULTI_ENGINE_EVALUATION_API_INTEGRATION_79.md](MULTI_ENGINE_EVALUATION_API_INTEGRATION_79.md)参照。
+
+Evaluation UI Integration（Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46)配下 Feature [#83](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/83)、**Completed**・Closed。PR [#84](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/84)をSquash Merge・mainへ反映済み、Merge Commit: `f7c5262`）。`OcrEvaluationView.jsx`をTesseract専用からTesseract/PaddleOCR/EasyOCR/TrOCRの4Engine対応へ一般化した。Backend Multi-engine Evaluation API（Feature #79）は無変更。詳細は`docs/workitems/engine-ui/EVALUATION_UI_IMPLEMENTATION_83.md`参照。続くFeature [#85](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/85)「TrOCR UI Integration」（**Completed**・Closed。PR [#86](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/86)、Merge Commit: `1384beb`）で、Epic #46が対象とする全画面（ModelsView/TrainingView/InferenceView/OcrEvaluationView/BenchmarkCenterView）のTrOCR対応状況を調査した結果、Feature #83・既存InferenceView対応（Issue #23）・Registry移行（Refactor #51/#53/#57）により追加実装は不要と確認され、Epic #46はCompleted・Closedとなった。詳細は`docs/workitems/engine-ui/TROCR_UI_INTEGRATION_85.md`参照。
+
+TrOCR Training Backend & Artifact Contract Investigation（Investigation [#88](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/88)、**Completed**・Closed）。既存Training Call Graph（Tesseract/PaddleOCR/EasyOCR）・TrOCR既存コード（`trocr_pipeline.py`は未実装であることを確認）・Dataset/Artifact/Model Metadata/Experiment lineage契約・Training UI前提を実コードから調査し、実装Issue 5件（Dataset Adapter → Training Backend Core → Job Integration → Artifact Registration → Training UI）への分割案を策定した。Productionコード変更なし。詳細は[TROCR_TRAINING_INVESTIGATION_88.md](TROCR_TRAINING_INVESTIGATION_88.md)参照。
 
 ⬜ Benchmark（Benchmark Runner/Benchmark Centerへの`ENGINE_CATALOG`/`ENGINE_BUILDERS`登録）
 
 ⬜ Release Gate（`release_gate.py`のモデル対象へTrOCRを含める）
-
-⬜ Frontend（Training UI・Evaluation UIへのTrOCR対応。`TrainingView.jsx`の既存ドロップダウンへTrOCR選択肢を追加）
 
 ⬜ Documentation（ユーザーマニュアル・チュートリアル。学習成果物ができてから実用的な内容を書く）
 
