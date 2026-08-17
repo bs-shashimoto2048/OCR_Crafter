@@ -99,6 +99,8 @@ from .services.data_manager import import_images_from_directory, list_raw_images
 from .services.dataset_builder import build_dataset, read_dataset_meta
 from .services.dialogs import select_directory_path, select_file_path
 from .services.evaluation import evaluate_dataset
+from .services.evaluation_dispatcher import EvaluationDispatcherError
+from .services.evaluation_multi_engine import run_multi_engine_evaluation
 from .services.ocr_evaluation import TRAINING_PREPROCESS_MISSING_MESSAGE, evaluate_ocr
 from .services.labels import ensure_master_csv, read_labels, upsert_label
 from .services.model_registry import (
@@ -4757,23 +4759,47 @@ def evaluate(req: EvaluateRequest) -> dict[str, Any]:
 @app.post("/api/ocr/evaluate")
 def api_ocr_evaluate(req: OcrEvaluateRequest, request: Request) -> dict[str, Any]:
     project_id = _resolve_project_id(req.project_id)
+    # 既存の呼び出し元は必ずengine="tesseract"のみを指定する（他Engineは従来ValueErrorで
+    # 拒否されていたため）。したがって全targetがtesseractの場合は既存evaluate_ocr()を
+    # 一切変更せずそのまま呼ぶ（後方互換を完全に維持）。1つでも非tesseractが含まれる場合のみ、
+    # Multi-engine Evaluation API Integration（Issue #79、Dispatcher/Runner/Predictor経由）の
+    # 新経路を使う（既存経路では到達できなかった新規capabilityのため後方互換に影響しない）。
+    all_tesseract = all(str(t.engine or "tesseract").strip().lower() == "tesseract" for t in req.targets)
     try:
-        result = evaluate_ocr(
-            project_id=project_id,
-            image_dir=req.image_dir,
-            gt_csv=req.gt_csv,
-            targets=[t.model_dump() for t in req.targets],
-            charset=req.charset,
-            psm=req.psm,
-            eval_preprocess=req.eval_preprocess,
-            preprocess_source=str(req.preprocess_source or "none"),
-            preprocess_mode=req.preprocess_mode,
-        )
+        if all_tesseract:
+            result = evaluate_ocr(
+                project_id=project_id,
+                image_dir=req.image_dir,
+                gt_csv=req.gt_csv,
+                targets=[t.model_dump() for t in req.targets],
+                charset=req.charset,
+                psm=req.psm,
+                eval_preprocess=req.eval_preprocess,
+                preprocess_source=str(req.preprocess_source or "none"),
+                preprocess_mode=req.preprocess_mode,
+            )
+        else:
+            result = run_multi_engine_evaluation(
+                project_id=project_id,
+                image_dir=req.image_dir,
+                gt_csv=req.gt_csv,
+                targets=[t.model_dump() for t in req.targets],
+                charset=req.charset,
+                psm=req.psm,
+                eval_preprocess=req.eval_preprocess,
+                preprocess_mode=req.preprocess_mode,
+            )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except EvaluationDispatcherError as e:
+        # UnknownEvaluationEngineError / UnsupportedEvaluationEngineError / 未register等はいずれも
+        # 「指定されたengine/構成が評価できない」という入力エラーとして扱う（既存のValueError→400と
+        # 同じ粒度）。Sample単位の推論失敗（Sample Failure Boundary）はここまで伝播しない
+        # （EvaluationRunner内で隔離され、結果の`error`フィールドへ格納される。Run全体は失敗しない）。
         raise HTTPException(status_code=400, detail=str(e)) from e
     _record_audit_safe(
         request, "evaluation_run", project_id=project_id, target_type="evaluation",
