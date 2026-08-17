@@ -28,7 +28,18 @@ Engine Registry → resolve_engine_id() → OCR Pipeline → {PaddleOCR, EasyOCR
 
 ## Progress
 
-⬜ Training（`services/trocr_pipeline.py`学習Backend。Hugging Face Transformers経由、`VisionEncoderDecoderModel`+`Seq2SeqTrainer`。公式`unilm/trocr`（fairseq）は不採用。詳細は[ARCHITECTURE_DRAFT.md](ARCHITECTURE_DRAFT.md)・[ADR-0001](../../adr/ADR-0001_Trocr_Architecture.md)参照）。実装前調査（Investigation [#88](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/88)、**Completed**・Closed）で既存Training Call Graph・Dataset/Artifact/Model Metadata/Experiment lineage契約・Training UI前提を確定し、実装Issue 5件（Dataset Adapter → Training Backend Core → Job Integration → Artifact Registration → Training UI）への分割案を策定した。Productionコード変更なし。詳細は[TROCR_TRAINING_INVESTIGATION_88.md](TROCR_TRAINING_INVESTIGATION_88.md)参照。
+🔧 Training（`services/trocr_pipeline.py`学習Backend。Hugging Face Transformers経由、`VisionEncoderDecoderModel`+`Seq2SeqTrainer`。公式`unilm/trocr`（fairseq）は不採用。詳細は[ARCHITECTURE_DRAFT.md](ARCHITECTURE_DRAFT.md)・[ADR-0001](../../adr/ADR-0001_Trocr_Architecture.md)参照）。実装前調査（Investigation [#88](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/88)、**Completed**・Closed）で既存Training Call Graph・Dataset/Artifact/Model Metadata/Experiment lineage契約・Training UI前提を確定し、実装Issue 5件（Dataset Adapter → Training Backend Core → Job Integration → Artifact Registration → Training UI）への分割案を策定した（詳細は[TROCR_TRAINING_INVESTIGATION_88.md](TROCR_TRAINING_INVESTIGATION_88.md)参照）。
+
+```text
+Training
+  ✅ Dataset Adapter
+  ⬜ Training Backend Core
+  ⬜ Job Integration
+  ⬜ Artifact Registration
+  ⬜ Training UI
+```
+
+TrOCR Training Dataset Adapter実装（Feature [#90](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/90)、**Completed**・Closed）。`src/app/services/trocr_dataset_adapter.py`を新設し、既存OCR Dataset（`train.txt`/`val.txt`/`test.txt`+`meta.json`）からTrOCR Training Backend Coreが消費できる最小契約（image path + ground truth text）を提供するAdapterを実装した。Dataset schemaは変更していない。既存`tesseract_pipeline.py::_read_dataset_pairs()`が書式異常・画像不存在・空groundtruthを黙ってスキップするのに対し、本Adapterは学習開始前の明示的な検出（`TrocrDatasetError`）という異なる目的のため意図的により厳格な契約を採用した（train split以外の0件許容・重複entry許容は既存契約と整合）。重要な発見として、既存Dataset出力画像は`create_ocr_dataset()`が必ず`preprocess_ocr_image()`（Tesseract/PaddleOCR向け固定キャンバス整形）を適用済みであり、raw画像は保存されないことを確認・明文化した（TrOCR Processorとの二重前処理リスクとして次Issueへ制約を引き継ぐ、Dataset schema変更は本Issueでは行わない）。Trainer/Processor/model依存なし（`transformers`/`torch`/`PIL`を一切importしない）。詳細は[TROCR_TRAINING_DATASET_ADAPTER_90.md](TROCR_TRAINING_DATASET_ADAPTER_90.md)参照。次の実装対象はTraining Backend Core。
 
 Evaluation（評価連携の方針決定・confidence算出方法の確定。`ocr_evaluation.py`のTesseract専用制約への対応可否を含む）
 
