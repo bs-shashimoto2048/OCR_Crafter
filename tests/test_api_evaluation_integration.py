@@ -145,6 +145,93 @@ def test_mixed_tesseract_and_non_tesseract_routes_to_new_path(monkeypatch, clien
     assert called["legacy"] is False
 
 
+def test_mixed_engine_request_forwards_falsy_tesseract_options_unmodified(monkeypatch, client):
+    """マージ前レビューMajor #1の回帰防止（API層）: mixed-engineリクエストのTesseract targetに
+    psm=0/charset=""を指定した場合、API層（main.py）がそれらの値を一切加工せず
+    run_multi_engine_evaluation()（延いてはbuild_predictor()）へそのまま渡すことを確認する
+    （API層自身がfalsy値を書き換える別の不具合が無いことの確認）。"""
+    captured = {}
+
+    def fake_evaluate_ocr(**kwargs):
+        raise AssertionError("legacy経路が呼ばれるべきではない")
+
+    def fake_run_multi_engine_evaluation(**kwargs):
+        captured.update(kwargs)
+        return {"targets": [], "count": 0, "rows": []}
+
+    monkeypatch.setattr(main_mod, "evaluate_ocr", fake_evaluate_ocr)
+    monkeypatch.setattr(main_mod, "run_multi_engine_evaluation", fake_run_multi_engine_evaluation)
+
+    resp = client.post(
+        "/api/ocr/evaluate",
+        json=_base_payload(
+            targets=[
+                {"engine": "tesseract", "model": "eng", "options": {"psm": 0, "charset": ""}},
+                {"engine": "paddleocr", "model": "official"},
+            ]
+        ),
+    )
+    assert resp.status_code == 200
+    tesseract_target = next(t for t in captured["targets"] if t["engine"] == "tesseract")
+    assert tesseract_target["options"] == {"psm": 0, "charset": ""}
+
+
+def test_mixed_engine_request_falsy_tesseract_options_reach_build_predictor(monkeypatch, client, tmp_path):
+    """API → run_multi_engine_evaluation()（実関数）→ build_predictor()まで、mixed-engine
+    リクエストのTesseract target psm=0/charset=""が実際に正しく届くことをend-to-endで確認する
+    （main.pyはmock解除・evaluation_multi_engine.pyの実オーケストレーションを通す。4 Predictor
+    クラスのみfakeへ差し替え、実OCRエンジン・実モデル・network・GPUに依存しない）。"""
+    import src.app.services.evaluation_multi_engine as multi_engine_mod
+    from src.app.services.evaluation_types import PredictionResult
+
+    image_dir = tmp_path / "images"
+    image_dir.mkdir()
+    from PIL import Image
+
+    Image.new("RGB", (20, 10), (255, 255, 255)).save(image_dir / "a.png")
+    gt_csv = tmp_path / "gt.csv"
+    gt_csv.write_text("image,expected\na.png,ABC\n", encoding="utf-8")
+
+    captured_tesseract_kwargs = {}
+
+    class _FakeTesseractPredictor:
+        engine_id = "tesseract"
+
+        def __init__(self, project_id, model="latest", charset="", psm=7):
+            captured_tesseract_kwargs["charset"] = charset
+            captured_tesseract_kwargs["psm"] = psm
+
+        def recognize(self, image, **kwargs):
+            return PredictionResult(text="ABC", confidence=0.9)
+
+    class _FakePaddlePredictor:
+        engine_id = "paddleocr"
+
+        def __init__(self, **kwargs):
+            pass
+
+        def recognize(self, image, **kwargs):
+            return PredictionResult(text="ABC", confidence=0.9)
+
+    monkeypatch.setattr(multi_engine_mod, "TesseractEvaluationPredictor", _FakeTesseractPredictor)
+    monkeypatch.setattr(multi_engine_mod, "PaddleOCREvaluationPredictor", _FakePaddlePredictor)
+
+    resp = client.post(
+        "/api/ocr/evaluate",
+        json={
+            "project_id": "p1",
+            "image_dir": str(image_dir),
+            "gt_csv": str(gt_csv),
+            "targets": [
+                {"engine": "tesseract", "model": "eng", "options": {"psm": 0, "charset": ""}},
+                {"engine": "paddleocr", "model": "official"},
+            ],
+        },
+    )
+    assert resp.status_code == 200
+    assert captured_tesseract_kwargs == {"charset": "", "psm": 0}
+
+
 # ---------------------------------------------------------------------------
 # Error mapping
 # ---------------------------------------------------------------------------

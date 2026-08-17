@@ -157,6 +157,31 @@ def validate_engine_supported(engine: str) -> str:
     return normalized
 
 
+def _resolve_option(options: dict[str, Any], key: str, default: Any) -> Any:
+    """`options[key]`を「未指定」と「明示的なfalsy値」を区別して解決する。
+
+    マージ前レビューMajor #1の是正: `options.get(key) or default`はPythonの`or`演算子が
+    `0`・`""`等のfalsy値を「未指定」と誤認し、既存Schemaが認める正当な値（`psm=0`・
+    `charset=""`=「空文字=whitelistなし」、`OcrEvaluateRequest.charset`のdocstring参照）を
+    サイレントにdefaultへ書き換えてしまっていた。
+
+    ルール（既存Schemaの意味を優先し、新しい優先順位を推測で追加しない）:
+    - キー自体が存在しない → default（未指定として扱う。既存`OcrEvalTarget.options`の
+      「未指定時は既存OcrEvaluateRequestレベルのcharset/psmが適用される」という
+      docstring通りの既存後方互換ルール）
+    - キーが存在し値が`None` → default扱い（`options`辞書全体の既定値`{}`同様、
+      「明示的にNoneを指定する」ことと「未指定」を区別する意味が既存Schema上存在しないため、
+      Noneは他Predictor（例: TrOCRの`device`）と同じく「未指定」として扱う）
+    - キーが存在し値がfalsyでも`None`以外（`0`・`""`等） → その値をそのまま保持する
+    """
+    if key not in options:
+        return default
+    value = options[key]
+    if value is None:
+        return default
+    return value
+
+
 def build_predictor(
     engine: str,
     *,
@@ -180,8 +205,8 @@ def build_predictor(
         return TesseractEvaluationPredictor(
             project_id,
             model=model,
-            charset=str(options.get("charset") or default_charset),
-            psm=int(options.get("psm") or default_psm),
+            charset=str(_resolve_option(options, "charset", default_charset)),
+            psm=int(_resolve_option(options, "psm", default_psm)),
         )
     if normalized == "paddleocr":
         return PaddleOCREvaluationPredictor(

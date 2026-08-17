@@ -159,6 +159,101 @@ def test_build_predictor_tesseract_forwards_charset_psm_override(fake_predictors
 
 
 # ---------------------------------------------------------------------------
+# build_predictor: falsy option値の保持（マージ前レビューMajor #1の是正）
+#
+# `options.get(key) or default`はPythonのfalsy評価により`psm=0`・`charset=""`という
+# 既存Schema上正当な明示的値（OcrEvaluateRequest.charsetのdocstring「空文字=whitelistなし」・
+# psmのge=0制約）を「未指定」と誤認しdefaultへ書き換えていた。以下はその回帰防止テスト。
+# ---------------------------------------------------------------------------
+
+
+def test_build_predictor_tesseract_preserves_psm_zero(fake_predictors):
+    """psm=0（有効なPSM値）が明示指定された場合、default_psmへフォールバックせず0を保持する。"""
+    predictor = build_predictor(
+        "tesseract",
+        project_id="p1",
+        model="latest",
+        options={"psm": 0},
+        default_charset="ABC",
+        default_psm=7,
+    )
+    assert predictor.init_kwargs["psm"] == 0
+
+
+def test_build_predictor_tesseract_preserves_empty_charset(fake_predictors):
+    """charset=""（既存Schemaで「whitelistなし」を意味する正当な値）が明示指定された場合、
+    default_charsetへフォールバックせず空文字を保持する。"""
+    predictor = build_predictor(
+        "tesseract",
+        project_id="p1",
+        model="latest",
+        options={"charset": ""},
+        default_charset="ABC",
+        default_psm=7,
+    )
+    assert predictor.init_kwargs["charset"] == ""
+
+
+def test_build_predictor_tesseract_preserves_psm_zero_and_empty_charset_together(fake_predictors):
+    """psm=0とcharset=""を同時に明示指定した場合、両方とも保持される
+    （マージ前レビューで確認された再現ケースそのもの）。"""
+    predictor = build_predictor(
+        "tesseract",
+        project_id="p1",
+        model="latest",
+        options={"psm": 0, "charset": ""},
+        default_charset="ABCDEF",
+        default_psm=7,
+    )
+    assert predictor.init_kwargs["charset"] == ""
+    assert predictor.init_kwargs["psm"] == 0
+
+
+def test_build_predictor_tesseract_no_options_uses_defaults(fake_predictors):
+    """optionsが空dict（未指定）の場合は、従来どおりdefault_charset/default_psmが使われる。"""
+    predictor = build_predictor(
+        "tesseract",
+        project_id="p1",
+        model="latest",
+        options={},
+        default_charset="ABCDEF",
+        default_psm=7,
+    )
+    assert predictor.init_kwargs["charset"] == "ABCDEF"
+    assert predictor.init_kwargs["psm"] == 7
+
+
+def test_build_predictor_tesseract_normal_truthy_values_still_forwarded(fake_predictors):
+    """通常のtruthy値（psm=8・charset="XYZ"）は従来どおりforwardされる（回帰確認）。"""
+    predictor = build_predictor(
+        "tesseract",
+        project_id="p1",
+        model="latest",
+        options={"psm": 8, "charset": "XYZ"},
+        default_charset="ABCDEF",
+        default_psm=7,
+    )
+    assert predictor.init_kwargs["charset"] == "XYZ"
+    assert predictor.init_kwargs["psm"] == 8
+
+
+def test_build_predictor_tesseract_explicit_none_falls_back_to_default(fake_predictors):
+    """options内のキーが明示的にNoneの場合はdefaultへフォールバックする（他Predictorの
+    Optionalオプション、例: TrOCRのdeviceと同じ「Noneは未指定扱い」という既存の意味論に揃える。
+    Noneと未指定を区別する意味は既存Schema上存在しないため）。"""
+    predictor = build_predictor(
+        "tesseract",
+        project_id="p1",
+        model="latest",
+        options={"psm": None, "charset": None},
+        default_charset="ABCDEF",
+        default_psm=7,
+    )
+    assert predictor.init_kwargs["charset"] == "ABCDEF"
+    assert predictor.init_kwargs["psm"] == 7
+
+
+# ---------------------------------------------------------------------------
 # run_multi_engine_evaluation
 # ---------------------------------------------------------------------------
 
@@ -326,6 +421,33 @@ def test_confidence_nullable_for_trocr(fake_predictors, tmp_path, monkeypatch):
         psm=7,
     )
     assert result["rows"][0]["results"][0]["confidence"] is None
+
+
+def test_confidence_zero_is_preserved_not_treated_as_unavailable(fake_predictors, tmp_path, monkeypatch):
+    """confidence=0.0（実測値）が「未取得」扱いのNoneへ化けず、そのままResponseへ保持される
+    ことを確認する（レビューMinor 4。Predictor→PredictionResult→Runner→Response変換の
+    経路全体でfalsy値=0.0が捏造・欠落しないことの回帰防止テスト）。"""
+    image_dir, gt_csv = _make_dataset(tmp_path, {"a": "ABC"})
+
+    class _ZeroConfidencePredictor(_FakePredictorBase):
+        engine_id = "paddleocr"
+        predictions: dict[str, str] = {}
+
+        def recognize(self, image, **kwargs):
+            return PredictionResult(text="ABC", confidence=0.0)
+
+    monkeypatch.setattr(f"{MODULE}.PaddleOCREvaluationPredictor", _ZeroConfidencePredictor)
+    result = run_multi_engine_evaluation(
+        project_id="p1",
+        image_dir=image_dir,
+        gt_csv=gt_csv,
+        targets=[{"engine": "paddleocr", "model": "official"}],
+        charset="ABC",
+        psm=7,
+    )
+    confidence = result["rows"][0]["results"][0]["confidence"]
+    assert confidence == 0.0
+    assert confidence is not None  # Noneとfloat 0.0を明確に区別する
 
 
 def test_missing_image_dir_raises_file_not_found(fake_predictors, tmp_path):

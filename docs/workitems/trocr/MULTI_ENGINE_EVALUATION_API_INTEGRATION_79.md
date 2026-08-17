@@ -175,6 +175,97 @@ Sample単位の推論失敗は`EvaluationRunner`の既存Sample Failure Boundary
 `engine="paddleocr"/"easyocr"/"trocr"`を指定）から4 Built-in EnginesをDispatcher/
 Runner経由で選択できる状態を達成した。
 
+## 11. マージ前レビューでの是正（Major #1）
+
+PR #80のマージ前レビューで検出されたMajor #1を是正した。
+
+### 原因
+
+`build_predictor()`の
+
+```python
+charset=str(options.get("charset") or default_charset)
+psm=int(options.get("psm") or default_psm)
+```
+
+が、Pythonの`or`演算子によるfalsy評価により、`options`で明示指定された`psm=0`（Schema上
+`ge=0`で有効な値）や`charset=""`（`OcrEvaluateRequest.charset`のdocstring「空文字=
+whitelistなし」で明示的に定義された正当な値）を「未指定」と誤認し、サイレントに
+`default_psm`/`default_charset`へ書き換えていた。
+
+### 修正内容
+
+`_resolve_option(options, key, default)`ヘルパーを新設し、「キー自体が存在しない」場合と
+「キーは存在するが値がfalsy」の場合を明確に区別した。
+
+- キー自体が存在しない → `default`（既存`OcrEvalTarget.options`のdocstring通り「未指定時は
+  既存OcrEvaluateRequestレベルのcharset/psmが適用される」という既存の後方互換ルール）
+- キーが存在し値が`None` → `default`（他Predictorの`Optional`オプション、例:
+  TrOCRの`device`と同じ「Noneは未指定扱い」という既存の意味論に揃えた。Noneと未指定を
+  区別する意味は既存Schema上存在しないため、新しい優先順位を推測で追加していない）
+- キーが存在し値がfalsyでも`None`以外（`0`・`""`等） → その値をそのまま保持する
+
+Tesseract targetの`charset`/`psm`のみに適用した（PaddleOCR/EasyOCR/TrOCRの`language`/
+`use_angle_cls`/`local_files_only`は、既存Predictor自身の既定値と一致するため実害はなく、
+レビューMinor 3として今回は変更していない）。
+
+### 実測結果
+
+```python
+build_predictor(
+    "tesseract", project_id="p1", model="latest",
+    options={"psm": 0, "charset": ""},
+    default_charset="ABCDEF", default_psm=7,
+)
+# 修正前: charset="ABCDEF", psm=7（誤り）
+# 修正後: charset="", psm=0（期待通り）
+```
+
+`options={}`（未指定）・`options={"psm": 8, "charset": "XYZ"}`（通常のtruthy値）・
+`options={"psm": None, "charset": None}`（明示的None）はいずれも従来どおりの挙動を維持する
+ことも実測確認済み。
+
+### 回帰テスト追加
+
+`tests/test_evaluation_multi_engine.py`:
+`test_build_predictor_tesseract_preserves_psm_zero`・
+`test_build_predictor_tesseract_preserves_empty_charset`・
+`test_build_predictor_tesseract_preserves_psm_zero_and_empty_charset_together`・
+`test_build_predictor_tesseract_no_options_uses_defaults`・
+`test_build_predictor_tesseract_normal_truthy_values_still_forwarded`・
+`test_build_predictor_tesseract_explicit_none_falls_back_to_default`・
+`test_confidence_zero_is_preserved_not_treated_as_unavailable`（レビューMinor 4）。
+
+`tests/test_api_evaluation_integration.py`:
+`test_mixed_engine_request_forwards_falsy_tesseract_options_unmodified`（API層がoptionsを
+加工せず転送することの確認）・
+`test_mixed_engine_request_falsy_tesseract_options_reach_build_predictor`
+（`main.py`のmockを解除し、API→`run_multi_engine_evaluation()`（実関数）→
+`build_predictor()`まで、mixed-engineリクエストのTesseract target `psm=0`/`charset=""`が
+実際に届くことをend-to-endで確認。4 Predictorクラスのみfakeへ差し替え）。
+
+### レビューMinor/Suggestionへの対応（Future Work、コード変更なし）
+
+- **Minor 1**: `OcrEvaluationResult`の`evaluation_id`/`started_at`/`finished_at`/
+  `duration_ms`は、Runnerが既に計算済みだが新経路のResponseへ未露出。今回は変更せず、
+  Future Workとして記録する（レスポンスへ追加露出する際は既存キー命名との整合を要検討）。
+- **Minor 2**: `validate_engine_supported()`は`create_default_registry()`を内部で固定生成
+  しており、`EvaluationDispatcher.__init__(registry=...)`のようなRegistry注入ができない。
+  現状Backend既定Registryの4エンジン全てが`supports_evaluation=True`のため、
+  `UnsupportedEvaluationEngineError`分岐を直接検証するテストが存在しない（実質未到達）。
+  今回は変更せず、Registry注入対応によるテスト容易性改善をFuture Workとして記録する。
+- **Minor 3**: `build_predictor()`のPaddleOCR/EasyOCR/TrOCR分岐（`language`/
+  `use_angle_cls`/`local_files_only`）が、各Predictorクラス自身のconstructor既定値を
+  重複してハードコードしている（DRY違反、現状は値が一致しているため実害なし）。今回は
+  変更せず、DRY改善候補としてFuture Workへ記録する。
+- **Minor 4**: `confidence=0.0`が「未取得」扱いのNoneへ化けず保持されることを、
+  `test_confidence_zero_is_preserved_not_treated_as_unavailable`で確認した（実装コードは
+  元々単純なpassthroughのため変更不要、テスト追加のみで固定）。
+- **Suggestion**: 応答トップレベルの`charset`が既存`evaluate_ocr()`の`dict.fromkeys()`に
+  よる重複文字除去を行っていない点、および`test_api_evaluation_integration.py`が
+  `run_multi_engine_evaluation()`をmockしたRouter層テストのみで構成されている点は、
+  いずれも機能的な問題ではないためコード変更は行わない。Future Workとして記録するのみ。
+
 ## Scope外（本Issueでは行わない）
 
 - Evaluation UI変更（`frontend/`は無変更）
