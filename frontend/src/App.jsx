@@ -49,6 +49,11 @@ import {
   trocrMetadataValidationError,
 } from "./lib/trocrModelMetadata";
 import {
+  buildOcrEvalTargets,
+  isTrocrEvalModelUnresolved,
+  resolvePreprocessSourceForEngine,
+} from "./lib/ocrEvalEngine";
+import {
   buildPreprocessPreviewPayload,
   buildPreprocessRunPayload,
   denormalizePreprocessOperations,
@@ -636,6 +641,25 @@ export default function App() {
   const [ocrEvalWhitelistCustom, setOcrEvalWhitelistCustom] = useState(TESSERACT_WHITELIST_DEFAULT);
   const [ocrEvalLoading, setOcrEvalLoading] = useState(false);
   const [ocrEvalResult, setOcrEvalResult] = useState(null);
+  // Evaluation UI Generalization（Issue #83）: 評価エンジン選択・Engine別モデル/オプション。
+  // 推論テスト画面（inferEngine等）とは完全に独立した本画面専用のstateとして持つ
+  // （推論に使用モデルとテスト用選択を混同させない既存方針、App.jsx冒頭のコメント参照）。
+  const [ocrEvalEngine, setOcrEvalEngine] = useState("tesseract");
+  const [ocrEvalPaddleModel, setOcrEvalPaddleModel] = useState("latest");
+  const [ocrEvalPaddleLanguage, setOcrEvalPaddleLanguage] = useState("en");
+  const [ocrEvalPaddleUseAngleCls, setOcrEvalPaddleUseAngleCls] = useState(false);
+  const [ocrEvalEasyocrLangs, setOcrEvalEasyocrLangs] = useState(["en"]);
+  const [ocrEvalTrocrModelRef, setOcrEvalTrocrModelRef] = useState("");
+  const [ocrEvalTrocrModelSource, setOcrEvalTrocrModelSource] = useState("manual");
+  const [ocrEvalTrocrSelectedModel, setOcrEvalTrocrSelectedModel] = useState("");
+  const [ocrEvalTrocrDevice, setOcrEvalTrocrDevice] = useState("");
+  const [ocrEvalTrocrLocalFilesOnly, setOcrEvalTrocrLocalFilesOnly] = useState(false);
+  // Engine切替時、選択中の評価前処理モードがそのEngineで使えない場合のみ"none"へフォールバックする
+  // （"training"/"step5"はTesseract学習後モデルのtraining_preprocessに依存する概念のため）。
+  function handleOcrEvalEngineChange(nextEngine) {
+    setOcrEvalEngine(nextEngine);
+    setOcrEvalPreSource((prev) => resolvePreprocessSourceForEngine(nextEngine, prev));
+  }
   const [inferFile, setInferFile] = useState(null);
   const [inferFileName, setInferFileName] = useState("");
   const [inferPreviewUrl, setInferPreviewUrl] = useState("");
@@ -3669,11 +3693,31 @@ export default function App() {
       notify("error", "評価用画像フォルダと正解CSVを指定してください");
       return;
     }
-    const targets = [];
-    if (ocrEvalIncludeBase) {
-      targets.push({ engine: "tesseract", model: "eng" });
+    if (
+      ocrEvalEngine === "trocr" &&
+      isTrocrEvalModelUnresolved(ocrEvalTrocrModelSource, trocrModels, ocrEvalTrocrSelectedModel, ocrEvalTrocrModelRef)
+    ) {
+      notify("error", "TrOCRモデルを指定してください");
+      return;
     }
-    targets.push({ engine: "tesseract", model: ocrEvalTrainedModel || "latest" });
+    // Engine別のtarget構築（Issue #83: Evaluation UI Generalization）。
+    // tesseract選択時は既存挙動を1バイトも変えない（学習前後比較=includeBase）。
+    // 他Engine選択時はtarget1件のみ（学習前ベースライン比較の概念が無いため）
+    const targets = buildOcrEvalTargets({
+      engine: ocrEvalEngine,
+      includeBase: ocrEvalIncludeBase,
+      trainedModel: ocrEvalTrainedModel,
+      paddleModel: ocrEvalPaddleModel,
+      paddleLanguage: ocrEvalPaddleLanguage,
+      paddleUseAngleCls: ocrEvalPaddleUseAngleCls,
+      easyocrLangs: ocrEvalEasyocrLangs,
+      trocrModelSource: ocrEvalTrocrModelSource,
+      trocrSelectedModel: ocrEvalTrocrSelectedModel,
+      trocrModels,
+      trocrModelRef: ocrEvalTrocrModelRef,
+      trocrDevice: ocrEvalTrocrDevice,
+      trocrLocalFilesOnly: ocrEvalTrocrLocalFilesOnly,
+    });
 
     setOcrEvalLoading(true);
     try {
@@ -4818,6 +4862,29 @@ export default function App() {
         whitelistCustom={ocrEvalWhitelistCustom}
         setWhitelistCustom={setOcrEvalWhitelistCustom}
         whitelistDefault={TESSERACT_WHITELIST_DEFAULT}
+        engine={ocrEvalEngine}
+        setEngine={handleOcrEvalEngineChange}
+        paddleModel={ocrEvalPaddleModel}
+        setPaddleModel={setOcrEvalPaddleModel}
+        paddleModels={paddleOcrModelOptions}
+        paddleLanguage={ocrEvalPaddleLanguage}
+        setPaddleLanguage={setOcrEvalPaddleLanguage}
+        paddleUseAngleCls={ocrEvalPaddleUseAngleCls}
+        setPaddleUseAngleCls={setOcrEvalPaddleUseAngleCls}
+        easyocrLangs={ocrEvalEasyocrLangs}
+        setEasyocrLangs={setOcrEvalEasyocrLangs}
+        easyocrLanguageOptions={EASYOCR_LANGUAGE_OPTIONS}
+        trocrModelRef={ocrEvalTrocrModelRef}
+        setTrocrModelRef={setOcrEvalTrocrModelRef}
+        trocrModelSource={ocrEvalTrocrModelSource}
+        setTrocrModelSource={setOcrEvalTrocrModelSource}
+        trocrSelectedModel={ocrEvalTrocrSelectedModel}
+        setTrocrSelectedModel={setOcrEvalTrocrSelectedModel}
+        trocrModels={trocrModels}
+        trocrDevice={ocrEvalTrocrDevice}
+        setTrocrDevice={setOcrEvalTrocrDevice}
+        trocrLocalFilesOnly={ocrEvalTrocrLocalFilesOnly}
+        setTrocrLocalFilesOnly={setOcrEvalTrocrLocalFilesOnly}
         onRun={runOcrEvaluation}
         loading={ocrEvalLoading}
         result={ocrEvalResult}

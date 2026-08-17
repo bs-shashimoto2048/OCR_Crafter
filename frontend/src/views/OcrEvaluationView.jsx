@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useState } from "react";
 
 import Card from "../components/Card";
 import Button from "../components/Button";
+import { getEngineLabel } from "../config/engineRegistry";
 import { API_BASE, request } from "../lib/api";
 import { flattenEvalHistory, historyPreprocessLabel } from "../lib/evalHistory";
 import { confusionLabel, confusionTitle } from "../lib/confusionFormat";
@@ -12,6 +13,8 @@ import {
   evalPreprocessSummary,
   normalizeEvalPreprocess,
 } from "../lib/evalPreprocess";
+import { EVALUATION_ENGINE_IDS, isPreprocessSourceAllowedForEngine, isTrocrEvalModelUnresolved } from "../lib/ocrEvalEngine";
+import { trocrMetadataValidationError } from "../lib/trocrModelMetadata";
 
 function pct(value) {
   const n = Number(value);
@@ -38,6 +41,30 @@ export default function OcrEvaluationView({
   whitelistCustom,
   setWhitelistCustom,
   whitelistDefault,
+  // Evaluation Engine一般化（Issue #83）: Engine選択・Engine別モデル/オプション
+  engine = "tesseract",
+  setEngine,
+  paddleModel = "latest",
+  setPaddleModel,
+  paddleModels = [],
+  paddleLanguage = "en",
+  setPaddleLanguage,
+  paddleUseAngleCls = false,
+  setPaddleUseAngleCls,
+  easyocrLangs = ["en"],
+  setEasyocrLangs,
+  easyocrLanguageOptions = [],
+  trocrModelRef = "",
+  setTrocrModelRef,
+  trocrModelSource = "manual",
+  setTrocrModelSource,
+  trocrSelectedModel = "",
+  setTrocrSelectedModel,
+  trocrModels = [],
+  trocrDevice = "",
+  setTrocrDevice,
+  trocrLocalFilesOnly = false,
+  setTrocrLocalFilesOnly,
   onRun,
   loading,
   result,
@@ -62,7 +89,12 @@ export default function OcrEvaluationView({
   const comparison = result?.comparison || null;
   // 主表示対象 = 学習後モデル（学習前のみの評価では先頭ターゲット）
   const mainTarget = targets.find((t) => !t.is_base) || targets[0] || null;
-  const canRun = String(imageDir || "").trim() !== "" && String(gtCsv || "").trim() !== "" && !loading;
+  // TrOCR選択時のみ、model_ref未解決（未選択・解決不能・未入力）なら実行不可にする
+  // （InferenceView.jsxの実行ボタン無効化判定と同じ考え方をEvaluationへ揃える）
+  const trocrModelUnresolved =
+    engine === "trocr" && isTrocrEvalModelUnresolved(trocrModelSource, trocrModels, trocrSelectedModel, trocrModelRef);
+  const canRun =
+    String(imageDir || "").trim() !== "" && String(gtCsv || "").trim() !== "" && !loading && !trocrModelUnresolved;
   const mismatchRows = rows.filter((row) => (row.results || []).some((r) => !r.match));
   const selectedDataset = datasets.find((row) => row.id === selectedDatasetId) || null;
   const historyRows = flattenEvalHistory(evalHistory);
@@ -203,7 +235,14 @@ export default function OcrEvaluationView({
   // 結果に紐づく「実際に適用した」前処理（サーバー応答のecho。UI選択中の値ではない）
   const resultPreLabel = useMemo(() => {
     if (!result) return "";
-    if (result.preprocess_source === undefined) return "未記録（旧形式の結果）";
+    if (result.preprocess_source === undefined) {
+      // Multi-engine Evaluation API（Issue #79）の新経路はpreprocess_sourceを返さない
+      // （Tesseract専用のlegacy概念のため）。preprocess_modeが無ければ本当に旧形式の結果、
+      // あればpreprocess_modeから表示する（"未記録（旧形式）"と誤表示しない）
+      if (result.preprocess_mode === undefined) return "未記録（旧形式の結果）";
+      const source = evalPreprocessSourceLabel(result.preprocess_mode === "manual" ? "custom" : result.preprocess_mode);
+      return result.eval_preprocess ? `${source} / ${evalPreprocessSummary(result.eval_preprocess)}` : source;
+    }
     if (result.preprocess_mode === "training" || result.preprocess_mode === "training_individual") {
       const hash = String(result.evaluation_preprocess?.preprocess_hash || "");
       const short = hash.startsWith("sha256:") ? hash.slice(7, 15) : hash.slice(0, 8);
@@ -283,6 +322,18 @@ export default function OcrEvaluationView({
               ) : null}
             </div>
 
+            {/* 評価エンジン選択（Issue #83: Evaluation UI Generalization） */}
+            <div className="rounded-xl border border-border/80 bg-card/45 p-3">
+              <label className="app-label">評価エンジン</label>
+              <select className="app-select" value={engine} onChange={(e) => setEngine?.(e.target.value)}>
+                {EVALUATION_ENGINE_IDS.map((id) => (
+                  <option key={id} value={id}>
+                    {getEngineLabel(id) || id}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             {/* OCR評価条件（前処理はStep5と共通定義。UIで選択→評価APIへ送信し全画像へ同一適用） */}
             <div className="rounded-xl border border-border/80 bg-card/45 p-3">
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">OCR評価条件</p>
@@ -292,8 +343,15 @@ export default function OcrEvaluationView({
                 value={preprocessSource}
                 onChange={(e) => onChangePreprocessSource?.(e.target.value)}
               >
-                <option value="training">学習時前処理を使用（推奨・既定）</option>
-                <option value="step5">手動設定: Step5既定（保存済みのStep5前処理設定）</option>
+                {/* 学習時前処理・Step5同期はTesseract学習後モデルのtraining_preprocessに依存する
+                    概念のため、他Engine選択時は表示しない（Backendがpreprocess_mode="training"を
+                    非Tesseractターゲットで拒否するため、選べても実行時400になってしまう） */}
+                {isPreprocessSourceAllowedForEngine(engine, "training") ? (
+                  <option value="training">学習時前処理を使用（推奨・既定）</option>
+                ) : null}
+                {isPreprocessSourceAllowedForEngine(engine, "step5") ? (
+                  <option value="step5">手動設定: Step5既定（保存済みのStep5前処理設定）</option>
+                ) : null}
                 <option value="custom">手動設定: カスタム（この画面で指定）</option>
                 <option value="none">前処理なし</option>
               </select>
@@ -305,19 +363,21 @@ export default function OcrEvaluationView({
                   手動設定または前処理なしを選択してください。
                 </div>
               ) : null}
-              {preprocessSource !== "training" && trainedPreRecorded ? (
+              {engine === "tesseract" && preprocessSource !== "training" && trainedPreRecorded ? (
                 <p className="mt-1 text-[11px] leading-relaxed text-amber-200/90">
                   注意: 学習時前処理と異なる前処理で評価すると、CERや完全一致率は参考値になります。
                 </p>
               ) : null}
-              <label className="mt-2 inline-flex h-5 cursor-pointer items-center gap-1.5 text-xs text-text">
-                <input
-                  type="checkbox"
-                  checked={preprocessSource === "step5"}
-                  onChange={(e) => onChangePreprocessSource?.(e.target.checked ? "step5" : "custom")}
-                />
-                Step5の前処理設定と同期する（手動設定）
-              </label>
+              {engine === "tesseract" ? (
+                <label className="mt-2 inline-flex h-5 cursor-pointer items-center gap-1.5 text-xs text-text">
+                  <input
+                    type="checkbox"
+                    checked={preprocessSource === "step5"}
+                    onChange={(e) => onChangePreprocessSource?.(e.target.checked ? "step5" : "custom")}
+                  />
+                  Step5の前処理設定と同期する（手動設定）
+                </label>
+              ) : null}
               {/* 設定サマリー（閉じていても現在の評価条件が分かる。長い場合は省略+ツールチップ） */}
               <p className="mt-1 min-w-0 truncate text-[11px] text-muted" title={preSummaryText}>
                 使用中: {preSummaryText}
@@ -560,53 +620,195 @@ sample_003.png,CHYBkt`}</pre>
 
             <div className="space-y-3 rounded-xl border border-border/80 bg-card/45 p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-200/90">評価対象モデル</p>
-              <label className="inline-flex items-center gap-2 rounded-lg border border-border/70 bg-card/55 px-3 py-2 text-sm text-text">
-                <input type="checkbox" checked={Boolean(includeBase)} onChange={(e) => setIncludeBase(e.target.checked)} />
-                学習前モデル（eng.traineddata）を含めて比較する
-              </label>
-              <p className="text-xs text-muted">
-                <span className="font-semibold text-slate-200">eng.traineddata</span> = Tesseract
-                標準の英語モデル（未学習のベースライン）。学習後モデルと同一データで比較し、改善度を測ります。
-              </p>
-              <div>
-                <label className="app-label">学習後モデル</label>
-                <select className="app-select" value={trainedModel} onChange={(e) => setTrainedModel(e.target.value)}>
-                  <option value="latest">latest（最新）</option>
-                  {(tesseractModels || []).map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
-                {(tesseractModels || []).length === 0 ? (
-                  <p className="mt-1 text-xs text-amber-200">学習済みTesseractモデルがありません。学習完了後に評価できます。</p>
-                ) : null}
-              </div>
+              {engine === "tesseract" ? (
+                <>
+                  <label className="inline-flex items-center gap-2 rounded-lg border border-border/70 bg-card/55 px-3 py-2 text-sm text-text">
+                    <input type="checkbox" checked={Boolean(includeBase)} onChange={(e) => setIncludeBase(e.target.checked)} />
+                    学習前モデル（eng.traineddata）を含めて比較する
+                  </label>
+                  <p className="text-xs text-muted">
+                    <span className="font-semibold text-slate-200">eng.traineddata</span> = Tesseract
+                    標準の英語モデル（未学習のベースライン）。学習後モデルと同一データで比較し、改善度を測ります。
+                  </p>
+                  <div>
+                    <label className="app-label">学習後モデル</label>
+                    <select className="app-select" value={trainedModel} onChange={(e) => setTrainedModel(e.target.value)}>
+                      <option value="latest">latest（最新）</option>
+                      {(tesseractModels || []).map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                    {(tesseractModels || []).length === 0 ? (
+                      <p className="mt-1 text-xs text-amber-200">学習済みTesseractモデルがありません。学習完了後に評価できます。</p>
+                    ) : null}
+                  </div>
+                </>
+              ) : engine === "paddleocr" ? (
+                <>
+                  <div>
+                    <label className="app-label">PaddleOCRモデル</label>
+                    <select className="app-select" value={paddleModel} onChange={(e) => setPaddleModel?.(e.target.value)}>
+                      <option value="latest">latest（最新・未検出時は公式モデルへフォールバック）</option>
+                      {(paddleModels || []).map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="app-label">PaddleOCR 言語</label>
+                    <input
+                      className="app-input"
+                      value={paddleLanguage}
+                      onChange={(e) => setPaddleLanguage?.(e.target.value)}
+                      placeholder="en"
+                    />
+                  </div>
+                  <label className="inline-flex h-5 items-center gap-1.5 text-xs text-text">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(paddleUseAngleCls)}
+                      onChange={(e) => setPaddleUseAngleCls?.(e.target.checked)}
+                    />
+                    角度分類器を使用する（use_angle_cls）
+                  </label>
+                </>
+              ) : engine === "easyocr" ? (
+                <div>
+                  <label className="app-label">EasyOCR 言語</label>
+                  <div className="grid grid-cols-3 gap-2 rounded-lg border border-border/70 bg-card/55 p-2">
+                    {easyocrLanguageOptions.map((lang) => (
+                      <label key={lang} className="inline-flex items-center gap-2 text-xs text-text">
+                        <input
+                          type="checkbox"
+                          checked={Array.isArray(easyocrLangs) ? easyocrLangs.includes(lang) : false}
+                          onChange={() => {
+                            const list = Array.isArray(easyocrLangs) ? easyocrLangs : [];
+                            setEasyocrLangs?.(list.includes(lang) ? list.filter((item) => item !== lang) : [...list, lang]);
+                          }}
+                        />
+                        {lang}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div>
+                    <label className="app-label">TrOCRモデル指定方法</label>
+                    <div className="flex gap-3 rounded-lg border border-border/70 bg-card/55 p-2 text-xs text-text">
+                      <label className="inline-flex items-center gap-1.5">
+                        <input
+                          type="radio"
+                          name="ocr-eval-trocr-model-source"
+                          checked={trocrModelSource === "metadata"}
+                          onChange={() => setTrocrModelSource?.("metadata")}
+                        />
+                        登録済みモデルから選択
+                      </label>
+                      <label className="inline-flex items-center gap-1.5">
+                        <input
+                          type="radio"
+                          name="ocr-eval-trocr-model-source"
+                          checked={trocrModelSource !== "metadata"}
+                          onChange={() => setTrocrModelSource?.("manual")}
+                        />
+                        手動入力
+                      </label>
+                    </div>
+                  </div>
+                  {trocrModelSource === "metadata" ? (
+                    <div>
+                      <label className="app-label">TrOCRモデル</label>
+                      {trocrModels.length === 0 ? (
+                        <p className="text-xs text-amber-200">登録済みTrOCRモデルはありません。手動入力をご利用ください。</p>
+                      ) : (
+                        <>
+                          <select
+                            className="app-select"
+                            value={trocrSelectedModel}
+                            onChange={(e) => setTrocrSelectedModel?.(e.target.value)}
+                          >
+                            <option value="">選択してください</option>
+                            {trocrModels.map((m) => (
+                              <option key={m.name} value={m.name}>
+                                {m.label}
+                              </option>
+                            ))}
+                          </select>
+                          {trocrMetadataValidationError(trocrModels, trocrSelectedModel) ? (
+                            <p className="mt-1 text-xs text-red-400">
+                              {trocrMetadataValidationError(trocrModels, trocrSelectedModel)}
+                            </p>
+                          ) : null}
+                        </>
+                      )}
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="app-label">TrOCRモデル参照</label>
+                      <input
+                        type="text"
+                        className="app-input"
+                        value={trocrModelRef || ""}
+                        onChange={(e) => setTrocrModelRef?.(e.target.value)}
+                        placeholder="例: microsoft/trocr-base-printed"
+                      />
+                      <p className="mt-1 text-xs text-muted">
+                        Hugging Face model IDまたはローカルモデルパスを指定してください（必須）。
+                      </p>
+                    </div>
+                  )}
+                  <div>
+                    <label className="app-label">推論デバイス</label>
+                    <select className="app-select" value={trocrDevice || ""} onChange={(e) => setTrocrDevice?.(e.target.value)}>
+                      <option value="">自動（CUDA利用可なら自動使用）</option>
+                      <option value="cpu">CPU</option>
+                      <option value="cuda">CUDA</option>
+                    </select>
+                  </div>
+                  <label className="inline-flex h-5 items-center gap-1.5 text-xs text-text">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(trocrLocalFilesOnly)}
+                      onChange={(e) => setTrocrLocalFilesOnly?.(e.target.checked)}
+                    />
+                    ローカルファイルのみ使用する（local_files_only。Hugging Face Hubへ接続しない）
+                  </label>
+                </div>
+              )}
             </div>
 
-            <div>
-              <label className="app-label">評価時 whitelist</label>
-              <select
-                className="app-select"
-                value={whitelistMode || "default"}
-                onChange={(e) => setWhitelistMode(e.target.value)}
-              >
-                <option value="default">実運用（既定: A-Z + 0-9 + k,l,t）</option>
-                <option value="none">whitelistなし（探索制約なし）</option>
-                <option value="custom">カスタム（任意の文字を指定）</option>
-              </select>
-              {whitelistMode === "custom" ? (
-                <input
-                  className="app-input mt-2"
-                  value={whitelistCustom}
-                  onChange={(e) => setWhitelistCustom(e.target.value)}
-                  placeholder={whitelistDefault}
-                />
-              ) : null}
-              <p className="mt-1 text-xs text-muted">
-                whitelist は推論時の探索制約です。実運用条件での測定には既定を使用してください。
-              </p>
-            </div>
+            {/* whitelist（評価時の探索制約）はTesseract固有機能。他Engineには等価概念が無いため
+                Tesseract選択時のみ表示する（docs/EVALUATION_UI_GENERALIZATION.md 4.1章参照） */}
+            {engine === "tesseract" ? (
+              <div>
+                <label className="app-label">評価時 whitelist</label>
+                <select
+                  className="app-select"
+                  value={whitelistMode || "default"}
+                  onChange={(e) => setWhitelistMode(e.target.value)}
+                >
+                  <option value="default">実運用（既定: A-Z + 0-9 + k,l,t）</option>
+                  <option value="none">whitelistなし（探索制約なし）</option>
+                  <option value="custom">カスタム（任意の文字を指定）</option>
+                </select>
+                {whitelistMode === "custom" ? (
+                  <input
+                    className="app-input mt-2"
+                    value={whitelistCustom}
+                    onChange={(e) => setWhitelistCustom(e.target.value)}
+                    placeholder={whitelistDefault}
+                  />
+                ) : null}
+                <p className="mt-1 text-xs text-muted">
+                  whitelist は推論時の探索制約です。実運用条件での測定には既定を使用してください。
+                </p>
+              </div>
+            ) : null}
           </div>
 
           {/* 下部固定領域: 実行ボタン・評価履歴（画面高が低くても評価実行へ到達できる） */}
