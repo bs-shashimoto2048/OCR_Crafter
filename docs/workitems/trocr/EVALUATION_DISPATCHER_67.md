@@ -46,7 +46,7 @@ Backend Engine Registry（`create_default_registry()`）には`tesseract`/`paddl
 
 Backend `EngineCapability.supports_evaluation`を参照するのは`EvaluationDispatcher.resolve()`のみ。`EnginePredictor`はCapabilityを一切参照・保持しない（Dispatcherが唯一の参照元という要件を満たす）。
 
-現状の実際の値（`engine_capability.py`のBuiltin Capability）: `tesseract`・`paddleocr`は`supports_evaluation=True`、`easyocr`/`trocr`は`False`（**Issue #73（PaddleOCR Evaluation Predictor）でpaddleocrをFalse→Trueへ変更済み**。Issue #67時点はtesseractのみTrueだった）。
+現状の実際の値（`engine_capability.py`のBuiltin Capability）: `tesseract`・`paddleocr`・`easyocr`は`supports_evaluation=True`、`trocr`は`False`（**Issue #73（PaddleOCR Evaluation Predictor）でpaddleocrをFalse→Trueへ、Issue #75（EasyOCR Evaluation Predictor）でeasyocrをFalse→Trueへそれぞれ変更済み**。Issue #67時点はtesseractのみTrueだった）。
 
 #### Capability実値（`create_default_registry()`で検証済み。2026年時点の最新値）
 
@@ -54,7 +54,7 @@ Backend `EngineCapability.supports_evaluation`を参照するのは`EvaluationDi
 | --------- | ---------: | ------------------: | -------------------------------- |
 | tesseract |        yes |                true | 登録済Predictorを返す                  |
 | paddleocr |        yes |                true | 登録済Predictorを返す（Issue #73でTrueへ変更） |
-| easyocr   |        yes |               false | UnsupportedEvaluationEngineError |
+| easyocr   |        yes |                true | 登録済Predictorを返す（Issue #75でTrueへ変更） |
 | trocr     |        yes |               false | UnsupportedEvaluationEngineError |
 | custom    |         no |                該当なし | UnknownEvaluationEngineError     |
 

@@ -235,6 +235,7 @@ def _easyocr_capability() -> EngineCapability:
         supports_orientation=True,
         supports_detection=True,
         supports_recognition=True,
+        supports_evaluation=True,
         supports_cpu=True,
         supports_cuda=True,
         supports_multilingual=True,

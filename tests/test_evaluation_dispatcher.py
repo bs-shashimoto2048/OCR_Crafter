@@ -132,26 +132,27 @@ def test_capability_unsupported_raises():
 
 
 def test_capability_unsupported_with_real_default_registry():
-    """Backend既定Registryでは現状 easyocr/trocr が supports_evaluation=False。
+    """Backend既定Registryでは現状 trocr が supports_evaluation=False。
 
-    paddleocrはIssue #73（PaddleOCR Evaluation Predictor）でsupports_evaluation=Trueへ
-    変更されたため、このテストの対象からは除外した（下記
-    test_capability_supported_with_real_default_registry_tesseract_and_paddleocr参照）。
+    paddleocrはIssue #73（PaddleOCR Evaluation Predictor）、easyocrはIssue #75
+    （EasyOCR Evaluation Predictor）でそれぞれsupports_evaluation=Trueへ変更されたため、
+    このテストの対象からは除外した（下記
+    test_capability_supported_with_real_default_registry_tesseract_paddleocr_and_easyocr参照）。
     """
     dispatcher = EvaluationDispatcher()
-    for engine_id in ("easyocr", "trocr"):
+    for engine_id in ("trocr",):
         dispatcher.register(engine_id, MockPredictor(engine_id=engine_id))
         with pytest.raises(UnsupportedEvaluationEngineError):
             dispatcher.resolve(engine_id)
 
 
-def test_capability_supported_with_real_default_registry_tesseract_and_paddleocr():
-    """Backend既定Registryでは tesseract・paddleocr が supports_evaluation=True。
+def test_capability_supported_with_real_default_registry_tesseract_paddleocr_and_easyocr():
+    """Backend既定Registryでは tesseract・paddleocr・easyocr が supports_evaluation=True。
 
-    paddleocrはIssue #73でTrueへ変更した（Issue #67時点ではFalseだった）。
+    paddleocrはIssue #73、easyocrはIssue #75でTrueへ変更した（Issue #67時点ではいずれもFalseだった）。
     """
     dispatcher = EvaluationDispatcher()
-    for engine_id in ("tesseract", "paddleocr"):
+    for engine_id in ("tesseract", "paddleocr", "easyocr"):
         dispatcher.register(engine_id, MockPredictor(engine_id=engine_id))
         dispatcher.resolve(engine_id)  # 例外なし
 
