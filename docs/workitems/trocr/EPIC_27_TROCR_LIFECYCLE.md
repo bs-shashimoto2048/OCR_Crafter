@@ -42,7 +42,7 @@ Evaluation
   ✅ Tesseract Predictor Adapter
   ✅ PaddleOCR Predictor
   ✅ EasyOCR Predictor
-  🔧 TrOCR Predictor（実装済み・PRレビュー待ち）
+  ✅ TrOCR Predictor
   ⬜ Multi-engine API Integration
   ⏸ Evaluation UI Integration（Backend完了後、Epic #46で再開）
   ⬜ Cleanup
@@ -64,7 +64,7 @@ PaddleOCR Evaluation Predictor実装（Feature [#73](https://github.com/bs-shash
 
 EasyOCR Evaluation Predictor実装（Feature [#75](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/75)、**Completed**・Closed。PR [#76](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/76)をSquash Merge・mainへ反映済み、Merge Commit: `1d5923a`）。`src/app/services/easyocr_evaluation_predictor.py`を新設し、既存EasyOCR推論経路（`predict.py`の`_get_easyocr_reader`/`_run_easyocr`。専用の評価経路もBenchmark用の実行経路も既存になし）を`EnginePredictor`化した。実装前調査でEasyOCRにはPaddleOCRのようなcustom/学習済みモデル解決が存在しない（official Readerのみ）ことを確認し、PaddleOCRのcustom model設計は持ち込んでいない。既存の「最大confidence採用」ルールをそのまま踏襲（confidenceは常にfloat、検出0件時は0.0）。PaddleOCR Issue #73のCI環境依存の教訓を踏まえ、本Predictorは`_get_easyocr_reader()`という単一の既存関数のみに依存し独自の`import easyocr`を持たない設計とした（module stub不要でCI非依存にテスト可能）。`easyocr.supports_evaluation`を`True`へ変更（API自動有効化なしを確認済み）。マージ前レビューはBlocker/Majorなし・Minor 1件/Suggestion 2件（Future Workへ記録）でApprove。既存`POST /api/predict`・`ocr_evaluation.py`・`benchmark.py`は無変更。詳細は[EASYOCR_EVALUATION_PREDICTOR_75.md](EASYOCR_EVALUATION_PREDICTOR_75.md)参照。次の実装対象はTrOCR Evaluation Predictor。
 
-TrOCR Evaluation Predictor実装（Feature [#77](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/77)、**Implemented, PR review pending**）。`src/app/services/trocr_evaluation_predictor.py`を新設し、既存TrOCR単一画像推論コア（`trocr_engine.py::TrOCREngine`）を`EnginePredictor`化した。既存`predict.py::_predict_with_trocr()`は呼び出しのたびに`TrOCREngine.load()`し直す設計のためこの関数は呼ばず、`TrOCREngine`自身のbuild-once契約（`load()`で1回・`predict_file()`を繰り返し呼ぶ）を直接利用。TrOCR用のmodel resolutionは既存に存在しないため、Evaluation専用の新Resolverや`"latest"`等の特殊値フォールバックは発明していない。confidenceは`TrOCRResult`が属性自体を持たないため常に`None`（独自変換なし）。`trocr.supports_evaluation`を`True`へ変更した結果、既定Registry登録済みの4エンジン全てがTrueとなった（API自動有効化なしを確認済み）。既存`POST /api/predict`・`ocr_evaluation.py`・`benchmark.py`・`trocr_engine.py`は無変更。詳細は[TROCR_EVALUATION_PREDICTOR_77.md](TROCR_EVALUATION_PREDICTOR_77.md)参照。次の実装対象はMulti-engine API Integration。
+TrOCR Evaluation Predictor実装（Feature [#77](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/77)、**Completed**・Closed。PR [#78](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/78)をSquash Merge・mainへ反映済み、Merge Commit: `28c1bcf`）。`src/app/services/trocr_evaluation_predictor.py`を新設し、既存TrOCR単一画像推論コア（`trocr_engine.py::TrOCREngine`）を`EnginePredictor`化した。既存`predict.py::_predict_with_trocr()`は呼び出しのたびに`TrOCREngine.load()`し直す設計のためこの関数は呼ばず、`TrOCREngine`自身のbuild-once契約（`load()`で1回・`predict_file()`を繰り返し呼ぶ）を直接利用。TrOCR用のmodel resolutionは既存に存在しないため、Evaluation専用の新Resolverや`"latest"`等の特殊値フォールバックは発明していない。confidenceは`TrOCRResult`が属性自体を持たないため常に`None`（独自変換なし）。`trocr.supports_evaluation`を`True`へ変更した結果、既定Registry登録済みの4エンジン（tesseract/paddleocr/easyocr/trocr）全てがTrueとなった（API自動有効化なしを確認済み）。マージ前レビューはBlocker/Majorなし・Minor 2件/Suggestion 1件（Future Workへ記録）でApprove。既存`POST /api/predict`・`ocr_evaluation.py`・`benchmark.py`・`trocr_engine.py`は無変更。詳細は[TROCR_EVALUATION_PREDICTOR_77.md](TROCR_EVALUATION_PREDICTOR_77.md)参照。次の実装対象はMulti-engine API Integration。
 
 ⬜ Benchmark（Benchmark Runner/Benchmark Centerへの`ENGINE_CATALOG`/`ENGINE_BUILDERS`登録）
 

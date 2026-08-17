@@ -6,9 +6,11 @@ Parent Epic: [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)�
 
 Related: Design [#61](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/61) / Feature [#63](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/63)（Common Evaluation Schema、Completed） / Feature [#65](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/65)（Common Evaluation Metric Calculator、Completed） / Feature [#67](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/67)（Evaluation Dispatcher、Completed） / Feature [#69](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/69)（Evaluation Runner、Completed） / Feature [#71](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/71)（Tesseract Evaluation Predictor Adapter、Completed） / Feature [#73](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/73)（PaddleOCR Evaluation Predictor、Completed） / Feature [#75](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/75)（EasyOCR Evaluation Predictor、Completed） / [ADR-0003（Accepted）](../../adr/ADR-0003_Multi_Engine_Evaluation.md) / [docs/design/MULTI_ENGINE_EVALUATION_API.md](../../design/MULTI_ENGINE_EVALUATION_API.md)
 
-PR: [#78](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/78)（Open・レビュー待ち）
+PR: [#78](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/78)（Squash Merge済み。Squash Commit: `28c1bcf3ce53753bc14d64912502a0b238437ab0`）
 
-**状態**: Implemented, PR review pending。
+**状態**: **Completed**・Closed。
+
+**マージ前レビュー結果**: Blocker 0件・Major 0件・Minor 2件・Suggestion 1件、Conclusion: Approve推奨。Minor/SuggestionはProductionコードを変更せず、下記「Future Work」へ記録した。
 
 ## 最重要原則
 
@@ -197,6 +199,31 @@ TrOCR追加によりTesseract/PaddleOCR/EasyOCR Predictorが壊れていない�
 をmockしている（`transformers`パッケージ自体はCIの必須依存として導入済み。
 `requirements-ci.txt`のコメント参照。paddleocr/easyocrとは異なりPaddleOCR Issue #73型の
 CI環境依存は生じない）。
+
+## Future Work（マージ前レビューMinor/Suggestion指摘）
+
+PR #78マージ前レビューで挙がった指摘。いずれもBlocker・Majorではなく、今回のマージは妨げない（Productionコードは今回変更していない）。
+
+### Minor 1
+
+`tests/test_trocr_evaluation_predictor.py::test_recognize_image_read_failure_propagates`が
+`pytest.raises(Exception)`という広すぎる例外型で検証しており、実際に送出される
+`FileNotFoundError`（`trocr_engine.py::predict_file()`が明示的に送出する型）を具体的に
+assertしていない。将来`pytest.raises(FileNotFoundError)`への厳格化候補として記録する。
+
+### Minor 2
+
+既存`TrOCREngine.predict_file()`を直接呼んだ結果とPredictor経由の結果を、同一fake設定下で
+比較する互換性テストが未追加（PaddleOCR/EasyOCR Predictorの
+`test_existing_run_easyocr_helper_untouched`等に相当するテストが無い）。`recognize()`は
+`self._engine.predict_file(image)`への1行委譲のみで分岐が無いため実質的なロジックの乖離余地は
+低いが、将来の回帰防止テスト候補として記録する。
+
+### Suggestion
+
+`test_no_network_or_model_download_dependency`と`test_load_exactly_once_on_construction`の
+assertionが重複気味（ほぼ同一のfake呼び出し回数チェック）。将来の可読性向上のため、統合または
+観点の明確な分離を検討する（機能上の問題なし）。
 
 ## 次のIssue
 
