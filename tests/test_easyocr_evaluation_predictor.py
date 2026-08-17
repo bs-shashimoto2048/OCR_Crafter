@@ -374,8 +374,10 @@ def test_capability_tesseract_and_paddleocr_still_true():
         dispatcher.resolve(engine_id)  # 例外なし
 
 
-def test_capability_trocr_still_false():
-    from src.app.services.evaluation_dispatcher import UnsupportedEvaluationEngineError
+def test_capability_trocr_also_true():
+    """trocrはIssue #77（TrOCR Evaluation Predictor）でsupports_evaluation=Trueへ変更されたため、
+    このテストの対象からは除外していたUnsupported検証はもう成立しない（`tests/
+    test_trocr_evaluation_predictor.py`側でTrueであることを検証する）。"""
 
     class DummyPredictor:
         engine_id = "trocr"
@@ -385,8 +387,7 @@ def test_capability_trocr_still_false():
 
     dispatcher = EvaluationDispatcher()
     dispatcher.register("trocr", DummyPredictor())
-    with pytest.raises(UnsupportedEvaluationEngineError):
-        dispatcher.resolve("trocr")
+    dispatcher.resolve("trocr")  # 例外なし
 
 
 def test_capability_custom_still_unknown():

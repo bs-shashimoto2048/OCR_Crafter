@@ -454,10 +454,12 @@ def test_capability_tesseract_still_true(monkeypatch):
     dispatcher.resolve("tesseract")  # 例外なし
 
 
-def test_capability_trocr_still_false():
-    """easyocrはIssue #75でsupports_evaluation=Trueへ変更されたため、このテストの対象からは
-    除外した（`tests/test_easyocr_evaluation_predictor.py`側でTrueであることを検証する）。"""
-    from src.app.services.evaluation_dispatcher import UnsupportedEvaluationEngineError
+def test_capability_easyocr_and_trocr_also_true():
+    """easyocrはIssue #75、trocrはIssue #77でそれぞれsupports_evaluation=Trueへ変更されたため、
+    このテストの対象からは除外していたUnsupported検証はもう成立しない（`tests/
+    test_easyocr_evaluation_predictor.py`・`tests/test_trocr_evaluation_predictor.py`側で
+    それぞれTrueであることを検証する）。本テストは両エンジンがpaddleocrと同じくresolve可能に
+    なったことのみを確認する。"""
 
     class DummyPredictor:
         def __init__(self, engine_id):
@@ -467,10 +469,9 @@ def test_capability_trocr_still_false():
             return PredictionResult(text="A")
 
     dispatcher = EvaluationDispatcher()
-    for engine_id in ("trocr",):
+    for engine_id in ("easyocr", "trocr"):
         dispatcher.register(engine_id, DummyPredictor(engine_id))
-        with pytest.raises(UnsupportedEvaluationEngineError):
-            dispatcher.resolve(engine_id)
+        dispatcher.resolve(engine_id)  # 例外なし
 
 
 def test_capability_custom_still_unknown():
