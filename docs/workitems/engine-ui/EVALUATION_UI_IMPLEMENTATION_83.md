@@ -2,7 +2,7 @@
 
 Related: Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46)（Engine UI Generalization） / Feature [#83](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/83)（Evaluation UI Implementation） / Design [#59](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/59)（Evaluation UI Generalization Design、[EVALUATION_UI_GENERALIZATION.md](../../EVALUATION_UI_GENERALIZATION.md)） / Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27) 配下 Feature [#79](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/79)（Multi-engine Evaluation API Integration、PR [#80](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/80)・Merge Commit `e496b91`）
 
-**状態（作業時点）**: Implemented, PR review pending。
+**状態**: Completed・Closed。PR [#84](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/84)をSquash Merge・mainへ反映済み、Merge Commit: `f7c5262`。Issue #83はPR本文の`Closes #83`によりマージ時に自動Close。
 
 ## 目的
 
