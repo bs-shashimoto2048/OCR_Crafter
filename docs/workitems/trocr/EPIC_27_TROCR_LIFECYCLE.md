@@ -91,7 +91,9 @@ Evaluation UI Integration（Epic [#46](https://github.com/bs-shashimoto2048/OCR_
 
 TrOCR Training Backend & Artifact Contract Investigation（Investigation [#88](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/88)、**Completed**・Closed）。既存Training Call Graph（Tesseract/PaddleOCR/EasyOCR）・TrOCR既存コード（`trocr_pipeline.py`は未実装であることを確認）・Dataset/Artifact/Model Metadata/Experiment lineage契約・Training UI前提を実コードから調査し、実装Issue 5件（Dataset Adapter → Training Backend Core → Job Integration → Artifact Registration → Training UI）への分割案を策定した。Productionコード変更なし。詳細は[TROCR_TRAINING_INVESTIGATION_88.md](TROCR_TRAINING_INVESTIGATION_88.md)参照。
 
-⬜ Benchmark（Benchmark Runner/Benchmark Centerへの`ENGINE_CATALOG`/`ENGINE_BUILDERS`登録）
+TrOCR Benchmark Integration Investigation（Investigation [#100](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/100)、**Completed**・Closed）。Benchmark Runner（`services/benchmark.py`、実行ツール）とBenchmark Center（`services/benchmark_center.py`、横断比較ビュー）の既存Call Graph・Engine Support Matrix・TrOCR Inference/Artifact Contract・Variant Key・前処理・Metrics/confidence・Error/Cancellation・UI契約を実コードから調査した。**重要な発見**: Benchmark（独自のCER計算）・Job Management経由の旧`evaluate_ocr()`・Multi-engine Evaluation API（Dispatcher/Runner/Predictor）は用語が重なるが実装上は3つの独立した経路であり、Feature #61-#85の資産はBenchmarkへ自動的には波及しない。TrOCRのconfidence欠損はBenchmarkに一切影響しない（現状Benchmarkはconfidenceを一切永続化・使用していない）。Benchmark CenterのUIコード（`BenchmarkCenterView.jsx`）は既にEngine Registry経由で汎用化済みだが、`list_model_infos()`未統合（Issue #96の決定）によりTrOCRの実データが現れない。実装は「TrOCR Benchmark Runner Integration」1 Issue（Backend: `ENGINE_CATALOG`/`ENGINE_BUILDERS`へのbuilder追加、UI: `BenchmarkView.jsx`へのモデル選択パネル追加）に安全に収まると判断し、Benchmark Center自体・Release Gate統合は対象外とした。Productionコード変更なし。詳細は[TROCR_BENCHMARK_INTEGRATION_INVESTIGATION_100.md](TROCR_BENCHMARK_INTEGRATION_INVESTIGATION_100.md)参照。
+
+🔧 Benchmark（Investigation #100完了。実装は「TrOCR Benchmark Runner Integration」1 Issueとして`ENGINE_CATALOG`/`ENGINE_BUILDERS`へのbuilder追加＋`BenchmarkView.jsx`のUI追加で対応予定）
 
 ⬜ Release Gate（`release_gate.py`のモデル対象へTrOCRを含める）
 
