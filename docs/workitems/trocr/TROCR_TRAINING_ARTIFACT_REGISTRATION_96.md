@@ -2,7 +2,7 @@
 
 Related: Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)（TrOCR学習・評価・Benchmark・Release Gate統合） / Investigation [#88](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/88) / Feature [#90](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/90)（Dataset Adapter） / Feature [#92](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/92)（Training Backend Core） / Feature [#94](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/94)（Job Integration） / Feature [#96](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/96)
 
-**状態（作業時点）**: Implemented, PR review pending。
+**状態**: Completed・Closed。PR [#97](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/97)をSquash Merge・mainへ反映済み、Merge Commit: `6a0c0c7`。Issue #96はPR本文の`Closes #96`によりマージ時に自動Close。
 
 ## 目的
 
