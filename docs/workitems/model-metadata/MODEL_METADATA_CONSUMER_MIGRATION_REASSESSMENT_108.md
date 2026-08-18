@@ -2,7 +2,7 @@
 
 Related: Epic [#28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)（Unified Model Metadata Infrastructure） / Investigation [#108](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/108) / Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46)（Engine UI Generalization、Completed） / Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)（TrOCR Lifecycle、Completed）
 
-**状態**: Implemented, PR review pending（Investigation/Documentation only、Productionコード変更なし）。
+**状態**: Completed / Closed（Investigation/Documentation only、Productionコード変更なし）。PR [#109](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/109)、Squash Commit `75f317f`でマージ済み。
 
 ## 目的
 
