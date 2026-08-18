@@ -111,7 +111,7 @@ flowchart LR
     LS[("ブラウザ localStorage<br/>前処理パラメータ・辞書・UI設定")]
     MID[("data/model_ids.json<br/>モデル管理No登録簿（全プロジェクト共通）")]
     DSID[("data/dataset_ids.json<br/>Dataset管理No登録簿（全プロジェクト共通・v1.0.0で追加）")]
-    JOBS[("data/jobs/<br/>jobs.json・events/*.jsonl・logs/*.log")]
+    JOBS[("data/jobs/<br/>job_manager.db (SQLite)・events/*.jsonl・logs/*.log")]
 ```
 
 - `data/projects/<id>/releases.json`（リリース管理）: `schema_version=2`（Migration Version）。`models{}`・`history[]`（各エントリへ `release_id`=REL-0001形式。旧データは初回参照時のMigrationで古い順にバックフィル）・`candidate_counter`・`release_counter`・`policy`（Release Gateルール）。詳細は `docs/20_RELEASE_POLICY.md`
@@ -126,7 +126,7 @@ flowchart LR
 
 - `data/audit/`（全プロジェクト共通・監査ログ）: `audit.jsonl`=**追記型**の監査記録（AUD-000001形式・削除/編集APIなし・パスワード/トークン/APIキー/画像バイナリ保存禁止）＋ `counter.json`=採番。詳細は `docs/22_SECURITY_AND_AUDIT.md`
 
-- `data/jobs/`（全プロジェクト共通・Job Management）: `jobs.json`=`{"counter": 通算採番数, "items": [Job...], "config": {"benchmark_concurrency": 1}}`。Job IDは JOB-000001形式・システム全体で一意・再利用しない。`events/JOB-xxxxxx.jsonl`=進捗イベント（追記型・1行1イベント。将来SSEでも同一形式）。`logs/JOB-xxxxxx.log`=スタックトレース等の内部ログ（画面へ出さない）。詳細は `docs/18_JOB_MANAGEMENT.md`
+- `data/jobs/`（全プロジェクト共通・Job Management）: `job_manager.db`（SQLite。Feature #127で`jobs.json`から移行済み。`job_manager_jobs`テーブル＝Job本体・`job_manager_counter`＝採番・`job_manager_config`＝`benchmark_concurrency`等）。Job IDは JOB-000001形式・システム全体で一意・再利用しない。`training_jobs`（`outputs/app.db`、Job System A）とは意図的に別ファイル。`events/JOB-xxxxxx.jsonl`=進捗イベント（追記型・1行1イベント。将来SSEでも同一形式・移行対象外）。`logs/JOB-xxxxxx.log`=スタックトレース等の内部ログ（画面へ出さない・移行対象外）。詳細は `docs/18_JOB_MANAGEMENT.md`
 
 - `data/model_ids.json`: モデル管理No（M0001形式）の登録簿。`{"counter": 通算採番数, "models": {"<project_id>/<モデル名>": "M0001"}}`。`/models/info` の一覧取得時に未登録モデルを**作成日時順**で一括採番して追記する（既存モデルの初回移行も同じ経路）。**モデルを削除してもエントリは残し、番号を再利用しない**（OCR Crafter全体で一意）。ファイルが無い・壊れている場合は counter=0 から再構築される
 

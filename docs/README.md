@@ -118,6 +118,7 @@
 - [TrOCR Evaluation Registered-model Selection（Bug #121）](workitems/trocr/TROCR_EVALUATION_REGISTERED_MODEL_SELECTION_121.md)
 - [Job Lifecycle Unification Architecture Investigation（#123）](workitems/jobs/JOB_LIFECYCLE_UNIFICATION_ARCHITECTURE_123.md)
 - [Training Job Startup Reconciliation Parity（Reliability #125）](workitems/jobs/TRAINING_JOB_STARTUP_RECONCILIATION_125.md)
+- [JobRepository SQLite Migration（Feature #127）](workitems/jobs/JOB_REPOSITORY_SQLITE_MIGRATION_127.md)
 
 ## バージョン情報
 

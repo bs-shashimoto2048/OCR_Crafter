@@ -90,24 +90,19 @@ def _seed_benchmark_run(project, benchmark_id, *, cer=0.05, mean_time_ms=200.0, 
 
 
 def _seed_job(project, job_type, status="running", job_id="JOB-000001"):
+    """JobをRepository経由で直接登録する（Issue #127でSQLite移行後、jobs.jsonへの
+    直接書き込みは実データを反映しなくなったため、`JobRepository.insert()`を使う）。"""
     from src.app.services import job_manager as jm
 
-    jobs_root = jm._jobs_root()
-    path = jobs_root / "jobs.json"
-    registry = {"counter": 1, "items": [], "config": {}}
-    if path.exists():
-        registry = json.loads(path.read_text(encoding="utf-8"))
-    registry["items"].append(
+    jm.JobRepository().insert(
         {
             "job_id": job_id,
             "project_id": project,
             "job_type": job_type,
             "status": status,
             "created_at": "2026-07-24T10:00:00",
-            "updated_at": "2026-07-24T10:00:00",
         }
     )
-    path.write_text(json.dumps(registry), encoding="utf-8")
 
 
 class TestBestCerPriority:

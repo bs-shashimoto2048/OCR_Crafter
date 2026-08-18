@@ -26,20 +26,20 @@
 
 ## 2. JSON方式が限界に近い項目（明記）
 
-1. **jobs.json のJob作成・更新（約600ms@10,000件）**: 採番・状態更新のたびに全件をread-modify-writeするため、件数に比例して悪化する。進捗更新（record_progress）は実行中Jobごとに毎回発生するため、**Job履歴が5,000件を超えたらデータ保持設定（job_retention_days）で定期削除する運用を必須とする**。10,000件超の常用はSQLite移行が必要
+1. **jobs.json のJob作成・更新（約600ms@10,000件）**: 採番・状態更新のたびに全件をread-modify-writeするため、件数に比例して悪化していた（**Feature #127でSQLite（`data/jobs/job_manager.db`）へ移行済み。行単位のINSERT/UPDATE/SELECTとなり、件数に比例した悪化は解消した**）。Job履歴が増え続ける前提は変わらないため、データ保持設定（job_retention_days）での定期削除は引き続き推奨する
 2. **audit.jsonl のフィルタ全走査**: 50,000件で33msと実用内だが、リクエスト毎に全読みするため500,000件級（150MB超）ではメモリ・時間とも悪化する。保持日数（audit_retention_days）での整理を推奨
 3. **benchmarks.json のcases**: 1 Benchmark=5,000ケースで1.4MB。数十件のBenchmark履歴を保持すると読込が線形悪化（一覧はcases除外済みのため影響は詳細表示のみ）
 
-## 3. SQLite移行計画（今回未実装・Migration計画）
+## 3. SQLite移行計画
 
-移行対象の優先順位と方式（実装時は `training_jobs` と同じ `outputs/app.db` へ）:
+移行対象の優先順位と方式:
 
-| 優先 | 対象 | 移行方式 |
-|---|---|---|
-| 1 | `data/jobs/jobs.json` → `jobs` テーブル | JobRepositoryはインターフェース固定済み（docs/18）。SQLite版Repositoryへ差し替え、初回起動時に jobs.json をINSERT移行→`jobs.json.migrated` へリネーム。イベントJSONL・内部ログはファイルのまま |
-| 2 | `data/audit/audit.jsonl` → `audit` テーブル（INDEX: timestamp/action/project_id） | 追記型を維持（INSERTのみ・UPDATE/DELETE文を実装しない）。既存JSONLは初回移行後にアーカイブ保管 |
-| 3 | `benchmarks.json` の `cases` → `benchmark_cases` テーブル | summary/資格情報はJSONのまま・casesのみ分離（ページングをSQL LIMIT/OFFSETへ） |
-| 対象外 | experiments.json / releases.json / model_ids.json / retention.json | 件数・サイズとも小さく（500件で0.8MB・20ms）JSONで十分。ユーザーが直接確認できる利点を維持 |
+| 優先 | 対象 | 移行方式 | 状態 |
+|---|---|---|---|
+| 1 | `data/jobs/jobs.json` → `job_manager_jobs` テーブル | JobRepositoryのインターフェース固定（docs/18）を活かし、SQLite版Repositoryへ差し替え。初回起動時に jobs.json をINSERT移行→`jobs.json.migrated.<timestamp>` へリネーム。イベントJSONL・内部ログはファイルのまま | **実装済み（Feature #127）**。当初案は`training_jobs`と同じ`outputs/app.db`だったが、実装時にOption B（専用`data/jobs/job_manager.db`）へ変更した。理由: `temp_projects`フィクスチャがPROJECTS_DIR経由で`data/jobs/`ごと隔離できるため既存テストが無改修で成立する（`outputs/app.db`共用だとJob System Aと同じ「テストが実DBへ副作用を出す」クラスの問題を再発しかねない、Issue #8/#112参照）。詳細は`docs/workitems/jobs/JOB_REPOSITORY_SQLITE_MIGRATION_127.md` |
+| 2 | `data/audit/audit.jsonl` → `audit` テーブル（INDEX: timestamp/action/project_id） | 追記型を維持（INSERTのみ・UPDATE/DELETE文を実装しない）。既存JSONLは初回移行後にアーカイブ保管 | 未実装 |
+| 3 | `benchmarks.json` の `cases` → `benchmark_cases` テーブル | summary/資格情報はJSONのまま・casesのみ分離（ページングをSQL LIMIT/OFFSETへ） | 未実装 |
+| 対象外 | experiments.json / releases.json / model_ids.json / retention.json | 件数・サイズとも小さく（500件で0.8MB・20ms）JSONで十分。ユーザーが直接確認できる利点を維持 | - |
 
 移行原則: `db.py` の `ALTER TABLE ADD COLUMN` / `migrate_legacy_data.py` 方式に倣い、明示的なmigration関数＋冪等＋既存ファイルは削除せずリネーム保管。
 
