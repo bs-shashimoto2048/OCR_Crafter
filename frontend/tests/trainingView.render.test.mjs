@@ -721,17 +721,21 @@ function deviceButtonTag(html, label) {
 
 // ---------- Engine選択肢 ----------
 
-test("Engine選択肢: PaddleOCR→Tesseract→EasyOCRの順で、valueと表示名は既存どおり。TrOCR/customは表示しない", () => {
+test("Engine選択肢: PaddleOCR→Tesseract→EasyOCR→TrOCRの順で、valueと表示名は既存どおり。customは表示しない", () => {
   const html = render({ initialSettingsTab: "training-settings" }).replaceAll("<!-- -->", "");
   const paddleIdx = html.indexOf('value="paddleocr"');
   const tessIdx = html.indexOf('value="tesseract"');
   const easyIdx = html.indexOf('value="easyocr"');
-  assert.ok(paddleIdx !== -1 && tessIdx !== -1 && easyIdx !== -1, "既存3Engineのoptionが揃っていない");
-  assert.ok(paddleIdx < tessIdx && tessIdx < easyIdx, "option順序がPaddleOCR→Tesseract→EasyOCRでない");
+  const trocrIdx = html.indexOf('value="trocr"');
+  assert.ok(
+    paddleIdx !== -1 && tessIdx !== -1 && easyIdx !== -1 && trocrIdx !== -1,
+    "既存3Engine+TrOCRのoptionが揃っていない"
+  );
+  assert.ok(paddleIdx < tessIdx && tessIdx < easyIdx && easyIdx < trocrIdx, "option順序がPaddleOCR→Tesseract→EasyOCR→TrOCRでない");
   assert.ok(html.includes("PaddleOCR（学習可）"), "PaddleOCRの表示名・補足文が変わっている");
   assert.ok(html.includes("Tesseract（学習可 / A-Z・0-9・筆記体klt・記号+-）"), "Tesseractの表示名・補足文が変わっている");
   assert.ok(html.includes("EasyOCR（推論専用）"), "EasyOCRの表示名・補足文が変わっている");
-  assert.ok(!html.includes('value="trocr"'), "TrOCRが選択肢へ追加されている");
+  assert.ok(html.includes("TrOCR（学習可 / Fine-tune）"), "TrOCRの表示名・補足文が表示されない（Issue #98）");
   assert.ok(!html.includes('value="custom"'), "customが選択肢へ追加されている");
 });
 
@@ -763,8 +767,8 @@ test("Engine表示名: TrOCR値が渡っても「TrOCR」と正しく表示さ�
 
 // ---------- 学習可否 ----------
 
-test("学習可否: PaddleOCR/Tesseractは学習回数入力が有効・「実行操作」ブロックを表示する", () => {
-  for (const engine of ["paddleocr", "tesseract"]) {
+test("学習可否: PaddleOCR/Tesseract/TrOCRは学習回数入力が有効・「実行操作」ブロックを表示する", () => {
+  for (const engine of ["paddleocr", "tesseract", "trocr"]) {
     const editHtml = render({ ocrEngine: engine, initialSettingsTab: "training-settings" });
     assert.ok(!epochsInputTag(editHtml).includes("disabled"), `${engine}: 学習回数入力が無効化されている`);
     const summaryHtml = render({ ocrEngine: engine });
@@ -772,8 +776,8 @@ test("学習可否: PaddleOCR/Tesseractは学習回数入力が有効・「実�
   }
 });
 
-test("学習可否: EasyOCR/TrOCR/未登録Engineは学習回数入力が無効・「実行操作」ブロックを表示しない（API呼び出し不可）", () => {
-  for (const engine of ["easyocr", "trocr", "some-unknown-engine"]) {
+test("学習可否: EasyOCR/未登録Engineは学習回数入力が無効・「実行操作」ブロックを表示しない（API呼び出し不可）", () => {
+  for (const engine of ["easyocr", "some-unknown-engine"]) {
     const editHtml = render({ ocrEngine: engine, initialSettingsTab: "training-settings" });
     assert.ok(epochsInputTag(editHtml).includes("disabled"), `${engine}: 学習回数入力が有効なまま`);
     const summaryHtml = render({ ocrEngine: engine });
@@ -794,6 +798,13 @@ test("デバイス対応可否: TesseractはCPU固定でボタン操作不可（
   const html = render({ ocrEngine: "tesseract", initialSettingsTab: "training-settings", systemCheck: { gpu_available: true } });
   for (const label of ["Auto", "CPU", "GPU"]) {
     assert.ok(deviceButtonTag(html, label).includes("disabled"), `Tesseract/${label}が有効化されている`);
+  }
+});
+
+test("デバイス対応可否: TrOCRはAuto/CPU/GPUいずれも選択可能（GPU検出時、PaddleOCRと同じsupportedDevices）", () => {
+  const html = render({ ocrEngine: "trocr", initialSettingsTab: "training-settings", systemCheck: { gpu_available: true } });
+  for (const label of ["Auto", "CPU", "GPU"]) {
+    assert.ok(!deviceButtonTag(html, label).includes("disabled"), `TrOCR/${label}が無効化されている`);
   }
 });
 
@@ -827,10 +838,65 @@ test("設定パネル: EasyOCRは既存の学習対象外通知をそのまま�
   assert.ok(!html.includes("初期重み"));
 });
 
-test("設定パネル: TrOCR値は未対応表示になり、PaddleOCR設定を表示しない（暗黙のPaddleOCRフォールバックなし）", () => {
-  const html = render({ ocrEngine: "trocr", initialSettingsTab: "engine" });
-  assert.ok(html.includes("このエンジンはこのUIでは学習対象外です。"));
-  assert.ok(!html.includes("初期重み"));
+test("エンジン設定サマリー: TrOCRはBase Modelを表示し、PaddleOCR用の「初期化」文言を誤表示しない（Issue #98）", () => {
+  const paddleHtml = render({ ocrEngine: "paddleocr", ocrInitSourceType: "scratch" }).replaceAll("<!-- -->", "");
+  assert.ok(paddleHtml.includes("初期化: scratch"));
+
+  const trocrManualHtml = render({
+    ocrEngine: "trocr",
+    ocrTrocrModelSource: "manual",
+    ocrTrocrModelRef: "microsoft/trocr-base-printed",
+  }).replaceAll("<!-- -->", "");
+  assert.ok(trocrManualHtml.includes("Base Model: microsoft/trocr-base-printed"));
+  assert.ok(!trocrManualHtml.includes("初期化: scratch"), "TrOCRへPaddleOCR用の初期化サマリーが誤表示されている");
+
+  const trocrRegisteredHtml = render({
+    ocrEngine: "trocr",
+    ocrTrocrModelSource: "registered",
+    ocrTrocrSelectedModel: "",
+  }).replaceAll("<!-- -->", "");
+  assert.ok(trocrRegisteredHtml.includes("Base Model: 未選択"));
+});
+
+test("設定パネル: TrOCRは専用パネル（Base Model指定方法・モデル参照・学習率）を表示する（Issue #98）", () => {
+  const html = render({ ocrEngine: "trocr", initialSettingsTab: "engine" }).replaceAll("<!-- -->", "");
+  assert.ok(html.includes("Base Model"));
+  assert.ok(html.includes("登録済みモデルから継続Fine-tune"));
+  assert.ok(html.includes("モデル参照（model_ref）"));
+  assert.ok(html.includes("学習率（learning_rate）"));
+  assert.ok(html.includes("local_files_only"));
+  assert.ok(!html.includes("初期重み"), "PaddleOCR専用パネルへフォールバックしていない");
+  assert.ok(!html.includes("このエンジンはこのUIでは学習対象外です。"));
+});
+
+test("設定パネル: TrOCRの手動入力モードでmodel_ref入力欄に既存値が反映される", () => {
+  const html = render({
+    ocrEngine: "trocr",
+    initialSettingsTab: "engine",
+    ocrTrocrModelSource: "manual",
+    ocrTrocrModelRef: "microsoft/trocr-base-printed",
+  }).replaceAll("<!-- -->", "");
+  assert.ok(html.includes('value="microsoft/trocr-base-printed"'));
+});
+
+test("設定パネル: TrOCRの登録済みモデル方式で一覧が空の場合は案内を表示する", () => {
+  const html = render({
+    ocrEngine: "trocr",
+    initialSettingsTab: "engine",
+    ocrTrocrModelSource: "registered",
+    trocrTrainedModels: [],
+  }).replaceAll("<!-- -->", "");
+  assert.ok(html.includes("登録済みのTrOCRモデルはありません"));
+});
+
+test("設定パネル: TrOCRの登録済みモデル方式で一覧があれば選択肢として表示する", () => {
+  const html = render({
+    ocrEngine: "trocr",
+    initialSettingsTab: "engine",
+    ocrTrocrModelSource: "registered",
+    trocrTrainedModels: [{ name: "trocr_job-1.trocr.json", label: "trocr_job-1.trocr.json (base: microsoft/trocr-base-printed)", modelRef: "/data/m1" }],
+  }).replaceAll("<!-- -->", "");
+  assert.ok(html.includes("trocr_job-1.trocr.json (base: microsoft/trocr-base-printed)"));
 });
 
 test("設定パネル: 未登録Engineは未対応表示になり、PaddleOCR設定を表示しない（暗黙のPaddleOCRフォールバックなし）", () => {

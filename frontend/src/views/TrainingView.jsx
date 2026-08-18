@@ -19,6 +19,7 @@ import { buildEffectiveAugmentation } from "../lib/augmentation";
 import { buildEffectiveTrainingPreprocess } from "../lib/preprocessCompare";
 import { collectSettingsSnapshot, isSettingsDirty } from "../lib/trainingSettingsDraft";
 import { SETTINGS_TABS, normalizeSettingsTabId } from "../lib/trainingSettingsTabs";
+import { trocrTrainedModelValidationError } from "../lib/trocrTrainedModels";
 import {
   buildDatasetCreateProgressLabel,
   buildOcrDatasetDisplay,
@@ -50,6 +51,7 @@ const TRAINING_ENGINE_OPTION_SUFFIX = {
   paddleocr: "（学習可）",
   tesseract: "（学習可 / A-Z・0-9・筆記体klt・記号+-）",
   easyocr: "（推論専用）",
+  trocr: "（学習可 / Fine-tune）",
 };
 
 // 次回学習の設定（インライン編集）のタブ（3カテゴリ＝学習設定＋オーグメンテーション＋エンジン設定。
@@ -145,6 +147,17 @@ export default function TrainingView({
   setOcrPinMemory,
   ocrPersistentWorkers,
   setOcrPersistentWorkers,
+  ocrTrocrModelSource,
+  setOcrTrocrModelSource,
+  ocrTrocrSelectedModel,
+  setOcrTrocrSelectedModel,
+  ocrTrocrModelRef,
+  setOcrTrocrModelRef,
+  ocrTrocrLearningRate,
+  setOcrTrocrLearningRate,
+  ocrTrocrLocalFilesOnly,
+  setOcrTrocrLocalFilesOnly,
+  trocrTrainedModels = [],
   systemCheck,
   onApplyOcrTrainingPreset,
   ocrDatasetInfo,
@@ -234,6 +247,11 @@ export default function TrainingView({
       batchSize,
       ocrMaxTextLength,
       ocrImageShape,
+      ocrTrocrModelSource,
+      ocrTrocrSelectedModel,
+      ocrTrocrModelRef,
+      ocrTrocrLearningRate,
+      ocrTrocrLocalFilesOnly,
     });
   }
   function openSettingsTab(tabId) {
@@ -282,6 +300,11 @@ export default function TrainingView({
     setBatchSize(snap.batchSize);
     setOcrMaxTextLength(snap.ocrMaxTextLength);
     setOcrImageShape(snap.ocrImageShape);
+    setOcrTrocrModelSource?.(snap.ocrTrocrModelSource);
+    setOcrTrocrSelectedModel?.(snap.ocrTrocrSelectedModel);
+    setOcrTrocrModelRef?.(snap.ocrTrocrModelRef);
+    setOcrTrocrLearningRate?.(snap.ocrTrocrLearningRate);
+    setOcrTrocrLocalFilesOnly?.(snap.ocrTrocrLocalFilesOnly);
   }
   // 「次回学習に適用」: 変更は既存stateへ反映済みのため確定してサマリーへ戻る
   function applySettings() {
@@ -519,9 +542,13 @@ export default function TrainingView({
   const engineSummaryLabel =
     engineTrainingPanel === "tesseract"
       ? "eng.traineddata / PSM 7"
-      : !isEngineTrainingSupported(ocrEngine)
-        ? "学習対象外（推論専用）"
-        : `初期化: ${ocrInitSourceType === "scratch" ? "scratch" : "既存OCRモデル"} / Batch ${batchSize || "-"}`;
+      : engineTrainingPanel === "trocr"
+        ? `Base Model: ${
+            ocrTrocrModelSource === "registered" ? ocrTrocrSelectedModel || "未選択" : ocrTrocrModelRef || "未入力"
+          }`
+        : !isEngineTrainingSupported(ocrEngine)
+          ? "学習対象外（推論専用）"
+          : `初期化: ${ocrInitSourceType === "scratch" ? "scratch" : "既存OCRモデル"} / Batch ${batchSize || "-"}`;
   const ocrNextAction = ocrDatasetReady ? "train" : "dataset";
   const osFamily = String(systemCheck?.os_family || "").trim().toLowerCase();
   const recommendedProfile = String(systemCheck?.recommended_profile || "").trim();
@@ -1536,9 +1563,136 @@ export default function TrainingView({
                                     </div>
                                   </div>
                                 </>
+                              ) : engineTrainingPanel === "trocr" ? (
+                                <>
+                                  <div className="space-y-2 rounded-lg border border-border/70 bg-card/50 p-3">
+                                    <p className="text-xs font-semibold text-slate-100">Base Model</p>
+                                    <div className="flex gap-3 rounded-lg border border-border bg-card/45 p-2 text-xs text-text">
+                                      <label className="inline-flex items-center gap-1.5">
+                                        <input
+                                          type="radio"
+                                          name="training-trocr-model-source"
+                                          checked={ocrTrocrModelSource === "registered"}
+                                          onChange={() => setOcrTrocrModelSource?.("registered")}
+                                        />
+                                        登録済みモデルから継続Fine-tune
+                                      </label>
+                                      <label className="inline-flex items-center gap-1.5">
+                                        <input
+                                          type="radio"
+                                          name="training-trocr-model-source"
+                                          checked={ocrTrocrModelSource !== "registered"}
+                                          onChange={() => setOcrTrocrModelSource?.("manual")}
+                                        />
+                                        手動入力
+                                      </label>
+                                    </div>
+
+                                    {ocrTrocrModelSource === "registered" ? (
+                                      <div>
+                                        <label className="app-label">登録済みTrOCRモデル</label>
+                                        {trocrTrainedModels.length === 0 ? (
+                                          <p className="text-xs text-amber-200">
+                                            このプロジェクトに登録済みのTrOCRモデルはありません。手動入力をご利用ください。
+                                          </p>
+                                        ) : (
+                                          <>
+                                            <select
+                                              className="app-select"
+                                              value={ocrTrocrSelectedModel ?? ""}
+                                              onChange={(e) => setOcrTrocrSelectedModel?.(e.target.value)}
+                                            >
+                                              <option value="">選択してください</option>
+                                              {trocrTrainedModels.map((m) => (
+                                                <option key={m.name} value={m.name}>
+                                                  {m.label}
+                                                </option>
+                                              ))}
+                                            </select>
+                                            {trocrTrainedModelValidationError(trocrTrainedModels, ocrTrocrSelectedModel) ? (
+                                              <p className="mt-1 text-xs text-red-400">
+                                                {trocrTrainedModelValidationError(trocrTrainedModels, ocrTrocrSelectedModel)}
+                                              </p>
+                                            ) : null}
+                                          </>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <div>
+                                        <label className="app-label">
+                                          モデル参照（model_ref）
+                                          <InfoTooltip
+                                            title="モデル参照（model_ref）"
+                                            body="Hugging Face model IDまたはローカルモデルディレクトリのパスです。fine-tuneのベースとして使われます。"
+                                          />
+                                        </label>
+                                        <input
+                                          type="text"
+                                          className="app-input"
+                                          value={ocrTrocrModelRef ?? ""}
+                                          onChange={(e) => setOcrTrocrModelRef?.(e.target.value)}
+                                          placeholder="例: microsoft/trocr-base-printed"
+                                        />
+                                        <p className="mt-1 text-xs text-muted">
+                                          Hugging Face model IDまたはローカルモデルパスを指定してください（必須）。
+                                        </p>
+                                        <p className="mt-1 text-xs text-amber-200">
+                                          Hub上のモデルIDを指定した場合、Backendがモデルを取得する可能性があります。社内運用ではローカルモデルパスの利用を推奨します。
+                                        </p>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                      <label className="app-label">
+                                        学習率（learning_rate）
+                                        <InfoTooltip title="学習率" body="AdamW optimizerの学習率です。既定は5e-5程度が目安です。" />
+                                      </label>
+                                      <input
+                                        type="number"
+                                        step="0.00001"
+                                        className="app-input"
+                                        value={ocrTrocrLearningRate ?? ""}
+                                        onChange={(e) => setOcrTrocrLearningRate?.(e.target.value)}
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="app-label">
+                                        最大文字数
+                                        <InfoTooltip title="最大文字数" body="1ラベルあたりの最大トークン長（max_target_length）です。" />
+                                      </label>
+                                      <input
+                                        type="number"
+                                        className="app-input"
+                                        value={ocrMaxTextLength}
+                                        onChange={(e) => setOcrMaxTextLength(e.target.value)}
+                                      />
+                                    </div>
+                                  </div>
+
+                                  <div>
+                                    <label className="inline-flex items-center gap-1.5 text-xs text-text">
+                                      <input
+                                        type="checkbox"
+                                        checked={Boolean(ocrTrocrLocalFilesOnly)}
+                                        onChange={(e) => setOcrTrocrLocalFilesOnly?.(e.target.checked)}
+                                      />
+                                      ローカルファイルのみ使用（local_files_only）
+                                      <InfoTooltip
+                                        title="local_files_only"
+                                        body="有効にすると、モデル参照の解決時にHugging Face Hubへのネットワークアクセスを行わず、ローカルキャッシュ・ローカルパスのみを使用します。"
+                                      />
+                                    </label>
+                                  </div>
+
+                                  <div className="rounded-lg border border-accent/30 bg-accent/10 px-3 py-2 text-xs text-blue-100">
+                                    TrOCR（Transformer-based OCR）をmodel_refからfine-tuneします。バッチサイズ・演算デバイス・学習回数（Epoch）は上部の共通設定を使用します。
+                                  </div>
+                                </>
                               ) : (
-                                // Registryが返すtrainingPanelがtesseract/paddleocrいずれでもない場合
-                                // （EasyOCR・TrOCR・未登録Engine）。PaddleOCR設定は表示しない
+                                // Registryが返すtrainingPanelがtesseract/paddleocr/trocrいずれでもない場合
+                                // （EasyOCR・未登録Engine）。PaddleOCR設定は表示しない
                                 <div className="rounded-lg border border-amber-300/40 bg-amber-300/10 p-3 text-sm text-amber-100">
                                   {ocrEngine === "easyocr"
                                     ? "EasyOCR はこのUIでは学習対象外です。推論画面でのみ利用できます。"

@@ -35,6 +35,12 @@ export const SETTINGS_DRAFT_KEYS = [
   "batchSize",
   "ocrMaxTextLength",
   "ocrImageShape",
+  // TrOCRエンジン設定（Issue #98）
+  "ocrTrocrModelSource",
+  "ocrTrocrSelectedModel",
+  "ocrTrocrModelRef",
+  "ocrTrocrLearningRate",
+  "ocrTrocrLocalFilesOnly",
 ];
 
 // 現在値からスナップショットを採取する（オブジェクトは複製し、後の編集の影響を受けない）

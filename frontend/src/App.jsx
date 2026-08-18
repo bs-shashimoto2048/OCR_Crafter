@@ -48,6 +48,7 @@ import {
   resolveSelectedTrocrModelRef,
   trocrMetadataValidationError,
 } from "./lib/trocrModelMetadata";
+import { mapTrocrTrainedModels, resolveTrocrTrainedModelRef } from "./lib/trocrTrainedModels";
 import {
   buildOcrEvalTargets,
   isTrocrEvalModelUnresolved,
@@ -508,6 +509,14 @@ export default function App() {
   const [ocrUseAmp, setOcrUseAmp] = useState(false);
   const [ocrPinMemory, setOcrPinMemory] = useState(false);
   const [ocrPersistentWorkers, setOcrPersistentWorkers] = useState(false);
+  // TrOCR学習固有設定（Issue #98）。Inference/Evaluationの推論用TrOCR state
+  // （inferTrocr*/ocrEvalTrocr*）とは意図的に分離する（State Isolation要件）
+  const [ocrTrocrModelSource, setOcrTrocrModelSource] = useState("manual");
+  const [ocrTrocrSelectedModel, setOcrTrocrSelectedModel] = useState("");
+  const [ocrTrocrModelRef, setOcrTrocrModelRef] = useState("");
+  const [ocrTrocrLearningRate, setOcrTrocrLearningRate] = useState(0.00005);
+  const [ocrTrocrLocalFilesOnly, setOcrTrocrLocalFilesOnly] = useState(false);
+  const [trocrTrainedModelItems, setTrocrTrainedModelItems] = useState([]);
   const [systemCheck, setSystemCheck] = useState(null);
 
   const [models, setModels] = useState([]);
@@ -992,14 +1001,18 @@ export default function App() {
       setOfficialPaddleModels([]);
       setLatestModels({ any: "", byType: {}, ocrPaddle: "", ocrTesseract: "" });
       setModelTypes([]);
+      setTrocrTrainedModelItems([]);
       return;
     }
     const pid = encodeURIComponent(targetProjectId);
-    const [modelsData, typesData, infosData, officialData] = await Promise.all([
+    const [modelsData, typesData, infosData, officialData, trocrModelsData] = await Promise.all([
       request(`/models?project_id=${pid}`),
       request(`/model-types?project_id=${pid}`),
       request(`/models/info?project_id=${pid}`).catch(() => ({ items: [] })),
       request("/api/ocr/models/official").catch(() => ({ items: [] })),
+      // 登録済みTrOCRモデル一覧（Issue #96 list_trocr_models()の薄いラッパー、Issue #98で新設）。
+      // Training UIの「登録済みモデルから継続Fine-tune」選択に使う
+      request(`/api/trocr/models?project_id=${pid}`).catch(() => ({ items: [] })),
     ]);
     const modelItems = modelsData.items || [];
     const types = typesData.items || [];
@@ -1027,6 +1040,7 @@ export default function App() {
     setModelInfos(infoMap);
     setModelTypes(mergedTypes);
     setOfficialPaddleModels(Array.isArray(officialData?.items) ? officialData.items : []);
+    setTrocrTrainedModelItems(Array.isArray(trocrModelsData?.items) ? trocrModelsData.items : []);
 
     // 推論使用モデルの復元（プロジェクト読込・モデル一覧取得完了時。モデル一覧取得より先に
     // 設定値を取得していても、ここでモデル一覧が揃った後に復元する）。プロジェクトごとに
@@ -1513,6 +1527,10 @@ export default function App() {
     () => extractTrocrModels(models, modelInfos, modelAliases),
     [models, modelInfos, modelAliases]
   );
+  // Training UIの「登録済みモデルから継続Fine-tune」用（Issue #98）。上記trocrModels
+  // （GET /models/info由来、.trocr.jsonをglobしないため実運用上常に空）とはデータソースが
+  // 異なる新規エンドポイント（GET /api/trocr/models）の応答をそのまま使う
+  const trocrTrainedModels = useMemo(() => mapTrocrTrainedModels(trocrTrainedModelItems), [trocrTrainedModelItems]);
   // ""=未選択（登録済みモデルの有無で動的に既定値を決める）。ユーザーが明示的に
   // 選択した後は、その値を固定で保持する（データ読込タイミングによる再切替をしない）
   const [inferTrocrModelSource, setInferTrocrModelSource] = useState("");
@@ -2028,12 +2046,19 @@ export default function App() {
   const clsTrainingMode = clsInitSourceType === "scratch" ? "scratch" : "finetune";
   const ocrTrainingMode = ocrInitSourceType === "scratch" ? "scratch" : "finetune";
   const canTrain = workflowState.datasetBuilt && savedLabeledCount > 0;
+  // TrOCRのmodel_ref解決（登録済みモデル選択 or 手動入力）。Training状態は
+  // Inference/Evaluationの推論用TrOCR state（inferTrocr*/ocrEvalTrocr*）とは分離している
+  const trocrResolvedModelRef =
+    ocrTrocrModelSource === "registered"
+      ? resolveTrocrTrainedModelRef(trocrTrainedModels, ocrTrocrSelectedModel)
+      : String(ocrTrocrModelRef || "").trim();
   const canStartOcrTraining =
-    (ocrEngine === "paddleocr" || ocrEngine === "tesseract") &&
+    (ocrEngine === "paddleocr" || ocrEngine === "tesseract" || ocrEngine === "trocr") &&
     String(ocrDatasetDir || "").trim() !== "" &&
     (ocrEngine === "tesseract" ||
-      ocrTrainingMode === "scratch" ||
-      String(ocrInitSourceValue || "").trim() !== "");
+      (ocrEngine === "trocr"
+        ? trocrResolvedModelRef !== ""
+        : ocrTrainingMode === "scratch" || String(ocrInitSourceValue || "").trim() !== ""));
   const workflowSteps = useMemo(() => {
     const jobRunning = jobStatus === "running" || jobStatus === "queued";
     // OCR認識モデル系 / 実験機能系の画面では、その系統内の工程ナビを表示する
@@ -3171,6 +3196,79 @@ export default function App() {
     }
   }
 
+  async function startTrocrTraining() {
+    if (!projectId) {
+      notify("error", "プロジェクトを作成または選択してください");
+      return;
+    }
+    if (!String(ocrDatasetDir || "").trim()) {
+      notify("error", "先にOCRデータ作成を実行してください");
+      return;
+    }
+    const modelRef =
+      ocrTrocrModelSource === "registered"
+        ? resolveTrocrTrainedModelRef(trocrTrainedModels, ocrTrocrSelectedModel)
+        : String(ocrTrocrModelRef || "").trim();
+    if (!modelRef) {
+      notify(
+        "error",
+        ocrTrocrModelSource === "registered"
+          ? "継続元のTrOCRモデルを選択してください。"
+          : "モデル参照（model_ref）を入力してください。"
+      );
+      return;
+    }
+    // UIの演算デバイスボタンは他エンジンと共通の"auto"/"cpu"/"gpu"を使うが、
+    // TrOCRのBackend契約（TrocrTrainStartRequest.device）は"auto"/"cpu"/"cuda"のため
+    // ここで翻訳する（共通の演算デバイスUI自体は変更しない）
+    const requestedDevice = String(ocrTrainDevice || "auto").trim().toLowerCase();
+    const device = requestedDevice === "gpu" ? "cuda" : requestedDevice === "cpu" ? "cpu" : "auto";
+    if (device === "cuda" && !Boolean(systemCheck?.gpu_available)) {
+      notify("error", "GPUが利用できない環境です。device を auto または cpu に変更してください。");
+      return;
+    }
+    try {
+      const payload = {
+        project_id: projectId,
+        dataset_dir: ocrDatasetDir,
+        model_ref: modelRef,
+        epochs: Number(epochs),
+        batch_size: Number(batchSize),
+        learning_rate: Number(ocrTrocrLearningRate),
+        max_target_length: Number(ocrMaxTextLength),
+        device,
+        local_files_only: Boolean(ocrTrocrLocalFilesOnly),
+      };
+      const data = await request("/api/trocr/train/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      resetTrainingLog(`TrOCR学習開始要求: プロジェクト=${projectId}`);
+      setJobId(data.job_id);
+      setJobStatus(data.status || "queued");
+      setJobFamily("ocr");
+      setWorkflowState((prev) => ({ ...prev, trainingStarted: true }));
+      lastStatusRef.current = "";
+      lastMessageRef.current = "";
+      pushLog(`TrOCR学習開始要求: プロジェクト=${projectId} / ジョブ=${data.job_id}`);
+      pushLog(
+        `TrOCR学習設定: model_ref=${modelRef}, device=${device}, epochs=${payload.epochs}, batch=${payload.batch_size}, learning_rate=${payload.learning_rate}`
+      );
+      notify("info", `TrOCR学習キューに追加しました (${data.job_id})`);
+      setActiveView("ocr-training");
+    } catch (error) {
+      // 409（すでに実行中）は新規開始せず既存ジョブへ再接続する
+      if (String(error?.message || "").includes("すでに実行中")) {
+        notify("info", "OCR学習ジョブがすでに実行中のため、既存ジョブへ再接続しました");
+        await reconnectActiveOcrJob();
+        setActiveView("ocr-training");
+      } else {
+        notify("error", error.message);
+      }
+    }
+  }
+
   async function startOcrTraining() {
     if (!projectId) {
       notify("error", "プロジェクトを作成または選択してください");
@@ -3185,8 +3283,12 @@ export default function App() {
         await startTesseractTraining();
         return;
       }
+      if (ocrEngine === "trocr") {
+        await startTrocrTraining();
+        return;
+      }
       if (ocrEngine !== "paddleocr") {
-        notify("error", "EasyOCR は学習対象外です。PaddleOCR または Tesseract を選択してください。");
+        notify("error", "EasyOCR は学習対象外です。PaddleOCR・Tesseract・TrOCR を選択してください。");
         return;
       }
       await startPaddleOcrTraining();
@@ -4403,6 +4505,17 @@ export default function App() {
         setOcrPinMemory={setOcrPinMemory}
         ocrPersistentWorkers={ocrPersistentWorkers}
         setOcrPersistentWorkers={setOcrPersistentWorkers}
+        ocrTrocrModelSource={ocrTrocrModelSource}
+        setOcrTrocrModelSource={setOcrTrocrModelSource}
+        ocrTrocrSelectedModel={ocrTrocrSelectedModel}
+        setOcrTrocrSelectedModel={setOcrTrocrSelectedModel}
+        ocrTrocrModelRef={ocrTrocrModelRef}
+        setOcrTrocrModelRef={setOcrTrocrModelRef}
+        ocrTrocrLearningRate={ocrTrocrLearningRate}
+        setOcrTrocrLearningRate={setOcrTrocrLearningRate}
+        ocrTrocrLocalFilesOnly={ocrTrocrLocalFilesOnly}
+        setOcrTrocrLocalFilesOnly={setOcrTrocrLocalFilesOnly}
+        trocrTrainedModels={trocrTrainedModels}
         systemCheck={systemCheck}
         onApplyOcrTrainingPreset={applyOcrTrainingPreset}
         onCreateSelectedOcrDataset={createSelectedOcrDataset}

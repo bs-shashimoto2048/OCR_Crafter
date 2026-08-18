@@ -65,6 +65,44 @@ test("OcrEvaluationViewへは評価画面用state（ocrEvalTrocr*）のみを渡
   assert.ok(!block.includes("{inferTrocr"), "OcrEvaluationViewへ推論テスト画面専用stateが渡っている");
 });
 
+test("学習画面用TrOCR state（ocrTrocr*）が個別に存在する（推論テスト画面・評価画面のstateと別名前空間、Issue #98）", async () => {
+  const source = await APP_SOURCE_PROMISE;
+  for (const name of [
+    "ocrTrocrModelRef",
+    "setOcrTrocrModelRef",
+    "ocrTrocrModelSource",
+    "setOcrTrocrModelSource",
+    "ocrTrocrSelectedModel",
+    "setOcrTrocrSelectedModel",
+    "ocrTrocrLearningRate",
+    "ocrTrocrLocalFilesOnly",
+  ]) {
+    assert.ok(source.includes(name), `App.jsxに"${name}"が見つからない`);
+  }
+});
+
+test("TrainingViewへは学習画面用state（ocrTrocr*）のみを渡し、推論テスト画面・評価画面用stateを渡さない", async () => {
+  const source = await APP_SOURCE_PROMISE;
+  const start = source.indexOf("<TrainingView");
+  assert.ok(start >= 0, "<TrainingView が見つからない");
+  const end = source.indexOf("/>", start);
+  const block = source.slice(start, end);
+  assert.ok(block.includes("ocrTrocrModelRef={ocrTrocrModelRef}"));
+  assert.ok(block.includes("ocrTrocrModelSource={ocrTrocrModelSource}"));
+  assert.ok(!block.includes("{inferTrocr"), "TrainingViewへ推論テスト画面専用stateが渡っている");
+  assert.ok(!block.includes("ocrEvalTrocr"), "TrainingViewへEvaluation専用stateが渡っている");
+});
+
+test("InferenceView/OcrEvaluationViewへは学習画面専用state（ocrTrocr*）を渡さない", async () => {
+  const source = await APP_SOURCE_PROMISE;
+  const inferStart = source.indexOf("<InferenceView");
+  const inferEnd = source.indexOf("/>", inferStart);
+  assert.ok(!source.slice(inferStart, inferEnd).includes("ocrTrocr"), "InferenceViewへ学習画面専用stateが渡っている");
+  const evalStart = source.indexOf("<OcrEvaluationView");
+  const evalEnd = source.indexOf("/>", evalStart);
+  assert.ok(!source.slice(evalStart, evalEnd).includes("ocrTrocr"), "OcrEvaluationViewへ学習画面専用stateが渡っている");
+});
+
 test("trocrModels（登録済みモデル一覧）は読み取り専用の共有データとして両画面へ同じ値を渡す（選択stateとは別物）", async () => {
   const source = await APP_SOURCE_PROMISE;
   // 一覧データ自体（extractTrocrModels由来）は1箇所のuseMemoで生成され、両画面が

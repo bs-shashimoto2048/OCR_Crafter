@@ -125,11 +125,11 @@ test("getEngineDownloadType: 未登録はnull", () => {
 
 // ---------- 学習可否（trainingSupported） ----------
 
-test("isEngineTrainingSupported: PaddleOCR/Tesseractはtrue、EasyOCR/TrOCRはfalse", () => {
+test("isEngineTrainingSupported: PaddleOCR/Tesseract/TrOCRはtrue、EasyOCRはfalse", () => {
   assert.equal(isEngineTrainingSupported("paddleocr"), true);
   assert.equal(isEngineTrainingSupported("tesseract"), true);
   assert.equal(isEngineTrainingSupported("easyocr"), false);
-  assert.equal(isEngineTrainingSupported("trocr"), false);
+  assert.equal(isEngineTrainingSupported("trocr"), true);
 });
 
 test("isEngineTrainingSupported: custom・未登録・null/undefined/空文字はfalse（学習可能と誤認させない）", () => {
@@ -140,20 +140,21 @@ test("isEngineTrainingSupported: custom・未登録・null/undefined/空文字�
 
 // ---------- 選択肢（trainingSelectable / getTrainingSelectableEngines） ----------
 
-test("isEngineTrainingSelectable: PaddleOCR/Tesseract/EasyOCRはtrue、TrOCR/customはfalse", () => {
+test("isEngineTrainingSelectable: PaddleOCR/Tesseract/EasyOCR/TrOCRはtrue、customはfalse", () => {
   assert.equal(isEngineTrainingSelectable("paddleocr"), true);
   assert.equal(isEngineTrainingSelectable("tesseract"), true);
   assert.equal(isEngineTrainingSelectable("easyocr"), true);
-  assert.equal(isEngineTrainingSelectable("trocr"), false);
+  assert.equal(isEngineTrainingSelectable("trocr"), true);
   assert.equal(isEngineTrainingSelectable("custom"), false);
 });
 
-test("getTrainingSelectableEngines: 既存UIと同じ順序・内容（PaddleOCR→Tesseract→EasyOCR）でTrOCR/customを含まない", () => {
+test("getTrainingSelectableEngines: 既存UIと同じ順序・内容（PaddleOCR→Tesseract→EasyOCR→TrOCR）でcustomを含まない", () => {
   const engines = getTrainingSelectableEngines();
   assert.deepEqual(engines, [
     { id: "paddleocr", label: "PaddleOCR" },
     { id: "tesseract", label: "Tesseract" },
     { id: "easyocr", label: "EasyOCR" },
+    { id: "trocr", label: "TrOCR" },
   ]);
 });
 
@@ -195,11 +196,12 @@ test("getTrainingSelectableEngines: 戻り値を変更しても次回呼び出�
   first[0].label = "HACKED";
 
   const second = getTrainingSelectableEngines();
-  assert.equal(second.length, 3, "2回目の呼び出し結果の件数が変化している");
+  assert.equal(second.length, 4, "2回目の呼び出し結果の件数が変化している");
   assert.deepEqual(second, [
     { id: "paddleocr", label: "PaddleOCR" },
     { id: "tesseract", label: "Tesseract" },
     { id: "easyocr", label: "EasyOCR" },
+    { id: "trocr", label: "TrOCR" },
   ]);
 });
 
@@ -249,11 +251,11 @@ test("getEngineEntry: supportedDevices配列もfrozenであり、push()はエラ
 
 // ---------- 設定パネル種別 ----------
 
-test("getEngineTrainingPanel: paddleocr/tesseractは専用パネル、easyocr/trocrはunsupported", () => {
+test("getEngineTrainingPanel: paddleocr/tesseract/trocrは専用パネル、easyocrはunsupported", () => {
   assert.equal(getEngineTrainingPanel("paddleocr"), "paddleocr");
   assert.equal(getEngineTrainingPanel("tesseract"), "tesseract");
   assert.equal(getEngineTrainingPanel("easyocr"), "unsupported");
-  assert.equal(getEngineTrainingPanel("trocr"), "unsupported");
+  assert.equal(getEngineTrainingPanel("trocr"), "trocr");
 });
 
 test("getEngineTrainingPanel: 未登録engineはnull（呼び出し側でPaddleOCRへフォールバックしないこと）", () => {

@@ -75,13 +75,13 @@ const ENGINE_REGISTRY = {
     displayName: "TrOCR",
     color: "emerald",
     downloadType: "directory_or_ref",
-    // TrOCR学習はBackend未実装のため現状false（Epic #27完了後に見直す）。
-    // trainingSelectable=falseにより、TrainingViewのOCRタイプ選択肢には出さない
-    // （これはTrOCR UI統合ではなく、「TrOCR学習未実装」という現状を表すもの）
-    trainingSupported: false,
-    trainingSelectable: false,
+    // TrOCR学習Backend（Feature #92/#94/#96）が実装されたため、Training UI統合
+    // （Feature #98）でtrainingSupported/trainingSelectableをtrueへ変更した。
+    // trainingPanel="trocr"はTrainingView.jsxの新設パネル分岐に対応する
+    trainingSupported: true,
+    trainingSelectable: true,
     supportedDevices: ["cpu", "gpu"],
-    trainingPanel: "unsupported",
+    trainingPanel: "trocr",
     snapshotType: "generic",
   },
   [ENGINE_ID_CUSTOM]: {
@@ -189,7 +189,7 @@ export function isEngineDeviceSupported(value, deviceId) {
   return getEngineSupportedDevices(value).includes(deviceId);
 }
 
-// 学習画面の「エンジン固有設定」パネル種別（"paddleocr" | "tesseract" | "unsupported"）。
+// 学習画面の「エンジン固有設定」パネル種別（"paddleocr" | "tesseract" | "trocr" | "unsupported"）。
 // 未登録エンジンはnull（呼び出し側は"unsupported"と同様に安全側へフォールバックすること。
 // PaddleOCR設定への暗黙フォールバックは行わない）。
 export function getEngineTrainingPanel(value) {

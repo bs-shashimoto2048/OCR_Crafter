@@ -33,6 +33,11 @@ function sampleValues(overrides = {}) {
     batchSize: 16,
     ocrMaxTextLength: 8,
     ocrImageShape: "1,48,320",
+    ocrTrocrModelSource: "manual",
+    ocrTrocrSelectedModel: "",
+    ocrTrocrModelRef: "microsoft/trocr-base-printed",
+    ocrTrocrLearningRate: 0.00005,
+    ocrTrocrLocalFilesOnly: false,
     ...overrides,
   };
 }
@@ -60,6 +65,14 @@ test("値の変更・ネスト変更で差分ありになる", () => {
   const aug = sampleValues();
   aug.ocrAugmentation = { ...aug.ocrAugmentation, preset: "weak" };
   assert.equal(isSettingsDirty(snapshot, aug), true);
+});
+
+test("TrOCR固有フィールドの変更も差分ありになる", () => {
+  const snapshot = collectSettingsSnapshot(sampleValues());
+  assert.equal(isSettingsDirty(snapshot, sampleValues({ ocrTrocrModelRef: "microsoft/trocr-base-handwritten" })), true);
+  assert.equal(isSettingsDirty(snapshot, sampleValues({ ocrTrocrModelSource: "registered" })), true);
+  assert.equal(isSettingsDirty(snapshot, sampleValues({ ocrTrocrLearningRate: 0.0001 })), true);
+  assert.equal(isSettingsDirty(snapshot, sampleValues({ ocrTrocrLocalFilesOnly: true })), true);
 });
 
 test("スナップショット未採取（編集未開始）は常に差分なし", () => {
