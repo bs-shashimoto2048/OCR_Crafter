@@ -4,7 +4,7 @@
 
 **Epic [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)は既存推論経路へのTrOCR統合が完了し、Closed（2026-07-31 09:21:33 JST）。** Phase1（設計フェーズ）完了。Phase2（共通基盤実装）完了（Engine Capability [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4)・Engine Registry [#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9)・Engine判定ロジック統一Backend側[#11](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/11)・Frontend側[#12](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/12)・共通Model Metadata [#14](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/14)、いずれもmainへマージ済み）。Phase3（TrOCR Backend単画像推論コア、Feature [#16](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/16)）完了・mainへマージ済み。Phase4（OCR Pipelineへの接続、Feature [#18](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/18)）完了・mainへマージ済み。既存OCR推論APIへの統合（Feature [#20](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/20)）完了・mainへマージ済み。Phase5（推論テスト画面へのTrOCR選択UI追加、Feature [#23](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/23)）完了・mainへマージ済み。TrOCR Model MetadataのFrontend連携（Feature [#25](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/25)）完了・mainへマージ済み。
 
-**[Epic #27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)（TrOCR学習・評価・Benchmark・Release Gate統合）を新設し、当初ロードマップのうちTraining／Evaluation／Benchmark／Release Gateを引き継いだ。** Training（Dataset Adapter → Training Backend Core → Job Integration → Artifact Registration → Training UI、Feature #90/#92/#94/#96/#98）・Evaluation（Multi-engine Evaluation API Design → 各Predictor → API Integration、Design #61・Feature #63-#79。UI側はEpic #46 Feature #83/#85）・Benchmark（Investigation #100 → Feature #102）・Release Gate（Feature #104）がすべて実装完了・mainへマージ済み。最終cleanup/documentation（Chore [#106](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/106)）を実施中。詳細は[EPIC_27_TROCR_LIFECYCLE.md](EPIC_27_TROCR_LIFECYCLE.md)参照。
+**[Epic #27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)（TrOCR学習・評価・Benchmark・Release Gate統合）は、当初ロードマップのうちTraining／Evaluation／Benchmark／Release Gateをすべて実装完了し、Closed（2026-08-18）。** Training（Dataset Adapter → Training Backend Core → Job Integration → Artifact Registration → Training UI、Feature #90/#92/#94/#96/#98）・Evaluation（Multi-engine Evaluation API Design → 各Predictor → API Integration、Design #61・Feature #63-#79。UI側はEpic #46 Feature #83/#85）・Benchmark（Investigation #100 → Feature #102）・Release Gate（Feature #104）・最終cleanup/documentation（Chore #106）がすべて実装完了・mainへマージ済み。詳細は[EPIC_27_TROCR_LIFECYCLE.md](EPIC_27_TROCR_LIFECYCLE.md)参照。
 
 ## 目的
 
@@ -31,13 +31,13 @@ OCR CrafterへTransformerベースの文字認識エンジンを追加できる�
 - [x] Epic #1のスコープ整理（Training/Evaluation/Benchmark/Release GateをEpic #27へ引き継ぎ）
 - [x] Epic #1をClose（2026-07-31 09:21:33 JST。子Issue・完了条件すべて達成）
 - [x] Epic #27配下の実装Issue作成・完了（Evaluation: Design #61・Feature #63/#65/#67/#69/#71/#73/#75/#77/#79、Epic #46 Feature #83/#85／Training: Investigation #88・Feature #90/#92/#94/#96/#98／Benchmark: Investigation #100・Feature #102／Release Gate: Feature #104。すべてmainへマージ済み・Closed）
-- [ ] Epic #27最終cleanup/documentation（Chore [#106](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/106)、実施中）
+- [x] Epic #27最終cleanup/documentation（Chore [#106](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/106)、実装完了・Closed。PR [#107](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/107)・Merge Commit `ddbcf91`）
 - [x] Model Metadata実運用化Epicの新規作成（[Epic #28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28) Unified Model Metadata Infrastructure。ModelMetadata生成/保存/Models連携/Inference連携/Evaluation連携/旧モデル管理方式からの移行。Investigation [#29](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/29)Closed。Architecture [#30](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/30)設計中。Epic #28専用の作業資料は独立ディレクトリ[docs/workitems/model-metadata/](../model-metadata/README.md)へ分離）
 
 ## 関連Issue
 
 - Epic: [#1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1) [Epic] Transformer OCR対応基盤とTrOCR統合（既存推論経路への統合完了、Closed 2026-07-31）
-- Epic: [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27) [Epic] TrOCR学習・評価・Benchmark・Release Gate統合（Epic #1の後続。Training/Evaluation/Benchmark/Release Gate実装完了、最終cleanup（Chore #106）実施中）
+- Epic: [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27) [Epic] TrOCR学習・評価・Benchmark・Release Gate統合（Epic #1の後続。Training/Evaluation/Benchmark/Release Gate・最終cleanup（Chore #106）すべて実装完了、Closed 2026-08-18）
 - Investigation: [#2](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/2) [Investigation] TrOCR採用可否とOCR Crafter統合方式の調査（Parent Epic: #1）
 - Feature: [#4](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/4) [Feature] Engine Capability実装（Parent Epic: #1、実装済み）
 - Feature: [#9](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/9) [Feature] Engine Registry実装（Parent Epic: #1、MVP実装済み・Closed）

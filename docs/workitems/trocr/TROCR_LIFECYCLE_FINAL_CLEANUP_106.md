@@ -2,7 +2,7 @@
 
 Related: Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)（TrOCR学習・評価・Benchmark・Release Gate統合） / Chore [#106](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/106)
 
-**状態**: Implemented, PR review pending。
+**状態**: Completed・Closed。PR [#107](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/107)をSquash Merge・mainへ反映済み、Merge Commit: `ddbcf91`。Issue #106はPR本文の`Closes #106`によりマージ時に自動Close。
 
 ## 目的
 
