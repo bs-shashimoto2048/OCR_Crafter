@@ -130,7 +130,7 @@ def test_get_dataset_detail_full_fields(temp_projects):
     assert [m["name"] for m in detail["models"]] == ["m1.tess.json"]
 
 
-def test_get_dataset_detail_includes_linked_experiments(temp_projects):
+def test_get_dataset_detail_includes_linked_experiments(temp_projects, isolated_test_db):
     """Experiment Manager強化: Dataset詳細へ「使用Experiment」一覧（experiments）が含まれる。"""
     from src.app.services.tesseract_pipeline import register_tesseract_model
 
@@ -229,7 +229,7 @@ def test_model_deletion_does_not_touch_dataset(temp_projects):
     assert check_dataset_delete_impact("p1", dataset_id)["model_count"] == 0
 
 
-def test_register_tesseract_model_records_dataset_lineage(temp_projects):
+def test_register_tesseract_model_records_dataset_lineage(temp_projects, isolated_test_db):
     folder = _write_dataset(
         "p1", "ds_a", "2026-07-01T00:00:00", meta_overrides={"display_name": "OCRDataset_v1"}
     )
@@ -288,7 +288,7 @@ def test_register_ocr_model_records_dataset_lineage(temp_projects, isolated_test
     assert info["dataset_id"] == payload["dataset_id"]
 
 
-def test_register_tesseract_model_backward_compatible_without_dataset_meta(temp_projects):
+def test_register_tesseract_model_backward_compatible_without_dataset_meta(temp_projects, isolated_test_db):
     """Datasetのmeta.jsonが無い（旧データ・実験用パス）場合もエラーにせずフォルダ名/空値で記録する。"""
     paths = ensure_project_directories("p1")
     dataset_root = paths.outputs / "ocr_dataset" / "no_meta_dataset"

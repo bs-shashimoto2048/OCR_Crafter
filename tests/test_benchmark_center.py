@@ -65,7 +65,7 @@ def _register_model_with_dataset(project_id, lang, dataset_folder):
     )
 
 
-def test_list_comparable_models_cross_references_experiment_and_evaluation(temp_projects):
+def test_list_comparable_models_cross_references_experiment_and_evaluation(temp_projects, isolated_test_db):
     project_id = "p1"
     folder = _write_dataset(project_id, "ds_a", "2026-07-01T00:00:00")
     _register_model_with_dataset(project_id, "ocr_v1", folder)
@@ -83,7 +83,7 @@ def test_list_comparable_models_cross_references_experiment_and_evaluation(temp_
     assert row["evaluation"]["accuracy_percent"] == 90.0
 
 
-def test_list_comparable_models_without_evaluation_has_none(temp_projects):
+def test_list_comparable_models_without_evaluation_has_none(temp_projects, isolated_test_db):
     project_id = "p1"
     folder = _write_dataset(project_id, "ds_a", "2026-07-01T00:00:00")
     _register_model_with_dataset(project_id, "ocr_v1", folder)
@@ -91,7 +91,7 @@ def test_list_comparable_models_without_evaluation_has_none(temp_projects):
     assert rows[0]["evaluation"] is None
 
 
-def test_list_comparable_models_filters_by_dataset_engine_query(temp_projects):
+def test_list_comparable_models_filters_by_dataset_engine_query(temp_projects, isolated_test_db):
     project_id = "p1"
     folder_a = _write_dataset(project_id, "ds_a", "2026-07-01T00:00:00")
     folder_b = _write_dataset(project_id, "ds_b", "2026-07-02T00:00:00")
@@ -113,7 +113,7 @@ def test_list_comparable_models_filters_by_dataset_engine_query(temp_projects):
     assert len(by_query) == 1 and by_query[0]["model_name"] == "ocr_v1.tess.json"
 
 
-def test_check_missing_evaluations(temp_projects):
+def test_check_missing_evaluations(temp_projects, isolated_test_db):
     project_id = "p1"
     folder = _write_dataset(project_id, "ds_a", "2026-07-01T00:00:00")
     _register_model_with_dataset(project_id, "ocr_v1", folder)
@@ -167,7 +167,7 @@ def test_participation_counts_for_model_dataset_experiment(temp_projects):
     assert build_experiment_participation_counts("p1") == {"EXP-0001": 2}
 
 
-def test_api_benchmark_center_models_endpoint(temp_projects):
+def test_api_benchmark_center_models_endpoint(temp_projects, isolated_test_db):
     project_id = "p1"
     folder = _write_dataset(project_id, "ds_a", "2026-07-01T00:00:00")
     _register_model_with_dataset(project_id, "ocr_v1", folder)
@@ -176,7 +176,7 @@ def test_api_benchmark_center_models_endpoint(temp_projects):
     assert resp.json()["items"][0]["model_name"] == "ocr_v1.tess.json"
 
 
-def test_api_benchmark_center_missing_evaluations_endpoint(temp_projects):
+def test_api_benchmark_center_missing_evaluations_endpoint(temp_projects, isolated_test_db):
     project_id = "p1"
     folder = _write_dataset(project_id, "ds_a", "2026-07-01T00:00:00")
     _register_model_with_dataset(project_id, "ocr_v1", folder)

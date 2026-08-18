@@ -28,7 +28,7 @@ def _register(temp_projects, lang: str, extra_meta=None, duration=None):
     )
 
 
-def test_register_saves_experiment_meta(temp_projects):
+def test_register_saves_experiment_meta(temp_projects, isolated_test_db):
     meta_path = _register(
         temp_projects,
         "expmodel",
@@ -49,7 +49,7 @@ def test_register_saves_experiment_meta(temp_projects):
     assert payload["max_iterations"] == 1000
 
 
-def test_register_without_experiment_meta_is_backward_compatible(temp_projects):
+def test_register_without_experiment_meta_is_backward_compatible(temp_projects, isolated_test_db):
     meta_path = _register(temp_projects, "plainmodel", extra_meta=None, duration=None)
     payload = json.loads(meta_path.read_text(encoding="utf-8"))
     assert payload["experiment_name"] == ""
@@ -58,7 +58,7 @@ def test_register_without_experiment_meta_is_backward_compatible(temp_projects):
     assert payload["training_duration_seconds"] is None
 
 
-def test_models_info_returns_experiment_fields(temp_projects):
+def test_models_info_returns_experiment_fields(temp_projects, isolated_test_db):
     _register(
         temp_projects,
         "expmodel",

@@ -321,7 +321,7 @@ def _register_model(temp_projects, project_id: str, dataset_root: str) -> None:
     )
 
 
-def test_model_meta_inherits_training_preprocess(temp_projects):
+def test_model_meta_inherits_training_preprocess(temp_projects, isolated_test_db):
     project_id = _make_labeled_processed_project(temp_projects, project_id="p_model")
     paths = ensure_project_directories(project_id)
     snapshot = save_preprocess_snapshot(paths.root, build_preprocess_config(None))
