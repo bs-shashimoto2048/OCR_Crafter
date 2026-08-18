@@ -12,6 +12,8 @@ Related: [ADR-0001](../adr/ADR-0001_Trocr_Architecture.md)（Status: Accepted）
 
 **追記（2026-07-30、Feature [#23](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/23)）**: Frontend（`InferenceView.jsx`、推論テスト画面）からもTrOCRを選択して`POST /predict`を呼び出せるようになった。詳細は[FEATURE_TROCR_FRONTEND_UI.md](../workitems/trocr/FEATURE_TROCR_FRONTEND_UI.md)を参照。モデル参照はUI側の自由入力欄からそのまま`model`フィールドへ渡るのみで、Model Metadata・Engine Registry APIとは引き続き未接続。`trocr_engine.py`・Backend API自体は無変更。
 
+**追記（2026-08-18、Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)完了）**: 上記各追記時点で「引き続き未実装」としていた学習・評価・Benchmark・Release Gateは、Epic #27（Feature #90-#104）で全て実装済みとなった。`trocr_engine.py`自体（本ファイルが扱う単画像推論コア）は今回も無変更のまま、Training Backend Core（Issue #92）・Evaluation Predictor（Issue #77）・Benchmark Runner（Issue #102）・Release Gate（Issue #104）のいずれもがこのコアをそのまま再利用している。Model Metadataとの接続のみ、引き続き[Epic #28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)（Unified Model Metadata Infrastructure）の責務として未接続のまま。詳細は[docs/workitems/trocr/EPIC_27_TROCR_LIFECYCLE.md](../workitems/trocr/EPIC_27_TROCR_LIFECYCLE.md)参照。
+
 **追記（2026-07-30、Feature [#25](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/25)）**: Frontendの手動入力に加え、既存モデル一覧（`GET /models/info`）からengine正規化が`trocr`のものだけを抽出し、登録済みモデルとして選択できるようになった（詳細は[FEATURE_TROCR_MODEL_METADATA_UI.md](../workitems/trocr/FEATURE_TROCR_MODEL_METADATA_UI.md)）。ただし`ModelMetadata`（本ファイル前段で言及した将来接続点）自体は依然として既存コードへ未配線であり、TrOCR用のモデル一覧ファイル形式も存在しないため、実環境では登録済みモデルは基本的に0件のままである。Backend・`trocr_engine.py`は無変更。
 
 ## 推論コアの責務

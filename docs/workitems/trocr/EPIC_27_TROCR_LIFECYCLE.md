@@ -28,7 +28,7 @@ Engine Registry → resolve_engine_id() → OCR Pipeline → {PaddleOCR, EasyOCR
 
 ## Progress
 
-🔧 Training（`services/trocr_pipeline.py`学習Backend。Hugging Face Transformers経由、`VisionEncoderDecoderModel`+`Seq2SeqTrainer`。公式`unilm/trocr`（fairseq）は不採用。詳細は[ARCHITECTURE_DRAFT.md](ARCHITECTURE_DRAFT.md)・[ADR-0001](../../adr/ADR-0001_Trocr_Architecture.md)参照）。実装前調査（Investigation [#88](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/88)、**Completed**・Closed）で既存Training Call Graph・Dataset/Artifact/Model Metadata/Experiment lineage契約・Training UI前提を確定し、実装Issue 5件（Dataset Adapter → Training Backend Core → Job Integration → Artifact Registration → Training UI）への分割案を策定した（詳細は[TROCR_TRAINING_INVESTIGATION_88.md](TROCR_TRAINING_INVESTIGATION_88.md)参照）。
+✅ Training（`services/trocr_training_core.py`学習Backend。Hugging Face Transformers経由、`VisionEncoderDecoderModel`+独自最小training loop。`Seq2SeqTrainer`は`accelerate>=1.1.0`のハード依存が判明したため不採用。詳細は[ARCHITECTURE_DRAFT.md](ARCHITECTURE_DRAFT.md)・[ADR-0001](../../adr/ADR-0001_Trocr_Architecture.md)参照）。実装前調査（Investigation [#88](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/88)、**Completed**・Closed）で既存Training Call Graph・Dataset/Artifact/Model Metadata/Experiment lineage契約・Training UI前提を確定し、実装Issue 5件（Dataset Adapter → Training Backend Core → Job Integration → Artifact Registration → Training UI）への分割案を策定した（詳細は[TROCR_TRAINING_INVESTIGATION_88.md](TROCR_TRAINING_INVESTIGATION_88.md)参照）。
 
 ```text
 Training
@@ -97,7 +97,7 @@ TrOCR Benchmark Runner Integration実装（Feature [#102](https://github.com/bs-
 
 TrOCR Release Gate Integration実装（Feature [#104](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/104)、**Completed**・Closed。PR [#105](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/105)をSquash Merge・mainへ反映済み、Merge Commit: `363ba21`）。TrOCRモデルを既存Release Gate lifecycle（Draft/Validated/Candidate/Production/Archived）の正式な対象へ統合した。実装前調査（Mandatory Investigation）で3つの必須Backend修正を特定: `release_manager.py::list_releases()`が`.trocr.json`をglobしていなかった（TrOCRモデルが一覧に出ない）、`release_gate.py::_model_engine()`が`.trocr.json`を認識しない（`allowed_engines`ポリシーで常にFAIL）、`_latest_benchmark_result()`がTesseract専用のハードコードでTrOCRのBenchmark結果（Issue #102、`model`=model_ref）と接続できない。いずれも`list_trocr_models()`（Issue #96）等の既存契約を再利用する最小修正で解決し、新しいRelease Gate architectureは作らなかった。**重要な発見**: `App.jsx::runOcrEvaluation()`のattach-evaluationペイロードで`engine`が全エンジンで`"tesseract"`固定になっており、Evaluation Hashが実際のengineを反映しない既存バグ（PaddleOCR/EasyOCR評価にも影響）を発見・修正した。Frontend（`ReleasesView.jsx`）はエンジン固有のファイル名判定を一切持たないことを実コード調査で確認し、UI変更は行わずテストで契約を固定した（Model Card/Deployment Package生成がTesseract専用項目を前提としている既存の制約はFuture Workとして記録）。詳細は[TROCR_RELEASE_GATE_INTEGRATION_104.md](TROCR_RELEASE_GATE_INTEGRATION_104.md)参照。
 
-⬜ Documentation（ユーザーマニュアル・チュートリアル。学習成果物ができてから実用的な内容を書く）
+TrOCR Lifecycle Final Cleanup & Documentation実施（Chore [#106](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/106)、**Implemented, PR review pending**）。Epic #27の主要機能（Training/Evaluation/Benchmark/Release Gate）が全て実装完了したことを受け、最終cleanup/documentationを行った。**重要な発見**: GitHub Epic #27本文が実装実態から大きく乖離していた（Progress・子Issue一覧がDesign #61時点の状態のまま停止しており、#63以降の完了Issue・全Training/Benchmark/Release Gate Issueが未反映）。また`docs/USER_GUIDE.md`/`docs/QUICK_START.md`/`docs/FAQ.md`/`docs/00_PROJECT_OVERVIEW.md`にTrOCRの記載が一切無い（推論エンジン一覧からも欠落）ことを確認した——Epic #1（TrOCR推論統合）完了時点から一度もユーザー向けドキュメントが更新されていなかった。GitHub Epic #27本文を実装実態に同期し、ユーザー向けドキュメント一式へTrOCRの操作手順・既知の制約（モデル管理画面に表示されない・Model Card/Deployment PackageがTesseract専用項目前提・confidence非対応）を追記した。Epic #27の完了条件9項目を全項目検証し、全て充足していることを確認した。cleanup中に新規のProduction bugは発見しなかった（既存の未反映ドキュメントのみ）。詳細は[TROCR_LIFECYCLE_FINAL_CLEANUP_106.md](TROCR_LIFECYCLE_FINAL_CLEANUP_106.md)参照。
 
 **Model Metadata本格連携（ModelMetadataの生成・保存・Models/Inference/Evaluation連携・旧モデル管理方式からの移行）は、本Epicのスコープ外。[Epic #28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)（Unified Model Metadata Infrastructure）の責務。** 本Epicで学習成果物の保存方式を決める際は、Epic #28の決定を前提とする（詳細は[Epic #1](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/1)・[ISSUE_MAP.md](ISSUE_MAP.md)の「Future Work」参照）。
 
@@ -121,21 +121,35 @@ TrOCR Release Gate Integration実装（Feature [#104](https://github.com/bs-shas
 - 既存OCRエンジン（Tesseract/PaddleOCR/EasyOCR）の学習・評価・Benchmark・Release Gateロジックの全面再設計
 - `ModelMetadata`の既存コードへの本格配線（生成・保存・Models/Inference/Evaluation連携・旧モデル管理方式からの移行。[Epic #28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)の責務）
 
-## 完了条件
+## 完了条件（Chore #106で全項目検証済み、2026-08-18）
 
-- TrOCR学習が実行できる
-- TrOCRモデルを保存・識別できる（保存方式は[Epic #28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)の`ModelMetadata`実運用化方針、または既存`.ocr.json`/`.tess.json`パターン踏襲のいずれかに従う）
-- TrOCRモデル評価が実行できる
-- Datasetとの系譜を追跡できる
-- Experimentとの系譜を追跡できる
-- Benchmark関連画面と整合する
-- Release Gateの対象に含まれる
-- 既存OCRエンジンへ回帰がない
-- ユーザー向けドキュメントが整備されている
+- [x] **TrOCR学習が実行できる** — Training UI（Issue #98）から`POST /api/trocr/train/start`を呼び出し、Job管理画面で進捗監視・完了確認できる（Dataset Adapter #90 → Training Backend Core #92 → Job Integration #94）
+- [x] **TrOCRモデルを保存・識別できる**（保存方式は既存`.ocr.json`/`.tess.json`パターン踏襲を選択。Epic #28の`ModelMetadata`実運用化を待たない判断を#96で確定） — `.trocr.json`sidecar・`list_trocr_models()`・`GET /api/trocr/models`（Issue #96/#98）
+- [x] **TrOCRモデル評価が実行できる** — `TrOCREvaluationPredictor`（Issue #77）・Multi-engine Evaluation API Integration（Issue #79）・Evaluation UI（Epic #46 Feature #83/#85）
+- [x] **Datasetとの系譜を追跡できる** — `register_trocr_model()`が`resolve_dataset_id_safe()`経由で`dataset_id`を記録（Issue #96）
+- [x] **Experimentとの系譜を追跡できる** — `register_trocr_model()`が`record_experiment()`を呼び、実験カルテへ`models`/`training`情報を記録（Issue #96）
+- [x] **Benchmark関連画面と整合する** — Benchmark Runner（Investigation #100 → Feature #102）。Benchmark Centerは実コード調査の結果、変更不要と確認済み（Investigation #100）
+- [x] **Release Gateの対象に含まれる** — Feature #104（`list_releases()`のglob追加・`_model_engine()`のtrocr識別・Benchmark evidence接続）
+- [x] **既存OCRエンジンへ回帰がない** — 各Feature Issue（#90-#104）で個別にfull suite確認済み。既知Issue #8以外の新規failureは一度も発生していない
+- [x] **ユーザー向けドキュメントが整備されている** — Chore #106で`docs/USER_GUIDE.md`・`docs/QUICK_START.md`・`docs/FAQ.md`・`docs/GLOSSARY.md`・`docs/00_PROJECT_OVERVIEW.md`・`docs/16_SCREEN_SPEC.md`・`docs/19_BENCHMARK_SPEC.md`・`docs/20_RELEASE_POLICY.md`を更新（詳細は[TROCR_LIFECYCLE_FINAL_CLEANUP_106.md](TROCR_LIFECYCLE_FINAL_CLEANUP_106.md)参照）
+
+**全9項目を満たしたため、Epic #27はChore #106の完了をもってCompleted・Closeとする。**
 
 ## 子Issue
 
-未作成。[ISSUE_MAP.md](ISSUE_MAP.md)のPhase4（Training/Evaluation）・Phase6（Benchmark）を参照し、順次作成する。
+全て実装完了・Closed。
+
+**Evaluation**: Design [#61](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/61) → Feature [#63](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/63)/[#65](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/65)/[#67](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/67)/[#69](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/69)/[#71](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/71)/[#73](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/73)/[#75](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/75)/[#77](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/77)/[#79](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/79)（UI側はEpic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46) Feature [#83](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/83)/[#85](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/85)）
+
+**Training**: Investigation [#88](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/88) → Feature [#90](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/90)/[#92](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/92)/[#94](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/94)/[#96](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/96)/[#98](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/98)
+
+**Benchmark**: Investigation [#100](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/100) → Feature [#102](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/102)
+
+**Release Gate**: Feature [#104](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/104)
+
+**最終cleanup/documentation**: Chore [#106](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/106)（本Issue）
+
+詳細は[ISSUE_MAP.md](ISSUE_MAP.md)参照。
 
 ## 前提Epic
 
