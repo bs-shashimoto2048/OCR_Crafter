@@ -194,3 +194,33 @@ test("結果表示: Multi-engine経路（preprocess_source無し・preprocess_mo
   const html = renderToString(React.createElement(OcrEvaluationView, baseProps({ engine: "paddleocr", result })));
   assert.ok(!html.includes("未記録（旧形式の結果）"));
 });
+
+// Evaluation → Benchmark Handoff（Issue #119）
+
+const SAMPLE_RESULT = {
+  targets: [{ label: "tesseract", engine: "tesseract", model: "m.tess.json", is_base: false, total: 1, correct: 1 }],
+  rows: [],
+  count: 1,
+  gt_count: 1,
+  skipped_missing_image: 0,
+  comparison: null,
+};
+
+test("Benchmarkへボタン: 結果が無い間は無効", () => {
+  const html = renderToString(React.createElement(OcrEvaluationView, baseProps({ engine: "tesseract", result: null })));
+  const buttonMatch = html.match(/<button[^>]*>Benchmarkへ<\/button>/);
+  assert.ok(buttonMatch, "Benchmarkへボタンが見つからない");
+  assert.ok(buttonMatch[0].includes("disabled"));
+});
+
+test("Benchmarkへボタン: Tesseract/PaddleOCR/TrOCRは結果があれば表示・有効", () => {
+  for (const engine of ["tesseract", "paddleocr", "trocr"]) {
+    const html = renderToString(React.createElement(OcrEvaluationView, baseProps({ engine, result: SAMPLE_RESULT })));
+    assert.ok(html.includes("Benchmarkへ"), `engine=${engine}`);
+  }
+});
+
+test("Benchmarkへボタン: EasyOCRはBenchmark実行経路が無いため表示しない", () => {
+  const html = renderToString(React.createElement(OcrEvaluationView, baseProps({ engine: "easyocr", result: SAMPLE_RESULT })));
+  assert.ok(!html.includes("Benchmarkへ"));
+});

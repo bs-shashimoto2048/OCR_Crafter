@@ -358,7 +358,7 @@ OCRデータセット作成と学習ジョブの実行・監視（PaddleOCR / Te
 - 未開始: 「OCR学習を開始」（押下直後にロック）
 - 学習準備中/学習中: スピナー付き無効ボタン（開始APIを再送できない。バックエンドも409で二重起動拒否）
 - 停止処理中: 全実行操作を無効化
-- 完了: 「学習が完了しました」＋[学習結果を確認][推論で試す][同じ設定で再学習（確認ダイアログ）]
+- 完了: 「学習が完了しました」＋[学習結果を確認][推論で試す][同じ設定で再学習（確認ダイアログ）]。OCR学習（Tesseract/PaddleOCR/TrOCR）完了時のみ追加で[評価へ（このモデルを引き継ぐ）]を表示（Issue #119、Training → Evaluation Handoff）。学習で登録されたモデルのEngine・識別子（job_id一致で解決）をモデル評価画面へ引き継ぎ、解決できない場合はEngineのみ引き継いで評価画面でのモデル選択を促す
 - 失敗: 原因概要＋[再実行] / 停止済み: [学習を再実行]
 - 「データを再作成」は実行中無効（Tooltip: 学習実行中はデータを再作成できません。）
 
@@ -767,7 +767,7 @@ Dataset Manager・実験管理・モデル管理（いずれも「Benchmark参�
 - CSV出力はCER・文字正解率・編集距離・置換/脱落/挿入件数・学習前比（improved/unchanged/regressed）・混同集計に加え、**前処理識別情報**（evaluation_preprocess_mode / evaluation_preprocess_hash / training_preprocess_hash / preprocess_match=1一致・0不一致・空未記録）と evaluation_preprocess_json セクション（再現用スナップショット。明細行へは繰り返さない）を含む
 
 **主操作**
-- 評価実行（`POST /api/ocr/evaluate`。データセット選択時はそのimage_dir/gt_csvを使用し、結果にデータセット情報を紐付け）/ CSVエクスポート
+- 評価実行（`POST /api/ocr/evaluate`。データセット選択時はそのimage_dir/gt_csvを使用し、結果にデータセット情報を紐付け）/ CSVエクスポート / [Benchmarkへ]（評価結果がある場合のみ有効。Issue #119、Evaluation → Benchmark Handoff。Engine・モデル・評価Datasetを引き継いでBenchmark画面へ遷移する。EasyOCR選択時はBenchmark Runnerに実行経路が無いため表示しない）
 - データセットの名前変更（`POST /api/evaluation/datasets/{id}/rename`）/ 削除（`DELETE /api/evaluation/datasets/{id}`。確認ダイアログに名前と枚数を表示し、CSV・metadata・画像・editing_stateを一括削除）
 
 **ショートカット**

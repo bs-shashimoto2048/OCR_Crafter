@@ -83,6 +83,7 @@ export default function OcrEvaluationView({
   onChangePreprocessCustom,
   step5Preprocess = DEFAULT_EVAL_PREPROCESS,
   modelInfos = {},
+  onSendToBenchmark,
 }) {
   const targets = Array.isArray(result?.targets) ? result.targets : [];
   const rows = Array.isArray(result?.rows) ? result.rows : [];
@@ -885,9 +886,19 @@ sample_003.png,CHYBkt`}</pre>
           subtitle="認識率・改善率・誤認識一覧"
           className="xl:flex xl:min-h-0 xl:flex-col xl:overflow-hidden"
           actions={
-            <Button size="sm" variant="secondary" onClick={onExportCsv} disabled={!result}>
-              CSV出力
-            </Button>
+            <div className="flex gap-2">
+              <Button size="sm" variant="secondary" onClick={onExportCsv} disabled={!result}>
+                CSV出力
+              </Button>
+              {/* Evaluation → Benchmark Handoff（Issue #119）。EasyOCRはBenchmark Runnerに
+                  実行経路が無い（services/benchmark.py::ENGINE_CATALOG、implemented=False）
+                  ため、ボタン自体を表示しない（無効な選択肢を見せない） */}
+              {engine !== "easyocr" ? (
+                <Button size="sm" variant="secondary" onClick={onSendToBenchmark} disabled={!result}>
+                  Benchmarkへ
+                </Button>
+              ) : null}
+            </div>
           }
         >
           {!result ? (

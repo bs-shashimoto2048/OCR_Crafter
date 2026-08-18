@@ -209,6 +209,8 @@ def list_model_infos(project_id: Optional[str] = None) -> list[dict]:
                     "model_type": "ocr",
                     "training_family": "tesseract",
                     "engine": "tesseract",
+                    # Training→Evaluation handoff（Issue #119）向けの追加のみ。既存キーの変更・削除は無い
+                    "job_id": str(payload.get("job_id") or ""),
                     "created_at": str(payload.get("created_at") or ""),
                     "modified_at": datetime.fromtimestamp(st.st_mtime).isoformat(),
                     "charset": str(payload.get("charset") or ""),
@@ -322,6 +324,8 @@ def list_model_infos(project_id: Optional[str] = None) -> list[dict]:
                     "training_family": str(payload.get("training_family") or "ocr"),
                     # 未指定・未登録の値をpaddleocrへ暗黙フォールバックしない（Engine Registry経由の明示的な判定）
                     "engine": resolve_engine_id(payload.get("engine"), registry=engine_registry) or "unknown",
+                    # Training→Evaluation handoff（Issue #119）向けの追加のみ。既存キーの変更・削除は無い
+                    "job_id": job_id,
                     "created_at": str(payload.get("created_at") or ""),
                     "modified_at": datetime.fromtimestamp(st.st_mtime).isoformat(),
                     "dataset_split_ratio": dataset_ratio,
