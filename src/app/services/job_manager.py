@@ -4,9 +4,10 @@
 統一のJobとして管理する。既存の同期APIは維持し、新しいJob API経由でも
 同じ処理を呼び出せる構造（ハンドラが既存サービスを呼ぶ）。
 
-レイヤ構成（将来Redis/Celery/RQ・SQLiteへ交換できるよう分離）:
-- JobRepository: 永続化（現在は data/jobs/jobs.json。インターフェースを固定し
-  SQLite等へ差し替え可能）
+レイヤ構成（将来Redis/Celery/RQへ交換できるよう分離）:
+- JobRepository: 永続化（SQLite、data/jobs/job_manager.db。Issue #127で
+  data/jobs/jobs.json（JSON）から移行済み。旧実装は`_LegacyJsonJobRepository`として
+  移行importのみに残す。インターフェースは維持しているため他レイヤは無変更）
 - JobService: 採番・状態遷移検証・同時実行制御・キャンセル・再実行
 - JobWorker: 単一プロセス・単一Workerのキュー消化スレッド
 - JobHandler: 種別ごとの実処理（既存サービスを呼ぶ。progress/cancelコールバック付き）
@@ -27,6 +28,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import threading
 import traceback
 from datetime import datetime
@@ -65,8 +67,12 @@ def _jobs_root() -> Path:
     return root
 
 
-class JobRepository:
-    """Jobの永続化層（JSONファイル）。将来SQLiteへ差し替える場合はこのクラスのみ置換する。
+class _LegacyJsonJobRepository:
+    """旧・Jobの永続化層（JSONファイル、data/jobs/jobs.json）。
+
+    Issue #127でSQLite版`JobRepository`へ移行済み。本クラスは
+    `migrate_legacy_jobs_json()`が既存jobs.jsonを読み取ってSQLiteへimportする際に
+    のみ使用する（読み取り専用の役割。本番コードから新規に書き込むことはない）。
 
     read-modify-write は threading.RLock（プロセス内）＋ file_lock（プロセス間）で排他し、
     保存は原子的リネーム（atomic_write_json）で行う（クラッシュ時の破損・二重採番防止）。
@@ -172,6 +178,405 @@ class JobRepository:
         logs_dir.mkdir(parents=True, exist_ok=True)
         with (logs_dir / f"{job_id}.log").open("a", encoding="utf-8") as f:
             f.write(f"[{datetime.now().isoformat()}]\n{text}\n")
+
+
+# Job本体のSQLiteカラム順（job_idを除く列はupdate()のSET句順とも一致させる）
+_JOB_COLUMNS = (
+    "job_id",
+    "project_id",
+    "job_type",
+    "status",
+    "requested_by",
+    "created_at",
+    "started_at",
+    "finished_at",
+    "progress",
+    "current_step",
+    "message",
+    "params",
+    "result_summary",
+    "error_summary",
+    "related_experiment_id",
+    "related_model_id",
+    "related_benchmark_id",
+    "retry_source_job_id",
+    "cancellation_requested_at",
+)
+
+_JOB_MANAGER_DB_FILENAME = "job_manager.db"
+_LEGACY_JOBS_JSON_FILENAME = "jobs.json"
+
+
+class JobRepository:
+    """Jobの永続化層（SQLite: data/jobs/job_manager.db、Issue #127）。
+
+    Architecture Investigation #123で指摘された「training_jobsテーブルとの誤統合
+    リスク」を避けるため、Training Job（Job System A、outputs/app.db）とは別の
+    SQLiteファイルへ分離する（Option B、専用DB。既存docs/26_PERFORMANCE_LIMITS.mdの
+    「同じoutputs/app.dbへ」という当初案から、テスト隔離の観点（`temp_projects`
+    フィクスチャがPROJECTS_DIR経由でdata/jobs/ごと隔離できる）で変更した。
+    詳細はdocs/workitems/jobs/JOB_REPOSITORY_SQLITE_MIGRATION_127.md参照）。
+
+    read-modify-write（next_id/insert/update/set_config）は既存同様
+    threading.RLock（プロセス内）＋file_lock（プロセス間、DBファイルへのサイドカー
+    .lockファイル）で排他する。event/内部ログは移行対象外（既存docs/26の移行計画
+    通りJSONLファイルのまま）。読み取り（get/list/get_config）は無ロックのまま
+    （旧実装と同じ設計）だが、Worker daemon threadの書き込みと衝突しないよう
+    WALモードを有効にする（本Issueで導入する唯一のDB tuning）。
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+
+    def _path(self) -> Path:
+        """DBファイルパス。file_lock()の対象として既存のJobService.create_jobが
+        そのまま再利用する（`with self.repository._lock, file_lock(self.repository._path())`）。
+
+        `_jobs_root()`はPROJECTS_DIR（テストでは`temp_projects`が都度差し替える）に
+        追随するため、本Repositoryがアプリ全体で1個のシングルトン（`get_job_service()`）
+        として使い回されても、呼び出しごとに正しい現在のパスを返す。
+        """
+        return _jobs_root() / _JOB_MANAGER_DB_FILENAME
+
+    def _connect(self) -> sqlite3.Connection:
+        # シングルトンのRepositoryインスタンスがテスト間で使い回され、その都度
+        # PROJECTS_DIR（延いてはDBファイルパス）が差し替わり得るため、__init__時の
+        # 一度きりのschema作成ではなく毎回_ensure_schema()を通す（CREATE TABLE/INDEX
+        # IF NOT EXISTSは十分安価な冪等操作のため、必要以上のオーバーヘッドにはならない）。
+        path = self._path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(path)
+        conn.execute("PRAGMA journal_mode=WAL")
+        self._ensure_schema(conn)
+        return conn
+
+    @staticmethod
+    def _ensure_schema(conn: sqlite3.Connection) -> None:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS job_manager_jobs (
+                job_id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL DEFAULT 'default',
+                job_type TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'queued',
+                requested_by TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT '',
+                started_at TEXT NOT NULL DEFAULT '',
+                finished_at TEXT NOT NULL DEFAULT '',
+                progress INTEGER NOT NULL DEFAULT 0,
+                current_step TEXT NOT NULL DEFAULT '',
+                message TEXT NOT NULL DEFAULT '',
+                params TEXT NOT NULL DEFAULT '{}',
+                result_summary TEXT,
+                error_summary TEXT NOT NULL DEFAULT '',
+                related_experiment_id TEXT NOT NULL DEFAULT '',
+                related_model_id TEXT NOT NULL DEFAULT '',
+                related_benchmark_id TEXT NOT NULL DEFAULT '',
+                retry_source_job_id TEXT NOT NULL DEFAULT '',
+                cancellation_requested_at TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_job_manager_jobs_status ON job_manager_jobs(status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_job_manager_jobs_job_type ON job_manager_jobs(job_type)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_job_manager_jobs_project_id ON job_manager_jobs(project_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_job_manager_jobs_created_at ON job_manager_jobs(created_at)")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS job_manager_counter (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                value INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        conn.execute("INSERT OR IGNORE INTO job_manager_counter (id, value) VALUES (1, 0)")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS job_manager_config (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
+
+    @staticmethod
+    def _job_to_row(job: dict[str, Any]) -> tuple:
+        def _text(key: str, default: str = "") -> str:
+            value = job.get(key)
+            return str(value) if value is not None else default
+
+        params = job.get("params")
+        result_summary = job.get("result_summary")
+        return (
+            str(job.get("job_id") or ""),
+            _text("project_id", "default"),
+            _text("job_type"),
+            _text("status", "queued"),
+            _text("requested_by"),
+            _text("created_at"),
+            _text("started_at"),
+            _text("finished_at"),
+            int(job.get("progress") or 0),
+            _text("current_step"),
+            _text("message"),
+            json.dumps(params if params is not None else {}, ensure_ascii=False),
+            json.dumps(result_summary, ensure_ascii=False) if result_summary is not None else None,
+            _text("error_summary"),
+            _text("related_experiment_id"),
+            _text("related_model_id"),
+            _text("related_benchmark_id"),
+            _text("retry_source_job_id"),
+            _text("cancellation_requested_at"),
+        )
+
+    @staticmethod
+    def _row_to_job(row: tuple) -> dict[str, Any]:
+        payload = dict(zip(_JOB_COLUMNS, row))
+        try:
+            payload["params"] = json.loads(payload["params"]) if payload["params"] else {}
+        except (TypeError, ValueError):
+            payload["params"] = {}
+        raw_result = payload.get("result_summary")
+        if raw_result:
+            try:
+                payload["result_summary"] = json.loads(raw_result)
+            except (TypeError, ValueError):
+                payload["result_summary"] = None
+        else:
+            payload["result_summary"] = None
+        payload["progress"] = int(payload.get("progress") or 0)
+        return payload
+
+    def next_id(self) -> str:
+        from .atomic_io import file_lock
+
+        with self._lock, file_lock(self._path()):
+            with self._connect() as conn:
+                conn.execute("UPDATE job_manager_counter SET value = value + 1 WHERE id = 1")
+                row = conn.execute("SELECT value FROM job_manager_counter WHERE id = 1").fetchone()
+                conn.commit()
+            return f"JOB-{int(row[0]):06d}"
+
+    def insert(self, job: dict[str, Any]) -> None:
+        from .atomic_io import file_lock
+
+        with self._lock, file_lock(self._path()):
+            with self._connect() as conn:
+                columns = ", ".join(_JOB_COLUMNS)
+                placeholders = ", ".join("?" for _ in _JOB_COLUMNS)
+                conn.execute(
+                    f"INSERT INTO job_manager_jobs ({columns}) VALUES ({placeholders})",
+                    self._job_to_row(job),
+                )
+                conn.commit()
+
+    def update(self, job_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+        from .atomic_io import file_lock
+
+        with self._lock, file_lock(self._path()):
+            with self._connect() as conn:
+                row = conn.execute(
+                    f"SELECT {', '.join(_JOB_COLUMNS)} FROM job_manager_jobs WHERE job_id = ?", (job_id,)
+                ).fetchone()
+                if row is None:
+                    raise FileNotFoundError(f"job not found: {job_id}")
+                merged = {**self._row_to_job(row), **patch}
+                row_values = self._job_to_row(merged)
+                set_clause = ", ".join(f"{column} = ?" for column in _JOB_COLUMNS if column != "job_id")
+                conn.execute(
+                    f"UPDATE job_manager_jobs SET {set_clause} WHERE job_id = ?",
+                    (*row_values[1:], job_id),
+                )
+                conn.commit()
+            return dict(merged)
+
+    def get(self, job_id: str) -> Optional[dict[str, Any]]:
+        with self._connect() as conn:
+            row = conn.execute(
+                f"SELECT {', '.join(_JOB_COLUMNS)} FROM job_manager_jobs WHERE job_id = ?", (job_id,)
+            ).fetchone()
+        return self._row_to_job(row) if row is not None else None
+
+    def list(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT {', '.join(_JOB_COLUMNS)} FROM job_manager_jobs ORDER BY rowid"
+            ).fetchall()
+        return [self._row_to_job(row) for row in rows]
+
+    def get_config(self, key: str, default: Any = None) -> Any:
+        with self._connect() as conn:
+            row = conn.execute("SELECT value FROM job_manager_config WHERE key = ?", (key,)).fetchone()
+        if row is None:
+            return default
+        try:
+            return json.loads(row[0])
+        except (TypeError, ValueError):
+            return default
+
+    def set_config(self, key: str, value: Any) -> None:
+        from .atomic_io import file_lock
+
+        with self._lock, file_lock(self._path()):
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO job_manager_config (key, value) VALUES (?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (key, json.dumps(value, ensure_ascii=False)),
+                )
+                conn.commit()
+
+    # イベント（進捗履歴）・内部ログ: 移行対象外（既存docs/26の移行計画通りJSONLファイルのまま）。
+    # _LegacyJsonJobRepositoryと完全に同じ実装（保存先data/jobs/events・logsは無変更）
+    def append_event(self, job_id: str, event: dict[str, Any]) -> None:
+        events_dir = _jobs_root() / "events"
+        events_dir.mkdir(parents=True, exist_ok=True)
+        with (events_dir / f"{job_id}.jsonl").open("a", encoding="utf-8") as f:
+            f.write(json.dumps({"ts": datetime.now().isoformat(), **event}, ensure_ascii=False) + "\n")
+
+    def read_events(self, job_id: str) -> list[dict[str, Any]]:
+        path = _jobs_root() / "events" / f"{job_id}.jsonl"
+        events: list[dict[str, Any]] = []
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                try:
+                    events.append(json.loads(line))
+                except ValueError:
+                    continue
+        except OSError:
+            pass
+        return events
+
+    def write_internal_log(self, job_id: str, text: str) -> None:
+        """スタックトレース等の内部ログ（ユーザー画面へは出さない）。"""
+        logs_dir = _jobs_root() / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        with (logs_dir / f"{job_id}.log").open("a", encoding="utf-8") as f:
+            f.write(f"[{datetime.now().isoformat()}]\n{text}\n")
+
+    # -- backup_manager.apply_retention()専用の一括読み書き（既存の private attribute
+    # reach-through互換、Issue #127）。retentionは低頻度の管理操作のため全件scan/rewriteのままでよい --
+    def _load(self) -> dict[str, Any]:
+        with self._connect() as conn:
+            counter_row = conn.execute("SELECT value FROM job_manager_counter WHERE id = 1").fetchone()
+            rows = conn.execute(
+                f"SELECT {', '.join(_JOB_COLUMNS)} FROM job_manager_jobs ORDER BY rowid"
+            ).fetchall()
+            config_rows = conn.execute("SELECT key, value FROM job_manager_config").fetchall()
+        items = [self._row_to_job(row) for row in rows]
+        config: dict[str, Any] = {}
+        for key, value in config_rows:
+            try:
+                config[key] = json.loads(value)
+            except (TypeError, ValueError):
+                continue
+        return {"counter": int(counter_row[0]) if counter_row else 0, "items": items, "config": config}
+
+    def _save(self, registry: dict[str, Any]) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM job_manager_jobs")
+            columns = ", ".join(_JOB_COLUMNS)
+            placeholders = ", ".join("?" for _ in _JOB_COLUMNS)
+            for item in registry.get("items", []):
+                conn.execute(
+                    f"INSERT INTO job_manager_jobs ({columns}) VALUES ({placeholders})",
+                    self._job_to_row(item),
+                )
+            conn.execute("UPDATE job_manager_counter SET value = ? WHERE id = 1", (int(registry.get("counter") or 0),))
+            conn.execute("DELETE FROM job_manager_config")
+            for key, value in (registry.get("config") or {}).items():
+                conn.execute(
+                    "INSERT INTO job_manager_config (key, value) VALUES (?, ?)",
+                    (key, json.dumps(value, ensure_ascii=False)),
+                )
+            conn.commit()
+
+
+def migrate_legacy_jobs_json(repository: Optional["JobRepository"] = None) -> dict[str, Any]:
+    """既存`data/jobs/jobs.json`（JSON時代のレジストリ）をSQLiteへ一度だけimportする（Issue #127）。
+
+    - ファイルが無ければ何もしない（新規インストール、またはSQLite移行後の2回目以降の起動）
+    - JSONとして読めない場合は取り込まず、`.malformed.<timestamp>`へリネームして保全する
+      （中身は復元できないが、サイレントにデータを消さずファイル自体は残す）
+    - 正常にparseできた場合、job_idが既にSQLite側に存在するitemはスキップする
+      （重複を上書きしない・複数回実行しても安全＝冪等）
+    - counterはSQLite側の現在値とlegacy側の大きい方を採用する（ID巻き戻り防止）
+    - 取り込み後（0件でも）、legacy fileは削除せず`.migrated.<timestamp>`へリネームする
+      （2回目以降の起動でjobs.jsonが既に存在しないため再処理されない＝リネーム自体が
+      移行済みマーカーを兼ねる）
+    - event JSONL・内部ログファイルは移行しない（既存docs/26の移行計画通りファイルのまま）
+
+    `JobWorker.start()`から呼ばれる想定（`recover_interrupted_jobs`と同じ配置）。
+    戻り値は統計情報（imported/skipped_duplicate/status）。
+    """
+    repo = repository or JobRepository()
+    legacy_path = _jobs_root() / _LEGACY_JOBS_JSON_FILENAME
+    if not legacy_path.exists():
+        return {"status": "no_legacy_file", "imported": 0, "skipped_duplicate": 0}
+
+    try:
+        raw = json.loads(legacy_path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raise ValueError("jobs.json root is not an object")
+        legacy_items = raw.get("items")
+        if not isinstance(legacy_items, list):
+            raise ValueError("jobs.json items is not a list")
+        legacy_counter = int(raw.get("counter") or 0)
+        legacy_config = raw.get("config") if isinstance(raw.get("config"), dict) else {}
+    except (OSError, ValueError, TypeError):
+        backup_path = legacy_path.with_name(f"{legacy_path.name}.malformed.{datetime.now():%Y%m%d%H%M%S}")
+        try:
+            legacy_path.rename(backup_path)
+        except OSError:
+            pass
+        return {
+            "status": "malformed_legacy_file_backed_up",
+            "imported": 0,
+            "skipped_duplicate": 0,
+            "backup_path": str(backup_path),
+        }
+
+    imported = 0
+    skipped = 0
+    for item in legacy_items:
+        if not isinstance(item, dict):
+            continue
+        job_id = str(item.get("job_id") or "").strip()
+        if not job_id:
+            continue
+        if repo.get(job_id) is not None:
+            skipped += 1
+            continue
+        repo.insert(item)
+        imported += 1
+
+    from .atomic_io import file_lock
+
+    with repo._lock, file_lock(repo._path()):  # noqa: SLF001
+        with repo._connect() as conn:  # noqa: SLF001
+            row = conn.execute("SELECT value FROM job_manager_counter WHERE id = 1").fetchone()
+            current = int(row[0]) if row else 0
+            if legacy_counter > current:
+                conn.execute("UPDATE job_manager_counter SET value = ? WHERE id = 1", (legacy_counter,))
+                conn.commit()
+
+    for key, value in legacy_config.items():
+        if repo.get_config(key, None) is None:
+            repo.set_config(key, value)
+
+    backup_path = legacy_path.with_name(f"{legacy_path.name}.migrated.{datetime.now():%Y%m%d%H%M%S}")
+    try:
+        legacy_path.rename(backup_path)
+    except OSError:
+        pass
+
+    return {
+        "status": "migrated",
+        "imported": imported,
+        "skipped_duplicate": skipped,
+        "legacy_backup_path": str(backup_path),
+    }
 
 
 # ---------- Job Handler（種別ごとの実処理。既存サービスを呼ぶ） ----------
@@ -584,7 +989,14 @@ class JobWorker:
     def start(self) -> None:
         if self.is_alive():
             return
-        # Worker起動前に、前回プロセスでrunningのまま残ったJobをinterruptedへ回収する
+        # Worker起動前に、旧JSON時代のjobs.jsonが残っていれば一度だけSQLiteへimportする
+        # （Issue #127。ファイルが無ければ即座に no-op。importと同時にlegacy fileを
+        # リネームするため2回目以降の起動では再処理されない＝冪等）
+        try:
+            migrate_legacy_jobs_json(self.service.repository)
+        except Exception:  # noqa: BLE001
+            pass
+        # 前回プロセスでrunningのまま残ったJobをinterruptedへ回収する
         # （実行実体のないJobを二重実行・永続running表示にしない）
         try:
             recover_interrupted_jobs(self.service)

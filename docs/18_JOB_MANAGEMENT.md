@@ -20,7 +20,7 @@
 
 - 形式: `JOB-000001`（6桁ゼロ埋め連番）
 - **システム全体（全プロジェクト横断）で一意**。プロジェクト毎に採番しない
-- 採番カウンタは `data/jobs/jobs.json` の `counter`。IDは再利用しない
+- 採番カウンタは `data/jobs/job_manager.db`（SQLite、`job_manager_counter`テーブル。Feature #127でSQLite移行済み。旧`jobs.json`の`counter`は初回起動時に一度だけimportされる）。IDは再利用しない
 
 ## 3. 状態遷移
 
@@ -47,13 +47,13 @@ Workerはプロセス内スレッドのため、Backend再起動でrunning中の
 
 ## 3b. 原子性・排他制御
 
-- `jobs.json` の保存は**原子的リネーム**（`atomic_io.atomic_write_json`: 一時ファイル→os.replace）。クラッシュ時にレジストリが破損しない
-- read-modify-write は プロセス内RLock＋**プロセス間ファイルロック**（`atomic_io.file_lock`、`jobs.json.lock`）で排他。Job作成は重複判定と登録を同一ロック内で行い、**連続クリック・同時要求でも新規Jobは1件だけ**作成される
+- Job本体（`job_manager_jobs`テーブル）の保存はSQLiteトランザクション（Feature #127でSQLite移行済み。以前は`atomic_io.atomic_write_json`による原子的リネームだった）
+- read-modify-write は プロセス内RLock＋**プロセス間ファイルロック**（`atomic_io.file_lock`、`job_manager.db.lock`）で排他。Job作成は重複判定と登録を同一ロック内で行い、**連続クリック・同時要求でも新規Jobは1件だけ**作成される
 - 成果物の原子性: 配布ZIP・バックアップZIP=一時ファイル→リネーム / processed画像=1枚ずつ原子的リネーム / データセット=meta.json（完了マーカー）を最後に原子的書き込み / モデル=.tess.jsonメタ（登録の正）を成功時のみ原子的書き込み
 
 ## 4. 保存項目
 
-`data/jobs/jobs.json` の各Jobに以下を保存する:
+`data/jobs/job_manager.db`（SQLite、`job_manager_jobs`テーブル）の各Jobに以下を保存する:
 
 `job_id` / `project_id` / `job_type` / `status` / `requested_by` / `created_at` / `started_at` / `finished_at` / `progress`(0-100) / `current_step` / `message` / `params`（入力条件） / `result_summary` / `error_summary` / `related_experiment_id` / `related_model_id` / `related_benchmark_id` / `retry_source_job_id` / `cancellation_requested_at`
 
@@ -63,10 +63,12 @@ Workerはプロセス内スレッドのため、Backend再起動でrunning中の
 
 | レイヤ | 現実装 | 将来の交換先 |
 |---|---|---|
-| `JobRepository` | JSONファイル（`data/jobs/jobs.json`） | SQLite等（このクラスのみ置換） |
+| `JobRepository` | SQLite（`data/jobs/job_manager.db`。Feature #127で`data/jobs/jobs.json`から移行済み。旧JSON実装は`_LegacyJsonJobRepository`として移行importにのみ残す） | （このクラスのみ置換すれば他レイヤ無変更で交換可能） |
 | `JobService` | 採番・遷移検証・同時実行制御・キャンセル・再実行 | （共通） |
 | `JobWorker` | 単一プロセス・単一スレッド（1秒ポーリング、FastAPIプロセス内daemon） | Redis/Celery/RQ等のキュー基盤 |
 | `JOB_HANDLERS` | 種別→関数の辞書。`(params, ctx)` を受け取り結果dictを返す | （共通の登録形式） |
+
+Training Job（`training_jobs`テーブル・`outputs/app.db`、Job System A）とは意図的に別のSQLiteファイル（`data/jobs/job_manager.db`）へ分離している（Architecture Investigation #123で指摘された誤統合リスクを避けるため。詳細は`docs/workitems/jobs/JOB_REPOSITORY_SQLITE_MIGRATION_127.md`参照）。
 
 `JobContext` はハンドラへ渡す進捗・キャンセル用コンテキスト:
 
@@ -80,7 +82,7 @@ Workerはプロセス内スレッドのため、Backend再起動でrunning中の
 | training | システム全体で同時1件 |
 | preprocess | 同一プロジェクトで同時1件（別プロジェクトは並行可） |
 | evaluation | 同一プロジェクト×同一モデルの評価Job重複を防止（対象モデル集合が交差する場合は重複扱い） |
-| benchmark | 設定可能な同時実行数（`jobs.json` の `config.benchmark_concurrency`、既定1）。スロットが埋まっている間は queued のまま待機 |
+| benchmark | 設定可能な同時実行数（`job_manager_config` テーブルの `benchmark_concurrency`、既定1）。スロットが埋まっている間は queued のまま待機 |
 
 **重複時の挙動は「既存のアクティブJobを `deduplicated: true` で返す」で統一**（409エラーは返さない）。呼び出し側は返ったJob IDをそのまま監視すればよい。
 
@@ -106,14 +108,19 @@ Workerはプロセス内スレッドのため、Backend再起動でrunning中の
 
 ```text
 data/jobs/
-  jobs.json                 counter / items[]（Job本体） / config（benchmark_concurrency等）
-  events/JOB-xxxxxx.jsonl   進捗イベント（追記型JSONL）
-  logs/JOB-xxxxxx.log       内部ログ（スタックトレース等。画面へ出さない）
+  job_manager.db            SQLite（job_manager_jobs / job_manager_counter / job_manager_config）
+  jobs.json.migrated.*      旧JSON実装からの移行後、削除せずリネーム保管（Feature #127）
+  events/JOB-xxxxxx.jsonl   進捗イベント（追記型JSONL。移行対象外・無変更）
+  logs/JOB-xxxxxx.log       内部ログ（スタックトレース等。画面へ出さない。移行対象外・無変更）
 ```
 
-`data/jobs/` は `PROJECTS_DIR` の親（= `data/`）配下。テストでは `temp_projects` フィクスチャの `PROJECTS_DIR` 差し替えにより自動的に一時領域へ隔離される。
+`data/jobs/` は `PROJECTS_DIR` の親（= `data/`）配下。テストでは `temp_projects` フィクスチャの `PROJECTS_DIR` 差し替えにより自動的に一時領域へ隔離される（Feature #127のSQLite実装も`_jobs_root()`経由でこの隔離に追随する）。
+
+### 9b. 旧`jobs.json`からの移行（Feature #127）
+
+`migrate_legacy_jobs_json()` が `JobWorker.start()` から毎回呼ばれる。`data/jobs/jobs.json` が存在する場合のみ動作し、job_idの重複はSQLite側を正としてスキップ（冪等）、counterはSQLiteとlegacyの大きい方を採用、取り込み後は`jobs.json`を削除せず`jobs.json.migrated.<timestamp>`へリネームする（2回目以降の起動では既にファイルが無いため再処理されない）。JSONとして読めない場合は`jobs.json.malformed.<timestamp>`へリネームして内容を保全する（サイレントなデータ消失を避ける）。詳細は`docs/workitems/jobs/JOB_REPOSITORY_SQLITE_MIGRATION_127.md`参照。
 
 ## 10. テスト
 
-- バックエンド: `tests/test_job_manager.py`（採番・保存項目・不正遷移拒否・同時実行制御3種・キャンセル・再実行・実行成功/失敗/実行中キャンセル・実前処理ハンドラの統合・benchmark同時数設定・一覧フィルタ）
+- バックエンド: `tests/test_job_manager.py`（採番・保存項目・不正遷移拒否・同時実行制御3種・キャンセル・再実行・実行成功/失敗/実行中キャンセル・実前処理ハンドラの統合・benchmark同時数設定・一覧フィルタ。SQLite移行後も無改修で全件パス）、`tests/test_job_repository_sqlite_migration.py`（Feature #127: 永続化の再構築確認・legacy jobs.json import各シナリオ・malformed入力耐性）
 - フロント: `frontend/tests/jobsView.render.test.mjs`（一覧・フィルタ・ラベル定義・所要時間表示）、`sidebar.render.test.mjs`（運用セクション）

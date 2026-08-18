@@ -361,5 +361,6 @@ Production変更が無いため新規testsは不要（Issue本文の指示通り
 
 - §14で列挙した推奨Issue（reconciliation修正、Windows process semantics検証、Frontend API contract部分統一、Theme 3独立investigation、将来のexecution model統合設計）
   - reconciliation修正（§14推奨(1)）はReliability [#125](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/125)として実施済み。詳細は[TRAINING_JOB_STARTUP_RECONCILIATION_125.md](TRAINING_JOB_STARTUP_RECONCILIATION_125.md)を参照
+  - Theme 3（jobs.json→SQLite migration、§10・§14(3)）はFeature [#127](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/127)として実施済み。Job System B（`job_manager.py`）のみをSQLiteへ移行し、Training Job lifecycle（Job System A）・Job Lifecycle Unification自体は本Issueの結論通り変更していない。詳細は[JOB_REPOSITORY_SQLITE_MIGRATION_127.md](JOB_REPOSITORY_SQLITE_MIGRATION_127.md)を参照
 - Legacy evaluation（`job_type="evaluation"`）の実際の呼び出し経路が本調査では未特定のまま残っている。実装Issue化する際は再調査が必要
 - Benchmark専用のfrontend polling実装の詳細（`BenchmarkView.jsx`側の個別pollingロジックの有無）は本調査で深掘りしきれておらず、Frontend Consumer Matrix統一を検討する際に追加調査が必要
