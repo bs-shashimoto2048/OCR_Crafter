@@ -164,7 +164,7 @@ from .services.tesseract_pipeline import (
     ensure_tesseract_training_tools,
     run_tesseract_training,
 )
-from .services.trocr_model_registry import register_trocr_model
+from .services.trocr_model_registry import list_trocr_models, register_trocr_model
 from .services.trocr_training_core import TrocrTrainingConfig, run_trocr_training
 from .services.experiment_tracker import (
     attach_evaluation,
@@ -3460,6 +3460,18 @@ def api_trocr_train_start(req: TrocrTrainStartRequest, request: Request) -> dict
         job_id=job_id, after={"engine": "trocr", "dataset_dir": dataset_dir, "model_ref": model_ref, "epochs": int(req.epochs)},
     )
     return {"job_id": job_id, "project_id": project_id, "status": "queued", "training_family": "ocr", "engine": "trocr"}
+
+
+@app.get("/api/trocr/models")
+def api_trocr_models(project_id: Optional[str] = Query(default="default")) -> dict[str, Any]:
+    """登録済みTrOCRモデル一覧（Issue #96 `list_trocr_models()`の薄いラッパー、Issue #98で新設）。
+
+    Training UIの「登録済みモデルから継続Fine-tune」選択に使う。一般Modelsリスト
+    （`GET /models`・`GET /models/info`）への統合は行わない（Issue #96で決定した
+    Future Work境界をそのまま維持し、`model_registry.py`の共有関数は変更しない）。
+    """
+    resolved = _resolve_project_id(project_id)
+    return {"project_id": resolved, "items": list_trocr_models(resolved)}
 
 
 @app.get("/api/ocr/train/active")
