@@ -16,6 +16,7 @@ from src.app.services.legacy_metadata_adapter import (
     LEGACY_FORMAT_INFERENCE_MODEL_JSON,
     LEGACY_FORMAT_OCR_JSON,
     LEGACY_FORMAT_TESS_JSON,
+    LEGACY_FORMAT_TROCR_JSON,
     UnsupportedLegacyMetadataError,
 )
 from src.app.services.metadata_reader import MetadataReadError, MetadataReader
@@ -143,6 +144,55 @@ def test_read_dispatches_legacy_tess_by_filename_suffix(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Legacy TrOCR（.trocr.json、Issue #110）
+# ---------------------------------------------------------------------------
+
+
+def test_read_legacy_trocr_via_explicit_method(tmp_path):
+    path = _write_json(
+        tmp_path / "trocr_job-3.trocr.json",
+        {
+            "engine": "trocr",
+            "model_type": "ocr",
+            "created_at": "2026-01-03T09:00:00",
+            "model_dir": "/data/projects/p1/models/trocr_runs/job-3",
+            "dataset_id": "DS-0003",
+        },
+    )
+    result = MetadataReader.read_legacy(path, LEGACY_FORMAT_TROCR_JSON, model_id="M0003")
+
+    assert result.model_id == "M0003"
+    assert result.engine_id == "trocr"
+    assert result.artifact_path == "/data/projects/p1/models/trocr_runs/job-3"
+    # Reader経由の変換はbackfillが既定（.ocr.json/.tess.jsonと同じ扱い）
+    assert result.source == "backfill"
+
+
+def test_read_dispatches_legacy_trocr_by_filename_suffix(tmp_path):
+    path = _write_json(
+        tmp_path / "trocr_job-3.trocr.json",
+        {"engine": "trocr", "created_at": "2026-01-03T09:00:00"},
+    )
+    result = MetadataReader.read(path, model_id="M0003")
+    assert result.model_id == "M0003"
+    assert result.engine_id == "trocr"
+    assert result.source == "backfill"
+
+
+def test_read_legacy_trocr_source_can_be_overridden(tmp_path):
+    path = _write_json(tmp_path / "trocr_job-x.trocr.json", {"engine": "trocr"})
+    result = MetadataReader.read_legacy(path, LEGACY_FORMAT_TROCR_JSON, model_id="M0003", source="training")
+    assert result.source == "training"
+
+
+def test_read_trocr_filename_does_not_collide_with_ocr_json_suffix(tmp_path):
+    """`.trocr.json`は`.ocr.json`のsuffixとして誤判定されない（末尾一致確認の回帰）。"""
+    path = _write_json(tmp_path / "trocr_job-y.trocr.json", {"engine": "trocr"})
+    result = MetadataReader.read(path, model_id="M0003")
+    assert result.engine_id == "trocr"
+
+
+# ---------------------------------------------------------------------------
 # Legacy Inference（inference_model.json）
 # ---------------------------------------------------------------------------
 
@@ -215,6 +265,7 @@ def test_read_legacy_with_explicit_unknown_format_raises_unsupported_legacy_meta
     [
         ("ocr_x.ocr.json", LEGACY_FORMAT_OCR_JSON),
         ("tess_x.tess.json", LEGACY_FORMAT_TESS_JSON),
+        ("trocr_x.trocr.json", LEGACY_FORMAT_TROCR_JSON),
         ("inference_model.json", LEGACY_FORMAT_INFERENCE_MODEL_JSON),
     ],
 )

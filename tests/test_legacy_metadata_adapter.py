@@ -12,10 +12,12 @@ from src.app.services.legacy_metadata_adapter import (
     LEGACY_FORMAT_INFERENCE_MODEL_JSON,
     LEGACY_FORMAT_OCR_JSON,
     LEGACY_FORMAT_TESS_JSON,
+    LEGACY_FORMAT_TROCR_JSON,
     InferenceMetadataAdapter,
     LegacyMetadataAdapter,
     OCRMetadataAdapter,
     TesseractMetadataAdapter,
+    TrOCRMetadataAdapter,
     UnsupportedLegacyMetadataError,
 )
 from src.app.services.model_metadata import InvalidModelMetadataError, ModelMetadata
@@ -73,6 +75,25 @@ TESS_JSON_SAMPLE = {
     "dataset_id": "DS-0002",
     "dataset_name": "TessDataset_v1",
     "dataset_created_at": "2026-01-02T00:00:00",
+}
+
+# src/app/services/trocr_model_registry.py::register_trocr_model() が書き込む .trocr.json 相当（Issue #96）
+TROCR_JSON_SAMPLE = {
+    "name": "trocr_job-3.trocr.json",
+    "engine": "trocr",
+    "training_family": "ocr",
+    "model_type": "ocr",
+    "model_dir": "/data/projects/p1/models/trocr_runs/job-3",
+    "base_model_ref": "microsoft/trocr-base-handwritten",
+    "project_id": "p1",
+    "job_id": "job-3",
+    "dataset_root": "/data/projects/p1/datasets/ds_c",
+    "dataset_id": "DS-0003",
+    "epochs": 5,
+    "batch_size": 4,
+    "learning_rate": 0.0001,
+    "final_loss": 0.123,
+    "created_at": "2026-01-03T09:00:00",
 }
 
 # src/app/services/inference_model.py::save_inference_model() が書き込む inference_model.json 相当
@@ -145,6 +166,44 @@ def test_legacy_metadata_adapter_dispatches_tess_json():
 
 
 # ---------------------------------------------------------------------------
+# TrOCR（.trocr.json）正常変換（Issue #110）
+# ---------------------------------------------------------------------------
+
+
+def test_trocr_metadata_adapter_converts_to_model_metadata():
+    result = TrOCRMetadataAdapter.adapt(TROCR_JSON_SAMPLE, model_id="M0003")
+
+    assert isinstance(result, ModelMetadata)
+    assert result.model_id == "M0003"
+    assert result.engine_id == "trocr"
+    assert result.model_type == "ocr"
+    assert result.created_at == "2026-01-03T09:00:00"
+    assert result.artifact_path == "/data/projects/p1/models/trocr_runs/job-3"
+    assert result.dataset_id == "DS-0003"
+    assert result.source == "training"
+
+
+def test_trocr_metadata_adapter_specific_fields_not_modeled_are_ignored_not_leaked_into_extra():
+    """既存precedent（.ocr.json/.tess.jsonのtraining_params等）と同じく、base_model_ref/
+    project_id/job_id/epochs/batch_size/learning_rate/final_loss等はextraへ自動混入しない。
+    """
+    result = TrOCRMetadataAdapter.adapt(TROCR_JSON_SAMPLE, model_id="M0003")
+    assert dict(result.extra) == {}
+
+
+def test_legacy_metadata_adapter_dispatches_trocr_json():
+    via_dispatch = LegacyMetadataAdapter.adapt(LEGACY_FORMAT_TROCR_JSON, TROCR_JSON_SAMPLE, model_id="M0003")
+    via_direct = LegacyMetadataAdapter.from_trocr_json(TROCR_JSON_SAMPLE, model_id="M0003")
+    assert via_dispatch == via_direct == TrOCRMetadataAdapter.adapt(TROCR_JSON_SAMPLE, model_id="M0003")
+
+
+def test_trocr_metadata_adapter_works_purely_in_memory_without_any_file_on_disk():
+    data = {**TROCR_JSON_SAMPLE, "model_dir": "/this/path/does/not/exist/anywhere"}
+    result = TrOCRMetadataAdapter.adapt(data, model_id="M0003")
+    assert result.artifact_path == "/this/path/does/not/exist/anywhere"
+
+
+# ---------------------------------------------------------------------------
 # Inference（inference_model.json）正常変換
 # ---------------------------------------------------------------------------
 
@@ -201,6 +260,7 @@ def test_unsupported_legacy_metadata_error_message_lists_known_formats():
     [
         (OCRMetadataAdapter, OCR_JSON_SAMPLE),
         (TesseractMetadataAdapter, TESS_JSON_SAMPLE),
+        (TrOCRMetadataAdapter, TROCR_JSON_SAMPLE),
         (InferenceMetadataAdapter, INFERENCE_MODEL_JSON_SAMPLE),
     ],
 )
@@ -224,6 +284,12 @@ def test_missing_engine_field_raises_invalid_model_metadata_error():
         TesseractMetadataAdapter.adapt(data, model_id="M0002")
 
 
+def test_trocr_missing_engine_field_raises_invalid_model_metadata_error():
+    data = {k: v for k, v in TROCR_JSON_SAMPLE.items() if k != "engine"}
+    with pytest.raises(InvalidModelMetadataError):
+        TrOCRMetadataAdapter.adapt(data, model_id="M0003")
+
+
 # ---------------------------------------------------------------------------
 # Missing Required（model_id、InvalidModelMetadataError）
 # ---------------------------------------------------------------------------
@@ -237,6 +303,11 @@ def test_missing_model_id_raises_invalid_model_metadata_error():
 def test_whitespace_model_id_raises_invalid_model_metadata_error():
     with pytest.raises(InvalidModelMetadataError):
         TesseractMetadataAdapter.adapt(TESS_JSON_SAMPLE, model_id="   ")
+
+
+def test_trocr_missing_model_id_raises_invalid_model_metadata_error():
+    with pytest.raises(InvalidModelMetadataError):
+        TrOCRMetadataAdapter.adapt(TROCR_JSON_SAMPLE, model_id="")
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +325,17 @@ def test_adapter_does_not_reject_non_mapping_itself_delegates_to_from_dict():
 
 def test_adapter_output_is_a_valid_model_metadata_round_trippable():
     result = OCRMetadataAdapter.adapt(OCR_JSON_SAMPLE, model_id="M0001")
+    restored = ModelMetadata.from_dict(result.to_dict())
+    assert restored == result
+
+
+def test_trocr_adapter_does_not_reject_non_mapping_itself_delegates_to_from_dict():
+    with pytest.raises(InvalidModelMetadataError):
+        TrOCRMetadataAdapter.adapt(["not", "a", "mapping"], model_id="M0003")  # type: ignore[arg-type]
+
+
+def test_trocr_adapter_output_is_a_valid_model_metadata_round_trippable():
+    result = TrOCRMetadataAdapter.adapt(TROCR_JSON_SAMPLE, model_id="M0003")
     restored = ModelMetadata.from_dict(result.to_dict())
     assert restored == result
 
