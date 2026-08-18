@@ -94,6 +94,7 @@ from .schemas import (
     TesseractTrainStartRequest,
     TrainingPreprocessPreviewRequest,
     TrainRequest,
+    TrocrTrainStartRequest,
 )
 from .services.data_manager import import_images_from_directory, list_raw_images, rotate_project_image
 from .services.dataset_builder import build_dataset, read_dataset_meta
@@ -159,9 +160,11 @@ from .services.preprocess import (
 from .services.preprocess_snapshot import apply_training_preprocess
 from .services.tesseract_pipeline import (
     TESSERACT_TARGET_CHARSET,
+    _append_log,
     ensure_tesseract_training_tools,
     run_tesseract_training,
 )
+from .services.trocr_training_core import TrocrTrainingConfig, run_trocr_training
 from .services.experiment_tracker import (
     attach_evaluation,
     build_comparable_groups,
@@ -823,8 +826,10 @@ def _reconcile_ocr_training_job(job_id: str) -> Optional[dict[str, Any]]:
     if not job or str(job.get("training_family") or "") != "ocr":
         return job
 
-    # Tesseract ジョブは PaddleOCR の inference 復旧ロジックの対象外
-    if str(job.get("engine") or "").strip().lower() == "tesseract":
+    # Tesseract / TrOCR ジョブは PaddleOCR の inference 復旧ロジックの対象外
+    # （inference/latest.pdparamsの存在チェックはPaddleOCR固有の成果物形状のため。
+    # TrOCR jobのworker異常終了時の復旧はFuture Work、Issue #94では対象外）
+    if str(job.get("engine") or "").strip().lower() in {"tesseract", "trocr"}:
         return job
 
     project_id = str(job.get("project_id") or "default")
@@ -2763,6 +2768,89 @@ def _run_tesseract_training_job(job_id: str) -> None:
         )
 
 
+def _run_trocr_training_job(job_id: str) -> None:
+    """TrOCR Training Job orchestration（Issue #94）。
+
+    `_run_ocr_training_job()`/`_run_tesseract_training_job()`と同じ構造
+    （fetch → running更新 → 実行 → 成功/失敗の状態更新）に揃える。Dataset読込・
+    Processor/Model構築・training loop・artifact保存はIssue #92の
+    `run_trocr_training()`（Core）をそのまま呼ぶのみで、再実装しない。
+    """
+    job = fetch_training_job(job_id)
+    if not job:
+        return
+
+    upsert_training_job(
+        {
+            **job,
+            "status": "running",
+            "message": "trocr training started",
+            "updated_at": _now_iso(),
+        }
+    )
+
+    try:
+        project_id = str(job.get("project_id") or "default")
+        dataset_dir = str(job.get("dataset_dir") or "")
+        # 既存2エンジンのフィールド再利用規約（Tesseractがepochs=max_iterations等を流用するのと
+        # 同じ考え方）: init_source_value=model_ref、max_text_length=max_target_length
+        model_ref = str(job.get("init_source_value") or "")
+        raw_device = str(job.get("device") or "auto").strip().lower()
+        device = None if raw_device in {"", "auto"} else raw_device
+
+        paths = ensure_project_directories(project_id)
+        # 注意: Path("")はstr()にすると"."になり真偽値も常にTruthyのため、
+        # `Path(...) or fallback`という書き方はフォールバックが効かない罠がある。
+        # 生文字列の空判定を先に行ってからPathを組み立てる
+        log_path_raw = str(job.get("log_path") or "").strip()
+        log_path = Path(log_path_raw) if log_path_raw else (paths.logs / f"train_trocr_{job_id}.log")
+        output_dir = paths.models / "trocr_runs" / job_id
+
+        config = TrocrTrainingConfig(
+            output_dir=output_dir,
+            epochs=int(job.get("epochs") or 1),
+            batch_size=int(job.get("batch_size") or 1),
+            learning_rate=float(job.get("learning_rate") or 5e-5),
+            max_target_length=int(job.get("max_text_length") or 32),
+            device=device,
+            local_files_only=bool(job.get("local_files_only", False)),
+        )
+
+        def _on_epoch_end(epoch_number: int, total_epochs: int, avg_loss: Optional[float]) -> None:
+            # 既存PaddleOCR進捗ログと同じ"epoch: [N/M]"形式で1行追記する（frontend/src/lib/
+            # trainingLog.js::parseTrainingProgress()が既に汎用的にパースできる形式。
+            # Training UI側のTrOCR対応自体は本Issueのスコープ外だが、フォーマットを合わせて
+            # おくことで将来UIが有効化された際に無改修で進捗表示できる）
+            loss_label = f" loss={avg_loss:.4f}" if avg_loss is not None else ""
+            _append_log(log_path, f"epoch: [{epoch_number}/{total_epochs}]{loss_label}")
+
+        result = run_trocr_training(dataset_dir, model_ref, config, on_epoch_end=_on_epoch_end)
+
+        current = fetch_training_job(job_id) or job
+        upsert_training_job(
+            {
+                **current,
+                "status": "completed",
+                "message": "trocr training completed",
+                "model_path": str(result.artifact_dir),
+                "worker_pid": None,
+                "log_path": str(log_path),
+                "updated_at": _now_iso(),
+            }
+        )
+    except Exception as e:  # noqa: BLE001
+        current = fetch_training_job(job_id) or job
+        upsert_training_job(
+            {
+                **current,
+                "status": "failed",
+                "message": str(e),
+                "worker_pid": None,
+                "updated_at": _now_iso(),
+            }
+        )
+
+
 @app.post("/train/start")
 def train_start(req: TrainRequest, background_tasks: BackgroundTasks) -> dict[str, str]:
     project_id = _resolve_project_id(req.project_id)
@@ -3278,6 +3366,83 @@ def api_tesseract_train_start(req: TesseractTrainStartRequest, request: Request)
         after={"engine": "tesseract", "dataset_dir": dataset_dir, "max_iterations": int(req.max_iterations), "charset": charset},
     )
     return {"job_id": job_id, "project_id": project_id, "status": "queued", "training_family": "ocr", "engine": "tesseract"}
+
+
+@app.post("/api/trocr/train/start")
+def api_trocr_train_start(req: TrocrTrainStartRequest, request: Request) -> dict[str, Any]:
+    """TrOCR Training Job開始（Issue #94）。
+
+    既存`POST /api/ocr/train/start`（PaddleOCR専用）を汎用化せず、Tesseractと同様に
+    専用エンドポイント・専用スキーマとして新設した（既存2エンジンの契約・挙動は無変更）。
+    Job lifecycle（`training_jobs`テーブル・`_spawn_training_runner`・多重起動防止・
+    キャンセル・状態取得・ログ取得）は既存の`training_family="ocr"`の枠組みをそのまま
+    再利用する（`GET /api/ocr/train/status/{job_id}`・`POST /api/ocr/train/stop/{job_id}`・
+    `GET /api/ocr/train/log/{job_id}`はengine非依存のため無改修でTrOCR jobにも使える）。
+    """
+    _enforce_role(request, "training_start")
+    project_id = _resolve_project_id(req.project_id)
+    _reject_if_training_active(project_id, "ocr")
+
+    dataset_dir = str(req.dataset_dir or "").strip()
+    if not dataset_dir:
+        raise HTTPException(status_code=400, detail="dataset_dir is required")
+    if not Path(dataset_dir).is_dir():
+        raise HTTPException(status_code=404, detail=f"dataset_dir not found: {dataset_dir}")
+
+    model_ref = str(req.model_ref or "").strip()
+    if not model_ref:
+        raise HTTPException(status_code=400, detail="model_ref is required")
+
+    device = str(req.device or "auto").strip().lower()
+    if device not in {"auto", "cpu", "cuda"}:
+        raise HTTPException(status_code=400, detail=f"unsupported device: {device}")
+    if device == "cuda" and not bool(_system_check_snapshot().get("torch_cuda_available")):
+        raise HTTPException(status_code=400, detail="device=cuda was requested, but CUDA is not available for PyTorch.")
+
+    job_id = str(uuid.uuid4())
+    now = _now_iso()
+    paths = ensure_project_directories(project_id)
+    log_path = paths.logs / f"train_trocr_{job_id}.log"
+    job_payload = {
+        "id": job_id,
+        "project_id": project_id,
+        "training_family": "ocr",
+        "engine": "trocr",
+        "model_type": "ocr",
+        "epochs": int(req.epochs),
+        "batch_size": int(req.batch_size),
+        "learning_rate": float(req.learning_rate),
+        "device": device,
+        "max_text_length": int(req.max_target_length),
+        "dataset_dir": dataset_dir,
+        "local_files_only": bool(req.local_files_only),
+        # 既存2エンジンのフィールド再利用規約（Tesseractがinit_source_value=base_langを
+        # 流用するのと同じ考え方）: model_refはinit_source_valueへ保持する
+        "training_mode": "finetune",
+        "init_source_type": "trocr_model_ref",
+        "init_source_value": model_ref,
+        "status": "queued",
+        "message": "queued",
+        "model_path": None,
+        "worker_pid": None,
+        "log_path": str(log_path),
+        "created_at": now,
+        "updated_at": now,
+    }
+    upsert_training_job(job_payload)
+    worker_pid = _spawn_training_runner("trocr", job_id)
+    upsert_training_job(
+        {
+            **job_payload,
+            "worker_pid": worker_pid,
+            "updated_at": _now_iso(),
+        }
+    )
+    _record_audit_safe(
+        request, "training_start", project_id=project_id, target_type="training_job", target_id=job_id,
+        job_id=job_id, after={"engine": "trocr", "dataset_dir": dataset_dir, "model_ref": model_ref, "epochs": int(req.epochs)},
+    )
+    return {"job_id": job_id, "project_id": project_id, "status": "queued", "training_family": "ocr", "engine": "trocr"}
 
 
 @app.get("/api/ocr/train/active")

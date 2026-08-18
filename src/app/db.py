@@ -50,6 +50,7 @@ def init_db() -> None:
                 dataset_dir TEXT,
                 paddle_repo_dir TEXT,
                 image_shape TEXT,
+                local_files_only INTEGER NOT NULL DEFAULT 0,
                 status TEXT NOT NULL,
                 message TEXT,
                 model_path TEXT,
@@ -108,6 +109,10 @@ def init_db() -> None:
             conn.execute("ALTER TABLE training_jobs ADD COLUMN paddle_repo_dir TEXT")
         if "image_shape" not in columns:
             conn.execute("ALTER TABLE training_jobs ADD COLUMN image_shape TEXT")
+        if "local_files_only" not in columns:
+            # TrOCR専用（Issue #94）: Hugging Face Hubへ接続せずローカルキャッシュのみを使うか。
+            # 既存Tesseract/PaddleOCRは参照しない（後方互換のため既定0=false）
+            conn.execute("ALTER TABLE training_jobs ADD COLUMN local_files_only INTEGER NOT NULL DEFAULT 0")
         if "log_path" not in columns:
             conn.execute("ALTER TABLE training_jobs ADD COLUMN log_path TEXT")
         if "worker_pid" not in columns:
@@ -145,6 +150,7 @@ def upsert_training_job(job: dict[str, Any]) -> None:
     max_text_length = job.get("max_text_length")
     dataset_dir = job.get("dataset_dir")
     paddle_repo_dir = job.get("paddle_repo_dir")
+    local_files_only = 1 if bool(job.get("local_files_only", False)) else 0
     worker_pid = job.get("worker_pid")
     image_shape = job.get("image_shape")
     if isinstance(image_shape, (list, tuple, dict)):
@@ -156,8 +162,8 @@ def upsert_training_job(job: dict[str, Any]) -> None:
         conn.execute(
             """
             INSERT INTO training_jobs (
-                id, project_id, training_family, engine, model_type, epochs, batch_size, device, auto_batch_size, train_num_workers, eval_num_workers, save_epoch_step, use_amp, pin_memory, persistent_workers, resolved_device, learning_rate, training_mode, init_source_type, init_source_value, freeze_backbone_epochs, backbone_lr_scale, charset, max_text_length, dataset_dir, paddle_repo_dir, image_shape, status, message, model_path, worker_pid, log_path, experiment_meta, training_condition_snapshot, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, project_id, training_family, engine, model_type, epochs, batch_size, device, auto_batch_size, train_num_workers, eval_num_workers, save_epoch_step, use_amp, pin_memory, persistent_workers, resolved_device, learning_rate, training_mode, init_source_type, init_source_value, freeze_backbone_epochs, backbone_lr_scale, charset, max_text_length, dataset_dir, paddle_repo_dir, image_shape, local_files_only, status, message, model_path, worker_pid, log_path, experiment_meta, training_condition_snapshot, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 project_id=excluded.project_id,
                 training_family=excluded.training_family,
@@ -185,6 +191,7 @@ def upsert_training_job(job: dict[str, Any]) -> None:
                 dataset_dir=excluded.dataset_dir,
                 paddle_repo_dir=excluded.paddle_repo_dir,
                 image_shape=excluded.image_shape,
+                local_files_only=excluded.local_files_only,
                 status=excluded.status,
                 message=excluded.message,
                 model_path=excluded.model_path,
@@ -222,6 +229,7 @@ def upsert_training_job(job: dict[str, Any]) -> None:
                 dataset_dir,
                 paddle_repo_dir,
                 image_shape,
+                local_files_only,
                 job["status"],
                 job.get("message"),
                 job.get("model_path"),
@@ -240,7 +248,7 @@ def fetch_training_job(job_id: str) -> Optional[dict[str, Any]]:
     with get_conn() as conn:
         row = conn.execute(
             """
-            SELECT id, project_id, training_family, engine, model_type, epochs, batch_size, device, auto_batch_size, train_num_workers, eval_num_workers, save_epoch_step, use_amp, pin_memory, persistent_workers, resolved_device, learning_rate, training_mode, init_source_type, init_source_value, freeze_backbone_epochs, backbone_lr_scale, charset, max_text_length, dataset_dir, paddle_repo_dir, image_shape, status, message, model_path, worker_pid, log_path, experiment_meta, training_condition_snapshot, created_at, updated_at
+            SELECT id, project_id, training_family, engine, model_type, epochs, batch_size, device, auto_batch_size, train_num_workers, eval_num_workers, save_epoch_step, use_amp, pin_memory, persistent_workers, resolved_device, learning_rate, training_mode, init_source_type, init_source_value, freeze_backbone_epochs, backbone_lr_scale, charset, max_text_length, dataset_dir, paddle_repo_dir, image_shape, local_files_only, status, message, model_path, worker_pid, log_path, experiment_meta, training_condition_snapshot, created_at, updated_at
             FROM training_jobs WHERE id = ?
             """,
             (job_id,),
@@ -277,6 +285,7 @@ def fetch_training_job(job_id: str) -> Optional[dict[str, Any]]:
         "dataset_dir",
         "paddle_repo_dir",
         "image_shape",
+        "local_files_only",
         "status",
         "message",
         "model_path",
@@ -292,6 +301,7 @@ def fetch_training_job(job_id: str) -> Optional[dict[str, Any]]:
     payload["use_amp"] = bool(payload.get("use_amp", 0))
     payload["pin_memory"] = bool(payload.get("pin_memory", 0))
     payload["persistent_workers"] = bool(payload.get("persistent_workers", 0))
+    payload["local_files_only"] = bool(payload.get("local_files_only", 0))
     image_shape_raw = payload.get("image_shape")
     if isinstance(image_shape_raw, str) and image_shape_raw.strip():
         try:
