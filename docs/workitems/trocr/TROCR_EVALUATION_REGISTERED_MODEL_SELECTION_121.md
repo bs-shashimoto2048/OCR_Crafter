@@ -2,7 +2,7 @@
 
 Related: Bug [#121](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/121) / Feature [#119](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/119)（Training → Evaluation → Benchmark Workflow Handoff、Completed） / Feature [#98](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/98)（TrOCR Training UI Integration） / Feature [#104](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/104) / Feature [#110](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/110)
 
-**状態**: Implemented, PR review pending。
+**状態**: Completed / Closed。PR [#122](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/122)、Squash Commit `7a591d8`でマージ済み。
 
 ## 目的
 
