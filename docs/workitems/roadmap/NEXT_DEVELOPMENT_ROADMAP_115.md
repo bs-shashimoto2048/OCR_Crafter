@@ -125,6 +125,8 @@ PaddleOCR/TrOCRモデルのModel Card・Deployment Packageが「未記録」表�
 
 `training_jobs`テーブル方式と`job_manager.py`方式の2系統を統合する設計を検討する。ただし本調査では実装着手を推奨しない（§Prioritization参照）。
 
+→ Architecture Investigation [#123](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/123)として実施済み。詳細は[JOB_LIFECYCLE_UNIFICATION_ARCHITECTURE_123.md](../jobs/JOB_LIFECYCLE_UNIFICATION_ARCHITECTURE_123.md)を参照。結論: 統合実装は依然として非推奨、まず個別のreliability gap（startup reconciliation欠如）を単独Bug Issueとして解消することを推奨。
+
 ### Theme 3: `jobs.json` → SQLite移行（Performance Limits既存計画の実行）
 
 `docs/26_PERFORMANCE_LIMITS.md`が既に設計済みの移行計画（`JobRepository`インターフェース固定済み）を実行する。
