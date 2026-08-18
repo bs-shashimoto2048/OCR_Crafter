@@ -56,11 +56,11 @@ Architecture/API/Data contract/永続データ/ユーザー向けsemanticsを変
 
 ## CI / Known Failure
 
-GitHub Issue #8は既知のclean-environment DB failure。代表的な既知症状は`tests/test_dataset_registry.py::test_register_ocr_model_records_dataset_lineage`の`no such table: training_jobs`。
+GitHub Issue #8（`tests/test_dataset_registry.py::test_register_ocr_model_records_dataset_lineage`のclean-environment `no such table: training_jobs`）はPR #113（Squash Commit `3e45f45`）で修正済み・Closed。現時点で許容される既知backend failureは無い。
 
-他Featureで許容できるのは、観測した失敗が同じ既知原因であることを確認できた場合のみ。backend failureを自動的にIssue #8扱いしない。追加failure、別traceback、DB checksum不一致、継続的な新flake、説明不能なCI挙動は調査完了まで停止条件とする。
+backend failureを推測で許容しない。新規failure・別traceback・DB checksum不一致・継続的な新flake・説明不能なCI挙動は調査完了まで停止条件とする。
 
-Issue #8を無関係なFeatureのついでに修正しない。
+Issue #8と同系統の広範な問題（`tesseract_pipeline.py::register_tesseract_model()`が実DBへ副作用を及ぼす、少なくとも6ファイル・約15テスト）はGitHub Issue #112で追跡中。
 
 ## Scope / Natural-language Adjustments
 
