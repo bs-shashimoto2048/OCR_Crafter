@@ -2,7 +2,7 @@
 
 Related: Reliability [#125](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/125) / Architecture Investigation [#123](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/123)（Job Lifecycle Unification、Completed） / Feature [#94](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/94)（TrOCR Training Job Integration） / Bug [#112](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/112)（training_jobs参照によるtest DB isolation問題）
 
-**状態**: Implemented, PR review pending
+**状態**: Completed / Closed。PR [#126](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/126)、Squash Commit `c74a8e1`でマージ済み。
 
 ## 目的
 
@@ -136,6 +136,16 @@ python -m pytest -q
 ```
 
 `outputs/app.db`のsha256チェックサムをテスト実行前後で比較し、一致することを確認済み（実データへの副作用なし）。
+
+### PR #126のCI flakeについて
+
+初回CI実行で`tests/test_preview_batch.py::test_batch_inflight_share_same_key`が`assert 2 == 1`で失敗した。本Issueの変更（`training_jobs`関連）とは無関係な、スレッド実時間（`threading`+`time.sleep(0.3)`）に依存する同時実行共有キャッシュのテストである。以下の証拠により、本Issueの変更に起因しない既存のタイミング依存flakeと判断した。
+
+- 直前のPR #124（本Issueとは無関係なdocsのみのPR）のCIで同一テストが同一コミット履歴上で正常にpassしていた
+- ローカルで5回連続実行し、5/5成功
+- 該当CI jobを再実行（`gh run rerun --failed`）した結果、コード変更無しでpassした
+
+`gh pr merge --squash`実行前にこの証拠を確認した。
 
 ## Scope外（Out of Scope、実施しなかったこと）
 
