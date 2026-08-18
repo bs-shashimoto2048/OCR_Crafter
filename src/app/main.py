@@ -164,6 +164,7 @@ from .services.tesseract_pipeline import (
     ensure_tesseract_training_tools,
     run_tesseract_training,
 )
+from .services.trocr_model_registry import register_trocr_model
 from .services.trocr_training_core import TrocrTrainingConfig, run_trocr_training
 from .services.experiment_tracker import (
     attach_evaluation,
@@ -2825,6 +2826,22 @@ def _run_trocr_training_job(job_id: str) -> None:
             _append_log(log_path, f"epoch: [{epoch_number}/{total_epochs}]{loss_label}")
 
         result = run_trocr_training(dataset_dir, model_ref, config, on_epoch_end=_on_epoch_end)
+
+        # Artifact Registration（Issue #96）: 登録（sidecar書込）が失敗した場合、
+        # ここで送出された例外は下のexcept節へ落ちてjobをfailedにする（登録失敗を
+        # 完了扱いにしない。既存register_tesseract_model()と同じ「メタ書込＝正式登録の
+        # 完了マーカー」という設計思想をそのまま踏襲）
+        register_trocr_model(
+            project_id,
+            job_id=job_id,
+            model_dir=result.artifact_dir,
+            base_model_ref=model_ref,
+            dataset_dir=dataset_dir,
+            epochs=result.epochs_completed,
+            batch_size=int(job.get("batch_size") or 1),
+            learning_rate=float(job.get("learning_rate") or 5e-5),
+            final_loss=result.final_loss,
+        )
 
         current = fetch_training_job(job_id) or job
         upsert_training_job(

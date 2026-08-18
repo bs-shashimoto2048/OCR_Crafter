@@ -30,6 +30,15 @@ def _use_temp_db(monkeypatch, tmp_path):
     db_module.init_db()
 
 
+def _make_artifact_dir(tmp_path, name: str = "artifact"):
+    """Issue #96のArtifact Registrationが要求するconfig.jsonを含む、save_pretrained()
+    互換directoryを模す（実TrOCRモデル・ネットワーク不使用）。"""
+    artifact_dir = tmp_path / name
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    (artifact_dir / "config.json").write_text("{}", encoding="utf-8")
+    return artifact_dir
+
+
 # ---------------------------------------------------------------------------
 # api_trocr_train_start(): バリデーション
 # ---------------------------------------------------------------------------
@@ -198,7 +207,7 @@ def _queued_trocr_job(tmp_path, job_id="job-1", **overrides):
     return base
 
 
-def test_run_trocr_training_job_success_lifecycle_and_core_args(monkeypatch, tmp_path):
+def test_run_trocr_training_job_success_lifecycle_and_core_args(temp_projects, monkeypatch, tmp_path):
     _use_temp_db(monkeypatch, tmp_path)
     db_module.upsert_training_job(_queued_trocr_job(tmp_path))
 
@@ -212,7 +221,7 @@ def test_run_trocr_training_job_success_lifecycle_and_core_args(monkeypatch, tmp
             on_epoch_end(1, 2, 0.5)
             on_epoch_end(2, 2, 0.25)
         return TrocrTrainingResult(
-            artifact_dir=tmp_path / "artifact",
+            artifact_dir=_make_artifact_dir(tmp_path),
             model_ref=model_ref,
             sample_count=3,
             epochs_completed=2,
@@ -240,7 +249,7 @@ def test_run_trocr_training_job_success_lifecycle_and_core_args(monkeypatch, tmp
     assert config.local_files_only is False
 
 
-def test_run_trocr_training_job_translates_explicit_device(monkeypatch, tmp_path):
+def test_run_trocr_training_job_translates_explicit_device(temp_projects, monkeypatch, tmp_path):
     _use_temp_db(monkeypatch, tmp_path)
     db_module.upsert_training_job(_queued_trocr_job(tmp_path, device="cpu"))
     captured = {}
@@ -248,7 +257,7 @@ def test_run_trocr_training_job_translates_explicit_device(monkeypatch, tmp_path
     def _fake_run_trocr_training(dataset_dir, model_ref, config, on_epoch_end=None):
         captured["device"] = config.device
         return TrocrTrainingResult(
-            artifact_dir=tmp_path / "artifact", model_ref=model_ref, sample_count=1, epochs_completed=1, final_loss=0.1
+            artifact_dir=_make_artifact_dir(tmp_path), model_ref=model_ref, sample_count=1, epochs_completed=1, final_loss=0.1
         )
 
     monkeypatch.setattr(main_module, "run_trocr_training", _fake_run_trocr_training)
@@ -256,7 +265,7 @@ def test_run_trocr_training_job_translates_explicit_device(monkeypatch, tmp_path
     assert captured["device"] == "cpu"
 
 
-def test_run_trocr_training_job_sets_running_before_calling_core(monkeypatch, tmp_path):
+def test_run_trocr_training_job_sets_running_before_calling_core(temp_projects, monkeypatch, tmp_path):
     _use_temp_db(monkeypatch, tmp_path)
     db_module.upsert_training_job(_queued_trocr_job(tmp_path))
     observed_status_at_call_time = {}
@@ -264,7 +273,7 @@ def test_run_trocr_training_job_sets_running_before_calling_core(monkeypatch, tm
     def _fake_run_trocr_training(dataset_dir, model_ref, config, on_epoch_end=None):
         observed_status_at_call_time["status"] = db_module.fetch_training_job("job-1")["status"]
         return TrocrTrainingResult(
-            artifact_dir=tmp_path / "artifact", model_ref=model_ref, sample_count=1, epochs_completed=1, final_loss=0.1
+            artifact_dir=_make_artifact_dir(tmp_path), model_ref=model_ref, sample_count=1, epochs_completed=1, final_loss=0.1
         )
 
     monkeypatch.setattr(main_module, "run_trocr_training", _fake_run_trocr_training)
@@ -272,7 +281,7 @@ def test_run_trocr_training_job_sets_running_before_calling_core(monkeypatch, tm
     assert observed_status_at_call_time["status"] == "running"
 
 
-def test_run_trocr_training_job_core_failure_marks_job_failed(monkeypatch, tmp_path):
+def test_run_trocr_training_job_core_failure_marks_job_failed(temp_projects, monkeypatch, tmp_path):
     _use_temp_db(monkeypatch, tmp_path)
     db_module.upsert_training_job(_queued_trocr_job(tmp_path))
 
@@ -288,7 +297,7 @@ def test_run_trocr_training_job_core_failure_marks_job_failed(monkeypatch, tmp_p
     assert job["worker_pid"] is None
 
 
-def test_run_trocr_training_job_epoch_progress_is_logged(monkeypatch, tmp_path):
+def test_run_trocr_training_job_epoch_progress_is_logged(temp_projects, monkeypatch, tmp_path):
     _use_temp_db(monkeypatch, tmp_path)
     log_path = tmp_path / "train.log"
     db_module.upsert_training_job(_queued_trocr_job(tmp_path, log_path=str(log_path)))
@@ -297,7 +306,7 @@ def test_run_trocr_training_job_epoch_progress_is_logged(monkeypatch, tmp_path):
         on_epoch_end(1, 2, 0.5)
         on_epoch_end(2, 2, 0.25)
         return TrocrTrainingResult(
-            artifact_dir=tmp_path / "artifact", model_ref=model_ref, sample_count=1, epochs_completed=2, final_loss=0.25
+            artifact_dir=_make_artifact_dir(tmp_path), model_ref=model_ref, sample_count=1, epochs_completed=2, final_loss=0.25
         )
 
     monkeypatch.setattr(main_module, "run_trocr_training", _fake_run_trocr_training)
@@ -310,7 +319,7 @@ def test_run_trocr_training_job_epoch_progress_is_logged(monkeypatch, tmp_path):
     assert "loss=0.2500" in log_text
 
 
-def test_run_trocr_training_job_missing_job_is_a_noop(monkeypatch, tmp_path):
+def test_run_trocr_training_job_missing_job_is_a_noop(temp_projects, monkeypatch, tmp_path):
     _use_temp_db(monkeypatch, tmp_path)
     # 存在しないjob_idを呼んでも例外を出さない（既存2エンジンのorchestration関数と同じ契約）
     main_module._run_trocr_training_job("does-not-exist")
@@ -321,7 +330,7 @@ def test_run_trocr_training_job_missing_job_is_a_noop(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_reconcile_excludes_trocr_engine_like_tesseract(monkeypatch, tmp_path):
+def test_reconcile_excludes_trocr_engine_like_tesseract(temp_projects, monkeypatch, tmp_path):
     _use_temp_db(monkeypatch, tmp_path)
     db_module.upsert_training_job(_queued_trocr_job(tmp_path, status="running"))
 
