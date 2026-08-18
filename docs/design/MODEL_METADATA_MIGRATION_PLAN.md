@@ -4,6 +4,16 @@ Related: [MODEL_METADATA.md](MODEL_METADATA.md)（`ModelMetadata`のスキーマ
 
 本ドキュメントは、Unified Model Metadata Infrastructure Epicの調査Issue（Investigation: Model Metadata実運用化の影響調査、[#29](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/29)、Closed）の成果物である。**コード変更は行っていない。** 現状のモデル管理方式を実地調査し、`ModelMetadata`（Feature #14で実装済み・未配線）を実運用化する場合の課題・理想構成・Migration戦略・Issue分割案・リスクを記載する。
 
+## 追記（2026-08-18）: Investigation #108でConsumer Migration方針を再評価
+
+Epic #28は2026-07-31にUIレビュー未実施を理由に一旦停止したが、Epic #46・Epic #27の完了により停止理由は解消された。Investigation [#108](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/108)で現在のmainを正として再評価した結果、以下を確認した。
+
+- Feature #32-#44で構築したCanonical Metadata基盤（Schema/Adapter/Reader/Writer/Catalog/Factory/API）は、実装完了から現在まで**一貫してProduction consumerを一切持たない**（grep全文検索で確認済み）
+- `LegacyMetadataAdapter`/`MetadataReader`/`ModelCatalog`のいずれも、Epic #27で新設された`.trocr.json`（Issue #96）に未対応（Architecture #30策定時点でTrOCR Training成果物の保存方式が未確定だったため）
+- Consumer Migration（Models/Inference/Evaluation/Deployment）は、既存Legacyパスが全エンジンで問題なく機能している現状では、着手する具体的な必要性を確認できなかった。特に`/models/info`（`list_model_infos()`、200行超）・Release Gate（Issue #104で安定化したばかり）への切替は、利益より回帰リスクが大きいと判断した
+
+詳細・Architecture Questions 14問への回答・更新されたMigration戦略は[docs/workitems/model-metadata/MODEL_METADATA_CONSUMER_MIGRATION_REASSESSMENT_108.md](../workitems/model-metadata/MODEL_METADATA_CONSUMER_MIGRATION_REASSESSMENT_108.md)を参照。以降の実装は「TrOCR Legacy Metadata Adapter Compatibility」（既存3形式と同型の追加、schema変更なし）のみを推奨する。
+
 ## 追記（2026-07-31）: Architecture #30で決定事項を確定
 
 本Investigationで「要判断」「未決定」としていた論点は、Architecture Issue #30・[ADR-0002](../adr/ADR-0002_Unified_Model_Metadata.md)・[MODEL_METADATA_ARCHITECTURE.md](MODEL_METADATA_ARCHITECTURE.md)で確定した。対応関係は以下のとおり。
