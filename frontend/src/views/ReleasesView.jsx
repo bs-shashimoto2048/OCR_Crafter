@@ -219,7 +219,7 @@ export default function ReleasesView({
                 <a
                   href={`${API_BASE}/api/releases/deployment_package?project_id=${encodeURIComponent(projectId)}`}
                   className="inline-flex h-8 items-center rounded-lg border border-border bg-card/60 px-3 text-xs font-semibold text-text transition hover:bg-card/80"
-                  title="traineddata・設定JSON・前処理Snapshot・Release Note・Model CardをZIPでExport"
+                  title="モデル実体・設定JSON・前処理Snapshot・Release Note・Model CardをZIPでExport"
                 >
                   Deployment Package
                 </a>
