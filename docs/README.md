@@ -111,6 +111,8 @@
 ## 開発中のWork Items
 
 - [TrOCR対応](workitems/trocr/README.md)
+- [Unified Model Metadata Infrastructure](workitems/model-metadata/README.md)
+- [Next Development Roadmap（Investigation #115）](workitems/roadmap/NEXT_DEVELOPMENT_ROADMAP_115.md)
 
 ## バージョン情報
 
