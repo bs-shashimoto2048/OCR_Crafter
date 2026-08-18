@@ -67,7 +67,7 @@ def e2e_project(temp_projects):
     return {"paths": paths, "labels": labels}
 
 
-def test_lightweight_e2e(e2e_project):
+def test_lightweight_e2e(e2e_project, isolated_test_db):
     from src.app.services.model_registry import delete_model, list_models
     from src.app.services.ocr_evaluation import evaluate_ocr
     from src.app.services.ocr_pipeline import create_ocr_dataset

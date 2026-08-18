@@ -38,7 +38,7 @@ def test_record_assigns_sequential_ids(temp_projects):
     assert [row["experiment_id"] for row in items] == ["EXP-0001", "EXP-0002"]
 
 
-def test_register_tesseract_model_records_experiment(temp_projects, tmp_path):
+def test_register_tesseract_model_records_experiment(temp_projects, tmp_path, isolated_test_db):
     project_id = "p_train"
     paths = ensure_project_directories(project_id)
     dataset_root = tmp_path / "dataset"
@@ -104,7 +104,7 @@ def test_register_tesseract_model_records_experiment(temp_projects, tmp_path):
     assert exp["source"] == "training"
 
 
-def test_register_tesseract_model_records_dataset_lineage_and_training_fields(temp_projects, tmp_path):
+def test_register_tesseract_model_records_dataset_lineage_and_training_fields(temp_projects, tmp_path, isolated_test_db):
     """Experiment Manager強化: dataset_id/dataset_name/dataset_hash・model_engine・
     preprocess.version（前処理設定保存Versionとの連携）・training内のoptimizer等（Tesseractは
     概念が無いためnull）が記録されることを確認する。"""
@@ -149,7 +149,7 @@ def test_register_tesseract_model_records_dataset_lineage_and_training_fields(te
         assert exp["training"][key] is None
 
 
-def test_list_experiments_for_dataset(temp_projects, tmp_path):
+def test_list_experiments_for_dataset(temp_projects, tmp_path, isolated_test_db):
     project_id = "p_ds_link"
     dataset_a = tmp_path / "ds_a"
     dataset_a.mkdir()
