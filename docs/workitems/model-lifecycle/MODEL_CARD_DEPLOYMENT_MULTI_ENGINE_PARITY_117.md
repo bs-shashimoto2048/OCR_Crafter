@@ -2,7 +2,7 @@
 
 Related: Investigation [#115](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/115)（OCR Crafter Next Development Roadmap） / Feature [#117](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/117) / Investigation [#108](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/108) / Feature [#110](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/110)（TrOCR Legacy Metadata Adapter Compatibility） / Epic [#28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)（Unified Model Metadata Infrastructure、Open・保留継続） / Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)（TrOCR Lifecycle、Completed）
 
-**状態**: Implemented, PR review pending。
+**状態**: Completed / Closed。PR [#118](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/118)、Squash Commit `af830bf`でマージ済み。
 
 ## 目的
 
