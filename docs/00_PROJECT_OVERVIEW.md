@@ -27,18 +27,18 @@
 | データ準備 | OCR画像作成（画像指定・リサイズ → YOLO検出 → BBox選択 → クロップ出力）/ 学習データ（画像・前処理・ラベル）/ 評価データ（データセット作成）の3グループ |
 | 前処理 | 二値化・照明ムラ補正・手動マスク補正など多段パイプライン、リアルタイムプレビュー、プリセット保存 |
 | ラベル | ラベル編集（OCR候補・辞書近似候補のクリック採用）、未編集フィルタ |
-| 学習 | PaddleOCR認識モデル学習 / Tesseract LSTM fine-tune / 分類モデル学習（実験機能）— いずれも非同期ジョブ。実験名・親モデル・学習メモをモデルメタへ保存可能 |
-| 評価 | OCRモデル評価（主指標=**CER**のマイクロ平均。文字正解率・完全一致率・改善/同等/悪化・混同TOP・CSV出力・評価履歴・学習データ重複チェック）、分類モデル評価 |
+| 学習 | PaddleOCR認識モデル学習 / Tesseract LSTM fine-tune / TrOCR（Hugging Face `VisionEncoderDecoderModel`）fine-tune / 分類モデル学習（実験機能）— いずれも非同期ジョブ。実験名・親モデル・学習メモをモデルメタへ保存可能 |
+| 評価 | OCRモデル評価（Tesseract/PaddleOCR/EasyOCR/TrOCRのMulti-engine対応。主指標=**CER**のマイクロ平均。文字正解率・完全一致率・改善/同等/悪化・混同TOP・CSV出力・評価履歴・学習データ重複チェック）、分類モデル評価 |
 | モデル管理 | 管理No（M0001形式・全プロジェクト横断で一意・削除後も再利用しない）、モデルカルテ、**モデル比較**（最大3件・固定色・性能サマリー/学習条件比較/条件差分/次回学習提案）、モデルコメント |
 | Dataset Manager | 学習データセットの資産管理（Dataset ID=DS0001形式）。一覧（作成日時降順・ソート可能テーブル）、Dataset詳細（前処理Version/Hash・学習設定・使用モデル一覧）、Dataset⇔Model双方向リンク、コピー・削除（使用モデルがある場合は警告）、コメント、Dataset名・コメント・Charset・前処理Versionでの検索。詳細は `docs/16_SCREEN_SPEC.md` |
 | 実験管理 | 学習実行ごとの実験カルテ（EXP-0001形式・学習条件/前処理ハッシュ/Aug/評価/学習時間）、Experiment比較（条件差分の強調表示）、CER推移等のグラフ、簡易相関・ベスト条件・条件推薦、タグ・★・フィルタ・CSV出力、モデルカルテとの相互リンク |
 | リリース管理 | モデルのライフサイクル（Draft→Validated→Candidate→Production→Archived・Productionは1つだけ）、Release Note必須の昇格・バージョン採番・Release History・Rollback・本番比較・安全性警告、Model Card自動生成、Deployment Package（ZIP）Export |
-| 推論 | 単一推論・バッチ推論・YOLO検出+OCR複合推論。エンジン: custom / EasyOCR / PaddleOCR / Tesseract |
+| 推論 | 単一推論・バッチ推論・YOLO検出+OCR複合推論。エンジン: custom / EasyOCR / PaddleOCR / Tesseract / TrOCR |
 | 修正 | OCR修正画面（キーボード中心）、修正ログの保存とデータセット再生成 |
 | ジョブ管理 | バックグラウンドジョブの統一管理（JOB-000001形式・全体一意、状態遷移検証、同時実行制御、進捗0-100%＋イベント履歴、キャンセル・再実行）。詳細は `docs/18_JOB_MANAGEMENT.md` |
-| Benchmark Runner | 複数OCRエンジンを実際に実行して公平比較する実行ツール（BM-0001形式、Profile Hash、cold start/推論時間分離、Leaderboard、用途別ベスト＋バランス式、画像単位比較、CSV3種。旧称「Benchmark」）。詳細は `docs/19_BENCHMARK_SPEC.md` |
+| Benchmark Runner | 複数OCRエンジン（Tesseract/PaddleOCR/TrOCR。EasyOCRは未導入・利用不可として明示）を実際に実行して公平比較する実行ツール（BM-0001形式、Profile Hash、cold start/推論時間分離、Leaderboard、用途別ベスト＋バランス式、画像単位比較、CSV3種。旧称「Benchmark」）。詳細は `docs/19_BENCHMARK_SPEC.md` |
 | Benchmark Center | Dataset Manager・Experiment Tracking・Model Manager・既存評価結果を横断比較する統合ビュー（BMC-0001形式。評価は実行しない・比較条件のみ保存）。比較表・🏆最良値・レーダーチャート・推移グラフ・モデル推薦・CSV/Markdown/JSON出力。詳細は `docs/16_SCREEN_SPEC.md` |
-| Release Gate | Release Policy（プロジェクト毎12項目）に基づく昇格自動判定（PASS/CONDITIONAL_PASS/FAIL/NOT_EVALUATED）、FAILは例外承認必須、Release ID（REL-0001）。詳細は `docs/20_RELEASE_POLICY.md` |
+| Release Gate | Release Policy（プロジェクト毎12項目）に基づく昇格自動判定（PASS/CONDITIONAL_PASS/FAIL/NOT_EVALUATED）、FAILは例外承認必須、Release ID（REL-0001）。Tesseract/PaddleOCR/TrOCRのモデルが対象。詳細は `docs/20_RELEASE_POLICY.md` |
 | レポート | モデル開発レポート自動生成（単一モデル/比較/プロジェクト総括。Markdown/PDF・RPT-0001形式・Job経由・外部通信なし）。詳細は `docs/16_SCREEN_SPEC.md` |
 | 監査・運用 | 監査ログ（32操作・追記型・削除不可・Before/After差分）、ユーザー識別（X-Operator/X-Role・認証未設定モード明示）、運用ダッシュボード、ヘルスチェック3段階、バックアップ（metadata_only/full・復元は新Project IDへ）、データ保持設定。詳細は `docs/21_OPERATIONS_GUIDE.md` / `22_SECURITY_AND_AUDIT.md` |
 
@@ -61,8 +61,8 @@ OCRモデル        … データ作成・学習 / モデル管理 / Dataset Man
 | 層 | 技術 |
 |---|---|
 | API | FastAPI 0.136 + uvicorn（port 8000） |
-| OCR | EasyOCR 1.7.2 / PaddleOCR 3.5.0 / Tesseract（外部実行ファイル） |
-| 学習 | PaddleOCR（`external/PaddleOCR`）, Tesseract lstmtraining, PyTorch 2.11（分類） |
+| OCR | EasyOCR 1.7.2 / PaddleOCR 3.5.0 / Tesseract（外部実行ファイル） / TrOCR（Hugging Face Transformers、`VisionEncoderDecoderModel`） |
+| 学習 | PaddleOCR（`external/PaddleOCR`）, Tesseract lstmtraining, TrOCR（Hugging Face Transformers、独自AdamW training loop）, PyTorch 2.11（分類） |
 | 検出 | ultralytics YOLO 8.4 |
 | UI | React 18 + Vite 5 + Tailwind CSS 3（ダークテーマ、状態管理はReact標準hooksのみ） |
 | 永続化 | SQLite（学習ジョブ）+ CSV/JSONファイル（ラベル・マスク・ログ）+ localStorage（UI設定） |

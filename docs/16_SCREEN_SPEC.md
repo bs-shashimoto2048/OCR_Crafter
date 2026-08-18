@@ -620,10 +620,10 @@ OCR結果をキーボード中心で高速に確認・修正し、修正ログ�
 ## Benchmark Runner（benchmark / BenchmarkView。旧称「Benchmark」）
 
 **目的**
-同一データ・同一条件で複数OCRエンジン（Tesseract登録モデル / Tesseract標準eng / PaddleOCR公式）を**実際に実行**して公平比較する**実行ツール**。仕様詳細は `docs/19_BENCHMARK_SPEC.md`。v1.0.0でメニュー表示名を「Benchmark」から「Benchmark Runner」へ変更した（後述のBenchmark Centerと役割・命名を明確に区別するため。`activeView`のid・API・保存先はすべて無変更）。
+同一データ・同一条件で複数OCRエンジン（Tesseract登録モデル / Tesseract標準eng / PaddleOCR公式 / PaddleOCR自作モデル / TrOCR。Epic #27 Feature #102でTrOCRを追加）を**実際に実行**して公平比較する**実行ツール**。仕様詳細は `docs/19_BENCHMARK_SPEC.md`。v1.0.0でメニュー表示名を「Benchmark」から「Benchmark Runner」へ変更した（後述のBenchmark Centerと役割・命名を明確に区別するため。`activeView`のid・API・保存先はすべて無変更）。
 
 **表示内容**
-- **実行フォーム**: Benchmark名・データセットID・評価画像フォルダ・正解CSV・PSM/Whitelist（Tesseract系Engine Profile）・ウォームアップ回数、対象エンジンのチェックボックス（**未導入エンジンは選択不可＋「未導入・利用不可」バッジ**。登録モデルはselectで選択）。実行は「Job作成」（ジョブ管理で進捗監視）
+- **実行フォーム**: Benchmark名・データセットID・評価画像フォルダ・正解CSV・PSM/Whitelist（Tesseract系Engine Profile）・ウォームアップ回数、対象エンジンのチェックボックス（**未導入エンジンは選択不可＋「未導入・利用不可」バッジ**。登録モデルはselectで選択。**TrOCR**: Base Model指定方法（登録済みモデルから選択／手動でmodel_ref入力の二択）・device（auto/cpu/gpu）・local_files_only）。実行は「Job作成」（ジョブ管理で進捗監視）
 - **Benchmark履歴**: BM-0001形式ID（等幅）・名前・実行日時・エンジン数・1位（CER最小）・Profile Hash短縮表示。A/Bラジオで**履歴比較**（Profile Hash不一致は「⚠比較条件が異なります」警告・一致は「同一条件の比較です」）
 - **Leaderboard**（行クリックで表示）: CER昇順（同率は完全一致率降順→失敗数昇順→平均時間昇順）。CER/文字正解率/完全一致率/正解数/置換・挿入・脱落/失敗/Cold Start（＋WU回数）/平均/P50/P95/PeakMem（**取得不能表示**・推測しない）/Balanceスコア
 - **用途別ベスト**: 最高精度/完全一致率最高/最速/最少失敗/バランス最良＋**計算式の明示**（score = 70%×文字正解率 + 20%×速度比 + 10%×安定性）。重みはプロジェクト設定で変更可（保存ボタン）

@@ -229,7 +229,7 @@ sample_002.png,TY12lt
 
 ### 9.1 OCRデータ作成
 
-1. 学習方式 `ocr`、OCRタイプ（`Tesseract` / `PaddleOCR`）を選択
+1. 学習方式 `ocr`、OCRタイプ（`Tesseract` / `PaddleOCR` / `TrOCR`）を選択
 2. `charset`（学習対象文字セット）、`max_text_length`、`image_shape` を確認
 3. 必要に応じてオーグメンテーション（コントラスト変化・軽微ブラー・ノイズ・微小回転。強度1〜3）を設定。「Augプレビュー」で事前確認可能
 4. 「OCRデータ作成」を実行（分割予定枚数のプレビューあり）
@@ -257,11 +257,13 @@ sample_002.png,TY12lt
 |---|---|---|
 | Tesseract | 最大イテレーション・charset・PSM・ベースモデル（eng.traineddata） | LSTM fine-tune。学習ツール（lstmtraining等）の導入が必要。EpochやBatch Sizeは使用しません |
 | PaddleOCR | エポック数・バッチサイズ・device（auto/cpu/gpu）・ワーカー数・AMP | `Mac Safe` / `RTX Train` プリセットあり。GPU検出時は自動最適化、OOM時はbatch半減で1回自動リトライ |
+| TrOCR | エポック数・バッチサイズ・device（auto/cpu/gpu）・学習率・Base Model・local_files_only | Base Modelは「登録済みモデルから継続Fine-tune」または「Hugging Face model ID／ローカルパスを手動入力」の二択。`local_files_only`を有効にするとHugging Face Hubへのネットワークアクセスを行いません |
 
 - 実験名・親モデル・学習メモを指定すると実験カルテ（実験管理）へ記録されます
 - **完了条件**: 学習ログが `completed` になり、モデル管理へ追加される（PaddleOCRは推論用モデルの自動export込み）
 - **エラー時**: 学習は非同期Jobです。失敗時は「運用 > ジョブ管理」のエラー要約と学習ログを確認してください。同一プロジェクトでのOCR学習の二重実行は409エラーで拒否されます
 - **注意**: 学習中にBackendを再起動した場合、Jobは「中断（再起動）」となり再実行できます
+- **TrOCRの既知の制約**: TrOCR学習完了時のモデル登録（`.trocr.json`）は、Tesseract/PaddleOCRの登録簿（`.tess.json`/`.ocr.json`）とは別の専用ファイルです。そのため学習完了後のTrOCRモデルは**「16. モデル管理」画面の一覧・カルテ・ダウンロードには表示されません**（現時点では既知の制約）。TrOCRの継続Fine-tune用モデル選択は学習画面自身の「登録済みモデルから選択」・モデル評価/Benchmark Runner画面の同様の選択欄から利用できます。リリース管理（Release Gate）はこの`.trocr.json`を直接認識するため、TrOCRモデルの昇格・状態管理はモデル管理を経由せず「17. リリース管理」画面から行えます
 
 ## 10. Dataset Manager
 
@@ -281,7 +283,9 @@ sample_002.png,TY12lt
 ![モデル評価](images/evaluation.png)
 
 - **目的**: 学習前後のモデルを同一データで評価し、改善を数値で確認する
-- **入力**: 評価データセット（画像フォルダ＋正解CSV）、学習前モデル（例: `eng.traineddata`）と学習後モデル、Whitelist（既定 `A-Z0-9klt+-`。「なし」「カスタム」へ変更可）
+- **対応エンジン**: Tesseract / PaddleOCR / EasyOCR / TrOCR。エンジンを切り替えると評価対象モデルの入力欄も切り替わります（Tesseractのみ学習前後比較・Whitelistが利用可能。他エンジンは単一モデルの評価のみ）
+- **入力**: 評価データセット（画像フォルダ＋正解CSV）、学習前モデル（例: `eng.traineddata`）と学習後モデル、Whitelist（既定 `A-Z0-9klt+-`。「なし」「カスタム」へ変更可）。TrOCRはモデル参照（登録済みモデルから選択、または手動でHugging Face model ID／ローカルパスを入力）を指定します
+- **TrOCRのconfidence**: TrOCRは文字単位のconfidence（確信度）を算出できないため、確信度に依存する表示・ヒートマップは対象外です。CER等の主要指標には影響しません
 - **主指標**: **CER**（文字誤り率。全画像の編集距離総和÷正解文字数総和のマイクロ平均。低いほど良い）
 - **補助指標**: 文字正解率（1−CER）/ 完全一致率 / 誤認識数 / CER差・相対改善率 / 改善・同等・悪化件数 / 混同TOP（置換・脱落・挿入）
 - **結果の記録**: 評価条件は **Evaluation Profile** として実験カルテへ保存され、**Evaluation Hash**（評価条件のハッシュ）が生成されます。同一Hash=同一条件評価であり、比較の妥当性判定に使われます
@@ -325,7 +329,8 @@ sample_002.png,TY12lt
 
 ![Benchmark](images/benchmark.png)
 
-- **目的**: 複数OCRエンジン（Tesseract / PaddleOCR / EasyOCR / 学習済みモデル）を**実際に実行**し、同一条件で公平比較する
+- **目的**: 複数OCRエンジン（Tesseract / PaddleOCR / EasyOCR / TrOCR / 学習済みモデル）を**実際に実行**し、同一条件で公平比較する
+- **TrOCR**: モデルは「登録済みモデルから選択」または「Hugging Face model ID／ローカルパスを手動入力」で指定します。device（auto/cpu/gpu）・local_files_onlyも設定できます。confidenceは算出されないため結果表・Leaderboardには含まれません（CER等の主要指標には影響しません）
 - **モデル評価との違い**: モデル評価は「1つのモデルの精度測定と学習前後の比較」、Benchmark Runnerは「複数エンジン間の横並び比較（速度・メモリ含む）」です
 - **Benchmark Centerとの違い**: Benchmark RunnerはOCRエンジンを実行して測定する**実行ツール**です。既存の結果を実行せずに横断比較するだけの参照ビューは、次章の別画面「Benchmark Center」です
 - **表示**: Leaderboard（BM-0001形式）、用途別ベスト＋バランススコア、画像単位の結果比較、cold start（初回読み込み）と推論時間の分離、P50/P95、Peak Memory、CSV出力3種
@@ -365,6 +370,7 @@ sample_002.png,TY12lt
 ![リリース管理](images/releases.png)
 
 - **目的**: モデルのライフサイクル管理と本番モデルの決定
+- **対応エンジン**: Tesseract / PaddleOCR / TrOCR（Release Policyの許可エンジン設定`allowed_engines`にも`trocr`を指定可能）。TrOCRモデルは「16. モデル管理」画面には表示されませんが、本画面には学習完了時に登録された`.trocr.json`がそのまま一覧表示されます
 - **ステータス**: `Draft`（学習直後）→ `Validated`（評価完了で自動遷移）→ `Candidate`（本番候補）→ `Production`（本番使用中）→ `Archived`（旧モデル）
 - **Production は常に0件または1件**です。新しいモデルの昇格時に旧Productionは自動でArchivedになります
 - **昇格フロー**: Candidate → Release Note入力（必須）→ **Release Gate判定** → 昇格
@@ -372,7 +378,7 @@ sample_002.png,TY12lt
   - **FAIL判定のモデルは、Override Reason＋Approved By（承認者）が揃った場合のみ昇格可能**（Override履歴が監査ログへ記録されます）
 - **Release ID / Version**: Release ID（REL-0001形式）は「リリース行為」の識別子、Versionは「配布物の版」（Candidate=0.x、Production初回=1.0.0→マイナー加算）です
 - **Rollback**: Release Historyから過去Versionのモデルを再Productionへ戻せます（Versionは維持・新しいRelease IDが発行）
-- **Model Card / Deployment Package**: Productionモデルのカルテ（Markdown）自動生成と、traineddata・設定・前処理スナップショット・RELEASE_NOTE・MODEL_CARDを含むZIP Export
+- **Model Card / Deployment Package**: Productionモデルのカルテ（Markdown）自動生成と、traineddata・設定・前処理スナップショット・RELEASE_NOTE・MODEL_CARDを含むZIP Export。**既知の制約**: 現時点ではTesseract向けの項目（charset・PSM・traineddata等）を前提とした内容になっており、PaddleOCR/TrOCRモデルでは該当項目が「未記録」表示になります（エラーにはなりません）
 - 詳細仕様: [20_RELEASE_POLICY.md](20_RELEASE_POLICY.md)
 
 ## 18. レポート
@@ -439,9 +445,9 @@ CER・Evaluation Hash・Comparable Group・Release Gate などの用語は [GLOS
 
 ### 推論（OCRモデル > 推論）
 
-- エンジン: custom / EasyOCR / PaddleOCR / Tesseract。学習済みモデルまたは標準モデルを選択
+- エンジン: custom / EasyOCR / PaddleOCR / Tesseract / TrOCR。学習済みモデルまたは標準モデルを選択（TrOCRは登録済みモデルから選択、またはHugging Face model ID／ローカルパスを手動入力）
 - YOLO検出＋OCRの複合推論に対応
-- 結果には文字単位の確信度（ヒートマップ表示用）が付きます
+- 結果には文字単位の確信度（ヒートマップ表示用）が付きます（TrOCRはconfidenceを算出できないため、確信度ヒートマップは表示されません）
 - 補足: PaddleOCRで推論できるのはexport済みモデルのみです（学習完了時に自動export。旧モデルの一括変換は `POST /api/ocr/models/export-migrate`）
 - 補足: この画面のエンジン・モデル選択は試し撃ち用の表示であり、モデル管理画面で「推論に使用」により保存されたモデルとは独立しています（この画面で別モデルを選んでも、保存済みの推論使用モデルは変わりません）
 

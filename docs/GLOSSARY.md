@@ -9,6 +9,7 @@ OCR Crafterで使用する用語の説明です。画面上の「?」アイコ�
 | OCR | Optical Character Recognition。画像内の文字を読み取ってテキストにする技術 |
 | Tesseract | オープンソースのOCRエンジン。CPUで動作し、LSTM fine-tune（追加学習）に対応 |
 | PaddleOCR | PaddlePaddleベースのOCRエンジン。認識モデルの学習に対応し、GPUで高速化できる |
+| TrOCR | Hugging Face Transformersの`VisionEncoderDecoderModel`ベースのOCRエンジン。Hugging Face Hub上の公開モデルまたは自プロジェクトで学習したモデルをfine-tune・推論に使用できる。confidence（文字単位の確信度）・PSM/Whitelistの概念は無い |
 | YOLO | 物体検出モデル。OCR Crafterでは画像内の文字領域の検出（OCR画像作成）に使用 |
 | Bounding Box / 検出領域 | 画像内の対象（文字列）を囲む矩形。YOLO検出の結果として得られ、切り出しに使う |
 | charset | 学習対象の文字セット（例: `A-Z0-9klt+-`）。charset外の文字を含むラベルは学習サンプルから除外される |
@@ -19,7 +20,7 @@ OCR Crafterで使用する用語の説明です。画面上の「?」アイコ�
 
 | 用語 | 説明 |
 |---|---|
-| Epoch | 学習データ全体を1周する回数（PaddleOCR・分類学習で使用。Tesseractでは使用しない） |
+| Epoch | 学習データ全体を1周する回数（PaddleOCR・TrOCR・分類学習で使用。Tesseractでは使用しない） |
 | Iteration | 学習の反復回数（Tesseract学習では「最大イテレーション」を指定） |
 | Batch Size | 1回の学習ステップでまとめて処理する画像数。大きいほど速いがメモリを消費する |
 | Learning Rate | 学習率。1回の更新でモデルをどれだけ動かすか |

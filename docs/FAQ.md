@@ -5,10 +5,10 @@
 ## 全般
 
 **Q. OCR Crafterは何ができますか**
-A. 画像の取り込み・前処理・ラベル付け・データセット作成・OCRモデルの学習（Tesseract/PaddleOCR）・評価・推論・修正・モデル管理・リリース管理・レポート生成までを、ローカル環境のWeb UIで一貫して行えます。
+A. 画像の取り込み・前処理・ラベル付け・データセット作成・OCRモデルの学習（Tesseract/PaddleOCR/TrOCR）・評価・推論・修正・モデル管理・リリース管理・レポート生成までを、ローカル環境のWeb UIで一貫して行えます。
 
-**Q. TesseractとPaddleOCRの違いは何ですか**
-A. どちらも学習・推論に対応するOCRエンジンです。Tesseractは軽量でCPUのみで動作し、LSTM fine-tune（既定charset `A-Z0-9klt+-`）に対応します。PaddleOCRはディープラーニングベースの認識モデルを学習でき、GPUで高速化できます。用途に対する優劣はデータ依存のため、Benchmarkで同一条件比較して選定してください。
+**Q. Tesseract・PaddleOCR・TrOCRの違いは何ですか**
+A. いずれも学習・推論に対応するOCRエンジンです。Tesseractは軽量でCPUのみで動作し、LSTM fine-tune（既定charset `A-Z0-9klt+-`）に対応します。PaddleOCRはディープラーニングベースの認識モデルを学習でき、GPUで高速化できます。TrOCRはHugging Face Transformers（`VisionEncoderDecoderModel`）ベースで、Hugging Face Hub上の公開モデルや自プロジェクトで学習したモデルをfine-tuneできます（confidence・PSM/Whitelistの概念は無し）。用途に対する優劣はデータ依存のため、Benchmarkで同一条件比較して選定してください。
 
 **Q. GPUは必須ですか**
 A. 必須ではありません。全機能がCPUで動作します。GPUがあるとPaddleOCR学習などが高速化されます。
@@ -52,6 +52,9 @@ A. できません。Productionは各プロジェクトで**0件または1件**�
 
 **Q. Release IDとVersionの違いは何ですか**
 A. Release ID（REL-0001形式）は昇格・Rollbackなど「リリース行為」1回ごとの識別子、Versionは配布物の版番号（Candidate=0.x、Production初回=1.0.0）です。RollbackではVersionは維持され、新しいRelease IDだけが発行されます。
+
+**Q. TrOCRで学習したモデルがモデル管理画面に表示されません**
+A. 既知の制約です。TrOCRのモデル登録簿（`.trocr.json`）はTesseract/PaddleOCR（`.tess.json`/`.ocr.json`）と別ファイル形式のため、現時点では「モデル管理」画面の一覧・カルテ・ダウンロードには統合されていません。TrOCRモデルの参照は学習画面自身の「登録済みモデルから選択」、モデル評価・Benchmark Runner画面の同様の選択欄、リリース管理画面（Release Gateはこのファイルを直接認識します）から行えます。
 
 ## テンプレート・設定
 
