@@ -17,7 +17,7 @@ Productionへ昇格するモデルが満たすべき基準（Release Policy）�
 | `required_chars` | 必須文字と最低正解率 `{chars, min_accuracy}` | ルール無効 |
 | `critical_confusions` | 危険な混同 `[{from, to, severity: warning/fail, max_count}]` | ルール無効 |
 | `max_benchmark_rank` | Benchmark順位の上限 | ルール無効 |
-| `allowed_engines` | 許可エンジン（tesseract / paddleocr） | 空=制限なし |
+| `allowed_engines` | 許可エンジン（tesseract / paddleocr / trocr。Issue #104でtrocrを追加） | 空=制限なし |
 
 **未設定の項目はルール自体を生成しない**（後方互換: Policy未設定のプロジェクトは従来どおり制限なし）。
 
@@ -33,6 +33,8 @@ Productionへ昇格するモデルが満たすべき基準（Release Policy）�
 各ルールは **Rule / Expected / Actual / Result / Message** の行としてUIへ表示する。Resultは `pass`（合格）/ `fail`（不合格）/ `warning`（警告）/ `unverified`（未検証）。
 
 判定の情報源は実験カルテ（`experiments.json` の evaluation / evaluation_profile / evaluation_hash）・Benchmark（`benchmarks.json`）・Production側の実験カルテ。**推測で補完しない**（記録がなければ未検証）。
+
+**モデル識別子**: Release Gateはモデルメタsidecarファイル名（`.tess.json`/`.ocr.json`/`.trocr.json`。Issue #104でTrOCRを追加）をそのままモデル識別子として使う（`list_releases()`がこれらをglobして一覧化する。新しい識別子体系は作らない）。**Benchmark（`benchmarks.json`）との照合はエンジンにより方式が異なる**点に注意: Tesseract登録モデル（`engine: tesseract_model`）はBenchmark実行時の`model`指定がsidecarファイル名そのものであり直接一致するが、TrOCR（`engine: trocr`）はBenchmark実行時の`model`指定がmodel_ref（Hugging Face model ID・ローカルパス・登録済みartifactのmodel_dir）であるため、`.trocr.json`のsidecar名とは異なる文字列になる。Release Gateはこの差異を吸収するため、`list_trocr_models()`経由でsidecar名→model_dirへ解決してから照合する（`release_gate.py::_resolve_trocr_benchmark_model_ref()`）。
 
 ## 3. Critical Confusion（危険な混同）
 
@@ -100,4 +102,4 @@ Productionは1プロジェクトに**0件または1件**（初期状態・未昇
 
 ## 11. テスト
 
-`tests/test_release_gate.py`（Policy正規化・比較品質・NOT_EVALUATED/PASS/FAIL・Critical Confusion warning/fail・必須文字未検証・Production比較3ルール・Benchmark未実施=未検証・Override強制とスナップショット・REL-IDバックフィルMigration・Rollback Version維持・Candidate Version維持・Validated自動遷移）＋ `frontend/tests/releaseGate.test.mjs`（ラベル・Override必須判定・Policyフォーム変換・Critical Confusionsテキスト形式）。
+`tests/test_release_gate.py`（Policy正規化・比較品質・NOT_EVALUATED/PASS/FAIL・Critical Confusion warning/fail・必須文字未検証・Production比較3ルール・Benchmark未実施=未検証・Override強制とスナップショット・REL-IDバックフィルMigration・Rollback Version維持・Candidate Version維持・Validated自動遷移）＋ `tests/test_release_gate_trocr.py`（Issue #104。TrOCRモデルのlist_releases()一覧化・NOT_EVALUATED/PASS/FAIL・allowed_enginesでのtrocr識別・Benchmark evidence接続のmodel_dir解決・既存Tesseract/PaddleOCRへの回帰確認・Promotion）＋ `frontend/tests/releaseGate.test.mjs`（ラベル・Override必須判定・Policyフォーム変換・Critical Confusionsテキスト形式）＋ `frontend/tests/releasesView.render.test.mjs`（Issue #104。TrOCRモデルが既存UIへエンジン非依存に表示される契約の固定）。
