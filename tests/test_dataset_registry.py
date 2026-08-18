@@ -255,7 +255,11 @@ def test_register_tesseract_model_records_dataset_lineage(temp_projects):
     assert info["dataset_id"] == payload["dataset_id"]
 
 
-def test_register_ocr_model_records_dataset_lineage(temp_projects):
+def test_register_ocr_model_records_dataset_lineage(temp_projects, isolated_test_db):
+    """`list_model_infos()`の`.ocr.json`分岐は`fetch_training_job()`経由で`training_jobs`
+    テーブルを参照する（`model_registry.py`）ため、`isolated_test_db`で明示的にテスト専用
+    DBを初期化する（Issue #8。`outputs/app.db`の事前状態には依存しない）。
+    """
     folder = _write_dataset(
         "p1", "ds_b", "2026-07-02T00:00:00", meta_overrides={"display_name": "OCRDataset_v2"}
     )
