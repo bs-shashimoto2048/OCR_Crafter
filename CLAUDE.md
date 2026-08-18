@@ -60,7 +60,7 @@ GitHub Issue #8（`tests/test_dataset_registry.py::test_register_ocr_model_recor
 
 backend failureを推測で許容しない。新規failure・別traceback・DB checksum不一致・継続的な新flake・説明不能なCI挙動は調査完了まで停止条件とする。
 
-Issue #8と同系統の広範な問題（`tesseract_pipeline.py::register_tesseract_model()`が実DBへ副作用を及ぼす、少なくとも6ファイル・約15テスト）はGitHub Issue #112で追跡中。
+Issue #8と同系統の広範な問題（`tesseract_pipeline.py::register_tesseract_model()`が実DBへ副作用を及ぼす、6ファイル・17テスト）はGitHub Issue #112・PR #114（Squash Commit `d878d2f`）で修正済み・Closed。
 
 ## Scope / Natural-language Adjustments
 
