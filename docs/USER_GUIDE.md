@@ -378,7 +378,7 @@ sample_002.png,TY12lt
   - **FAIL判定のモデルは、Override Reason＋Approved By（承認者）が揃った場合のみ昇格可能**（Override履歴が監査ログへ記録されます）
 - **Release ID / Version**: Release ID（REL-0001形式）は「リリース行為」の識別子、Versionは「配布物の版」（Candidate=0.x、Production初回=1.0.0→マイナー加算）です
 - **Rollback**: Release Historyから過去Versionのモデルを再Productionへ戻せます（Versionは維持・新しいRelease IDが発行）
-- **Model Card / Deployment Package**: Productionモデルのカルテ（Markdown）自動生成と、traineddata・設定・前処理スナップショット・RELEASE_NOTE・MODEL_CARDを含むZIP Export。**既知の制約**: 現時点ではTesseract向けの項目（charset・PSM・traineddata等）を前提とした内容になっており、PaddleOCR/TrOCRモデルでは該当項目が「未記録」表示になります（エラーにはなりません）
+- **Model Card / Deployment Package**: Productionモデルのカルテ（Markdown）自動生成と、モデル実体・設定・前処理スナップショット・RELEASE_NOTE・MODEL_CARDを含むZIP Export。Tesseract/PaddleOCR/TrOCRいずれのProductionモデルにも対応し、エンジン名・対象文字（TrOCRは「対象外」と表示）・ベースモデル/学習量・既知の制約はエンジンごとに正しい内容が表示されます（Issue #117）。モデル実体はTesseractがtraineddata単一ファイル、PaddleOCR/TrOCRはディレクトリ一式としてZIPへ含まれます。**既知の制約**: EasyOCRは学習・モデル登録機能自体が無いため、Model Card/Deployment Packageの対象になりません
 - 詳細仕様: [20_RELEASE_POLICY.md](20_RELEASE_POLICY.md)
 
 ## 18. レポート

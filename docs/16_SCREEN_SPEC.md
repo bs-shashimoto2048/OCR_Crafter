@@ -575,7 +575,7 @@ OCR結果をキーボード中心で高速に確認・修正し、修正ログ�
 モデルのライフサイクル（Draft→Validated→Candidate→Production→Archived）を管理し、安全な本番適用・配布を実現する。
 
 **表示内容**
-- **Production（現在使用中）**: 1プロジェクトに必ず1モデルだけ。管理Noバッジ＋Version（等幅・緑）＋リリース日時/Author＋CER/Experiment/Group。**Model Card**（Markdown自動生成: 概要・Version・用途・対象文字・評価条件・CER・完全一致率・既知の制約・更新履歴）表示と **Deployment Package**（ZIP: traineddata/設定JSON/前処理Snapshot/Release Note/Model Card。ONNXは実在時のみ）Export
+- **Production（現在使用中）**: 1プロジェクトに必ず1モデルだけ。管理Noバッジ＋Version（等幅・緑）＋リリース日時/Author＋CER/Experiment/Group。**Model Card**（Markdown自動生成: 概要・エンジン・Version・用途・対象文字・評価条件・CER・完全一致率・既知の制約・更新履歴。いずれもTesseract/PaddleOCR/TrOCRでエンジンに応じた内容、Issue #117）表示と **Deployment Package**（ZIP: モデル実体〔Tesseractはtraineddata単一ファイル、PaddleOCR/TrOCRはディレクトリ一式〕/設定JSON/前処理Snapshot/Release Note/Model Card。ONNXは実在時のみ）Export
 - **モデルステータス一覧**: モデル別に Status select（Draft=学習直後 / Validated=評価完了 / Candidate=本番候補=0.x自動採番 / Archived。Productionはpromoteのみ）・Version・CER・Experiment・「Productionへ昇格」
 - **昇格前チェック**: リリース判定（CER・文字正解率・完全一致率・Experiment・Evaluation Group・評価データ数・前処理Hash）＋**安全性警告**（Comparable Group違い/比較品質★低/CERなし/評価未実施/Scientific Mode外/評価件数5未満。禁止はしない）＋**本番比較**（CER差・完全一致率差・前処理差・Experiment差・Evaluation差）＋**Release Note必須入力**・Author・Version（空=自動採番。初回1.0.0→マイナー加算）
 - **Release Gate判定**（昇格パネル内・サーバー判定）: PASS（緑）/CONDITIONAL PASS（黄）/FAIL（赤）/NOT EVALUATED（灰）＋ルール毎の Rule/Expected/Actual/Result/Message 表。**FAIL時はOverride理由と承認者の入力欄が表示され、両方揃うまで「昇格を実行」が無効**。詳細 `docs/20_RELEASE_POLICY.md`

@@ -11,9 +11,14 @@
 - リリース履歴: Version / Model / Release Date / Author / Reason / Rollback を追記型で保存
 - Rollback: 過去のリリースVersionのモデルを再びProductionへ（新しい履歴エントリ・rollback=true）
 - Model Card: Productionモデルのカルテ（Markdown）をモデルメタ・実験・評価・履歴から自動生成
-- Deployment Package: Productionモデルの traineddata / 設定JSON(.tess.json) / 前処理Snapshot /
-  Release Note / Model Card をZIPへまとめてExport（ONNX等の推論成果物はTesseractには存在しない
-  ため、モデルディレクトリに実在する場合のみ追加する）
+- Deployment Package: Productionモデルの実体（Tesseract=traineddata、PaddleOCR/TrOCR=
+  ディレクトリartifact一式）/ 設定JSON / 前処理Snapshot / Release Note / Model Card を
+  ZIPへまとめてExport（ONNX等の推論成果物はTesseractのモデルディレクトリに実在する場合のみ追加）
+
+Multi-engine parity（Issue #117）: Model Card/Deployment PackageはTesseract/PaddleOCR/
+TrOCRのいずれのProductionモデルにも対応する（EasyOCRは学習・登録経路自体が存在しないため
+Productionモデルに到達し得ず、対象外＝unsupported）。engine判定は`meta`内の`engine`
+フィールドを正本とし、独自のengine判定体系は作らない（`_resolve_engine()`参照）。
 
 保存先: data/projects/<id>/releases.json
 """
@@ -27,6 +32,7 @@ from threading import Lock
 from typing import Any, Optional
 
 from ..project_paths import ensure_project_directories
+from .engine_registry import create_default_registry, resolve_engine_id
 
 RELEASES_FILENAME = "releases.json"
 _RELEASES_LOCK = Lock()
@@ -380,6 +386,118 @@ def _experiment_for_model(project_id: str, model: str) -> Optional[dict[str, Any
     return target
 
 
+def _resolve_engine(model_name: str, meta: dict[str, Any]) -> str:
+    """モデルのengine識別子を解決する（Issue #117）。
+
+    metaの`engine`フィールド（`.tess.json`/`.ocr.json`/`.trocr.json`いずれも登録時に
+    保存済み）を優先する。欠損時のみ、既存のsidecarファイル名suffix規約
+    （`release_gate.py::_model_engine()`と同じcontract）から導出する。新しい
+    engine判定体系は作らない。
+    """
+    engine = str(meta.get("engine") or "").strip().lower()
+    if engine:
+        return engine
+    if model_name.endswith(".tess.json"):
+        return "tesseract"
+    if model_name.endswith(".ocr.json"):
+        return "paddleocr"
+    if model_name.endswith(".trocr.json"):
+        return "trocr"
+    return ""
+
+
+def _engine_display_name(engine: str) -> str:
+    """Engine Registry（`engine_registry.py`）のdisplay_nameをそのまま使う
+    （Model Card独自の表示名マッピングを新設しない、Issue #117 Implementation Principle #3）。
+    未登録・空文字の場合は生の値（または「不明」）をそのまま返す。
+    """
+    if not engine:
+        return "不明"
+    registry = create_default_registry()
+    resolved = resolve_engine_id(engine, registry=registry)
+    if resolved is None:
+        return engine
+    return registry.get(resolved).display_name
+
+
+def _model_card_summary_line(engine: str, profile: Optional[dict[str, Any]]) -> str:
+    """「用途」行。既存Tesseractの文言は完全に維持し（後方互換）、他engineのみ
+    engineに応じた文言を返す（誤ってTesseract固定文言を表示しない、Issue #117）。
+    """
+    if engine == "tesseract":
+        psm = profile.get("psm") if profile else 7
+        return f"単一行の刻印文字OCR（Tesseract LSTM fine-tune / PSM {psm} 想定）"
+    if engine == "paddleocr":
+        return "単一行OCR（PaddleOCR認識モデル fine-tune）"
+    if engine == "trocr":
+        return "単一行OCR（TrOCR Vision Encoder-Decoder fine-tune）"
+    return "単一行OCR"
+
+
+def _model_card_charset_label(engine: str, meta: dict[str, Any]) -> str:
+    """「対象文字」行。TrOCRは文字集合を限定しない設計のため、「未記録」（データ欠損）
+    ではなく「対象外」（概念自体が無い）と明示する（Issue #117、既存precedent踏襲:
+    trocr_model_registry.pyにcharset相当フィールドが存在しない）。
+    """
+    if engine == "trocr":
+        return "対象外（TrOCRは文字集合を限定しない）"
+    return str(meta.get("charset") or "") or "未記録"
+
+
+def _model_card_base_and_volume_line(engine: str, meta: dict[str, Any]) -> str:
+    """「ベースモデル / 学習量」行。Tesseract（`base_lang`/`max_iterations`）は既存文言を
+    完全維持する。PaddleOCR/TrOCRはそれぞれの既存sidecar contractのフィールド名から導出する
+    （PaddleOCRの`training_params.init_source_type`/`init_source_value`・`epochs`は
+    `ocr_pipeline.py::_register_ocr_model()`、TrOCRの`base_model_ref`/`epochs`は
+    `trocr_model_registry.py::register_trocr_model()`のフィールドをそのまま使う）。
+    """
+    if engine == "paddleocr":
+        training_params = meta.get("training_params") if isinstance(meta.get("training_params"), dict) else {}
+        source_value = str(training_params.get("init_source_value") or "")
+        source_type = str(training_params.get("init_source_type") or "scratch")
+        base_label = f"{source_value}（{source_type}）" if source_value else source_type
+        epochs = training_params.get("epochs")
+        return f"ベースモデル: {base_label} / 学習Epoch数: {epochs if epochs is not None else '未記録'}"
+    if engine == "trocr":
+        base_label = str(meta.get("base_model_ref") or "") or "未記録"
+        epochs = meta.get("epochs")
+        return f"ベースモデル: {base_label} / 学習Epoch数: {epochs if epochs is not None else '未記録'}"
+    # tesseract・未知engineは既存の文言・フィールドをそのまま維持（後方互換）
+    return f"ベースモデル: {meta.get('base_lang') or '未記録'} / 学習Iteration: {meta.get('max_iterations') or '未記録'}"
+
+
+def _model_card_known_limitations_lines(engine: str) -> list[str]:
+    """「既知の制約」箇条書き。Tesseractの既存3行は完全に維持する（後方互換）。
+
+    既存文言はWhitelist/PSM/charset case-sensitivity（k/l/t筆記体）というTesseract
+    固有の概念を前提にしていたため、他engineでは誤った制約説明になっていた
+    （Issue #117。PaddleOCRは実行時whitelist不可・PSM概念自体が無い
+    `docs/10_KNOWN_LIMITATIONS.md`、TrOCRは文字集合を限定しない設計）。
+    """
+    if engine == "tesseract":
+        return [
+            "- 学習・評価条件（前処理・Whitelist・PSM）と異なる入力では性能が保証されない",
+            "- 評価データセット外の書体・照明条件は未検証",
+            "- 大小文字はcase-sensitive（k/l/t等の筆記体小文字を含むcharsetのみ認識）",
+        ]
+    if engine == "paddleocr":
+        return [
+            "- 学習・評価条件（前処理・対象文字）と異なる入力では性能が保証されない",
+            "- 評価データセット外の書体・照明条件は未検証",
+            "- 対象文字は学習時charsetに含まれる範囲に限られる（推論時whitelistでの絞り込みは不可）",
+        ]
+    if engine == "trocr":
+        return [
+            "- 学習・評価条件（前処理）と異なる入力では性能が保証されない",
+            "- 評価データセット外の書体・照明条件は未検証",
+            "- 文字集合を限定しない設計のため、学習データに含まれない言語・記号体系は未検証",
+        ]
+    return [
+        "- 学習・評価条件（前処理）と異なる入力では性能が保証されない",
+        "- 評価データセット外の書体・照明条件は未検証",
+    ]
+
+
 def build_model_card(project_id: Optional[str], model: Optional[str] = None) -> dict[str, Any]:
     """Productionモデル（またはモデル指定）のModel Card（Markdown）を自動生成する。"""
     paths = ensure_project_directories(project_id)
@@ -389,6 +507,7 @@ def build_model_card(project_id: Optional[str], model: Optional[str] = None) -> 
         raise FileNotFoundError("Productionモデルがありません（先にProductionへ昇格してください）")
     meta = _load_model_meta(paths, model_name)
     record = registry["models"].get(model_name) or {}
+    engine = _resolve_engine(model_name, meta)
     experiment = _experiment_for_model(paths.project_id, model_name)
     evaluation = (experiment or {}).get("evaluation") if isinstance((experiment or {}).get("evaluation"), dict) else None
     profile = (experiment or {}).get("evaluation_profile") if isinstance((experiment or {}).get("evaluation_profile"), dict) else None
@@ -408,10 +527,11 @@ def build_model_card(project_id: Optional[str], model: Optional[str] = None) -> 
         "",
         "## 概要",
         f"- プロジェクト: {paths.project_id}",
+        f"- エンジン: {_engine_display_name(engine)}",
         f"- Version: v{record.get('version') or '-'}（Status: {record.get('status') or 'Draft'}）",
-        f"- 用途: 単一行の刻印文字OCR（Tesseract LSTM fine-tune / PSM {profile.get('psm') if profile else 7} 想定）",
-        f"- 対象文字: {meta.get('charset') or '未記録'}",
-        f"- ベースモデル: {meta.get('base_lang') or '未記録'} / 学習Iteration: {meta.get('max_iterations') or '未記録'}",
+        f"- 用途: {_model_card_summary_line(engine, profile)}",
+        f"- 対象文字: {_model_card_charset_label(engine, meta)}",
+        f"- {_model_card_base_and_volume_line(engine, meta)}",
         "",
         "## 評価条件",
         f"- Experiment: {(experiment or {}).get('experiment_id') or '未記録'} / Comparable Group: {(experiment or {}).get('comparable_group') or 'なし'}",
@@ -425,9 +545,7 @@ def build_model_card(project_id: Optional[str], model: Optional[str] = None) -> 
         f"- 完全一致率: {(evaluation or {}).get('accuracy_percent') if evaluation else '未記録'}%" if evaluation else "- 完全一致率: 未記録",
         "",
         "## 既知の制約",
-        "- 学習・評価条件（前処理・Whitelist・PSM）と異なる入力では性能が保証されない",
-        "- 評価データセット外の書体・照明条件は未検証",
-        "- 大小文字はcase-sensitive（k/l/t等の筆記体小文字を含むcharsetのみ認識）",
+        *_model_card_known_limitations_lines(engine),
         "",
         "## 更新履歴",
         "| Version | 日時 | Author | 内容 |",
@@ -442,11 +560,42 @@ def build_model_card(project_id: Optional[str], model: Optional[str] = None) -> 
 # ---------- Deployment Package ----------
 
 
+def _add_directory_artifact_to_zip(zf: zipfile.ZipFile, engine: str, meta: dict[str, Any]) -> None:
+    """directory artifactを持つengine（PaddleOCR/TrOCR）のモデル実体をZIPへ追加する
+    （Issue #117）。Tesseractの単一ファイル（traineddata）とは異なり、成果物ディレクトリ
+    配下の全ファイルを相対パスを保ったまま`model/`以下へ書き込む（元ディレクトリは変更しない、
+    読込のみ）。
+
+    - PaddleOCR: `inference_dir`（Export後の推論用ディレクトリ）を優先し、無ければ`model_dir`
+      （既存`OCRMetadataAdapter._build_canonical()`と同じ優先順位、新しい解決層は追加しない）
+    - TrOCR: `model_dir`（Hugging Face `save_pretrained()`の出力ディレクトリそのもの。
+      train/infer分離が無いためこれ1つのみ、`trocr_model_registry.py`参照）
+    - 上記以外（未知engine）は何も追加しない（既存の「該当フィールドが無ければ黙って
+      artifactなし」という既存挙動を維持する。曖昧なフォールバック解決はしない）
+    """
+    if engine == "paddleocr":
+        artifact_dir = str(meta.get("inference_dir") or meta.get("model_dir") or "")
+    elif engine == "trocr":
+        artifact_dir = str(meta.get("model_dir") or "")
+    else:
+        artifact_dir = ""
+    if not artifact_dir or not Path(artifact_dir).is_dir():
+        return
+    base = Path(artifact_dir)
+    for file_path in sorted(base.rglob("*")):
+        if file_path.is_file():
+            rel = file_path.relative_to(base).as_posix()
+            zf.write(file_path, f"model/{rel}")
+
+
 def build_deployment_package(project_id: Optional[str]) -> tuple[str, bytes]:
     """Productionモデルの配布パッケージ（ZIP）を生成する。
 
-    含むもの: traineddata（モデル実体）/ 設定JSON（.tess.json）/ 前処理Snapshot /
-    Release Note / Model Card。ONNX等の推論成果物はモデルディレクトリに実在する場合のみ追加。
+    含むもの: モデル実体（Tesseractはtraineddata単一ファイル、PaddleOCR/TrOCRは
+    ディレクトリartifact一式。Issue #117でTesseract以外のengineもモデル実体を
+    含められるよう対応した）/ 設定JSON（モデルメタそのもの。既にengine identityを含む）/
+    前処理Snapshot / Release Note / Model Card。ONNX等の推論成果物はTesseractの
+    モデルディレクトリに実在する場合のみ追加（既存挙動）。
     戻り値: (ファイル名, ZIPバイト列)
     """
     paths = ensure_project_directories(project_id)
@@ -457,20 +606,25 @@ def build_deployment_package(project_id: Optional[str]) -> tuple[str, bytes]:
     meta = _load_model_meta(paths, model_name)
     record = registry["models"].get(model_name) or {}
     version = str(record.get("version") or "0")
+    engine = _resolve_engine(model_name, meta)
 
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        # 設定JSON（モデルメタ）
+        # 設定JSON（モデルメタ。engine identityを含む生payloadをそのまま書き出す）
         zf.writestr("model_config.json", json.dumps(meta, ensure_ascii=False, indent=2))
-        # モデル実体（traineddata）
-        traineddata = str(meta.get("traineddata_path") or "")
-        if traineddata and Path(traineddata).is_file():
-            zf.write(traineddata, f"model/{Path(traineddata).name}")
-        # ONNX等の追加成果物（実在する場合のみ。Tesseractは通常なし）
-        model_dir = str(meta.get("model_dir") or meta.get("tessdata_dir") or "")
-        if model_dir and Path(model_dir).is_dir():
-            for onnx in Path(model_dir).glob("*.onnx"):
-                zf.write(onnx, f"model/{onnx.name}")
+        # モデル実体
+        if engine == "tesseract":
+            traineddata = str(meta.get("traineddata_path") or "")
+            if traineddata and Path(traineddata).is_file():
+                zf.write(traineddata, f"model/{Path(traineddata).name}")
+            # ONNX等の追加成果物（実在する場合のみ。Tesseractは通常なし）
+            model_dir = str(meta.get("model_dir") or meta.get("tessdata_dir") or "")
+            if model_dir and Path(model_dir).is_dir():
+                for onnx in Path(model_dir).glob("*.onnx"):
+                    zf.write(onnx, f"model/{onnx.name}")
+        else:
+            # PaddleOCR/TrOCR: directory artifact一式を追加（Issue #117、_add_directory_artifact_to_zip参照）
+            _add_directory_artifact_to_zip(zf, engine, meta)
         # 前処理Snapshot（学習時前処理。モデルメタの確定保存値）
         if isinstance(meta.get("training_preprocess"), dict):
             zf.writestr(

@@ -6,6 +6,8 @@
 - Release History（新しい順・Author/Reason/Rollback）
 - Model Card（Markdown生成・性能/評価条件/更新履歴を含む）
 - Deployment Package（ZIPに traineddata/設定JSON/前処理Snapshot/Release Note/Model Card）
+- Model Card / Deployment Package Multi-engine Parity（Issue #117。Tesseract/PaddleOCR/
+  TrOCRのengine identity・directory artifact・EasyOCR unsupported確認）
 """
 
 import io
@@ -51,6 +53,75 @@ def _make_model(project_id: str, name: str) -> None:
         ),
         encoding="utf-8",
     )
+
+
+def _make_paddleocr_model(project_id: str, name: str, tmp_path) -> str:
+    """`.ocr.json`（PaddleOCR）+ directory artifactを作成する。フィールド形状は
+    `ocr_pipeline.py::_register_ocr_model()`の実payloadに合わせる（Issue #117）。
+    """
+    paths = ensure_project_directories(project_id)
+    inference_dir = tmp_path / f"{name}_infer"
+    inference_dir.mkdir(parents=True, exist_ok=True)
+    (inference_dir / "inference.pdmodel").write_bytes(b"dummy-pdmodel")
+    (inference_dir / "inference.pdiparams").write_bytes(b"dummy-pdiparams")
+    meta_name = f"ocr_paddleocr_{name}.ocr.json"
+    (paths.models / meta_name).write_text(
+        json.dumps(
+            {
+                "name": meta_name,
+                "engine": "paddleocr",
+                "model_type": "ocr",
+                "charset": "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+                "created_at": "2026-08-01T00:00:00",
+                "model_dir": str(inference_dir),
+                "inference_dir": str(inference_dir),
+                "checkpoint_dir": str(tmp_path / f"{name}_ckpt"),
+                "training_params": {
+                    "epochs": 50,
+                    "batch_size": 8,
+                    "learning_rate": 0.001,
+                    "init_source_type": "pretrained",
+                    "init_source_value": "PP-OCRv4",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    return meta_name
+
+
+def _make_trocr_model(project_id: str, name: str, tmp_path) -> str:
+    """`.trocr.json` + directory artifactを作成する。フィールド形状は
+    `trocr_model_registry.py::register_trocr_model()`の実payloadに合わせる（Issue #117）。
+    """
+    paths = ensure_project_directories(project_id)
+    model_dir = tmp_path / f"{name}_trocr_dir"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "config.json").write_text("{}", encoding="utf-8")
+    (model_dir / "model.safetensors").write_bytes(b"dummy-weights")
+    meta_name = f"trocr_{name}.trocr.json"
+    (paths.models / meta_name).write_text(
+        json.dumps(
+            {
+                "name": meta_name,
+                "engine": "trocr",
+                "model_type": "ocr",
+                "model_dir": str(model_dir),
+                "base_model_ref": "microsoft/trocr-base-handwritten",
+                "project_id": project_id,
+                "job_id": f"job-{name}",
+                "dataset_root": "",
+                "dataset_id": "",
+                "epochs": 5,
+                "batch_size": 4,
+                "learning_rate": 5e-5,
+                "final_loss": 0.3,
+                "created_at": "2026-08-01T00:00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    return meta_name
 
 
 def test_status_transitions_and_candidate_version(temp_projects):
@@ -197,3 +268,107 @@ def test_next_production_version():
     assert next_production_version("1.0.0") == "1.1.0"
     assert next_production_version("2.4.0") == "2.5.0"
     assert next_production_version("v1.2.0") == "1.3.0"
+
+
+# ---------------------------------------------------------------------------
+# Model Card / Deployment Package Multi-engine Parity（Issue #117）
+# ---------------------------------------------------------------------------
+
+
+def test_model_card_paddleocr_engine_identity_and_fields(temp_projects, tmp_path):
+    pid = "p_card_paddle"
+    model_name = _make_paddleocr_model(pid, "v1", tmp_path)
+    promote_model(pid, model_name, note="PaddleOCR初回リリース")
+    card = build_model_card(pid)
+    md = card["markdown"]
+    assert "エンジン: PaddleOCR" in md
+    assert "対象文字: ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" in md
+    assert "ベースモデル: PP-OCRv4（pretrained） / 学習Epoch数: 50" in md
+    # 誤ってTesseract固有の文言（LSTM fine-tune・PSM）を表示しない
+    assert "Tesseract" not in md
+    assert "PSM" not in md
+
+
+def test_model_card_trocr_engine_identity_and_fields(temp_projects, tmp_path):
+    pid = "p_card_trocr"
+    model_name = _make_trocr_model(pid, "v1", tmp_path)
+    promote_model(pid, model_name, note="TrOCR初回リリース")
+    card = build_model_card(pid)
+    md = card["markdown"]
+    assert "エンジン: TrOCR" in md
+    # TrOCRは文字集合を限定しない設計のため「未記録」ではなく「対象外」と明示する
+    assert "対象文字: 対象外（TrOCRは文字集合を限定しない）" in md
+    assert "ベースモデル: microsoft/trocr-base-handwritten / 学習Epoch数: 5" in md
+    assert "Tesseract" not in md
+    assert "PSM" not in md
+
+
+def test_model_card_tesseract_wording_unchanged(temp_projects):
+    """既存Tesseractの「用途」文言（LSTM fine-tune・PSM）は完全に維持する（後方互換）。"""
+    pid = "p_card_tess_regress"
+    _make_model(pid, "tess_regress")
+    promote_model(pid, "tess_regress.tess.json", note="regression")
+    card = build_model_card(pid)
+    assert "用途: 単一行の刻印文字OCR（Tesseract LSTM fine-tune / PSM 7 想定）" in card["markdown"]
+    assert "エンジン: Tesseract" in card["markdown"]
+
+
+def test_deployment_package_paddleocr_includes_directory_artifact(temp_projects, tmp_path):
+    pid = "p_zip_paddle"
+    model_name = _make_paddleocr_model(pid, "v1", tmp_path)
+    promote_model(pid, model_name, note="deploy")
+    filename, payload = build_deployment_package(pid)
+    with zipfile.ZipFile(io.BytesIO(payload)) as zf:
+        names = set(zf.namelist())
+        assert "model_config.json" in names
+        assert "model/inference.pdmodel" in names
+        assert "model/inference.pdiparams" in names
+        assert zf.read("model/inference.pdmodel") == b"dummy-pdmodel"
+        config = json.loads(zf.read("model_config.json"))
+        assert config["engine"] == "paddleocr"
+
+
+def test_deployment_package_trocr_includes_directory_artifact(temp_projects, tmp_path):
+    pid = "p_zip_trocr"
+    model_name = _make_trocr_model(pid, "v1", tmp_path)
+    promote_model(pid, model_name, note="deploy")
+    filename, payload = build_deployment_package(pid)
+    with zipfile.ZipFile(io.BytesIO(payload)) as zf:
+        names = set(zf.namelist())
+        assert "model/config.json" in names
+        assert "model/model.safetensors" in names
+        assert zf.read("model/model.safetensors") == b"dummy-weights"
+        config = json.loads(zf.read("model_config.json"))
+        assert config["engine"] == "trocr"
+
+
+def test_deployment_package_missing_artifact_directory_does_not_crash(temp_projects):
+    """artifact directoryが存在しない（削除済み等）場合もZIP生成自体は成功する
+    （model/配下が単に空になるだけで、既存のfail-safe方針を維持する）。"""
+    pid = "p_zip_missing_dir"
+    paths = ensure_project_directories(pid)
+    meta_name = "trocr_missing.trocr.json"
+    (paths.models / meta_name).write_text(
+        json.dumps({"engine": "trocr", "model_dir": "/no/such/directory", "created_at": "2026-08-01T00:00:00"}),
+        encoding="utf-8",
+    )
+    promote_model(pid, meta_name, note="deploy")
+    filename, payload = build_deployment_package(pid)
+    with zipfile.ZipFile(io.BytesIO(payload)) as zf:
+        names = zf.namelist()
+        assert "model_config.json" in names
+        assert not any(n.startswith("model/") for n in names)
+
+
+def test_easyocr_models_are_unsupported_not_listed_in_releases(temp_projects):
+    """EasyOCRは学習・登録経路自体が存在しないため`.easyocr.json`という形式は本来
+    作られない。仮にそのようなファイルが存在しても`list_releases()`はTesseract/
+    PaddleOCR/TrOCRの既知3形式のみをglobするため対象外になる（unsupportedの契約を
+    ドキュメントだけでなくテストでも固定する）。"""
+    pid = "p_easyocr_unsupported"
+    paths = ensure_project_directories(pid)
+    (paths.models / "easyocr_model.easyocr.json").write_text(
+        json.dumps({"engine": "easyocr", "created_at": "2026-08-01T00:00:00"}), encoding="utf-8"
+    )
+    releases = list_releases(pid)
+    assert "easyocr_model.easyocr.json" not in releases["statuses"]
