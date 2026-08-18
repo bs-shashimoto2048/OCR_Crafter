@@ -2,7 +2,7 @@
 
 Related: Architecture Investigation [#123](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/123) / Investigation [#115](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/115)（Next Development Roadmap、Theme 2） / Bug [#8](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/8) / Bug [#112](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/112)（training_jobs参照によるtest DB isolation問題）
 
-**状態**: Implemented, PR review pending（Architecture / Documentation onlyのInvestigation。Production job lifecycleは無変更）
+**状態**: Completed / Closed（Architecture / Documentation onlyのInvestigation。Production job lifecycleは無変更）。PR [#124](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/124)、Squash Commit `9308321`でマージ済み。
 
 ## 目的
 
