@@ -838,6 +838,26 @@ test("設定パネル: EasyOCRは既存の学習対象外通知をそのまま�
   assert.ok(!html.includes("初期重み"));
 });
 
+test("エンジン設定サマリー: TrOCRはBase Modelを表示し、PaddleOCR用の「初期化」文言を誤表示しない（Issue #98）", () => {
+  const paddleHtml = render({ ocrEngine: "paddleocr", ocrInitSourceType: "scratch" }).replaceAll("<!-- -->", "");
+  assert.ok(paddleHtml.includes("初期化: scratch"));
+
+  const trocrManualHtml = render({
+    ocrEngine: "trocr",
+    ocrTrocrModelSource: "manual",
+    ocrTrocrModelRef: "microsoft/trocr-base-printed",
+  }).replaceAll("<!-- -->", "");
+  assert.ok(trocrManualHtml.includes("Base Model: microsoft/trocr-base-printed"));
+  assert.ok(!trocrManualHtml.includes("初期化: scratch"), "TrOCRへPaddleOCR用の初期化サマリーが誤表示されている");
+
+  const trocrRegisteredHtml = render({
+    ocrEngine: "trocr",
+    ocrTrocrModelSource: "registered",
+    ocrTrocrSelectedModel: "",
+  }).replaceAll("<!-- -->", "");
+  assert.ok(trocrRegisteredHtml.includes("Base Model: 未選択"));
+});
+
 test("設定パネル: TrOCRは専用パネル（Base Model指定方法・モデル参照・学習率）を表示する（Issue #98）", () => {
   const html = render({ ocrEngine: "trocr", initialSettingsTab: "engine" }).replaceAll("<!-- -->", "");
   assert.ok(html.includes("Base Model"));

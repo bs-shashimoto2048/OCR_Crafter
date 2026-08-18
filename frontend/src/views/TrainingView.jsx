@@ -542,9 +542,13 @@ export default function TrainingView({
   const engineSummaryLabel =
     engineTrainingPanel === "tesseract"
       ? "eng.traineddata / PSM 7"
-      : !isEngineTrainingSupported(ocrEngine)
-        ? "学習対象外（推論専用）"
-        : `初期化: ${ocrInitSourceType === "scratch" ? "scratch" : "既存OCRモデル"} / Batch ${batchSize || "-"}`;
+      : engineTrainingPanel === "trocr"
+        ? `Base Model: ${
+            ocrTrocrModelSource === "registered" ? ocrTrocrSelectedModel || "未選択" : ocrTrocrModelRef || "未入力"
+          }`
+        : !isEngineTrainingSupported(ocrEngine)
+          ? "学習対象外（推論専用）"
+          : `初期化: ${ocrInitSourceType === "scratch" ? "scratch" : "既存OCRモデル"} / Batch ${batchSize || "-"}`;
   const ocrNextAction = ocrDatasetReady ? "train" : "dataset";
   const osFamily = String(systemCheck?.os_family || "").trim().toLowerCase();
   const recommendedProfile = String(systemCheck?.recommended_profile || "").trim();
