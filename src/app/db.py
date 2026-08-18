@@ -343,6 +343,25 @@ def fetch_active_training_job(project_id: str, training_family: Optional[str] = 
     return fetch_training_job(str(row[0]))
 
 
+def list_active_training_jobs() -> list[dict[str, Any]]:
+    """project横断でqueued/runningのtraining jobを全件返す（Issue #125: 起動時reconciliation用）。
+
+    `fetch_active_training_job()`はproject単位だが、サーバ起動時のstale job検知は
+    全projectを対象にする必要があるためこちらを新設する。id昇順で返し、
+    reconciliation結果を決定的にする（テストの再現性のため）。
+    """
+    placeholders = ",".join("?" for _ in ACTIVE_TRAINING_STATUSES)
+    query = f"SELECT id FROM training_jobs WHERE status IN ({placeholders}) ORDER BY id"
+    with get_conn() as conn:
+        rows = conn.execute(query, ACTIVE_TRAINING_STATUSES).fetchall()
+    jobs: list[dict[str, Any]] = []
+    for row in rows:
+        job = fetch_training_job(str(row[0]))
+        if job:
+            jobs.append(job)
+    return jobs
+
+
 def delete_training_jobs_by_project(project_id: str) -> int:
     with get_conn() as conn:
         cur = conn.execute("DELETE FROM training_jobs WHERE project_id = ?", (project_id,))
