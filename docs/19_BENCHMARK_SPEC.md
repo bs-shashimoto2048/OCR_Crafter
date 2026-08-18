@@ -18,6 +18,7 @@
 | `paddleocr_official` | PaddleOCR公式認識モデル（`OFFICIAL_PADDLEOCR_REC_MODELS`） | なし（PSM/Whitelistの概念なし） |
 | `paddleocr_custom` | **自作PaddleOCRモデル**（モデル管理登録済み・推論用エクスポート済みの .ocr.json）。未エクスポートは明確なエラー（推測フォールバックなし） | なし |
 | `easyocr` | **未導入・利用不可**（カタログへ明示・実行対象外） | - |
+| `trocr` | **Hugging Face TrOCR互換モデル**（Issue #96登録済みTrOCR artifact・Hugging Face Hub ID・ローカルパスのいずれか。Issue #102で追加） | device（auto/cpu/cuda） / local_files_only |
 
 エンジンは `ENGINE_BUILDERS`（種別→Runner生成関数の辞書）による**Adapter構造**で、新しいエンジンはbuilder関数の登録のみで追加できる。
 
@@ -109,5 +110,5 @@ score = w_acc × 文字正解率(1−CER) + w_speed × (最速MeanTime ÷ 自Mea
 
 ## 10. テスト
 
-- バックエンド: `tests/test_benchmark.py`（BM採番・Profile Hash・未実装エンジン拒否・実行結果項目・Leaderboardソート・用途別/バランス式・重み設定・CSV3種・Jobハンドラ統合）
-- フロント: `frontend/tests/benchmarkLogic.test.mjs`（フィルタ5種・ページング・Profile警告）、`benchmarkView.render.test.mjs`
+- バックエンド: `tests/test_benchmark.py`（BM採番・Profile Hash・未実装エンジン拒否・実行結果項目・Leaderboardソート・用途別/バランス式・重み設定・CSV3種・Jobハンドラ統合）、`tests/test_benchmark_trocr.py`（Issue #102。TrOCR catalog/builder登録・normalize_engine_spec・load-once/predict-many・device/local_files_only変換・confidence常時None・失敗伝播・既存エンジンとの混在実行）
+- フロント: `frontend/tests/benchmarkLogic.test.mjs`（フィルタ5種・ページング・Profile警告）、`benchmarkView.render.test.mjs`、`benchmarkTrocrStateIsolation.test.mjs`（Issue #102。Benchmark画面のTrOCR state分離）

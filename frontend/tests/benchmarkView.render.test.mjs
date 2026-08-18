@@ -32,6 +32,7 @@ const ENGINES = [
   { key: "paddleocr_official", label: "PaddleOCR公式", implemented: true, available: false, availability_note: "PaddleOCRが未インストールです", description: "公式モデル" },
   { key: "paddleocr_custom", label: "PaddleOCR（自作モデル）", implemented: true, available: true, availability_note: "推論用エクスポート済みの自作モデルが必要です", description: "自作モデル" },
   { key: "easyocr", label: "EasyOCR", implemented: false, available: false, availability_note: "未導入・利用不可", description: "未導入・利用不可" },
+  { key: "trocr", label: "TrOCR", implemented: true, available: true, availability_note: "", description: "Hugging Face TrOCR互換モデル" },
 ];
 
 const ITEMS = [
@@ -75,6 +76,17 @@ test("実行フォーム: 対象エンジン一覧と未導入エンジンの「
   assert.ok(html.includes("PaddleOCRが未インストールです"), "環境未導入の理由表示がない");
   assert.ok(html.includes("Benchmarkを実行（Job作成）"));
   assert.ok(html.includes("ウォームアップ回数"));
+});
+
+test("実行フォーム: TrOCRが選択可能なエンジンとして表示され、未導入バッジが付かない（Issue #102）", () => {
+  const html = render();
+  assert.ok(html.includes("TrOCR"), "TrOCRエンジンが選択肢へ表示されない");
+  const descIndex = html.indexOf("Hugging Face TrOCR互換モデル");
+  assert.ok(descIndex >= 0, "TrOCRの説明文が表示されない");
+  // TrOCRは配列の最後尾（ENGINES定義順）のため、説明文からその行の終わりまでの
+  // 範囲だけを見れば直前のEasyOCR行（未導入・利用不可）を誤って含まない
+  const rowSlice = html.slice(descIndex, descIndex + 200);
+  assert.ok(!rowSlice.includes("未導入・利用不可"), "利用可能なTrOCRへ未導入バッジが誤表示されている");
 });
 
 test("前処理選択と自作モデルAdapterの表示", () => {

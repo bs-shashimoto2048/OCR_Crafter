@@ -4772,6 +4772,7 @@ export default function App() {
         balanceWeights={benchmarks.balance_weights}
         engines={benchmarkEngines}
         ocrModels={ocrModels}
+        trocrTrainedModels={trocrTrainedModels}
         loading={benchmarksLoading}
         onRefresh={() => loadBenchmarks(projectId)}
         onRun={runBenchmark}
