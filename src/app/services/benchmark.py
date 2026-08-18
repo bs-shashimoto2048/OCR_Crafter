@@ -7,9 +7,9 @@
 設計方針:
 - CER・混同集計は `ocr_evaluation.py` の共通ロジック（levenshtein_ops /
   _normalize_compare）を再利用し、評価計算を重複実装しない
-- 対応エンジンは「Tesseract登録モデル / Tesseract標準(eng) / PaddleOCR公式」のみ。
-  未実装エンジン（EasyOCR等）はカタログで「未導入・利用不可」を明示し実行対象外。
-  クラウドOCRは対象外（カタログへ含めない）
+- 対応エンジンは「Tesseract登録モデル / Tesseract標準(eng) / PaddleOCR公式 /
+  PaddleOCR自作 / TrOCR」（Issue #102でTrOCRを追加）。未実装エンジン（EasyOCR等）は
+  カタログで「未導入・利用不可」を明示し実行対象外。クラウドOCRは対象外（カタログへ含めない）
 - Benchmark ID: BM-0001形式・プロジェクト内一意・再利用しない
   （保存先 data/projects/<id>/benchmarks.json）
 - Profile Hash: 比較条件（データセットID/内容ハッシュ/画像数/ラベル数/正規化/
@@ -81,6 +81,16 @@ ENGINE_CATALOG: list[dict[str, Any]] = [
         "requires_model": False,
         "profile_keys": [],
         "description": "未導入・利用不可（本環境にBenchmark用のEasyOCR実行経路が実装されていません）",
+    },
+    {
+        "key": "trocr",
+        "label": "TrOCR",
+        "implemented": True,
+        "requires_model": True,
+        # device/local_files_onlyはTesseractのPSM/Whitelistと同じ「エンジン固有条件」
+        # として扱う（Profile Hashにも含まれる＝条件が違えば別Benchmarkとして区別される）
+        "profile_keys": ["device", "local_files_only"],
+        "description": "Hugging Face TrOCR互換モデル（登録済みTrOCR artifact・Hugging Face Hub ID・ローカルパスのいずれか）",
     },
 ]
 
@@ -175,6 +185,10 @@ def normalize_engine_spec(spec: dict[str, Any]) -> dict[str, Any]:
         # None=既定whitelist / 空文字=whitelistなし を区別して保存する
         whitelist = spec.get("whitelist")
         normalized["whitelist"] = None if whitelist is None else str(whitelist)
+    if "device" in catalog["profile_keys"]:
+        normalized["device"] = str(spec.get("device") or "auto").strip().lower()
+    if "local_files_only" in catalog["profile_keys"]:
+        normalized["local_files_only"] = bool(spec.get("local_files_only") or False)
     return normalized
 
 
@@ -314,6 +328,44 @@ def _build_paddleocr_custom_runner(project_id: Optional[str], spec: dict[str, An
     return {"label": f"PaddleOCR自作（{model_name}）", "recognize": recognize}
 
 
+def _build_trocr_runner(project_id: Optional[str], spec: dict[str, Any]) -> dict[str, Any]:
+    """TrOCR Adapter（Investigation #100 / Issue #102）。
+
+    model_refはHugging Face Hub ID・ローカルディレクトリパス・Issue #96で登録済みの
+    TrOCR artifact（`.trocr.json`の`model_dir`）のいずれも受け付ける。既存
+    `TrOCREngine.load()`の契約（save_pretrained()/from_pretrained()の対称性）を
+    そのまま利用し、新しいModel Resolverは追加しない（`model_registry.py`の
+    共有Resolverは使わない。Issue #96/#98と同じ既定方針）。
+
+    `TrOCREngine.load()`は他Benchmark builderと同様にcold start（1回だけ）で呼ばれ、
+    以降は同一インスタンスの`predict_file()`をsampleごとに呼ぶ（load-once/predict-many、
+    既存`TrOCREngine`の確立済み契約をそのまま再利用）。
+    """
+    from .trocr_engine import TrOCREngine
+
+    model_ref = str(spec.get("model") or "").strip()
+    if not model_ref:
+        raise ValueError(
+            "TrOCR には model（Hugging Face model ID・ローカルパス・登録済みTrOCR artifactのmodel_dir）の指定が必要です"
+        )
+
+    # "auto"はTrOCREngine.load()のdevice=Noneへ変換する（Issue #94の_run_trocr_training_job()と
+    # 同じ変換規約。"auto"という文字列自体はtrocr_engine.py::_resolve_device()が理解しないため）
+    raw_device = str(spec.get("device") or "auto").strip().lower()
+    device = None if raw_device in {"", "auto"} else raw_device
+    local_files_only = bool(spec.get("local_files_only") or False)
+
+    engine = TrOCREngine.load(model_ref, device=device, local_files_only=local_files_only)
+
+    def recognize(image_path: str) -> tuple[str, Optional[float]]:
+        # TrOCRはconfidenceを提供しない（既存方針: 0.0/1.0等での代用・独自算出をしない）。
+        # Benchmark自体もconfidenceを永続化・利用しないため実害はない（Investigation #100 §7）
+        result = engine.predict_file(image_path)
+        return result.text, None
+
+    return {"label": f"TrOCR（{model_ref}）", "recognize": recognize}
+
+
 # エンジン種別→Runner生成関数（テストではここを差し替えて実OCRなしで検証する。
 # 新しいエンジンはこの辞書へbuilderを登録するAdapter構造で追加する）
 ENGINE_BUILDERS: dict[str, Callable[[Optional[str], dict[str, Any]], dict[str, Any]]] = {
@@ -321,6 +373,7 @@ ENGINE_BUILDERS: dict[str, Callable[[Optional[str], dict[str, Any]], dict[str, A
     "tesseract_base": _build_tesseract_runner,
     "paddleocr_official": _build_paddleocr_runner,
     "paddleocr_custom": _build_paddleocr_custom_runner,
+    "trocr": _build_trocr_runner,
 }
 
 
@@ -351,6 +404,15 @@ def engine_catalog_with_availability() -> list[dict[str, Any]]:
             except Exception:  # noqa: BLE001
                 item["available"] = False
                 item["availability_note"] = "PaddleOCRが未インストールです"
+        elif entry["key"] == "trocr":
+            try:
+                import transformers  # type: ignore # noqa: F401
+
+                item["available"] = True
+                item["availability_note"] = ""
+            except Exception:  # noqa: BLE001
+                item["available"] = False
+                item["availability_note"] = "transformersが未インストールです（pip install transformers）"
         items.append(item)
     return items
 

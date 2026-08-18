@@ -15,6 +15,7 @@ import {
   pageCases,
   profileMismatchWarning,
 } from "../lib/benchmarkLogic";
+import { resolveTrocrTrainedModelRef, trocrTrainedModelValidationError } from "../lib/trocrTrainedModels";
 
 const SCROLL_AREA = "dark-scroll [overscroll-behavior:contain] [scrollbar-gutter:stable]";
 const PAGE_SIZE = 50;
@@ -30,6 +31,7 @@ export default function BenchmarkView({
   balanceWeights = { accuracy: 0.7, speed: 0.2, stability: 0.1 },
   engines = [],
   ocrModels = [],
+  trocrTrainedModels = [],
   loading = false,
   onRefresh,
   onRun,
@@ -43,9 +45,17 @@ export default function BenchmarkView({
     tesseract_base: true,
     paddleocr_official: false,
     paddleocr_custom: false,
+    trocr: false,
   });
   const [selectedModel, setSelectedModel] = useState("");
   const [selectedPaddleModel, setSelectedPaddleModel] = useState("");
+  // TrOCR Benchmark設定（Issue #102）。学習画面・推論テスト画面・モデル評価画面が
+  // それぞれ持つ既存のTrOCR専用stateとは意図的に分離する（State Isolation要件）
+  const [benchTrocrModelSource, setBenchTrocrModelSource] = useState("manual");
+  const [benchTrocrSelectedModel, setBenchTrocrSelectedModel] = useState("");
+  const [benchTrocrModelRef, setBenchTrocrModelRef] = useState("");
+  const [benchTrocrDevice, setBenchTrocrDevice] = useState("auto");
+  const [benchTrocrLocalFilesOnly, setBenchTrocrLocalFilesOnly] = useState(false);
   // 前処理（全エンジン共通・開始時に一度だけ適用。実効HashがProfile Hashへ含まれる）
   const [preprocessMode, setPreprocessMode] = useState("none");
   const [manualPre, setManualPre] = useState({ grayscale: true, binarize: false, binarize_method: "otsu", threshold: 127 });
@@ -105,6 +115,22 @@ export default function BenchmarkView({
     }
     if (selectedEngines.paddleocr_custom && selectedPaddleModel) {
       specs.push({ engine: "paddleocr_custom", model: selectedPaddleModel });
+    }
+    if (selectedEngines.trocr) {
+      const trocrModelRef =
+        benchTrocrModelSource === "registered"
+          ? resolveTrocrTrainedModelRef(trocrTrainedModels, benchTrocrSelectedModel)
+          : String(benchTrocrModelRef || "").trim();
+      if (trocrModelRef) {
+        specs.push({
+          engine: "trocr",
+          model: trocrModelRef,
+          // Backend契約（TrOCREngine.load）はauto/cpu/cudaのみを理解する（"gpu"は
+          // 他画面と共通のUI表示用語彙。ここでのみ変換し、共通デバイスUI自体は変更しない）
+          device: benchTrocrDevice === "gpu" ? "cuda" : benchTrocrDevice === "cpu" ? "cpu" : "auto",
+          local_files_only: Boolean(benchTrocrLocalFilesOnly),
+        });
+      }
     }
     let preprocess = null;
     if (preprocessMode === "manual") {
@@ -268,6 +294,83 @@ export default function BenchmarkView({
                         </option>
                       ))}
                     </select>
+                  ) : null}
+                  {engine.key === "trocr" && selectedEngines.trocr ? (
+                    <div className="mt-1 space-y-1.5 rounded-lg border border-border/70 bg-card/40 p-1.5">
+                      <div className="flex gap-3 text-[11px] text-text">
+                        <label className="inline-flex items-center gap-1">
+                          <input
+                            type="radio"
+                            name="bench-trocr-model-source"
+                            checked={benchTrocrModelSource === "registered"}
+                            onChange={() => setBenchTrocrModelSource("registered")}
+                          />
+                          登録済みモデルから選択
+                        </label>
+                        <label className="inline-flex items-center gap-1">
+                          <input
+                            type="radio"
+                            name="bench-trocr-model-source"
+                            checked={benchTrocrModelSource !== "registered"}
+                            onChange={() => setBenchTrocrModelSource("manual")}
+                          />
+                          手動入力
+                        </label>
+                      </div>
+                      {benchTrocrModelSource === "registered" ? (
+                        trocrTrainedModels.length === 0 ? (
+                          <p className="text-[10px] text-amber-200">
+                            登録済みのTrOCRモデルはありません。手動入力をご利用ください。
+                          </p>
+                        ) : (
+                          <>
+                            <select
+                              className="app-select h-8 w-full text-xs"
+                              value={benchTrocrSelectedModel}
+                              onChange={(e) => setBenchTrocrSelectedModel(e.target.value)}
+                            >
+                              <option value="">選択してください</option>
+                              {trocrTrainedModels.map((m) => (
+                                <option key={m.name} value={m.name}>
+                                  {m.label}
+                                </option>
+                              ))}
+                            </select>
+                            {trocrTrainedModelValidationError(trocrTrainedModels, benchTrocrSelectedModel) ? (
+                              <p className="text-[10px] text-red-400">
+                                {trocrTrainedModelValidationError(trocrTrainedModels, benchTrocrSelectedModel)}
+                              </p>
+                            ) : null}
+                          </>
+                        )
+                      ) : (
+                        <input
+                          className="app-input h-8 w-full text-xs"
+                          placeholder="model_ref（例: microsoft/trocr-base-printed）"
+                          value={benchTrocrModelRef}
+                          onChange={(e) => setBenchTrocrModelRef(e.target.value)}
+                        />
+                      )}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <select
+                          className="app-select h-8 text-xs"
+                          value={benchTrocrDevice}
+                          onChange={(e) => setBenchTrocrDevice(e.target.value)}
+                        >
+                          <option value="auto">device: auto</option>
+                          <option value="cpu">device: cpu</option>
+                          <option value="gpu">device: gpu</option>
+                        </select>
+                        <label className="inline-flex items-center gap-1 text-[11px] text-text">
+                          <input
+                            type="checkbox"
+                            checked={benchTrocrLocalFilesOnly}
+                            onChange={(e) => setBenchTrocrLocalFilesOnly(e.target.checked)}
+                          />
+                          local_files_only
+                        </label>
+                      </div>
+                    </div>
                   ) : null}
                   <p className="mt-0.5 pl-6 text-[10px] text-muted">{engine.description}</p>
                 </div>
