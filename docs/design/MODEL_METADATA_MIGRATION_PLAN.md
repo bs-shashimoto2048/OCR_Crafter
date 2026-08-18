@@ -12,7 +12,11 @@ Epic #28は2026-07-31にUIレビュー未実施を理由に一旦停止したが
 - `LegacyMetadataAdapter`/`MetadataReader`/`ModelCatalog`のいずれも、Epic #27で新設された`.trocr.json`（Issue #96）に未対応（Architecture #30策定時点でTrOCR Training成果物の保存方式が未確定だったため）
 - Consumer Migration（Models/Inference/Evaluation/Deployment）は、既存Legacyパスが全エンジンで問題なく機能している現状では、着手する具体的な必要性を確認できなかった。特に`/models/info`（`list_model_infos()`、200行超）・Release Gate（Issue #104で安定化したばかり）への切替は、利益より回帰リスクが大きいと判断した
 
-詳細・Architecture Questions 14問への回答・更新されたMigration戦略は[docs/workitems/model-metadata/MODEL_METADATA_CONSUMER_MIGRATION_REASSESSMENT_108.md](../workitems/model-metadata/MODEL_METADATA_CONSUMER_MIGRATION_REASSESSMENT_108.md)を参照。以降の実装は「TrOCR Legacy Metadata Adapter Compatibility」（既存3形式と同型の追加、schema変更なし）のみを推奨する。
+詳細・Architecture Questions 14問への回答・更新されたMigration戦略は[docs/workitems/model-metadata/MODEL_METADATA_CONSUMER_MIGRATION_REASSESSMENT_108.md](../workitems/model-metadata/MODEL_METADATA_CONSUMER_MIGRATION_REASSESSMENT_108.md)を参照。以降の実装は「TrOCR Legacy Metadata Adapter Compatibility」（既存2形式=`.ocr.json`/`.tess.json`と同型の追加、schema変更なし）のみを推奨する。
+
+## 追記（2026-08-18）: Issue #110でTrOCR Legacy Metadata Adapter Compatibilityを実装
+
+Investigation #108で唯一推奨された次Issue「TrOCR Legacy Metadata Adapter Compatibility」（[#110](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/110)）を実装した。`LegacyMetadataAdapter`へ`TrOCRMetadataAdapter`（`.ocr.json`/`.tess.json`用Adapterと同型）を追加し、`MetadataReader`/`ModelCatalog`が`.trocr.json`をLegacy形式として扱えるようにした。Canonical schemaの変更は無く、Consumer Migration（Models/Inference/Evaluation/Deployment）は本Issueでも行っていない。詳細は[docs/workitems/model-metadata/TROCR_LEGACY_METADATA_ADAPTER_110.md](../workitems/model-metadata/TROCR_LEGACY_METADATA_ADAPTER_110.md)を参照。
 
 ## 追記（2026-07-31）: Architecture #30で決定事項を確定
 

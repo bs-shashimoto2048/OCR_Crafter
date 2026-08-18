@@ -8,9 +8,11 @@ Reader、Migration Phase 2）で実装する範囲のみを対象とする。
   スキャン・複数ファイルの列挙は行わない（Model Catalogの責務、本Issue対象外）
 - Canonical sidecar（`<model>.model_metadata.json`、Architecture 6.2）は
   `ModelMetadata.from_dict()`へ直接委譲する
-- Legacy形式（`.ocr.json`/`.tess.json`/`inference_model.json`）は
+- Legacy形式（`.ocr.json`/`.tess.json`/`.trocr.json`/`inference_model.json`）は
   `legacy_metadata_adapter.LegacyMetadataAdapter`へ委譲する（Reader自身は変換ロジックを
   持たない）。形式判定はファイル名のみで行う（内容を見て推測しない）
+- `.trocr.json`はIssue #110（TrOCR Legacy Metadata Adapter Compatibility）で追加。
+  `.ocr.json`/`.tess.json`と同じ`source`既定値（`"backfill"`）で扱う
 - Validationは一切自前で書かず、最終的に必ず`ModelMetadata.from_dict()`（Adapter経由も
   含め）に委ねる
 - Metadataの保存・更新・削除・Model Catalogの更新は行わない（Writer/Catalogの責務）
@@ -36,6 +38,7 @@ from .legacy_metadata_adapter import (
     LEGACY_FORMAT_INFERENCE_MODEL_JSON,
     LEGACY_FORMAT_OCR_JSON,
     LEGACY_FORMAT_TESS_JSON,
+    LEGACY_FORMAT_TROCR_JSON,
     LegacyMetadataAdapter,
     UnsupportedLegacyMetadataError,
 )
@@ -106,7 +109,7 @@ class MetadataReader:
                 if fallback:
                     resolved_model_id = str(fallback)
 
-        if legacy_format in (LEGACY_FORMAT_OCR_JSON, LEGACY_FORMAT_TESS_JSON):
+        if legacy_format in (LEGACY_FORMAT_OCR_JSON, LEGACY_FORMAT_TESS_JSON, LEGACY_FORMAT_TROCR_JSON):
             return LegacyMetadataAdapter.adapt(
                 legacy_format, payload, model_id=resolved_model_id, source=source
             )
@@ -126,6 +129,8 @@ class MetadataReader:
             return MetadataReader.read_legacy(path, LEGACY_FORMAT_OCR_JSON, model_id=model_id)
         if name.endswith(".tess.json"):
             return MetadataReader.read_legacy(path, LEGACY_FORMAT_TESS_JSON, model_id=model_id)
+        if name.endswith(".trocr.json"):
+            return MetadataReader.read_legacy(path, LEGACY_FORMAT_TROCR_JSON, model_id=model_id)
         if name == "inference_model.json":
             return MetadataReader.read_legacy(path, LEGACY_FORMAT_INFERENCE_MODEL_JSON, model_id=model_id)
         raise UnsupportedLegacyMetadataError(f"unrecognized metadata file name: {name!r}")

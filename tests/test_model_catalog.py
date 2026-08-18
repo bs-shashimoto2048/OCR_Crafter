@@ -15,6 +15,7 @@ import pytest
 from src.app.services.legacy_metadata_adapter import (
     LEGACY_FORMAT_OCR_JSON,
     LEGACY_FORMAT_TESS_JSON,
+    LEGACY_FORMAT_TROCR_JSON,
 )
 from src.app.services.metadata_reader import MetadataReadError, MetadataReader
 from src.app.services.metadata_writer import MetadataWriter
@@ -105,6 +106,43 @@ def test_list_returns_ocr_json_legacy_entry(tmp_path):
     assert result[0].engine_id == "paddleocr"
 
 
+def test_list_returns_trocr_json_legacy_entry(tmp_path):
+    """Issue #110: `.trocr.json`もLegacy sidecarとして`.ocr.json`/`.tess.json`と同様に検出される。"""
+    _write_json(
+        tmp_path / "trocr_job-3.trocr.json",
+        {"engine": "trocr", "model_dir": "/data/projects/p1/models/trocr_runs/job-3", "dataset_id": "DS-0003"},
+    )
+
+    catalog = ModelCatalog(tmp_path)
+    result = catalog.list()
+
+    assert len(result) == 1
+    assert result[0].model_id == "trocr_job-3.trocr.json"
+    assert result[0].engine_id == "trocr"
+    assert result[0].artifact_path == "/data/projects/p1/models/trocr_runs/job-3"
+    assert result[0].dataset_id == "DS-0003"
+    assert result[0].source == "backfill"
+
+
+def test_list_ignores_trocr_artifact_subdirectory_non_recursively(tmp_path):
+    """TrOCRのartifact本体（save_pretrained()出力ディレクトリ）はCatalogの非再帰走査に
+    現れず、sidecarファイルのみが1件として検出されること（ディレクトリ再帰スキャン不要の確認）。
+    """
+    artifact_dir = tmp_path / "trocr_runs" / "job-3"
+    artifact_dir.mkdir(parents=True)
+    (artifact_dir / "config.json").write_text("{}", encoding="utf-8")
+    _write_json(
+        tmp_path / "trocr_job-3.trocr.json",
+        {"engine": "trocr", "model_dir": str(artifact_dir)},
+    )
+
+    catalog = ModelCatalog(tmp_path)
+    result = catalog.list()
+
+    assert len(result) == 1
+    assert result[0].model_id == "trocr_job-3.trocr.json"
+
+
 def test_list_ignores_inference_model_json_file(tmp_path):
     """inference_model.jsonはモデル成果物ではなく選択ポインタのため、対象外とする（スコープ決定）。"""
     _write_json(
@@ -136,6 +174,38 @@ def test_canonical_is_preferred_over_legacy_for_same_base_file(tmp_path):
     assert result[0].dataset_id == "DS-CANONICAL"
     # Legacy側の値がマージされて残っていないことの確認
     assert result[0].model_id != "digits_20260101.tess.json"
+
+
+def test_canonical_is_preferred_over_trocr_legacy_for_same_base_file(tmp_path):
+    _write_json(
+        tmp_path / "trocr_job-3.trocr.json",
+        {"engine": "trocr", "dataset_id": "DS-LEGACY"},
+    )
+    canonical = ModelMetadata(model_id="M-CANON-TROCR", engine_id="trocr", dataset_id="DS-CANONICAL")
+    MetadataWriter.write(tmp_path / "trocr_job-3.trocr.json.model_metadata.json", canonical)
+
+    catalog = ModelCatalog(tmp_path)
+    result = catalog.list()
+
+    assert len(result) == 1
+    assert result[0] == canonical
+    assert result[0].dataset_id == "DS-CANONICAL"
+
+
+def test_canonical_and_legacy_coexist_across_engines_including_trocr(tmp_path):
+    """Canonical + Tesseract Legacy + TrOCR Legacyが同一ディレクトリに共存しても
+    互いに干渉しないこと（既存engineへの回帰が無いことの確認）。
+    """
+    canonical = ModelMetadata(model_id="M-CANON", engine_id="paddleocr")
+    MetadataWriter.write(tmp_path / "a.ocr.json.model_metadata.json", canonical)
+    _write_json(tmp_path / "digits_x.tess.json", {"engine": "tesseract"})
+    _write_json(tmp_path / "trocr_job-9.trocr.json", {"engine": "trocr"})
+
+    catalog = ModelCatalog(tmp_path)
+    result = {m.model_id: m for m in catalog.list()}
+
+    assert result.keys() == {"M-CANON", "digits_x.tess.json", "trocr_job-9.trocr.json"}
+    assert result["trocr_job-9.trocr.json"].engine_id == "trocr"
 
 
 def test_legacy_content_is_fully_ignored_when_canonical_present(tmp_path):
@@ -257,6 +327,13 @@ def test_broken_json_error_propagates_as_metadata_read_error(tmp_path):
 
 def test_unknown_engine_error_propagates_as_invalid_model_metadata_error(tmp_path):
     _write_json(tmp_path / "bad.ocr.json", {"engine": "not_a_real_engine"})
+    catalog = ModelCatalog(tmp_path)
+    with pytest.raises(InvalidModelMetadataError):
+        catalog.list()
+
+
+def test_unknown_engine_error_propagates_for_trocr_json(tmp_path):
+    _write_json(tmp_path / "bad.trocr.json", {"engine": "not_a_real_engine"})
     catalog = ModelCatalog(tmp_path)
     with pytest.raises(InvalidModelMetadataError):
         catalog.list()

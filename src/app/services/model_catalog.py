@@ -29,6 +29,15 @@ docs/design/MODEL_METADATA_ARCHITECTURE.md 6.9（Model Catalog）のうち、本
 - Legacyファイルのみが存在する（Canonical未書込の）モデルのmodel_idは、既存の
   `data/model_ids.json`（M0001形式）への配線をまだ行わず、暫定的にLegacyファイル自身の
   ファイル名をmodel_idとして採用する（`model_registry.py`との統合は将来のIssueで判断する）
+
+Issue #110（TrOCR Legacy Metadata Adapter Compatibility）で追加した`.trocr.json`について:
+- `.trocr.json`sidecarは他のLegacyファイルと同じく`directory`直下に置かれる
+  （`trocr_model_registry.py::register_trocr_model()`が`paths.models`直下へ書き込む）ため、
+  `.ocr.json`/`.tess.json`と全く同じ扱いで足りる
+- TrOCRのartifact本体（Hugging Face `save_pretrained()`出力）は`models/trocr_runs/<job_id>/`
+  というサブディレクトリであり、`_iter_entries()`は非再帰的な`iterdir()`かつ
+  `entry.is_file()`のみを対象とするため、このサブディレクトリ自体はCatalogの走査に
+  一切現れない（ディレクトリ探索の全面再設計・再帰スキャンは不要と判断した根拠）
 """
 
 from __future__ import annotations
@@ -39,6 +48,7 @@ from typing import Optional, Union
 from .legacy_metadata_adapter import (
     LEGACY_FORMAT_OCR_JSON,
     LEGACY_FORMAT_TESS_JSON,
+    LEGACY_FORMAT_TROCR_JSON,
 )
 from .metadata_reader import CANONICAL_METADATA_SIDECAR_SUFFIX, MetadataReader
 from .model_metadata import ModelMetadata
@@ -48,6 +58,7 @@ PathLike = Union[str, Path]
 _LEGACY_SUFFIX_FORMATS = (
     (".ocr.json", LEGACY_FORMAT_OCR_JSON),
     (".tess.json", LEGACY_FORMAT_TESS_JSON),
+    (".trocr.json", LEGACY_FORMAT_TROCR_JSON),
 )
 
 

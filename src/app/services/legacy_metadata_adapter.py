@@ -13,10 +13,17 @@ Metadata Adapter、Migration Phase 1の残り）で実装する範囲のみを�
 - `model_id`はLegacy形式のファイル内容から一意に決定できない（`.tess.json`は保持せず、
   `.ocr.json`の`name`は拡張子を除いたファイル名断片に過ぎない）ため、呼び出し側
   （将来のReader/Catalog、本Issueの対象外）が解決した値を明示的に渡す前提とする
-- `OCRMetadataAdapter`/`TesseractMetadataAdapter`/`InferenceMetadataAdapter`は将来
-  増える他形式（Adapter追加）を見据え、`LegacyMetadataAdapter`から独立したクラスとして
-  分離するが、Factory・Registry・Plugin・DIといった動的解決の仕組みは導入しない
-  （既知3形式の固定的なif/elif分岐のみ）
+- `OCRMetadataAdapter`/`TesseractMetadataAdapter`/`TrOCRMetadataAdapter`/
+  `InferenceMetadataAdapter`は将来増える他形式（Adapter追加）を見据え、
+  `LegacyMetadataAdapter`から独立したクラスとして分離するが、Factory・Registry・
+  Plugin・DIといった動的解決の仕組みは導入しない（既知4形式の固定的なif/elif分岐のみ）
+
+追記（Issue #110、TrOCR Legacy Metadata Adapter Compatibility）:
+- `TrOCRMetadataAdapter`（`.trocr.json`用）を追加。既存3Adapterと同じ設計方針
+  （filesystem非依存・独自Validation無し・model_id呼び出し側解決）をそのまま踏襲し、
+  固有フィールド（`base_model_ref`/`project_id`/`job_id`/`dataset_root`/`epochs`/
+  `batch_size`/`learning_rate`/`final_loss`）は既存2形式の`training_params`等と同様に
+  共通フィールドへ写像せず無視する（`extra`への自動格納も行わない、既存precedent踏襲）
 """
 
 from __future__ import annotations
@@ -27,11 +34,13 @@ from .model_metadata import ModelMetadata
 
 LEGACY_FORMAT_OCR_JSON = "ocr_json"
 LEGACY_FORMAT_TESS_JSON = "tess_json"
+LEGACY_FORMAT_TROCR_JSON = "trocr_json"
 LEGACY_FORMAT_INFERENCE_MODEL_JSON = "inference_model_json"
 
 KNOWN_LEGACY_FORMATS = (
     LEGACY_FORMAT_OCR_JSON,
     LEGACY_FORMAT_TESS_JSON,
+    LEGACY_FORMAT_TROCR_JSON,
     LEGACY_FORMAT_INFERENCE_MODEL_JSON,
 )
 
@@ -110,6 +119,39 @@ class TesseractMetadataAdapter:
         return _adapt_via(data, lambda d: TesseractMetadataAdapter._build_canonical(d, model_id, source))
 
 
+class TrOCRMetadataAdapter:
+    """`.trocr.json`（TrOCR学習成果物メタ、`trocr_model_registry.py::register_trocr_model()`
+    が生成する形式、Issue #96）をModelMetadataへ変換する。
+
+    `.trocr.json`固有のフィールド（`base_model_ref`/`project_id`/`job_id`/`dataset_root`/
+    `epochs`/`batch_size`/`learning_rate`/`final_loss`/`training_family`/`name`）は、
+    `OCRMetadataAdapter`/`TesseractMetadataAdapter`が`training_params`等の固有フィールドを
+    共通フィールドへ写像せず単に無視するのと同じ既存precedentに揃え、`extra`へも
+    自動混入させない（Issue #110の決定。extraへ格納する新しい振る舞いを本Adapterだけに
+    導入するとAdapter間の一貫性が崩れるため）。
+    """
+
+    @staticmethod
+    def _build_canonical(data: Mapping[str, Any], model_id: str, source: str) -> dict[str, Any]:
+        return {
+            "model_id": model_id,
+            "engine_id": data.get("engine"),
+            "model_type": data.get("model_type"),
+            "created_at": data.get("created_at"),
+            # TrOCRのartifactはHugging Face save_pretrained()の出力ディレクトリ1つのみ
+            # （Tesseract/PaddleOCRのような train/infer ディレクトリ分離が無い、
+            # trocr_model_registry.py参照）ため、model_dirをそのままartifact_pathとする
+            "artifact_path": data.get("model_dir"),
+            "dataset_id": data.get("dataset_id"),
+            "source": source,
+        }
+
+    @staticmethod
+    def adapt(data: Mapping[str, Any], *, model_id: str, source: str = "training") -> ModelMetadata:
+        """`source`の既定値は`OCRMetadataAdapter.adapt()`と同じ理由で`"training"`。"""
+        return _adapt_via(data, lambda d: TrOCRMetadataAdapter._build_canonical(d, model_id, source))
+
+
 class InferenceMetadataAdapter:
     """`inference_model.json`（推論使用モデルの選択状態、`services/inference_model.py`が
     生成する形式）をModelMetadataへ変換する。
@@ -137,19 +179,20 @@ class InferenceMetadataAdapter:
 
 
 class LegacyMetadataAdapter:
-    """Legacy Metadata（`.ocr.json`/`.tess.json`/`inference_model.json`）からModelMetadataへの
-    変換の入口。実際の変換は各専用Adapterへ委譲する。
+    """Legacy Metadata（`.ocr.json`/`.tess.json`/`.trocr.json`/`inference_model.json`）から
+    ModelMetadataへの変換の入口。実際の変換は各専用Adapterへ委譲する。
 
     ```
     LegacyMetadataAdapter
         │
         ├── OCRMetadataAdapter
         ├── TesseractMetadataAdapter
+        ├── TrOCRMetadataAdapter
         └── InferenceMetadataAdapter
     ```
 
     将来Adapterが増えることを前提に専用クラスへ分離しているが、動的な登録・解決の仕組み
-    （Factory/Registry/Plugin/DI）は導入しない。`adapt()`は既知3形式の固定的なif/elif分岐
+    （Factory/Registry/Plugin/DI）は導入しない。`adapt()`は既知4形式の固定的なif/elif分岐
     のみで委譲先を決定する。
     """
 
@@ -162,14 +205,18 @@ class LegacyMetadataAdapter:
         return TesseractMetadataAdapter.adapt(data, model_id=model_id, source=source)
 
     @staticmethod
+    def from_trocr_json(data: Mapping[str, Any], *, model_id: str, source: str = "training") -> ModelMetadata:
+        return TrOCRMetadataAdapter.adapt(data, model_id=model_id, source=source)
+
+    @staticmethod
     def from_inference_model_json(data: Mapping[str, Any], *, model_id: str) -> ModelMetadata:
         return InferenceMetadataAdapter.adapt(data, model_id=model_id)
 
     @staticmethod
     def adapt(legacy_format: str, data: Mapping[str, Any], *, model_id: str, source: str = "training") -> ModelMetadata:
-        """`legacy_format`（既知3形式のいずれか）に応じて適切な専用Adapterへ委譲する。
+        """`legacy_format`（既知4形式のいずれか）に応じて適切な専用Adapterへ委譲する。
 
-        既知3形式以外が指定された場合は`UnsupportedLegacyMetadataError`を送出する
+        既知4形式以外が指定された場合は`UnsupportedLegacyMetadataError`を送出する
         （Engine不正等の`InvalidModelMetadataError`とは異なる、形式自体が未対応という意味）。
         `source`は`inference_model_json`には適用されない（この形式に対応する概念が無いため）。
         """
@@ -177,6 +224,8 @@ class LegacyMetadataAdapter:
             return LegacyMetadataAdapter.from_ocr_json(data, model_id=model_id, source=source)
         if legacy_format == LEGACY_FORMAT_TESS_JSON:
             return LegacyMetadataAdapter.from_tess_json(data, model_id=model_id, source=source)
+        if legacy_format == LEGACY_FORMAT_TROCR_JSON:
+            return LegacyMetadataAdapter.from_trocr_json(data, model_id=model_id, source=source)
         if legacy_format == LEGACY_FORMAT_INFERENCE_MODEL_JSON:
             return LegacyMetadataAdapter.from_inference_model_json(data, model_id=model_id)
         raise UnsupportedLegacyMetadataError(
