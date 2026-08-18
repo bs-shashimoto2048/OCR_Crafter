@@ -2,7 +2,7 @@
 
 Related: Feature [#127](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/127) / Architecture Investigation [#123](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/123)（Job Lifecycle Unification、Completed、Theme 3の関係を整理） / Investigation [#115](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/115)（Theme 3の起点） / Reliability [#125](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/125)
 
-**状態**: Implemented, PR review pending
+**状態**: Completed / Closed。PR [#128](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/128)、Squash Commit `2baad09`でマージ済み。
 
 ## 目的
 
