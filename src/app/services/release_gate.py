@@ -112,13 +112,41 @@ def _experiment_for_model(project_id: str, model: str) -> Optional[dict[str, Any
     return target
 
 
+def _resolve_trocr_benchmark_model_ref(project_id: str, model: str) -> str:
+    """TrOCRのRelease Gateモデル識別子（`.trocr.json`sidecarファイル名）から、
+    Benchmark実行時に使われたmodel指定（model_ref: Hugging Face model ID・
+    ローカルパス・登録済みartifactのmodel_dir）を解決する。
+
+    Benchmark（Issue #102）はTrOCRのengine specへ`model_ref`をそのまま`model`として
+    保存する（Tesseractの`tesseract_model`のように`.tess.json`ファイル名そのものを
+    保存するのではない）。そのためRelease Gate側の識別子（sidecarファイル名）と
+    Benchmark側の識別子（model_ref）は文字列として異なり、直接比較できない。
+    既存のTrOCR artifact contract（`list_trocr_models()`、Issue #96）から
+    sidecar名→model_dirへ解決するだけで、新しい統一Resolverは追加しない。
+    """
+    from .trocr_model_registry import list_trocr_models
+
+    for item in list_trocr_models(project_id):
+        if str(item.get("name") or "") == model:
+            return str(item.get("model_dir") or "")
+    return ""
+
+
 def _latest_benchmark_result(project_id: str, model: str) -> Optional[dict[str, Any]]:
     """モデルを含む最新Benchmarkのこのモデルの結果行（rank付き）。なければNone。"""
     from .benchmark import list_benchmarks
 
+    # TrOCRのみ、sidecar名→model_dirへの解決が必要（上記_resolve_trocr_benchmark_model_ref参照）。
+    # 該当しない場合（Tesseract/PaddleOCR等）は空文字のまま=trocr分岐を素通りする
+    trocr_model_ref = _resolve_trocr_benchmark_model_ref(project_id, model) if model.endswith(".trocr.json") else ""
+
     for item in list_benchmarks(project_id)["items"]:  # 新しい順
         for row in item.get("results") or []:
-            if row.get("engine") == "tesseract_model" and str(row.get("model") or "") == model:
+            engine = row.get("engine")
+            row_model = str(row.get("model") or "")
+            if engine == "tesseract_model" and row_model == model:
+                return {**row, "benchmark_id": item.get("benchmark_id")}
+            if engine == "trocr" and trocr_model_ref and row_model == trocr_model_ref:
                 return {**row, "benchmark_id": item.get("benchmark_id")}
     return None
 
@@ -128,6 +156,8 @@ def _model_engine(model: str) -> str:
         return "tesseract"
     if model.endswith(".ocr.json"):
         return "paddleocr"
+    if model.endswith(".trocr.json"):
+        return "trocr"
     return ""
 
 

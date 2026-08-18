@@ -3975,7 +3975,11 @@ export default function App() {
                     image_count: data?.count ?? null,
                     label_count: data?.gt_count ?? null,
                     preprocess_signature: preprocessSignature,
-                    engine: "tesseract",
+                    // Evaluation Profile / Evaluation Hash（Release Gateのno_cer_regression等）へ
+                    // 含まれるため、実際に評価したengineをそのまま渡す（Issue #104で発見・修正:
+                    // 以前は全engineで"tesseract"固定になっており、PaddleOCR/EasyOCR/TrOCR評価の
+                    // Evaluation Hashが実際のengineを反映しない不具合があった）
+                    engine: ocrEvalEngine,
                     psm: data?.psm ?? 7,
                     whitelist: String(data?.charset ?? ""),
                   },

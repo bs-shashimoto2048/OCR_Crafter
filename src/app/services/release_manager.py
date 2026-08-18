@@ -142,7 +142,14 @@ def list_releases(project_id: Optional[str]) -> dict[str, Any]:
     paths = ensure_project_directories(project_id)
     registry = _load(paths.root)
     statuses: dict[str, Any] = {}
-    for meta_path in sorted(paths.models.glob("*.tess.json")) + sorted(paths.models.glob("*.ocr.json")):
+    # .trocr.json（Issue #96 TrOCR Artifact Registration）をIssue #104で追加。
+    # 既存2エンジンと同じ「モデルメタsidecarファイル名=Release Gateのモデル識別子」
+    # という規約をそのまま踏襲する（新しい識別子体系は作らない）
+    for meta_path in (
+        sorted(paths.models.glob("*.tess.json"))
+        + sorted(paths.models.glob("*.ocr.json"))
+        + sorted(paths.models.glob("*.trocr.json"))
+    ):
         record = registry["models"].get(meta_path.name)
         statuses[meta_path.name] = {
             "status": str(record.get("status") or "Draft") if isinstance(record, dict) else "Draft",
