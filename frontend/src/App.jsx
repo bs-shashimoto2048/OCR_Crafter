@@ -44,7 +44,6 @@ import {
   trocrModelRefMissing,
 } from "./lib/inferenceModel";
 import {
-  extractTrocrModels,
   resolveSelectedTrocrModelRef,
   trocrMetadataValidationError,
 } from "./lib/trocrModelMetadata";
@@ -718,7 +717,7 @@ export default function App() {
       paddleModel: ocrEvalPaddleModel,
       trocrModelSource: ocrEvalTrocrModelSource,
       trocrSelectedModel: ocrEvalTrocrSelectedModel,
-      trocrModels,
+      trocrModels: trocrTrainedModels,
       trocrModelRef: ocrEvalTrocrModelRef,
       imageDir: ocrEvalImageDir,
       gtCsv: ocrEvalGtCsv,
@@ -1587,20 +1586,21 @@ export default function App() {
     });
   }
 
-  // TrOCR Model Metadata連携（Issue #25）。既存のモデル一覧（modelInfos）から
-  // engine=trocrのものだけを抽出する。新規APIは追加しない
-  const trocrModels = useMemo(
-    () => extractTrocrModels(models, modelInfos, modelAliases),
-    [models, modelInfos, modelAliases]
-  );
-  // Training UIの「登録済みモデルから継続Fine-tune」用（Issue #98）。上記trocrModels
-  // （GET /models/info由来、.trocr.jsonをglobしないため実運用上常に空）とはデータソースが
-  // 異なる新規エンドポイント（GET /api/trocr/models）の応答をそのまま使う
+  // TrOCR登録済みモデル一覧（GET /api/trocr/models、Issue #96/#98）。
+  // Training/Benchmark/Inference/Evaluationいずれの「登録済みモデルから選択」も
+  // このAPIを唯一のデータソースとする（Issue #121）。
+  //
+  // 過去（Issue #25時点）はInference/Evaluationのみ`GET /models/info`由来の
+  // `extractTrocrModels()`を使っていたが、`/models/info`は`.trocr.json`をglobしない
+  // （Issue #96で意図的に未統合）ため、この経路は実運用上常に空になる既存バグだった
+  // （Issue #121で発見・修正。`extractTrocrModels()`自体は他に呼び出し元が無いため
+  // 削除せず`lib/trocrModelMetadata.js`に残す。将来別データソースが必要になった場合の
+  // 参考実装として残置）。
   const trocrTrainedModels = useMemo(() => mapTrocrTrainedModels(trocrTrainedModelItems), [trocrTrainedModelItems]);
   // ""=未選択（登録済みモデルの有無で動的に既定値を決める）。ユーザーが明示的に
   // 選択した後は、その値を固定で保持する（データ読込タイミングによる再切替をしない）
   const [inferTrocrModelSource, setInferTrocrModelSource] = useState("");
-  const inferTrocrModelSourceEffective = inferTrocrModelSource || (trocrModels.length > 0 ? "metadata" : "manual");
+  const inferTrocrModelSourceEffective = inferTrocrModelSource || (trocrTrainedModels.length > 0 ? "metadata" : "manual");
   const [inferTrocrSelectedModel, setInferTrocrSelectedModel] = useState("");
 
   // 比較用推論スロットの project 別読込（既存の単一推論設定とは独立したキーで互換維持）
@@ -3675,12 +3675,12 @@ export default function App() {
     let resolvedTrocrModel = "";
     if (inferEngine === "trocr") {
       if (inferTrocrModelSourceEffective === "metadata") {
-        const validationError = trocrMetadataValidationError(trocrModels, inferTrocrSelectedModel);
+        const validationError = trocrMetadataValidationError(trocrTrainedModels, inferTrocrSelectedModel);
         if (validationError) {
           notify("error", validationError);
           return;
         }
-        resolvedTrocrModel = resolveSelectedTrocrModelRef(trocrModels, inferTrocrSelectedModel);
+        resolvedTrocrModel = resolveSelectedTrocrModelRef(trocrTrainedModels, inferTrocrSelectedModel);
       } else {
         if (trocrModelRefMissing(inferEngine, inferTrocrModelRef)) {
           notify("error", "TrOCRモデル参照を入力してください。");
@@ -3863,7 +3863,7 @@ export default function App() {
     }
     if (
       ocrEvalEngine === "trocr" &&
-      isTrocrEvalModelUnresolved(ocrEvalTrocrModelSource, trocrModels, ocrEvalTrocrSelectedModel, ocrEvalTrocrModelRef)
+      isTrocrEvalModelUnresolved(ocrEvalTrocrModelSource, trocrTrainedModels, ocrEvalTrocrSelectedModel, ocrEvalTrocrModelRef)
     ) {
       notify("error", "TrOCRモデルを指定してください");
       return;
@@ -3881,7 +3881,7 @@ export default function App() {
       easyocrLangs: ocrEvalEasyocrLangs,
       trocrModelSource: ocrEvalTrocrModelSource,
       trocrSelectedModel: ocrEvalTrocrSelectedModel,
-      trocrModels,
+      trocrModels: trocrTrainedModels,
       trocrModelRef: ocrEvalTrocrModelRef,
       trocrDevice: ocrEvalTrocrDevice,
       trocrLocalFilesOnly: ocrEvalTrocrLocalFilesOnly,
@@ -4913,7 +4913,7 @@ export default function App() {
         tesseractModels={tesseractModels}
         trocrModelRef={inferTrocrModelRef}
         setTrocrModelRef={setInferTrocrModelRef}
-        trocrModels={trocrModels}
+        trocrModels={trocrTrainedModels}
         trocrModelSource={inferTrocrModelSourceEffective}
         setTrocrModelSource={setInferTrocrModelSource}
         trocrSelectedModel={inferTrocrSelectedModel}
@@ -5066,7 +5066,7 @@ export default function App() {
         setTrocrModelSource={setOcrEvalTrocrModelSource}
         trocrSelectedModel={ocrEvalTrocrSelectedModel}
         setTrocrSelectedModel={setOcrEvalTrocrSelectedModel}
-        trocrModels={trocrModels}
+        trocrModels={trocrTrainedModels}
         trocrDevice={ocrEvalTrocrDevice}
         setTrocrDevice={setOcrEvalTrocrDevice}
         trocrLocalFilesOnly={ocrEvalTrocrLocalFilesOnly}

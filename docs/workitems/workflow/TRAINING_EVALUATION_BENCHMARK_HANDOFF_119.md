@@ -129,5 +129,5 @@ cd frontend && npm run build
 
 ## Future Work
 
-- Evaluationの「登録済みモデルから選択」（TrOCR、`trocrModelSource==="metadata"`）モードが`/models/info`経由のため実運用上常に空になる既存バグ（`lib/trocrModelMetadata.js`）。修正する場合は`extractTrocrModels()`が`trocrTrainedModels`（`/api/trocr/models`）を参照するよう変更する必要があるが、Evaluation画面のTrOCR回帰確認を伴う別Issueとして起票すべき
+- ~~Evaluationの「登録済みモデルから選択」（TrOCR、`trocrModelSource==="metadata"`）モードが`/models/info`経由のため実運用上常に空になる既存バグ（`lib/trocrModelMetadata.js`）。~~ **Bug #121（TrOCR Evaluation Registered-model Selection）で修正済み**。調査の結果、同じバグがInferenceViewにも存在することが判明し、両画面まとめて修正された（詳細は[TROCR_EVALUATION_REGISTERED_MODEL_SELECTION_121.md](../trocr/TROCR_EVALUATION_REGISTERED_MODEL_SELECTION_121.md)参照）
 - Training→Inference（`onOpenInference`）も現状モデル識別子の引き継ぎが無い（Investigation #115で確認済みの別ギャップ）。本Issueのscopeには含まれていない
