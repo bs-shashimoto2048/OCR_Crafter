@@ -91,7 +91,7 @@ Management No ─> data/model_ids.json（M0001形式。model_registry.py::assign
 ### 3.4 Engine判定の重複
 
 - `model_registry.py::list_model_infos()`: `resolve_engine_id(payload.get("engine"), registry=...)`（Engine Registry経由。未登録・未指定は`"unknown"`、暗黙フォールバックなし）
-- `release_gate.py::_model_engine()`: **ファイル名拡張子のみ**で判定する独自ロジック（`.tess.json`→`"tesseract"`、`.ocr.json`→`"paddleocr"`、それ以外→`""`）。`.pt`（custom）・TrOCRは常に空文字列になる
+- `release_gate.py::_model_engine()`: **ファイル名拡張子のみ**で判定する独自ロジック（`.tess.json`→`"tesseract"`、`.ocr.json`→`"paddleocr"`、`.trocr.json`→`"trocr"`。**2026-08-18更新（Epic #27 Feature #104）**: TrOCR分岐を追加済み）。`.pt`（custom）は依然として常に空文字列になる
 - Engine Registry（`create_default_registry()`）には`tesseract`/`paddleocr`/`easyocr`/`trocr`の4エンジンのみ登録済み。**`custom`（分類モデル）は未登録**のため、`ModelMetadata(engine_id="custom", ...)`は現状`InvalidModelMetadataError`になる
 
 ### 3.5 API Surface（`src/app/main.py`）
