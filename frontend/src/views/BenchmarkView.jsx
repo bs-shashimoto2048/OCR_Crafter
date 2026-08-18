@@ -37,6 +37,7 @@ export default function BenchmarkView({
   onRun,
   onUpdateWeights,
   onOpenJobs,
+  handoffRequest = null,
 }) {
   // 実行フォーム
   const [form, setForm] = useState({ name: "", image_dir: "", gt_csv: "", dataset_id: "", warmup_runs: 1, psm: 7, whitelist: "" });
@@ -80,6 +81,31 @@ export default function BenchmarkView({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [detail]);
+
+  // Evaluation → Benchmark Handoff（Issue #119）。App.jsxのdetailRequestパターンと同じ
+  // 設計: handoffRequest.seqが変化した時のみ内部stateへ反映する（毎レンダリングでは走らない）。
+  // 既存の他engineの選択状態はそのまま維持し、対象engineのチェックボックスのみONにする
+  // （Design Principle #2「既存stateは独立したまま維持」。ユーザーは実行前に内容を確認できる）。
+  useEffect(() => {
+    if (!handoffRequest?.benchmarkEngineKey) return;
+    setSelectedEngines((prev) => ({ ...prev, [handoffRequest.benchmarkEngineKey]: true }));
+    if (handoffRequest.benchmarkEngineKey === "tesseract_model" && handoffRequest.modelName) {
+      setSelectedModel(handoffRequest.modelName);
+    } else if (handoffRequest.benchmarkEngineKey === "paddleocr_custom" && handoffRequest.modelName) {
+      setSelectedPaddleModel(handoffRequest.modelName);
+    } else if (handoffRequest.benchmarkEngineKey === "trocr" && handoffRequest.trocrModelRef) {
+      setBenchTrocrModelSource("manual");
+      setBenchTrocrModelRef(handoffRequest.trocrModelRef);
+    }
+    // datasetは引き継げた値のみ上書きする（未指定の項目は既存のBenchmark設定を維持）
+    setForm((prev) => ({
+      ...prev,
+      image_dir: handoffRequest.imageDir || prev.image_dir,
+      gt_csv: handoffRequest.gtCsv || prev.gt_csv,
+      dataset_id: handoffRequest.datasetId || prev.dataset_id,
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handoffRequest?.seq]);
 
   const tessModels = useMemo(
     () => ocrModels.filter((m) => String(m?.name || m).endsWith(".tess.json")).map((m) => String(m?.name || m)),

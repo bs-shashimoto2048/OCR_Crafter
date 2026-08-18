@@ -674,6 +674,42 @@ test("completedで完了ラベルと結果確認ボタンを表示する", () =>
   assert.ok(html.includes("同じ設定で再学習"));
 });
 
+// Training → Evaluation Handoff（Issue #119）
+
+test("completed（OCR/tesseract）は「評価へ」ボタンを表示する", () => {
+  const html = render({
+    jobStatus: "completed",
+    jobId: "j1",
+    jobInfo: { model_path: "C:/m.tess.json", training_family: "ocr", engine: "tesseract", id: "job-1" },
+  });
+  assert.ok(html.includes("評価へ"));
+});
+
+test("completed（OCR/paddleocr・trocr）も「評価へ」ボタンを表示する", () => {
+  for (const engine of ["paddleocr", "trocr"]) {
+    const html = render({
+      jobStatus: "completed",
+      jobId: "j1",
+      jobInfo: { training_family: "ocr", engine, id: "job-1" },
+    });
+    assert.ok(html.includes("評価へ"), `engine=${engine}`);
+  }
+});
+
+test("completed（classification）は「評価へ」ボタンを表示しない（Evaluation対応外）", () => {
+  const html = render({
+    jobStatus: "completed",
+    jobId: "j1",
+    jobInfo: { training_family: "classification", engine: "custom", id: "job-1" },
+  });
+  assert.ok(!html.includes("評価へ"));
+});
+
+test("completedでもtraining_family/engine情報が無ければ「評価へ」を表示しない（推測しない）", () => {
+  const html = render({ jobStatus: "completed", jobId: "j1", jobInfo: { model_path: "C:/m.tess.json" } });
+  assert.ok(!html.includes("評価へ"));
+});
+
 test("failedで失敗ラベルと再実行ボタンを表示する", () => {
   const html = render({ jobStatus: "failed", jobId: "j1", jobInfo: { message: "combine_tessdata が見つかりません" } });
   assert.ok(html.includes("失敗"));

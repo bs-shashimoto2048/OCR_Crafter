@@ -49,6 +49,8 @@ import {
   trocrMetadataValidationError,
 } from "./lib/trocrModelMetadata";
 import { mapTrocrTrainedModels, resolveTrocrTrainedModelRef } from "./lib/trocrTrainedModels";
+import { resolveTrainingEvaluationHandoff } from "./lib/trainingEvaluationHandoff";
+import { resolveEvaluationBenchmarkHandoff } from "./lib/evaluationBenchmarkHandoff";
 import {
   buildOcrEvalTargets,
   isTrocrEvalModelUnresolved,
@@ -669,6 +671,67 @@ export default function App() {
     setOcrEvalEngine(nextEngine);
     setOcrEvalPreSource((prev) => resolvePreprocessSourceForEngine(nextEngine, prev));
   }
+
+  // Training → Evaluation Handoff（Issue #119）。
+  // 明示的なユーザー操作（TrainingViewの「評価へ」ボタン）でのみ呼ばれる。
+  // 画面を開いただけで別画面のstateを書き換えない（Design Principle #1）。
+  // 評価Datasetは学習Datasetとは別概念のため引き継がない（推測しない、Design Principle #4）。
+  function sendTrainingResultToEvaluation(completedJobInfo) {
+    const { engine, modelName, modelRef } = resolveTrainingEvaluationHandoff({
+      engine: completedJobInfo?.engine,
+      jobId: completedJobInfo?.id,
+      modelInfos,
+      trocrTrainedModelItems,
+    });
+    handleOcrEvalEngineChange(engine);
+    if (engine === "trocr") {
+      setOcrEvalTrocrModelSource("manual");
+      setOcrEvalTrocrModelRef(modelRef);
+      if (!modelRef) {
+        notify("info", "TrOCRモデルの引き継ぎに失敗しました。モデル参照を手動で指定してください。");
+      }
+    } else if (engine === "paddleocr") {
+      if (modelName) {
+        setOcrEvalPaddleModel(modelName);
+      } else {
+        notify("info", "モデルの引き継ぎに失敗しました。評価画面でモデルを選択してください。");
+      }
+    } else if (engine === "tesseract") {
+      if (modelName) {
+        setOcrEvalTrainedModel(modelName);
+      } else {
+        notify("info", "モデルの引き継ぎに失敗しました。評価画面でモデルを選択してください。");
+      }
+    }
+    setActiveView("ocr-eval");
+  }
+
+  // Evaluation → Benchmark Handoff（Issue #119）。
+  // 明示的なユーザー操作（OcrEvaluationViewの「Benchmarkへ」ボタン）でのみ呼ばれる。
+  // Benchmark画面自体のstate（selectedEngines/selectedModel等）はBenchmarkView内部の
+  // useStateであり、App.jsxからは直接書き換えられないため、handoffRequest+seqという
+  // 既存パターン（Dataset Manager/Experiments画面のdetailRequestと同じ設計）で橋渡しする。
+  function sendEvaluationResultToBenchmark() {
+    const handoff = resolveEvaluationBenchmarkHandoff({
+      engine: ocrEvalEngine,
+      trainedModel: ocrEvalTrainedModel,
+      paddleModel: ocrEvalPaddleModel,
+      trocrModelSource: ocrEvalTrocrModelSource,
+      trocrSelectedModel: ocrEvalTrocrSelectedModel,
+      trocrModels,
+      trocrModelRef: ocrEvalTrocrModelRef,
+      imageDir: ocrEvalImageDir,
+      gtCsv: ocrEvalGtCsv,
+      datasetId: ocrEvalDatasetId,
+    });
+    if (!handoff) {
+      // Benchmark Runnerが実行経路を持たないengine（EasyOCR等）。ボタン自体を非表示に
+      // しているため通常到達しないが、念のため何もしない
+      return;
+    }
+    setBenchmarkHandoffRequest({ ...handoff, seq: Date.now() });
+    setActiveView("benchmark");
+  }
   const [inferFile, setInferFile] = useState(null);
   const [inferFileName, setInferFileName] = useState("");
   const [inferPreviewUrl, setInferPreviewUrl] = useState("");
@@ -725,6 +788,9 @@ export default function App() {
   const [modelDetailRequest, setModelDetailRequest] = useState(null);
   // Model詳細→「使用Dataset」からDataset Managerへ戻るリクエスト（{id, seq}。seq変化で詳細を開く）
   const [datasetDetailRequest, setDatasetDetailRequest] = useState(null);
+  // Evaluation → Benchmark Handoff（Issue #119）。BenchmarkViewは内部stateのため、
+  // 既存のdetailRequestパターン（{..., seq}。seq変化で適用）で橋渡しする
+  const [benchmarkHandoffRequest, setBenchmarkHandoffRequest] = useState(null);
   // リリース管理（Model Release Management）。状態・履歴はサーバー保存（releases.json）
   const [releases, setReleases] = useState({ production: "", statuses: {}, history: [] });
   const [releasesLoading, setReleasesLoading] = useState(false);
@@ -4538,6 +4604,7 @@ export default function App() {
         startPending={startingTraining}
         onOpenModels={() => setActiveView(trainingMode === "classification" ? "cls-models" : "ocr-models")}
         onOpenInference={() => setActiveView(trainingMode === "classification" ? "cls-inference" : "ocr-inference")}
+        onSendToEvaluation={sendTrainingResultToEvaluation}
         logs={logs}
         workflowState={workflowState}
         notify={notify}
@@ -4782,6 +4849,7 @@ export default function App() {
         onRun={runBenchmark}
         onUpdateWeights={updateBenchmarkWeights}
         onOpenJobs={() => setActiveView("jobs")}
+        handoffRequest={benchmarkHandoffRequest}
       />
     );
   }
@@ -5004,6 +5072,7 @@ export default function App() {
         trocrLocalFilesOnly={ocrEvalTrocrLocalFilesOnly}
         setTrocrLocalFilesOnly={setOcrEvalTrocrLocalFilesOnly}
         onRun={runOcrEvaluation}
+        onSendToBenchmark={sendEvaluationResultToBenchmark}
         loading={ocrEvalLoading}
         result={ocrEvalResult}
         onExportCsv={exportOcrEvalCsv}

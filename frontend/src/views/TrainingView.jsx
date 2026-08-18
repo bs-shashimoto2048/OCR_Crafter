@@ -20,6 +20,7 @@ import { buildEffectiveTrainingPreprocess } from "../lib/preprocessCompare";
 import { collectSettingsSnapshot, isSettingsDirty } from "../lib/trainingSettingsDraft";
 import { SETTINGS_TABS, normalizeSettingsTabId } from "../lib/trainingSettingsTabs";
 import { trocrTrainedModelValidationError } from "../lib/trocrTrainedModels";
+import { TRAINABLE_EVALUATION_ENGINES } from "../lib/trainingEvaluationHandoff";
 import {
   buildDatasetCreateProgressLabel,
   buildOcrDatasetDisplay,
@@ -180,6 +181,7 @@ export default function TrainingView({
   startPending = false,
   onOpenModels,
   onOpenInference,
+  onSendToEvaluation,
   logs,
   workflowState,
   notify,
@@ -2185,6 +2187,11 @@ export default function TrainingView({
                               推論で試す
                             </Button>
                           </div>
+                          {jobInfo?.training_family === "ocr" && TRAINABLE_EVALUATION_ENGINES.includes(jobInfo?.engine) ? (
+                            <Button variant="secondary" className="w-full" onClick={() => onSendToEvaluation?.(jobInfo)}>
+                              評価へ（このモデルを引き継ぐ）
+                            </Button>
+                          ) : null}
                           <Button
                             variant="secondary"
                             className="w-full"

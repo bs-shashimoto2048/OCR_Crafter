@@ -113,3 +113,20 @@ test("空状態: 履歴なしメッセージ", () => {
   const html = render({ items: [] });
   assert.ok(html.includes("Benchmark履歴がありません"));
 });
+
+// Evaluation → Benchmark Handoff（Issue #119）
+// useEffectはrenderToString（SSR）では発火しないため、実際のstate反映はlib/evaluationBenchmarkHandoff.js
+// のユニットテストで検証済み。ここではhandoffRequest propを渡してもクラッシュしないこと（既存の
+// detailRequestパターンと同じ「初期SSR描画では未適用」という既存挙動）のみを確認する
+
+test("handoffRequestを渡してもクラッシュしない（SSR初期描画では未適用）", () => {
+  const html = render({
+    handoffRequest: { benchmarkEngineKey: "tesseract_model", modelName: "m1.tess.json", imageDir: "", gtCsv: "", datasetId: "", seq: 12345 },
+  });
+  assert.ok(html.includes("対象エンジン"));
+});
+
+test("handoffRequestが無くても既存挙動を維持する（state isolation回帰）", () => {
+  const html = render({ handoffRequest: null });
+  assert.ok(html.includes("対象エンジン"));
+});
