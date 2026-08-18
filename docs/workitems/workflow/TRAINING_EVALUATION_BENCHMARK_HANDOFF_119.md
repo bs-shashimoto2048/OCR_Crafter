@@ -2,7 +2,7 @@
 
 Related: Investigation [#115](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/115)（OCR Crafter Next Development Roadmap） / Feature [#119](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/119) / Feature [#117](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/117)（Model Card / Deployment Package Multi-engine Parity、Completed） / Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)（TrOCR Lifecycle） / Epic [#46](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/46)（Engine UI Generalization）
 
-**状態**: Implemented, PR review pending。
+**状態**: Completed / Closed。PR [#120](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/120)、Squash Commit `fca59c8`でマージ済み。
 
 ## 目的
 
