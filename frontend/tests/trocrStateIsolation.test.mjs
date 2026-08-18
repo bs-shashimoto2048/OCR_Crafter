@@ -105,14 +105,16 @@ test("InferenceView/OcrEvaluationViewへは学習画面専用state（ocrTrocr*�
 
 test("trocrModels（登録済みモデル一覧）は読み取り専用の共有データとして両画面へ同じ値を渡す（選択stateとは別物）", async () => {
   const source = await APP_SOURCE_PROMISE;
-  // 一覧データ自体（extractTrocrModels由来）は1箇所のuseMemoで生成され、両画面が
-  // 同じ読み取り専用propとして参照する（選択中モデル・model_ref入力とは異なり、
+  // 一覧データ自体（GET /api/trocr/models由来のtrocrTrainedModels、Issue #121で
+  // extractTrocrModels()＝GET /models/info由来から切替。/models/infoは.trocr.jsonを
+  // globしないため実運用上常に空になる既存バグだった）は1箇所のuseMemoで生成され、
+  // 両画面が同じ読み取り専用propとして参照する（選択中モデル・model_ref入力とは異なり、
   // 画面ごとに複製する意味がないデータのため）。
-  assert.match(source, /const trocrModels = useMemo\(/);
+  assert.match(source, /const trocrTrainedModels = useMemo\(/);
   const inferStart = source.indexOf("<InferenceView");
   const inferEnd = source.indexOf("/>", inferStart);
-  assert.ok(source.slice(inferStart, inferEnd).includes("trocrModels={trocrModels}"));
+  assert.ok(source.slice(inferStart, inferEnd).includes("trocrModels={trocrTrainedModels}"));
   const evalStart = source.indexOf("<OcrEvaluationView");
   const evalEnd = source.indexOf("/>", evalStart);
-  assert.ok(source.slice(evalStart, evalEnd).includes("trocrModels={trocrModels}"));
+  assert.ok(source.slice(evalStart, evalEnd).includes("trocrModels={trocrTrainedModels}"));
 });
