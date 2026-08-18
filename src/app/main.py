@@ -29,10 +29,12 @@ from starlette.background import BackgroundTask
 
 from .config import get_settings
 from .db import (
+    ACTIVE_TRAINING_STATUSES,
     delete_training_jobs_by_project,
     fetch_active_training_job,
     fetch_training_job,
     init_db,
+    list_active_training_jobs,
     upsert_training_job,
 )
 from .init_dirs import ensure_directories
@@ -872,6 +874,59 @@ def _reconcile_ocr_training_job(job_id: str) -> Optional[dict[str, Any]]:
     return current
 
 
+def _reconcile_stale_training_jobs_on_startup() -> list[str]:
+    """サーバ起動時のTraining Job stale補正（Issue #125、Architecture Investigation #123の
+    reliability gap解消）。
+
+    training_jobsにqueued/runningのまま残っているジョブについて、記録された
+    worker_pidが実在するかを確認する。PaddleOCR（training_family="ocr"かつ
+    engineがtesseract/trocr以外）は既存の`_reconcile_ocr_training_job()`
+    （export検知・部分checkpoint検知）を無変更のまま最初に適用し、それでもなお
+    非terminalかつworker_pidが実在しない場合にのみ`failed`へ補正する。
+
+    Tesseract/TrOCR/Classificationは同等のengine別reconciliationを持たないため、
+    本関数がこれらengineに対する唯一のstartup reconciliation経路となる。
+    起動直後は本セッションが開始したどのtraining subprocessもまだ存在しないため、
+    「worker_pidが記録されていない、または死んでいる」ことは安全にstaleと判定できる
+    （`_spawn_training_runner`はサーバプロセスと独立したprocess groupで起動するため、
+    サーバ再起動をまたいで生存しているworker_pidは引き続き本物のrunning jobを指す）。
+
+    completed/failed/stopped等のterminal jobは`list_active_training_jobs()`の時点で
+    対象外のため一切変更しない。既にfailedへ補正済みのjobは次回呼び出し時に対象外と
+    なるため冪等（idempotent）である。
+    """
+    reconciled: list[str] = []
+    for job in list_active_training_jobs():
+        job_id = str(job.get("id") or "")
+        if not job_id:
+            continue
+
+        training_family = str(job.get("training_family") or "")
+        engine = str(job.get("engine") or "").strip().lower()
+        current = job
+        if training_family == "ocr" and engine not in {"tesseract", "trocr"}:
+            current = _reconcile_ocr_training_job(job_id) or job
+
+        if str(current.get("status") or "") not in ACTIVE_TRAINING_STATUSES:
+            continue  # 既存reconciliationでcompleted/failed等へ確定済み
+
+        worker_pid = int(current.get("worker_pid") or 0)
+        if worker_pid and _is_pid_alive(worker_pid):
+            continue  # サーバ再起動をまたいで実在するworkerが引き続き実行中
+
+        upsert_training_job(
+            {
+                **current,
+                "status": "failed",
+                "message": "startup reconciliationによりstale jobと判断されました（workerプロセスが見つかりません）",
+                "worker_pid": None,
+                "updated_at": _now_iso(),
+            }
+        )
+        reconciled.append(job_id)
+    return reconciled
+
+
 def _spawn_training_runner(job_type: str, job_id: str) -> int:
     repo_root = Path(__file__).resolve().parents[2]
     process = subprocess.Popen(
@@ -1135,6 +1190,15 @@ def on_startup() -> None:
     # queuedのJobを再開するためWorkerを起動する（docs/18_JOB_MANAGEMENT.md）
     if os.environ.get("OCRC_DISABLE_WORKER_AUTOSTART"):
         return  # テスト実行時（conftest）に実データへのWorker起動・復旧を行わない
+    try:
+        reconciled_training_jobs = _reconcile_stale_training_jobs_on_startup()
+        if reconciled_training_jobs:
+            logging.getLogger(__name__).warning(
+                "再起動復旧: %d件のTraining Jobをfailedへ補正しました: %s",
+                len(reconciled_training_jobs), reconciled_training_jobs,
+            )
+    except Exception:  # noqa: BLE001
+        logging.getLogger(__name__).exception("Training Job起動時reconciliationに失敗しました")
     try:
         from .services.job_manager import recover_interrupted_jobs
 
