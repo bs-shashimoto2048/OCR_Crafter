@@ -217,6 +217,47 @@ def test_training_parameter_propagation(tmp_path, fake_transformers):
     assert result.epochs_completed == 3
 
 
+def test_on_epoch_end_is_called_once_per_epoch_with_expected_args(tmp_path, fake_transformers):
+    """Issue #94: Job Integrationで追加したoptional progress hookの回帰テスト。
+    省略時（他の全テスト）は既存動作と1バイトも変わらないことを、本テストで明示的に
+    指定した場合との対比として確認する。"""
+    dataset_root = tmp_path / "dataset"
+    _build_dataset(dataset_root, [("a.png", "AB")])
+    calls = []
+
+    def _on_epoch_end(epoch_number, total_epochs, avg_loss):
+        calls.append((epoch_number, total_epochs, avg_loss))
+
+    config = _config(tmp_path, epochs=3)
+    result = run_trocr_training(dataset_root, "dummy/model", config, on_epoch_end=_on_epoch_end)
+    assert calls == [(1, 3, calls[0][2]), (2, 3, calls[1][2]), (3, 3, calls[2][2])]
+    assert all(loss is not None for (_epoch, _total, loss) in calls)
+    assert result.epochs_completed == 3
+
+
+def test_on_epoch_end_exception_propagates_unwrapped_not_as_run_error(tmp_path, fake_transformers):
+    """on_epoch_end自体が送出した例外は、training失敗（TrOCRTrainingRunError）と
+    区別してラップせずそのまま伝播する（モジュールdocstring参照）。"""
+    dataset_root = tmp_path / "dataset"
+    _build_dataset(dataset_root, [("a.png", "AB")])
+
+    def _raise(epoch_number, total_epochs, avg_loss):
+        raise RuntimeError("callback boom")
+
+    with pytest.raises(RuntimeError, match="callback boom"):
+        run_trocr_training(dataset_root, "dummy/model", _config(tmp_path), on_epoch_end=_raise)
+    # 例外後もmodelはeval()へ戻される（finally節で保証）
+    model = fake_transformers["models"][0]
+    assert model.training is False
+
+
+def test_on_epoch_end_omitted_does_not_change_existing_behavior(tmp_path, fake_transformers):
+    dataset_root = tmp_path / "dataset"
+    _build_dataset(dataset_root, [("a.png", "AB")])
+    result = run_trocr_training(dataset_root, "dummy/model", _config(tmp_path, epochs=2))
+    assert result.epochs_completed == 2
+
+
 def test_default_device_is_cpu(tmp_path, fake_transformers):
     dataset_root = tmp_path / "dataset"
     _build_dataset(dataset_root, [("a.png", "AB")])

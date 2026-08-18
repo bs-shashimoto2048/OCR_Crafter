@@ -598,6 +598,27 @@ class OcrTrainStartRequest(BaseModel):
     init_source_value: Optional[str] = Field(default=None)
 
 
+class TrocrTrainStartRequest(BaseModel):
+    """TrOCR Training Job開始リクエスト（Issue #94）。
+
+    既存`OcrTrainStartRequest`（PaddleOCR専用）を汎用化せず、Tesseractと同様に
+    専用エンドポイント・専用スキーマとして新設する（既存2エンジンの契約を変更しない）。
+    `model_ref`は既存`TrOCREngine.load()`/Issue #92 Coreの契約と同じくHugging Face
+    model IDまたはローカルディレクトリパスをそのまま受け付け、`"latest"`等の独自
+    フォールバックは持たない（未指定・空文字は明示的に400で拒否する）。
+    """
+
+    project_id: Optional[str] = Field(default="default")
+    dataset_dir: str = Field(..., description="OCRデータ作成で生成したデータセットディレクトリ（train.txt等を含む）")
+    model_ref: str = Field(..., description="Hugging Face model ID、またはローカルモデルディレクトリパス")
+    epochs: int = Field(default=1, ge=1, le=1000)
+    batch_size: int = Field(default=1, ge=1, le=256)
+    learning_rate: float = Field(default=5e-5, gt=0)
+    max_target_length: int = Field(default=32, ge=1, le=512)
+    device: Literal["auto", "cpu", "cuda"] = Field(default="auto")
+    local_files_only: bool = Field(default=False, description="Hugging Face Hubへ接続せずローカルキャッシュのみを使う")
+
+
 class OcrLogSaveRequest(BaseModel):
     project_id: Optional[str] = Field(default="default")
     image_path: str = Field(...)

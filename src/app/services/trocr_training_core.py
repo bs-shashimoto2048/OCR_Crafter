@@ -68,7 +68,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from PIL import Image, UnidentifiedImageError
 
@@ -171,6 +171,8 @@ def run_trocr_training(
     dataset_root: str | Path,
     model_ref: str,
     config: TrocrTrainingConfig,
+    *,
+    on_epoch_end: "Optional[Callable[[int, int, Optional[float]], None]]" = None,
 ) -> TrocrTrainingResult:
     """TrOCR Training Backend Coreの唯一のエントリポイント。
 
@@ -182,6 +184,13 @@ def run_trocr_training(
     `TrocrDatasetError`・`TrOCRDependencyError`・`TrOCRModelLoadError`）はいずれも
     ここで握りつぶさずそのまま伝播させる（Job Failureへの変換は後続Job Integration
     Issueの責務）。
+
+    `on_epoch_end`（Issue #94: Job Integrationで追加。省略時は既存動作と1バイトも
+    変わらない）: 1 epoch完了ごとに`(epoch_number(1始まり), total_epochs, epoch平均loss)`で
+    呼ばれるoptionalなobservationフック。Job層（呼び出し側）が進捗ログへ1行追記する等の
+    用途のみを想定し、training semantics（epoch数・batch順序・loss計算・早期終了判定）には
+    一切影響しない（戻り値も無視する）。コールバック自体が例外を送出した場合はラップせず
+    そのまま`run_trocr_training()`の呼び出し元へ伝播する（Job層の実装ミスを隠さない）。
     """
     # 1. Dataset読込（既存Adapterをそのまま利用。trainのみ。評価ループは本Coreに含めない）
     samples = load_trocr_training_samples(dataset_root, split="train")
@@ -211,23 +220,29 @@ def run_trocr_training(
     model.train()
     final_loss: Optional[float] = None
     try:
-        for _epoch in range(int(config.epochs)):
+        for epoch_index in range(int(config.epochs)):
             epoch_losses: list[float] = []
-            for batch in loader:
-                pixel_values = batch["pixel_values"].to(engine.device)
-                labels = batch["labels"].to(engine.device)
-                outputs = model(pixel_values=pixel_values, labels=labels)
-                loss = outputs.loss
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-                epoch_losses.append(float(loss.item()))
+            try:
+                for batch in loader:
+                    pixel_values = batch["pixel_values"].to(engine.device)
+                    labels = batch["labels"].to(engine.device)
+                    outputs = model(pixel_values=pixel_values, labels=labels)
+                    loss = outputs.loss
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
+                    epoch_losses.append(float(loss.item()))
+            except TrOCRTrainingRunError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                raise TrOCRTrainingRunError(f"training failed for model_ref={model_ref!r}: {e}") from e
             if epoch_losses:
                 final_loss = sum(epoch_losses) / len(epoch_losses)
-    except TrOCRTrainingRunError:
-        raise
-    except Exception as e:  # noqa: BLE001
-        raise TrOCRTrainingRunError(f"training failed for model_ref={model_ref!r}: {e}") from e
+            # on_epoch_endはtry/exceptの外（このifブロック）で呼ぶため、コールバック自体が
+            # 送出した例外はTrOCRTrainingRunErrorへラップされずそのまま伝播する
+            # （モジュールdocstring/関数docstring参照。training自体の失敗と区別する）
+            if on_epoch_end is not None:
+                on_epoch_end(epoch_index + 1, int(config.epochs), final_loss)
     finally:
         model.eval()
 
