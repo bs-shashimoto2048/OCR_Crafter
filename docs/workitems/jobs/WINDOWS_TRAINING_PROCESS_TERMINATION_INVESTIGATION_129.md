@@ -2,7 +2,7 @@
 
 Related: Investigation [#129](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/129) / Architecture Investigation [#123](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/123)（Job Lifecycle Unification、Completed。§7 Cancellation Semantics・§13 Risk Analysisで本項目を高リスクとして特定） / Reliability [#125](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/125)（Training Job Startup Reconciliation Parity、Completed）
 
-**状態**: Implemented, PR review pending（Investigation / Documentation only。Production cancellation semanticsは無変更）
+**状態**: Completed / Closed（Investigation / Documentation only。Production cancellation semanticsは無変更）。PR [#130](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/130)、Squash Commit `de15d16`でマージ済み。
 
 ## 目的
 
