@@ -122,6 +122,7 @@
 - [Windows Training Process Termination Semantics Investigation（#129）](workitems/jobs/WINDOWS_TRAINING_PROCESS_TERMINATION_INVESTIGATION_129.md)
 - [Frontend Job Display Contract Unification（Refactor #131）](workitems/jobs/FRONTEND_JOB_DISPLAY_CONTRACT_UNIFICATION_131.md)
 - [Windows Training Process Tree Termination（Reliability #133）](workitems/jobs/WINDOWS_TRAINING_PROCESS_TREE_TERMINATION_133.md)
+- [Shared Job Facade Implementation Readiness（Investigation #135）](workitems/jobs/SHARED_JOB_FACADE_READINESS_135.md)
 
 ## バージョン情報
 
