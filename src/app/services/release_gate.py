@@ -146,6 +146,13 @@ def _latest_benchmark_result(project_id: str, model: str) -> Optional[dict[str, 
             row_model = str(row.get("model") or "")
             if engine == "tesseract_model" and row_model == model:
                 return {**row, "benchmark_id": item.get("benchmark_id")}
+            # PaddleOCR自作モデル（.ocr.json）: Benchmark（benchmark.py::_build_paddleocr_custom_runner）は
+            # spec["model"]へ.ocr.jsonファイル名をそのまま保存するため、Tesseractと同じ直接一致で
+            # 照合できる（TrOCRのようなsidecar名→別識別子への解決は不要、Issue #137調査で確認済み）。
+            # "paddleocr_official"（事前学習済みモデル、.ocr.json sidecarを持たずRelease候補にならない）
+            # は意図的に対象外とし、"paddleocr_custom"のみに限定する（誤fallback防止）
+            if engine == "paddleocr_custom" and row_model == model:
+                return {**row, "benchmark_id": item.get("benchmark_id")}
             if engine == "trocr" and trocr_model_ref and row_model == trocr_model_ref:
                 return {**row, "benchmark_id": item.get("benchmark_id")}
     return None
