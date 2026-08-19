@@ -107,7 +107,9 @@ os.kill(child, TERM):    例外なし
 - **同一プロセス内で`Popen`オブジェクトへの参照を保持し続けている場合**（例: probe scriptが`proc = subprocess.Popen(...)`の`proc`をローカル変数として持ち続けたまま`is_pid_alive`を呼ぶ）、対象PIDに対する内部ハンドルが生き続けるため、`ctypes.OpenProcess`がterminate後も一時的に成功し続け、**`proc.wait()`を呼んでも解消しない**
 - **`_spawn_training_runner()`の実装（`process.pid`のみを返し、`Popen`オブジェクトへの参照を保持しない）を忠実に再現したprobeでは、この誤検知は再現しなかった**（terminate直後から`tasklist`と完全に一致してFalseを返した）
 
-**結論**: これは`_is_pid_alive()`自体のバグではなく、「同一プロセスが対象PIDのPopenハンドルを保持し続けている」という特殊な条件でのみ起きる現象であり、実運用の`_spawn_training_runner()`→（時間を置いて別リクエストで）`_stop_training_worker()`という呼び出しパターンでは再現しないことを確認した。誤解のまま放置すると「Windowsで停止済みJobがreconciliationで誤ってrunning扱いされ続ける」という誤った懸念につながりかねないため、明確に切り分けて記録する。
+**結論（本Issue時点）**: これは`_is_pid_alive()`自体のバグではなく、「同一プロセスが対象PIDのPopenハンドルを保持し続けている」という特殊な条件でのみ起きる現象であり、実運用の`_spawn_training_runner()`→（時間を置いて別リクエストで）`_stop_training_worker()`という呼び出しパターンでは再現しないことを確認した。誤解のまま放置すると「Windowsで停止済みJobがreconciliationで誤ってrunning扱いされ続ける」という誤った懸念につながりかねないため、明確に切り分けて記録する。
+
+> **訂正（Issue [#133](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/133)で判明）**: 上記の結論は誤りだった。Issue #133の実装前調査で、`Popen`ハンドルの保持有無に関係なく、`_is_pid_alive()`の実際の関数（`main.py::_is_pid_alive`）を`taskkill /F`・`os.kill(SIGTERM)`いずれで終了させたプロセスに対しても実行した結果、**一貫して`True`（誤って生存判定）を返すことを複数回の実機再現で確認した**。真因は`ctypes.OpenProcess`が成功するかどうかだけを見ており、`GetExitCodeProcess`で`STILL_ACTIVE`(259)かどうかを確認していなかったため（`OpenProcess`はプロセス終了後もPIDがOSに回収されるまで成功し続ける）。Issue #133で`_is_pid_alive()`のWindows分岐を`GetExitCodeProcess`ベースの判定へ修正し、この問題を解消した。詳細は`docs/workitems/jobs/WINDOWS_TRAINING_PROCESS_TREE_TERMINATION_133.md`参照。本節の「Popenハンドル保持が原因」という当初の切り分けは、たまたま当時のprobeの実行タイミング・手順に依存した再現性の低い観察であり、恒久的な原因分析としては不正確だった。
 
 ## 4. Unix Comparison
 
@@ -147,9 +149,9 @@ CI（GitHub Actions、`ubuntu-latest`。`.github/workflows/ci.yml`で確認済�
 3. **process tree全体を終了する必要があるか。** — Tesseract/PaddleOCRについては必要。TrOCR/Classificationは不要（worker本体の終了で完結する、§5）
 4. **Windowsでは`CREATE_NEW_PROCESS_GROUP`等が必要か。** — 対応する場合、`subprocess.CREATE_NEW_PROCESS_GROUP`（`creationflags`）でspawnし、停止時に`os.kill(pid, signal.CTRL_BREAK_EVENT)`を使うWindows流の代替経路が考えられる。ただしこれは孫プロセス（ネストされた`subprocess.Popen`）が同じprocess groupに属することが前提であり、Windows上でのprocess group継承の挙動は本Investigationでは未実測（Future Work）
 5. **`CTRL_BREAK_EVENT`等のgraceful signalを使う価値があるか。** — 理論上は#4と組み合わせて価値があるが、Python公式ドキュメント上`CTRL_BREAK_EVENT`はコンソールプロセスグループ全体へのイベント送出であり、対象プロセスがコンソールイベントハンドラを持たない場合の既定動作（プロセス終了）に依存する。本Investigationのスコープでは実装・実測しない（Production変更禁止のため）
-6. **強制停止は`Popen` objectを保持しない現行設計でも安全に実装可能か。** — 現行のworker本体終了については安全に実装できている（`worker_pid`のみで足りる、§3.4で誤解を切り分け済み）。孫プロセスを含めた終了には、孫プロセスのPIDも永続化するか、process group／Job Object（Windows）等のOS機構を使う設計変更が必要
-7. **persisted PIDだけでprocess identityを安全に判断できるか（PID再利用含む）。** — 本Investigationでは新たな検証はしていない（Issue #125で`_is_pid_alive()`の既存挙動を前提として利用しており、PID再利用の理論的リスクは既存のまま）。§3.4の誤検知はPID再利用ではなく同一プロセス内ハンドル保持が原因であり、別の懸念であることを確認した
-8. **startup reconciliation #125との整合は取れているか。** — 整合している。`_reconcile_stale_training_jobs_on_startup()`はサーバ起動直後（新しいプロセス）に判定するため、§3.4で見つかった「同一プロセスがハンドルを保持し続ける」ケースには該当しない。ただし、Windowsで孫プロセスが生存し続けるケースについて、reconciliation・stop双方とも孫プロセスの存在は検知・対処していない（新たなgapとして§ Recommended Actionへ記録）
+6. **強制停止は`Popen` objectを保持しない現行設計でも安全に実装可能か。** — 現行のworker本体終了については安全に実装できている（`worker_pid`のみで足りる）。孫プロセスを含めた終了には、孫プロセスのPIDも永続化するか、process group／Job Object（Windows）等のOS機構を使う設計変更が必要（**訂正**: §3.4の「誤解」という当初の切り分けはIssue #133で誤りと判明。`_is_pid_alive()`自体がWindowsで正しく機能していなかったため、本回答の「安全に実装できている」という評価も部分的に不正確だった。Issue #133の修正後に成立する評価として読み替えること）
+7. **persisted PIDだけでprocess identityを安全に判断できるか（PID再利用含む）。** — 本Investigationでは新たな検証はしていない（PID再利用の理論的リスクは既存のまま）。**訂正（Issue #133判明分）**: §3.4の「誤検知はPID再利用ではなく同一プロセス内ハンドル保持が原因」という当初の切り分けは誤りだった。実際には`_is_pid_alive()`のWindows実装が`GetExitCodeProcess`を確認していなかったことが真因であり、PID再利用リスクとは別の問題として、Issue #133で修正済み
+8. **startup reconciliation #125との整合は取れているか。** — Windowsで孫プロセスが生存し続けるケースについて、reconciliation・stop双方とも孫プロセスの存在は検知・対処していない（新たなgapとして§ Recommended Actionへ記録、Issue #133で対応）。**訂正**: §3.4の「同一プロセスがハンドルを保持し続けるケースには該当しない」という当初の説明は、Issue #133で`_is_pid_alive()`自体の実装バグが判明したことにより不正確だったと分かった。ただし#125の`_reconcile_stale_training_jobs_on_startup()`は新規プロセス起動直後に実行されるため、`_is_pid_alive()`が死んでいるworker_pidに対して`True`を誤返却するこの不具合の影響を実際に受けていた可能性がある（Windows環境でstartup reconciliationが機能していなかった疑いがあり、Issue #133での`_is_pid_alive()`修正により合わせて解消された）
 9. **engineごとに停止方式を変える必要があるか。** — 変える場合は必要になる（Tesseract/PaddleOCRのみprocess tree対応が必要、TrOCR/Classificationは現状のままで良い）。ただし本Investigationでは実装しない
 10. **cross-platform helperへ切り出すべきか。** — 将来対応する場合は価値がある（`_is_pid_alive()`が既にこのパターンを一部体現している）。本Investigationでは新設しない
 
@@ -160,16 +162,18 @@ CI（GitHub Actions、`ubuntu-latest`。`.github/workflows/ci.yml`で確認済�
 | Windowsで孫プロセス（Tesseract外部CLI/PaddleOCR学習subprocess）が停止後も実行を継続する | **確認済み・高**。GPU/CPU/ディスクを占有し続け、ユーザーには「停止済み」と表示されるため気づかれにくい |
 | `delete_artifacts=True`時、生存中の孫プロセスと`shutil.rmtree(run_dir)`の競合 | **理論的・中**。実際のファイルロック競合は本Investigationでは意図的に再現していない（実Training/GPU破壊的テストを避けるためIssue本文で明示的にOut of Scope）が、コード上`try/except`が無いことを確認済み |
 | 孤立した孫プロセスが後続jobのGPU/ポート/ファイルロックと衝突する | **理論的・中**。実測はしていないが、`_reject_if_training_active()`はDB状態のみに基づくため、孤立プロセスの存在自体は考慮されない |
-| `_is_pid_alive()`相当ロジックの誤検知 | **調査済み・低（実運用では発現しない）**。§3.4の通り、実運用の呼び出しパターンでは再現しないことを確認した |
+| `_is_pid_alive()`相当ロジックの誤検知 | **当初「低・実運用では発現しない」と評価したが、Issue #133で誤りと判明・高リスクへ訂正**。`_is_pid_alive()`のWindows実装は`ctypes.OpenProcess`成功のみを見ており、既に終了したプロセスに対しても`True`を返し続けていた（`GetExitCodeProcess`未確認が真因）。Issue #125のstartup reconciliationがWindows上で機能していなかった可能性を含む。Issue #133で修正済み |
 
 ## Recommended Action
 
 1. **現行実装（`os.killpg`→`os.kill`のfallback）は、worker本体の終了という最小契約は満たしており、緊急の破壊的修正は不要と判断する**（Architecture Investigation #123の方針＝いきなり大きな変更をしない、と整合）
 2. **Tesseract/PaddleOCRの孫プロセスがWindows上で停止後も残り得るという事実は、reliability gapとして次の小規模Issueへ分割することを推奨する**。候補: `[Bug] Windows Training Stop: descendant process cleanup for Tesseract/PaddleOCR` — 対応案としては、(a) `subprocess.CREATE_NEW_PROCESS_GROUP`をworker spawn時に付与し、孫プロセス生成側でも同一process groupを維持したまま、停止時にWindows用のprocess tree終了（例: `taskkill /T /F /PID <worker_pid>`相当、またはWindows Job Objectへ紐付けてJob Object全体を終了）へ切り替える、(b) 孫プロセスのPIDも`training_jobs`へ記録し停止時に個別終了する、等。いずれも新たな実装Issueでの設計判断が必要
 3. **`delete_artifacts=True`時の`shutil.rmtree(run_dir)`をtry/exceptで保護し、ファイルロック等の失敗を安全に扱う**（Windows固有の既知課題`docs/10_KNOWN_LIMITATIONS.md`の`rmtree`関連項目と合わせて別Bug Issueで検討可能）
-4. `_is_pid_alive()`自体の修正は不要（§3.4で誤解であることを確認済み）
+4. ~~`_is_pid_alive()`自体の修正は不要（§3.4で誤解であることを確認済み）~~ → **訂正（Issue #133）**: `_is_pid_alive()`のWindows実装には実在するバグがあり、修正が必要と判明した。Issue #133で修正済み
 
 本Issueでは上記1-3のいずれも実装しない（Investigation/Documentation onlyの原則、Issue本文の明示的指示通り）。次Issue自体もこのIssue内では作成しない。
+
+**本Issueの全体的な事後評価（Issue #133完了時点）**: 本Issue（#129）は孫プロセスの孤立という主要な発見自体は正しかったが、`_is_pid_alive()`に関する§3.4の「誤解」切り分けは誤りであり、実際には`_is_pid_alive()`自体に修正を要するバグが存在した。本docの該当箇所は訂正注記を追加する形で保持し（Documentation Lifecycleの原則に従い、誤りを隠さず記録する）、実装はIssue #133で行った。
 
 ## Tests / Verification
 

@@ -698,9 +698,47 @@ def _cleanup_failed_ocr_dataset(project_id: str, dataset_dir: str) -> bool:
     return True
 
 
+def _is_pid_alive_windows(pid: int) -> bool:
+    """Windows専用のPID生死判定（Issue #133で修正）。
+
+    `OpenProcess`が成功するだけでは生存確認にならない: 既に終了したプロセスでも、
+    OSがそのPID番号をまだ再利用可能な状態へ回収していない間は`OpenProcess`が
+    成功し続けることを実機で確認した（`os.kill(pid, 0)`宣言時終了・自プロセスからの
+    `os.kill(pid, SIGTERM)`終了・外部`taskkill /F`終了のいずれでも再現）。
+    `GetExitCodeProcess`が`STILL_ACTIVE`(259)を返す場合のみ生存とみなす。
+    """
+    try:
+        import ctypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        handle = ctypes.windll.kernel32.OpenProcess(  # type: ignore[attr-defined]
+            PROCESS_QUERY_LIMITED_INFORMATION,
+            False,
+            int(pid),
+        )
+        if not handle:
+            return False
+        try:
+            STILL_ACTIVE = 259
+            exit_code = ctypes.c_ulong(0)
+            ok = ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))  # type: ignore[attr-defined]
+            if not ok:
+                return False
+            return exit_code.value == STILL_ACTIVE
+        finally:
+            ctypes.windll.kernel32.CloseHandle(handle)  # type: ignore[attr-defined]
+    except Exception:
+        return False
+
+
 def _is_pid_alive(pid: int) -> bool:
     if pid <= 0:
         return False
+    # Windows: os.kill(pid, 0)はプロセス終了直後でも例外を送出しないことがある
+    # （PIDがOSに回収されるまでの間、生死判定として信頼できない。Issue #133で実測確認）。
+    # GetExitCodeProcessベースの判定のみを使う
+    if sys.platform.startswith("win"):
+        return _is_pid_alive_windows(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -708,24 +746,102 @@ def _is_pid_alive(pid: int) -> bool:
     except PermissionError:
         return True
     except OSError:
-        if not sys.platform.startswith("win"):
-            return False
-        try:
-            import ctypes
-
-            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-            handle = ctypes.windll.kernel32.OpenProcess(  # type: ignore[attr-defined]
-                PROCESS_QUERY_LIMITED_INFORMATION,
-                False,
-                int(pid),
-            )
-            if not handle:
-                return False
-            ctypes.windll.kernel32.CloseHandle(handle)  # type: ignore[attr-defined]
-            return True
-        except Exception:
-            return False
+        return False
     return True
+
+
+def _windows_process_image_name(pid: int) -> Optional[str]:
+    """Windowsで対象PIDの実行イメージ名を`tasklist`で確認する（Issue #133）。
+
+    PID再利用（worker終了後に無関係なプロセスへ同じPID番号が再割当てされるリスク）に
+    備え、process tree終了前に「本当にPythonプロセスか」を確認するための補助情報。
+    取得できない場合はNone（呼び出し側は「確認できない」ものとして安全側に倒す）。
+    """
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        line = (result.stdout or "").strip().splitlines()[0] if (result.stdout or "").strip() else ""
+        if not line:
+            return None
+        parts = [p.strip('"') for p in line.split('","')]
+        return parts[0] if parts and parts[0] else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _terminate_training_process_tree(worker_pid: int, timeout: float = 3.0) -> dict[str, Any]:
+    """Training workerとその子孫プロセスを安全に終了させる（Issue #133、Investigation #129の解消）。
+
+    Unix: 既存の`os.killpg`をそのまま使う。`_spawn_training_runner`が`start_new_session=True`
+    でspawnしているため、worker_pidはそのままprocess group IDでもあり、同一group内で
+    起動された子孫プロセス（Tesseract外部CLI・PaddleOCRのネストしたtrain.py subprocess）も
+    まとめて終了できる（Investigation #129で確認したPOSIX仕様）。
+    Windows: `os.killpg`が存在しないため、`taskkill /PID <pid> /T /F`でprocess tree全体
+    （子孫含む）を終了する。実行前に`tasklist`でイメージ名がPythonであることを確認し、
+    PID再利用により無関係なプロセスツリーを誤って強制終了しないようにする。
+
+    戻り値: {"outcome": "already_dead"|"terminated"|"still_alive"|"command_failed"|
+             "pid_mismatch"|"invalid_pid", "detail": str}
+    - "already_dead"/"terminated" のみを「終了確認済み」として扱う（呼び出し側はこの2つの
+      場合にのみartifact cleanupを行う。Design Principle: cleanupはtermination確認後のみ）
+    """
+    if worker_pid <= 0:
+        return {"outcome": "invalid_pid", "detail": "worker_pid <= 0"}
+
+    if not _is_pid_alive(worker_pid):
+        return {"outcome": "already_dead", "detail": ""}
+
+    if sys.platform.startswith("win"):
+        expected_image = os.path.basename(sys.executable).lower()
+        actual_image = (_windows_process_image_name(worker_pid) or "").lower()
+        if actual_image and actual_image != expected_image:
+            return {
+                "outcome": "pid_mismatch",
+                "detail": f"expected image '{expected_image}' but found '{actual_image}' for pid={worker_pid}",
+            }
+        try:
+            result = subprocess.run(
+                ["taskkill", "/PID", str(worker_pid), "/T", "/F"],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+            command_ok = result.returncode == 0
+            detail = f"{(result.stdout or '').strip()} {(result.stderr or '').strip()}".strip()
+        except Exception as e:  # noqa: BLE001
+            command_ok = False
+            detail = f"{type(e).__name__}: {e}"
+    else:
+        try:
+            os.killpg(worker_pid, signal.SIGTERM)
+            command_ok = True
+            detail = ""
+        except ProcessLookupError:
+            return {"outcome": "already_dead", "detail": ""}
+        except Exception:  # noqa: BLE001
+            try:
+                os.kill(worker_pid, signal.SIGTERM)
+                command_ok = True
+                detail = ""
+            except ProcessLookupError:
+                return {"outcome": "already_dead", "detail": ""}
+            except Exception as e2:  # noqa: BLE001
+                command_ok = False
+                detail = f"{type(e2).__name__}: {e2}"
+
+    if not command_ok:
+        return {"outcome": "command_failed", "detail": detail}
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not _is_pid_alive(worker_pid):
+            return {"outcome": "terminated", "detail": detail}
+        time.sleep(0.1)
+    return {"outcome": "still_alive", "detail": detail}
 
 
 def _ocr_run_dir_for_job(job_id: str, project_id: str) -> Path:
@@ -971,8 +1087,14 @@ def _delete_training_artifacts(job: dict[str, Any]) -> dict[str, Any]:
         if job_id_str:
             run_dir = paths.models / "ocr_runs" / job_id_str
             if run_dir.exists() and run_dir.is_dir() and not run_dir.is_symlink():
-                shutil.rmtree(run_dir)
-                removed["run_dir_removed"] = True
+                try:
+                    shutil.rmtree(run_dir)
+                    removed["run_dir_removed"] = True
+                except OSError:
+                    # Windowsのファイルロック等（Investigation #129）。呼び出し元
+                    # （_stop_training_worker）はtermination確認後にのみここへ到達するが、
+                    # 万一ファイルハンドルが残っていても例外を外部へ漏らさない
+                    pass
 
     model_path_raw = str(job.get("model_path") or "").strip()
     if model_path_raw:
@@ -1022,18 +1144,13 @@ def _stop_training_worker(
     if worker_pid <= 0:
         raise HTTPException(status_code=409, detail="worker pid is missing")
 
-    stopped = False
-    try:
-        os.killpg(worker_pid, signal.SIGTERM)
-        stopped = True
-    except ProcessLookupError:
-        stopped = False
-    except Exception:
-        try:
-            os.kill(worker_pid, signal.SIGTERM)
-            stopped = True
-        except ProcessLookupError:
-            stopped = False
+    termination = _terminate_training_process_tree(worker_pid)
+    stopped = termination["outcome"] in {"already_dead", "terminated"}
+    if not stopped:
+        logging.getLogger(__name__).warning(
+            "training stop: process tree termination not confirmed (job=%s pid=%s outcome=%s detail=%s)",
+            job_id, worker_pid, termination["outcome"], termination["detail"],
+        )
 
     current = fetch_training_job(job_id) or job
     removed = {"run_dir_removed": False, "model_removed": False, "log_removed": False}
@@ -1041,10 +1158,15 @@ def _stop_training_worker(
     next_model_path = current.get("model_path")
     next_log_path = current.get("log_path")
     if delete_artifacts:
-        removed = _delete_training_artifacts(current)
-        message = "training stopped by user and artifacts deleted"
-        next_model_path = None
-        next_log_path = None
+        # cleanup/rmtreeはprocess treeの終了確認後にのみ行う（終了未確認のまま成果物を
+        # 削除すると、生存中の子孫プロセスが書き込み中のファイルと競合しうるため）
+        if stopped:
+            removed = _delete_training_artifacts(current)
+            message = "training stopped by user and artifacts deleted"
+            next_model_path = None
+            next_log_path = None
+        else:
+            message = "training stop requested, but artifacts were not deleted because process termination could not be confirmed"
     upsert_training_job(
         {
             **current,
@@ -1062,7 +1184,7 @@ def _stop_training_worker(
         "training_family": training_family,
         "status": "stopped",
         "stopped": stopped,
-        "artifacts_deleted": bool(delete_artifacts),
+        "artifacts_deleted": bool(delete_artifacts and stopped),
         "removed": removed,
     }
 

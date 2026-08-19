@@ -161,4 +161,5 @@ python -m pytest -q
 
 - PaddleOCRの`_reconcile_ocr_training_job()`自体（worker_pid死亡かつ成果物皆無の場合に`current`をそのまま返す挙動）は本Issueでは変更していない。新設のfallbackがその残余ケースを別レイヤーでカバーしているが、将来的に`_reconcile_ocr_training_job()`自体へ同等のロジックを統合し、二重の判定経路を一本化する余地はある
 - Windows環境における`os.killpg`/`_is_pid_alive`の実機検証はArchitecture Investigation #123のRisk Analysisで指摘された既存の未検証事項であり、本Issueでも新規の実機検証は行っていない（既存関数の再利用のみ）
+  - **訂正・重要（Reliability [#133](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/133)で判明）**: 実機検証の結果、`_is_pid_alive()`のWindows実装（`ctypes.OpenProcess`が成功するかのみを見ており`GetExitCodeProcess`でSTILL_ACTIVEを確認していなかった）には、既に終了したworker_pidに対しても`True`（生存）を返し続けるバグがあることが判明した。これは`OpenProcess`がプロセス終了後もOSがPIDを回収するまで成功し続けるため。**この結果、本Issueが実装した`_reconcile_stale_training_jobs_on_startup()`は、Windows環境では死んでいるworker_pidを生存中と誤判定し、stale jobをfailedへ補正できていなかった可能性が高い**（Windows上での本機能の実効性が本Issueの完了時点では確認できていなかったことになる）。Issue #133で`_is_pid_alive()`のWindows分岐を修正済みであり、本Issueの`_reconcile_stale_training_jobs_on_startup()`自体はコード変更なしに、この修正の恩恵を受けて意図通り機能するようになった
 - Job Lifecycle Unification（Option C方向での段階的統一）はArchitecture Investigation #123の推奨に従い、引き続き別Issueとして扱う
