@@ -2,7 +2,7 @@
 
 Related: Refactor [#131](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/131) / Architecture Investigation [#123](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/123)（Job Lifecycle Unification、Completed。Option C＝Shared Job Facadeの第一歩として本Issueを推奨） / Reliability [#125](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/125) / Feature [#127](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/127) / Investigation [#129](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/129)
 
-**状態**: Implemented, PR review pending
+**状態**: Completed / Closed。PR [#132](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/132)、Squash Commit `32cc6f3`でマージ済み。
 
 ## 目的
 
