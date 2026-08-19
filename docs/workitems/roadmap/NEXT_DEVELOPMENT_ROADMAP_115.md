@@ -8,6 +8,8 @@ Related: Investigation [#115](https://github.com/bs-shashimoto2048/OCR_Crafter/i
 
 Epic #27がCompleted、Issue #8/#112のテストDB isolation問題が解消、Issue #87が重複整理済みとなった現時点で、既存Epic #28を無理に再開せず、OCR Crafter全体から次の高価値開発テーマを選定する。
 
+> 本Investigationの推奨事項（#117/#119/#121/#123系/#137）が完了した後、Investigation [#139](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/139)で本Roadmapの続編（Refresh）を実施した。詳細は[NEXT_DEVELOPMENT_ROADMAP_REFRESH_139.md](NEXT_DEVELOPMENT_ROADMAP_REFRESH_139.md)を参照。
+
 ## 1. Current Product Capability Map
 
 `docs/00_PROJECT_OVERVIEW.md`（既存ドキュメント）が機能一覧を網羅的に維持しているため重複作成はせず、実コードから以下を実測・再確認した。

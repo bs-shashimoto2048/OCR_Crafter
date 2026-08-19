@@ -113,6 +113,7 @@
 - [TrOCR対応](workitems/trocr/README.md)
 - [Unified Model Metadata Infrastructure](workitems/model-metadata/README.md)
 - [Next Development Roadmap（Investigation #115）](workitems/roadmap/NEXT_DEVELOPMENT_ROADMAP_115.md)
+- [Next Development Roadmap Refresh（Investigation #139）](workitems/roadmap/NEXT_DEVELOPMENT_ROADMAP_REFRESH_139.md)
 - [Model Card / Deployment Package Multi-engine Parity（Feature #117）](workitems/model-lifecycle/MODEL_CARD_DEPLOYMENT_MULTI_ENGINE_PARITY_117.md)
 - [PaddleOCR Release Gate Benchmark Linkage（Bug #137）](workitems/model-lifecycle/PADDLEOCR_RELEASE_GATE_BENCHMARK_LINKAGE_137.md)
 - [Training → Evaluation → Benchmark Workflow Handoff（Feature #119）](workitems/workflow/TRAINING_EVALUATION_BENCHMARK_HANDOFF_119.md)
