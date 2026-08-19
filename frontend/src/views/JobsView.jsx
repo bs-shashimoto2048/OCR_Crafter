@@ -6,6 +6,14 @@ import EmptyState from "../components/EmptyState";
 import InfoTooltip from "../components/InfoTooltip";
 import { request } from "../lib/api";
 import { HELP_TEXTS } from "../lib/helpTexts";
+import {
+  CANONICAL_JOB_STATUS_LABELS,
+  formatJobDuration,
+  formatJobTimestamp,
+  jobStatusBadgeClass,
+  mapStatusToCanonical,
+  toJobDisplayModel,
+} from "../lib/jobDisplayModel";
 
 const SCROLL_AREA = "dark-scroll [overscroll-behavior:contain] [scrollbar-gutter:stable]";
 
@@ -19,36 +27,20 @@ export const JOB_TYPE_LABELS = {
   report_generate: "レポート生成",
 };
 
-export const JOB_STATUS_LABELS = {
-  queued: "待機中",
-  running: "実行中",
-  succeeded: "成功",
-  failed: "失敗",
-  cancel_requested: "キャンセル要求中",
-  cancelled: "キャンセル済",
-  interrupted: "中断（再起動）",
-};
+// job_manager（Job System B）の実際のstatus語彙 → 表示ラベル。
+// Issue #131でjobDisplayModel.jsのcanonical categoryへ委譲し、二重管理をやめた
+// （ラベル文言自体は既存表示から変更していない）。
+export const JOB_STATUS_LABELS = Object.fromEntries(
+  ["queued", "running", "succeeded", "failed", "cancel_requested", "cancelled", "interrupted"].map((status) => [
+    status,
+    CANONICAL_JOB_STATUS_LABELS[mapStatusToCanonical("job_manager", status)],
+  ])
+);
 
-function statusChipClass(status) {
-  if (status === "running") return "border-accent/50 bg-accent/15 text-blue-200";
-  if (status === "succeeded") return "border-success/40 bg-success/10 text-success";
-  if (status === "failed") return "border-danger/40 bg-danger/10 text-danger";
-  if (status === "cancel_requested" || status === "interrupted") return "border-amber-400/50 bg-amber-400/10 text-amber-200";
-  return "border-border/60 bg-card/40 text-muted";
-}
-
-function dateLabel(value) {
-  return value ? String(value).slice(5, 16).replace("T", " ") : "-";
-}
-
-// 実行時間（開始〜終了 / 実行中は開始〜現在）
+// 実行時間（開始〜終了 / 実行中は開始〜現在）。Issue #131でjobDisplayModel.jsの
+// 共通実装（TrainingView等と共有可能な形）へ委譲した（計算ロジック自体は無変更）。
 export function jobDuration(job) {
-  const start = job?.started_at ? new Date(job.started_at).getTime() : null;
-  if (!start || Number.isNaN(start)) return "-";
-  const end = job?.finished_at ? new Date(job.finished_at).getTime() : Date.now();
-  const seconds = Math.max(0, Math.round((end - start) / 1000));
-  if (seconds < 60) return `${seconds}秒`;
-  return `${Math.floor(seconds / 60)}分${seconds % 60}秒`;
+  return formatJobDuration({ startedAt: job?.started_at, finishedAt: job?.finished_at });
 }
 
 export default function JobsView({
@@ -68,6 +60,7 @@ export default function JobsView({
   const [detailId, setDetailId] = useState("");
   const [events, setEvents] = useState([]);
   const detail = useMemo(() => jobs.find((j) => j.job_id === detailId) || null, [jobs, detailId]);
+  const detailModel = useMemo(() => toJobDisplayModel("job_manager", detail), [detail]);
 
   // Escで詳細パネルを閉じる（キーボード操作）
   useEffect(() => {
@@ -162,7 +155,9 @@ export default function JobsView({
               </tr>
             </thead>
             <tbody>
-              {jobs.map((job) => (
+              {jobs.map((job) => {
+                const model = toJobDisplayModel("job_manager", job);
+                return (
                 <tr
                   key={job.job_id}
                   tabIndex={0}
@@ -182,7 +177,7 @@ export default function JobsView({
                   <td className="whitespace-nowrap px-2 py-1.5 text-text">{JOB_TYPE_LABELS[job.job_type] || job.job_type}</td>
                   <td className="whitespace-nowrap px-2 py-1.5 text-muted">{job.project_id}</td>
                   <td className="whitespace-nowrap px-2 py-1.5">
-                    <span className={`rounded-full border px-2 py-0.5 text-[11px] ${statusChipClass(job.status)}`}>
+                    <span className={`rounded-full border px-2 py-0.5 text-[11px] ${jobStatusBadgeClass(model.displayStatus)}`}>
                       {JOB_STATUS_LABELS[job.status] || job.status}
                     </span>
                   </td>
@@ -201,8 +196,8 @@ export default function JobsView({
                     {job.current_step || "-"}
                   </td>
                   <td className="whitespace-nowrap px-2 py-1.5 text-muted">{job.requested_by || "-"}</td>
-                  <td className="whitespace-nowrap px-2 py-1.5 text-muted">{dateLabel(job.created_at)}</td>
-                  <td className="whitespace-nowrap px-2 py-1.5 text-muted">{jobDuration(job)}</td>
+                  <td className="whitespace-nowrap px-2 py-1.5 text-muted">{formatJobTimestamp(job.created_at)}</td>
+                  <td className="whitespace-nowrap px-2 py-1.5 text-muted">{formatJobDuration(model)}</td>
                   <td className="whitespace-nowrap px-2 py-1.5 text-[11px]">
                     {job.related_model_id ? (
                       <button type="button" className="mr-1 text-blue-200 underline-offset-2 hover:underline" onClick={(e) => { e.stopPropagation(); onOpenModel?.(job.related_model_id); }}>
@@ -222,7 +217,8 @@ export default function JobsView({
                     {!job.related_model_id && !job.related_experiment_id && !job.related_benchmark_id ? "-" : null}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
               {jobs.length === 0 ? (
                 <tr>
                   <td colSpan={10}>
@@ -247,7 +243,7 @@ export default function JobsView({
           subtitle={`${JOB_TYPE_LABELS[detail.job_type] || detail.job_type} / ${detail.project_id}`}
           actions={
             <div className="flex gap-2">
-              {["queued", "running"].includes(detail.status) ? (
+              {detailModel.canCancel ? (
                 <Button
                   size="sm"
                   variant="danger"
@@ -260,7 +256,7 @@ export default function JobsView({
                   キャンセル
                 </Button>
               ) : null}
-              {["succeeded", "failed", "cancelled", "interrupted"].includes(detail.status) ? (
+              {detailModel.canRetry ? (
                 <Button size="sm" variant="secondary" onClick={() => onRetry?.(detail.job_id)} title="同じ入力条件で再実行します">
                   再実行
                 </Button>
@@ -279,7 +275,7 @@ export default function JobsView({
                   Status: {JOB_STATUS_LABELS[detail.status] || detail.status} / Progress: {detail.progress}% / {detail.current_step}
                 </p>
                 <p className="text-muted">
-                  作成 {dateLabel(detail.created_at)} / 開始 {dateLabel(detail.started_at)} / 終了 {dateLabel(detail.finished_at)} / 所要 {jobDuration(detail)}
+                  作成 {formatJobTimestamp(detail.created_at)} / 開始 {formatJobTimestamp(detail.started_at)} / 終了 {formatJobTimestamp(detail.finished_at)} / 所要 {formatJobDuration(detailModel)}
                 </p>
                 {detail.retry_source_job_id ? <p className="text-muted">再実行元: {detail.retry_source_job_id}</p> : null}
                 {detail.message ? <p className="text-amber-200">{detail.message}</p> : null}
@@ -315,7 +311,7 @@ export default function JobsView({
                       <li key={index} className="flex gap-2 border-t border-border/40 py-0.5 first:border-t-0">
                         <span className="shrink-0 text-muted">{String(event.ts || "").slice(11, 19)}</span>
                         {event.type === "status" ? (
-                          <span className={`shrink-0 rounded-full border px-1.5 text-[10px] ${statusChipClass(event.status)}`}>
+                          <span className={`shrink-0 rounded-full border px-1.5 text-[10px] ${jobStatusBadgeClass(mapStatusToCanonical("job_manager", event.status))}`}>
                             {JOB_STATUS_LABELS[event.status] || event.status}
                           </span>
                         ) : (
