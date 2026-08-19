@@ -2,7 +2,7 @@
 
 Related: Bug [#137](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/137) / Feature [#117](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/117)（Model Card / Deployment Package Multi-engine Parity、Completed。本Issueの起点となったFuture Work） / Feature [#104](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/104)（TrOCR Release Gate Integration、既存パターンの参照元）
 
-**状態**: Implemented, PR review pending
+**状態**: Completed / Closed。PR [#138](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/138)、Squash Commit `a7cbe04`でマージ済み。
 
 ## 目的
 
