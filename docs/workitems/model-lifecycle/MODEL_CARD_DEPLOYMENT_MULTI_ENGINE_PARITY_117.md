@@ -131,5 +131,5 @@ cd frontend && npm run build
 ## Future Work
 
 - Model CardへのBenchmark結果表示（全engine共通で現在未実装。追加する場合はEvaluation/Benchmark architectureとの統合設計が必要になるため、別Issueとして起票すべき）
-- `release_gate.py::_latest_benchmark_result()`が`paddleocr_custom`/`paddleocr_official`のBenchmark行を一切マッチングしないことを発見した（`tesseract_model`/`trocr`のみ対応）。Release Gate自体の既存Benchmark evidence接続に関する未解決ギャップであり、本Issueの対象（Model Card/Deployment Package）とは別のため修正せず記録するに留めた
+- ~~`release_gate.py::_latest_benchmark_result()`が`paddleocr_custom`/`paddleocr_official`のBenchmark行を一切マッチングしないことを発見した（`tesseract_model`/`trocr`のみ対応）。Release Gate自体の既存Benchmark evidence接続に関する未解決ギャップであり、本Issueの対象（Model Card/Deployment Package）とは別のため修正せず記録するに留めた~~ → Bug [#137](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/137)として解消済み。`paddleocr_custom`は直接文字列一致で接続できる（Benchmark実行時の`model`とRelease Gateの`model`が最初から同一の`.ocr.json`ファイル名のため）。`paddleocr_official`は意図的に対象外のまま（Release候補になり得ないため）。詳細は`docs/workitems/model-lifecycle/PADDLEOCR_RELEASE_GATE_BENCHMARK_LINKAGE_137.md`参照
 - `docs/10_KNOWN_LIMITATIONS.md`のModel Card/Deployment Package既知の制約に関する記述は、本Issueの実装完了を反映してdoc更新が必要（USER_GUIDE.mdは更新済み、§Documentation参照）

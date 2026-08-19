@@ -114,6 +114,7 @@
 - [Unified Model Metadata Infrastructure](workitems/model-metadata/README.md)
 - [Next Development Roadmap（Investigation #115）](workitems/roadmap/NEXT_DEVELOPMENT_ROADMAP_115.md)
 - [Model Card / Deployment Package Multi-engine Parity（Feature #117）](workitems/model-lifecycle/MODEL_CARD_DEPLOYMENT_MULTI_ENGINE_PARITY_117.md)
+- [PaddleOCR Release Gate Benchmark Linkage（Bug #137）](workitems/model-lifecycle/PADDLEOCR_RELEASE_GATE_BENCHMARK_LINKAGE_137.md)
 - [Training → Evaluation → Benchmark Workflow Handoff（Feature #119）](workitems/workflow/TRAINING_EVALUATION_BENCHMARK_HANDOFF_119.md)
 - [TrOCR Evaluation Registered-model Selection（Bug #121）](workitems/trocr/TROCR_EVALUATION_REGISTERED_MODEL_SELECTION_121.md)
 - [Job Lifecycle Unification Architecture Investigation（#123）](workitems/jobs/JOB_LIFECYCLE_UNIFICATION_ARCHITECTURE_123.md)
