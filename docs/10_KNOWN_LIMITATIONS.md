@@ -19,6 +19,7 @@
 | 候補辞書はlocalStorage保存 | 数万件規模の辞書には不向き（5MB/256文字の読込上限あり） | `lib/candidateDictionary.js` |
 | CI稼働中（Docker/CD未整備） | `.github/workflows/ci.yml` でbackend（pytest）・frontend（npm build）を実行。Docker化・CD（自動デプロイ）は未対応 | `.github/workflows/ci.yml` |
 | Lint/型チェック未設定 | ruff/eslint/mypy等の設定ファイルなし | リポジトリルート |
+| Windowsでの学習停止は孫プロセスを終了しない | `os.killpg`はWindowsで`AttributeError`となり常に`os.kill(worker_pid)`へfallbackする。これはworker本体は確実に終了させるが、Tesseract（外部lstmtraining等CLI）・PaddleOCR（`tools/train.py`をネストしたsubprocess）が起動中の場合、その孫プロセスはWindows上では終了されず孤立プロセスとして実行を継続する（Linuxでは`start_new_session=True`によるprocess group継承のため`os.killpg`が孫プロセスも含めて終了させる、という非対称性を実測で確認）。TrOCR/Classificationは学習ループ自体がworker内in-processのためこの問題は無い | `main.py`（`_stop_training_worker`/`_spawn_training_runner`）、`docs/workitems/jobs/WINDOWS_TRAINING_PROCESS_TERMINATION_INVESTIGATION_129.md` |
 
 ## docs/13_QA_STATUS.md（2026-07-07）記載の既知課題
 
