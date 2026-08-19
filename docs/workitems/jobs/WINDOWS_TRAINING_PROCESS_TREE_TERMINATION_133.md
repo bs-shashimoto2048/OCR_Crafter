@@ -2,7 +2,7 @@
 
 Related: Reliability [#133](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/133) / Architecture Investigation [#123](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/123)（Job Lifecycle Unification、Completed） / Reliability [#125](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/125)（Training Job Startup Reconciliation Parity、Completed。本Issueで判明した`_is_pid_alive()`バグの訂正あり） / Investigation [#129](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/129)（Windows Training Process Termination Semantics Investigation、Completed。本Issueで一部訂正あり）
 
-**状態**: Implemented, PR review pending
+**状態**: Completed / Closed。PR [#134](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/134)、Squash Commit `834abc5`でマージ済み。
 
 ## 目的
 
