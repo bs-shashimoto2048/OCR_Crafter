@@ -132,5 +132,5 @@ UI上のボタン表示条件（`canCancel`）は共通化したが、実際に�
 
 ## Future Work
 
-- Backend側のShared Job Facade本体（Architecture Investigation #123のOption C、Frontend側は本Issueで準備が整った）
+- ~~Backend側のShared Job Facade本体（Architecture Investigation #123のOption C、Frontend側は本Issueで準備が整った）~~ → Investigation [#135](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/135)で再評価済み。**結論: 実装しない**。本Issue（#131）が表示契約の重複を既に解消しており、Backend Facadeの追加価値が乏しいと判断された。詳細は`docs/workitems/jobs/SHARED_JOB_FACADE_READINESS_135.md`参照
 - 将来TrainingView.jsxに新規の共有UIコンポーネント（例: 両System共通のstatusバッジコンポーネント）を追加する必要が生じた場合、本Issueの`jobDisplayModel.js`（`source: "training"`のmappingは既に完成済み）をそのまま利用できる
