@@ -611,14 +611,19 @@ def delete_model(project_id: Optional[str], model_name: str) -> str:
     is_pt = Path(safe_name).suffix.lower() == ".pt"
     is_ocr_meta = len(suffixes) >= 2 and suffixes[-2:] == [".ocr", ".json"]
     is_tess_meta = len(suffixes) >= 2 and suffixes[-2:] == [".tess", ".json"]
-    if not is_pt and not is_ocr_meta and not is_tess_meta:
-        raise ValueError("only .pt, .ocr.json and .tess.json model files can be deleted")
+    # TrOCR（Issue #141）: trocr_model_registry.py::register_trocr_model()が書き出す
+    # sidecarと同じ命名（<name>.trocr.json）。artifact directoryはmodel_dirキーへ保存されており、
+    # 既存_MODEL_DIR_META_KEYS（"model_dir"を含む）・_resolve_safe_model_dirs()をそのまま
+    # 再利用できるため、削除ロジック自体はis_ocr_meta/is_tess_metaと同じ経路に合流させるだけでよい
+    is_trocr_meta = len(suffixes) >= 2 and suffixes[-2:] == [".trocr", ".json"]
+    if not is_pt and not is_ocr_meta and not is_tess_meta and not is_trocr_meta:
+        raise ValueError("only .pt, .ocr.json, .tess.json and .trocr.json model files can be deleted")
 
     target = paths.models / safe_name
     if not target.exists() or not target.is_file():
         raise FileNotFoundError(f"model not found: {safe_name}")
 
-    if is_ocr_meta or is_tess_meta:
+    if is_ocr_meta or is_tess_meta or is_trocr_meta:
         try:
             payload = json.loads(target.read_text(encoding="utf-8"))
             if not isinstance(payload, dict):

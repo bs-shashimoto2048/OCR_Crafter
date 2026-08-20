@@ -4319,8 +4319,43 @@ def download_model_endpoint(model_name: str, project_id: Optional[str] = Query(d
             raise HTTPException(status_code=404, detail=f"traineddata not found: {traineddata_raw}")
         return FileResponse(traineddata, media_type="application/octet-stream", filename=traineddata.name)
 
+    if safe_name.endswith(".trocr.json"):
+        # TrOCR（Issue #141）: directory artifact（save_pretrained()出力）+ sidecarをzip化する。
+        # Deployment Package（Issue #117）の_add_directory_artifact_to_zip()をそのまま再利用し、
+        # 新しいpackage formatは作らない（model/ 配下へ相対パスを保ったまま追加、元directoryは無変更）
+        try:
+            trocr_meta = json.loads(model_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            raise HTTPException(status_code=400, detail=f"trocr model metadata is malformed: {safe_name}") from e
+        if not isinstance(trocr_meta, dict):
+            raise HTTPException(status_code=400, detail=f"trocr model metadata is malformed: {safe_name}")
+        trocr_model_dir_raw = str(trocr_meta.get("model_dir") or "").strip()
+        if not trocr_model_dir_raw:
+            raise HTTPException(status_code=400, detail=f"model has no model_dir: {safe_name}")
+        trocr_model_dir = Path(trocr_model_dir_raw).expanduser()
+        if not trocr_model_dir.exists() or not trocr_model_dir.is_dir():
+            raise HTTPException(status_code=404, detail=f"model_dir not found: {trocr_model_dir}")
+
+        from .services.release_manager import _add_directory_artifact_to_zip
+
+        export_name = safe_name.replace(".trocr.json", "")
+        tmp_zip = Path(tempfile.NamedTemporaryFile(delete=False, suffix=".zip").name)
+        try:
+            with zipfile.ZipFile(tmp_zip, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+                zf.write(model_path, arcname=safe_name)
+                _add_directory_artifact_to_zip(zf, "trocr", trocr_meta)
+            return FileResponse(
+                tmp_zip,
+                media_type="application/zip",
+                filename=f"{export_name}.trocr.zip",
+                background=BackgroundTask(lambda: tmp_zip.unlink(missing_ok=True)),
+            )
+        except Exception as e:  # noqa: BLE001
+            tmp_zip.unlink(missing_ok=True)
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
     if not safe_name.endswith(".ocr.json"):
-        raise HTTPException(status_code=400, detail="only .pt, .ocr.json and .tess.json are downloadable")
+        raise HTTPException(status_code=400, detail="only .pt, .ocr.json, .tess.json and .trocr.json are downloadable")
 
     meta = resolve_ocr_model_meta(project_id=resolved, model=safe_name, engine=None)
     if not isinstance(meta, dict):

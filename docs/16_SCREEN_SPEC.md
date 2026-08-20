@@ -376,7 +376,7 @@ OCRデータセット作成と学習ジョブの実行・監視（PaddleOCR / Te
 ## モデル（ocr-models / ModelsView）
 
 **目的**
-保存済みモデル（.pt / .ocr.json / .tess.json）の管理と推論への適用。
+保存済みモデル（.pt / .ocr.json / .tess.json / .trocr.json）の管理と推論への適用。**Feature #141**: `.trocr.json`（TrOCR、sidecar＋`model_dir`ディレクトリ一式）もTesseract/PaddleOCRと同様に一覧・ダウンロード・削除に対応（`GET /api/trocr/models`をFrontend側でマージ、`/models`/`/models/info`本体は無変更）。TrOCRは「方式」列で「OCR認識」と表示され、登録＝完了扱いのため未Exportによるダウンロード無効化は発生しない（Export手順を持たないため）。
 
 **表示内容**
 - **管理No（M0001形式）**: モデル作成順にOCR Crafter全体で一意採番（削除しても再利用しない。`data/model_ids.json` に永続化）。一覧はモデル名の左・カルテはモデル名の横＋モデル情報欄にチップ表示。チップのホバーで「管理No：M0004 / モデル名：ファイル名」ツールチップ。検索ボックスは管理No/モデル名/表示名の部分一致。**表示は全画面共通の `components/ModelIdBadge.jsx`**（一覧・カルテ・比較カード・凡例・改善悪化/学習条件/前処理/評価条件/モデル詳細情報の列見出し・条件差分/前処理差分ペア・混同比較・指標別結果・総合勝利数・推奨モデル。比較画面はモデル識別色ブルー/オレンジ/パープルの色付きテキスト表示でフォントのみ共通）

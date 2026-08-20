@@ -45,6 +45,8 @@ Investigation #115で策定したRoadmapの主要推奨事項（#117/#119/#121/#
 
 ### 2.1 TrOCRモデルがModel Manager画面に表示されない（既知の制約、継続）
 
+> **解決済み（Feature #141）**: 本節で記録した具体的gap（list/download/delete）は、本Investigationの最優先推奨事項どおりFeature [#141](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/141)（TrOCR Model Management Parity、Completed）で解消された。詳細は`docs/workitems/model-lifecycle/TROCR_MODEL_MANAGEMENT_PARITY_141.md`を参照。以下は#141着手前時点の記録として原文のまま残す。
+
 `GET /models/info`（`model_registry.py::list_model_infos()`）は`.trocr.json`を一切globしない（Issue #96で意図的に未統合、Investigation #108・Issue #121で繰り返し確認済み）。`docs/USER_GUIDE.md`（267行目）は既にこれを「現時点では既知の制約」として明記しており、**ドキュメントと実装は一致している**（新たな不一致ではない）。
 
 本Investigationで新たに確認した具体的な影響範囲:
@@ -170,6 +172,8 @@ Investigation #108が定義した再開トリガー（「既存Legacyパスが�
 4. **Epic #28**: **保留継続を推奨する**。再開トリガーは部分的に観測される（§7）が、個別Issue対応で十分吸収できる強さであり、Canonical Metadata Consumer Migration全体に着手するコスト・リスクには見合わない
 
 次Issue自体は本Investigation内では作成しない（Issue本文の明示的指示通り）。
+
+> **フォローアップ**: 上記1（TrOCR Model Management Parity）はFeature [#141](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/141)としてこの推奨どおり起票され、Completed / Closedとなった（詳細は`docs/workitems/model-lifecycle/TROCR_MODEL_MANAGEMENT_PARITY_141.md`）。次点候補（Legacy Evaluation Job Type実態確認 / Model Deletion Robustness）は本Investigation時点では未着手のまま。
 
 ## Deferred Items
 

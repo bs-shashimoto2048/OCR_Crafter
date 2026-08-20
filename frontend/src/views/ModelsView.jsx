@@ -119,6 +119,14 @@ export function fallbackDownloadName(name, engine) {
   if (downloadType === "zip") {
     return `${name.replace(/\.ocr\.json$/i, "")}.inference.zip`;
   }
+  // TrOCR（Issue #141）: directory artifact一式をzip化する既存download_model_endpoint()の
+  // filenameパターン（<export_name>.trocr.zip）に合わせる。sidecar名（.trocr.json）以外の
+  // 入力（未登録・想定外の名前）はダウンロード対象化せず、既存の「そのまま返す」フォール
+  // バックを維持する（既存テスト「TrOCRは.ocr.jsonにも.ptにも誤分類せず、ファイル名を
+  // そのまま返す」との後方互換のため）
+  if (downloadType === "directory_or_ref" && engine === "trocr" && /\.trocr\.json$/i.test(name)) {
+    return `${name.replace(/\.trocr\.json$/i, "")}.trocr.zip`;
+  }
   if (downloadType === "single_file" && engine === "tesseract") {
     return `${name.replace(/\.tess\.json$/i, "")}.traineddata`;
   }
@@ -143,7 +151,10 @@ function engineLabelOf(engine) {
 }
 
 function familyLabelOf(family) {
-  return ["ocr", "tesseract"].includes(family) ? "OCR認識" : "分類";
+  // "trocr"はisOcrFamily()（Export可否判定用、Issue #141でTrOCRをExport概念なし扱いに
+  // する意図で"ocr"/"tesseract"と区別している）とは別に、表示ラベルとしては
+  // 素直に「OCR認識」を返す（分類モデルではないため）
+  return ["ocr", "tesseract", "trocr"].includes(family) ? "OCR認識" : "分類";
 }
 
 // 評価%の色分け: 40%以上=緑 / 20〜39%=黄 / 20%未満=赤
