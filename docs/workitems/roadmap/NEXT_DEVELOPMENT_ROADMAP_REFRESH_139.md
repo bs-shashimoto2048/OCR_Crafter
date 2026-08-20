@@ -173,7 +173,7 @@ Investigation #108が定義した再開トリガー（「既存Legacyパスが�
 
 次Issue自体は本Investigation内では作成しない（Issue本文の明示的指示通り）。
 
-> **フォローアップ**: 上記1（TrOCR Model Management Parity）はFeature [#141](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/141)としてこの推奨どおり起票され、Completed / Closedとなった（詳細は`docs/workitems/model-lifecycle/TROCR_MODEL_MANAGEMENT_PARITY_141.md`）。次点候補（Legacy Evaluation Job Type実態確認 / Model Deletion Robustness）は本Investigation時点では未着手のまま。
+> **フォローアップ**: 上記1（TrOCR Model Management Parity）はFeature [#141](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/141)としてこの推奨どおり起票され、Completed / Closedとなった（詳細は`docs/workitems/model-lifecycle/TROCR_MODEL_MANAGEMENT_PARITY_141.md`）。#141完了後にInvestigation [#143](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/143)（Backup/Restore、本ドキュメントの候補外から新規発生）が実施され、派生3件（#145/#147/#150）がすべて完了した。その後継としてInvestigation [#152](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/152)（`docs/workitems/roadmap/NEXT_DEVELOPMENT_ROADMAP_REFRESH_152.md`）がroadmapを再棚卸しし、次点候補のうちModel Deletion Robustnessを最優先（P1）、Legacy Evaluation Job Type実態確認をP3として再順位付けした。
 
 ## Deferred Items
 
