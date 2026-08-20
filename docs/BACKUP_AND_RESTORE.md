@@ -6,7 +6,7 @@ OCR Crafterのバックアップ機能（`services/backup_manager.py`）の利�
 
 | 種別 | 対象データ | 対象外データ | 用途 |
 |---|---|---|---|
-| `metadata_only` | ラベル（annotations）・実験/リリース/Benchmark記録・前処理設定/スナップショットmeta・モデルメタJSON | 画像（raw/interim/processed）・モデル実体・outputs | 日次の軽量バックアップ（作業記録の保全） |
+| `metadata_only` | ラベル（annotations）・実験/リリース/Benchmark記録・Benchmark Center比較条件・推論使用モデル選択・前処理設定保存（確定設定＋履歴）/スナップショットmeta・モデルメタJSON（Issue #150で拡張） | 画像（raw/interim/processed）・モデル実体・outputs | 日次の軽量バックアップ（作業記録の保全） |
 | `full` | プロジェクトディレクトリ全体 | （なし） | 週次の完全バックアップ（全損対策） |
 
 ## 2. 推奨頻度
