@@ -29,12 +29,14 @@
 4. **切替**: 問題なければ運用プロジェクトとして利用開始（旧プロジェクトは残置または削除）
 5. 全操作は監査ログ（backup_restore / restore_failed）に記録される
 
+**既知の制約（Investigation #143で発見・未修正）**: 復元されたTesseract/PaddleOCR/TrOCRモデルのsidecar（`.tess.json`/`.ocr.json`/`.trocr.json`）が内部に保持する絶対パス（`model_dir`/`tessdata_dir`/`inference_dir`）は、復元処理で書き換えられず**旧プロジェクトのパスを指したまま**になる。そのため復元先プロジェクトでのモデルダウンロード・削除・推論・評価は、旧プロジェクトが既に存在しない場合は失敗し（404）、旧プロジェクトが残っている場合は意図せず旧プロジェクト側の実体を参照する。ラベル（`annotations/master.csv`）・実験/リリース/Benchmark記録・画像は正しく復元される。修正は別Issueで検討中（詳細: `docs/workitems/operations/BACKUP_RESTORE_INVESTIGATION_143.md` §6）。
+
 ## 4. サーバー全損からの復旧（フル手順）
 
 1. docs/24 に従い新サーバーへアプリ配備（リポジトリ＋.venv＋Tesseract＋tessdata＋PaddleOCR）
 2. NAS等から `data/backups/` を新サーバーの `data/backups/` へ配置（`index.json` 含む）
 3. Backend起動 → プロジェクトごとに §3 の復元手順を実施
-4. `data/jobs/` `data/audit/` はバックアップ対象外（システム全体データ）。監査ログの長期保管が必要な場合は `data/audit/audit.jsonl` をファイルコピーで別途保全しておくこと
+4. `data/jobs/`（`job_manager.db`含む） `data/audit/` `outputs/app.db`（Job System Aのtraining_jobsテーブル） `data/model_ids.json` `data/dataset_ids.json` はいずれもバックアップ対象外（project横断のグローバルデータ。Investigation #143で棚卸し済み）。長期保管が必要な場合はファイルコピーで別途保全すること。**`outputs/app.db`・`data/jobs/job_manager.db`は稼働中の単純ファイルコピーが安全でない**（`job_manager.db`はWALモードのため特に、直近のコミットが`-wal`ファイル側にのみ存在し欠落しうる）。コピーする場合はBackend停止時、または`sqlite3.Connection.backup()`（標準ライブラリのOnline Backup API）を使うこと
 5. Release Checklist（`docs/RELEASE_CHECKLIST.md`）で復旧後の健全性を確認
 
 ## 5. リストア試験（月次推奨）
