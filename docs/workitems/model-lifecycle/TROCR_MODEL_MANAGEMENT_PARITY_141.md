@@ -2,7 +2,7 @@
 
 Related: Feature [#141](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/141) / Investigation [#139](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/139)（OCR Crafter Roadmap Refresh、本Issueの起点となった最優先推奨） / Feature [#117](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/117)（Model Card / Deployment Package Multi-engine Parity、`_add_directory_artifact_to_zip()`の再利用元） / Bug [#137](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/137)（PaddleOCR Release Gate Benchmark Linkage、同種の既知gap修正パターン）
 
-**状態**: Implemented, PR review pending。
+**状態**: Completed / Closed。PR [#142](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/142)、Squash Commit `a159477`でマージ済み。
 
 ## 目的
 
