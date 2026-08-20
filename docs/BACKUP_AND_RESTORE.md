@@ -70,5 +70,5 @@ full：毎週
   - 復元は常に新Project IDへ行われ、既存プロジェクトへの上書き復元はできません
   - `data/backups/` 自体のバックアップ（別媒体への退避）はOS側の運用で行ってください
   - Manifest v1（旧形式）は整合性検証ができません
-  - `outputs/app.db`（Job System Aの学習Job実行履歴）・`data/jobs/job_manager.db`・`data/model_ids.json`・`data/dataset_ids.json`・`data/audit/`はプロジェクト単位のバックアップ対象外です（詳細: [25_DISASTER_RECOVERY.md](25_DISASTER_RECOVERY.md) §4）
+  - `outputs/app.db`（Job System Aの学習Job実行履歴）・`data/jobs/job_manager.db`・`data/model_ids.json`・`data/dataset_ids.json`・`data/audit/`はプロジェクト単位のバックアップ対象外です（詳細: [25_DISASTER_RECOVERY.md](25_DISASTER_RECOVERY.md) §4）。`outputs/app.db`・`data/jobs/job_manager.db`は`services/sqlite_backup.py`（Issue #147、`sqlite3.Connection.backup()`使用・UI/APIなし）でBackend停止不要のsnapshotを作成できます
   - 復元されたTesseract/PaddleOCR/TrOCRモデルのsidecarが保持する絶対パス（`model_dir`等）は、復元先プロジェクトを指すよう自動的に書き換えられます（Issue #145で修正済み）。書き換え結果は復元APIレスポンスの`model_path_rebase`（`rebased`/`unrebased`）と監査ログ`backup_restore`で確認できます。`metadata_only`モードで復元した場合、artifact本体（traineddata等）自体が含まれないため`unrebased`として報告されます（想定どおりの挙動です）
