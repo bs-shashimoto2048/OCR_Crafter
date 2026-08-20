@@ -2,7 +2,7 @@
 
 Related: Investigation [#139](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/139) / Investigation [#115](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/115)（Next Development Roadmap、Completed。本Investigationの前回版） / Investigation [#108](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/108)（Epic #28 Consumer Migration再評価、Completed） / Epic [#28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)（Unified Model Metadata Infrastructure、Open・保留継続）
 
-**状態**: Implemented, PR review pending（Investigation / Documentation only。Production実装は無し）
+**状態**: Completed / Closed（Investigation / Documentation only。Production実装は無し）。PR [#140](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/140)、Squash Commit `0faa792`でマージ済み。
 
 ## 目的
 
