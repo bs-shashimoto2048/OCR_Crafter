@@ -70,3 +70,5 @@ full：毎週
   - 復元は常に新Project IDへ行われ、既存プロジェクトへの上書き復元はできません
   - `data/backups/` 自体のバックアップ（別媒体への退避）はOS側の運用で行ってください
   - Manifest v1（旧形式）は整合性検証ができません
+  - `outputs/app.db`（Job System Aの学習Job実行履歴）・`data/jobs/job_manager.db`・`data/model_ids.json`・`data/dataset_ids.json`・`data/audit/`はプロジェクト単位のバックアップ対象外です（詳細: [25_DISASTER_RECOVERY.md](25_DISASTER_RECOVERY.md) §4）
+  - **既知の制約（未修正）**: 復元されたTesseract/PaddleOCR/TrOCRモデルのsidecarが保持する絶対パス（`model_dir`等）は復元先プロジェクトへ書き換えられず、旧プロジェクトのパスを指したままになります。ラベル・実験/リリース/Benchmark記録・画像は正しく復元されますが、モデル本体のダウンロード/削除/推論/評価は正しく機能しない場合があります（詳細: [25_DISASTER_RECOVERY.md](25_DISASTER_RECOVERY.md) §3）
