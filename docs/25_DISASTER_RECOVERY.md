@@ -29,7 +29,7 @@
 4. **切替**: 問題なければ運用プロジェクトとして利用開始（旧プロジェクトは残置または削除）
 5. 全操作は監査ログ（backup_restore / restore_failed）に記録される
 
-**既知の制約（Investigation #143で発見・未修正）**: 復元されたTesseract/PaddleOCR/TrOCRモデルのsidecar（`.tess.json`/`.ocr.json`/`.trocr.json`）が内部に保持する絶対パス（`model_dir`/`tessdata_dir`/`inference_dir`）は、復元処理で書き換えられず**旧プロジェクトのパスを指したまま**になる。そのため復元先プロジェクトでのモデルダウンロード・削除・推論・評価は、旧プロジェクトが既に存在しない場合は失敗し（404）、旧プロジェクトが残っている場合は意図せず旧プロジェクト側の実体を参照する。ラベル（`annotations/master.csv`）・実験/リリース/Benchmark記録・画像は正しく復元される。修正は別Issueで検討中（詳細: `docs/workitems/operations/BACKUP_RESTORE_INVESTIGATION_143.md` §6）。
+復元されたTesseract/PaddleOCR/TrOCRモデルのsidecar（`.tess.json`/`.ocr.json`/`.trocr.json`）が内部に保持する絶対パス（`model_dir`/`tessdata_dir`/`inference_dir`/`traineddata_path`）は、復元処理が**復元先プロジェクトを指すよう自動的に書き換える**（Investigation #143で発見・Bug #145で修正済み）。書き換え結果（`rebased`/`unrebased`）は復元APIレスポンスの`model_path_rebase`と監査ログ`backup_restore`で確認できる。`metadata_only`モード復元はartifact本体（traineddata等）自体を含まないため、当該モデルは`unrebased`として報告される（想定どおり）。詳細は`docs/workitems/operations/BACKUP_RESTORE_INVESTIGATION_143.md` §6・`docs/workitems/operations/RESTORE_MODEL_SIDECAR_PATH_REBASE_145.md`を参照。
 
 ## 4. サーバー全損からの復旧（フル手順）
 

@@ -218,6 +218,109 @@ def verify_backup(backup_id: str) -> dict[str, Any]:
     return {"backup_id": backup_id, "valid": not mismatches, "mismatches": mismatches, "manifest": manifest}
 
 
+# ---------- モデルsidecarの絶対パスrebase（Issue #145） ----------
+#
+# Tesseract/PaddleOCR/TrOCRのmodel sidecar（.tess.json/.ocr.json/.trocr.json）は、
+# artifact本体（ディレクトリ/ファイル）を絶対パスとして書込む（Issue #143で確認済み）。
+# restore_backup()はファイル実体を復元先project rootへコピーするが、sidecar内部の
+# 絶対パス文字列自体は書き換えないため、復元後のモデルは旧projectのパスを指したまま
+# になる（Investigation #143の中心的な発見）。本節はこれを修正する。
+
+_MODEL_SIDECAR_SUFFIXES = (".tess.json", ".ocr.json", ".trocr.json")
+
+
+def _rebase_path_value(old_value: str, source_pid: str, target_root: Path) -> Optional[Path]:
+    """旧project絶対パスold_valueのうち、source project rootより後ろの相対部分を
+    target_root（復元先project root）へ再結合したPathを返す。
+
+    old_valueをパス構成要素（Path.parts）へ分解し、source_pidと完全一致する
+    "最後の"要素を境界（anchor）として、それ以降を相対部分として採用する。
+    単純な文字列の前方一致・置換に依存しない（project_idが別の文脈で偶然
+    文字列として現れるケースを、パス構成要素単位の一致で避けるため）。
+    境界が見つからない、または相対部分が空の場合はNone（rebase不能）を返す。
+    """
+    try:
+        parts = Path(old_value).parts
+    except (OSError, ValueError):
+        return None
+    anchor_index = None
+    for i in range(len(parts) - 1, -1, -1):
+        if parts[i] == source_pid:
+            anchor_index = i
+            break
+    if anchor_index is None:
+        return None
+    relative_parts = parts[anchor_index + 1 :]
+    if not relative_parts:
+        return None
+    return target_root.joinpath(*relative_parts)
+
+
+def _rebase_model_sidecar_paths(target_root: Path, source_pid: str, restored: list[tuple[str, Path]]) -> dict[str, Any]:
+    """復元済みのmodel sidecarが保持する絶対パスフィールドを、復元先projectを
+    指すよう書き換える。
+
+    対象キーは`model_registry.py::_MODEL_DIR_META_KEYS`（ディレクトリ）に、
+    Tesseract固有の単一ファイル参照`traineddata_path`を加えたもの（新しい
+    parallel registryは作らず既存定義を再利用する）。各キーについて
+    `_rebase_path_value()`で再結合したパスが実在し、かつ復元先projectの
+    `models/`配下であることを`model_registry.py`の既存安全検証
+    （`_is_safe_model_artifact_dir()`）・`project_paths.is_within_directory()`
+    で確認できた場合のみ書き換える。確認できない場合は**元の値を保持し**
+    diagnosticsへ理由を記録する（推測で書き換えない。silent successにしない）。
+    """
+    from ..project_paths import is_within_directory
+    from .atomic_io import atomic_write_json
+    from .model_registry import _MODEL_DIR_META_KEYS, _is_safe_model_artifact_dir
+
+    rebase_keys = (*_MODEL_DIR_META_KEYS, "traineddata_path")
+    models_root = target_root / "models"
+    rebased: list[str] = []
+    unrebased: list[dict[str, str]] = []
+
+    for name, path in restored:
+        if not any(name.endswith(suffix) for suffix in _MODEL_SIDECAR_SUFFIXES):
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            unrebased.append({"sidecar": name, "reason": "sidecarのJSONが破損しているためrebaseできません"})
+            continue
+        if not isinstance(payload, dict):
+            unrebased.append({"sidecar": name, "reason": "sidecarのJSONが破損しているためrebaseできません"})
+            continue
+
+        changed = False
+        problems: list[str] = []
+        for key in rebase_keys:
+            raw = str(payload.get(key) or "").strip()
+            if not raw:
+                continue
+            candidate = _rebase_path_value(raw, source_pid, target_root)
+            if candidate is None:
+                problems.append(f"{key}: 復元先projectからの相対パスを特定できません")
+                continue
+            resolved_candidate = candidate.resolve()
+            if key == "traineddata_path":
+                safe = resolved_candidate.is_file() and is_within_directory(resolved_candidate, models_root.resolve())
+            else:
+                safe = _is_safe_model_artifact_dir(resolved_candidate, models_root)
+            if not safe:
+                problems.append(f"{key}: rebase後のパスが復元先projectに実在しません: {candidate}")
+                continue
+            if str(candidate) != raw:
+                payload[key] = str(candidate)
+                changed = True
+
+        if problems:
+            unrebased.append({"sidecar": name, "reason": "; ".join(problems)})
+        if changed:
+            atomic_write_json(path, payload)
+            rebased.append(name)
+
+    return {"rebased": rebased, "unrebased": unrebased}
+
+
 def restore_backup(backup_id: str, new_project_id: str = "") -> dict[str, Any]:
     """バックアップを**新しいProject IDへ**復元する（既存プロジェクトを上書きしない）。
 
@@ -279,6 +382,10 @@ def restore_backup(backup_id: str, new_project_id: str = "") -> dict[str, Any]:
             raise ValueError(
                 "復元後の整合性検証に失敗しました（復元先を削除しました）: " + " / ".join(post_mismatches[:5])
             )
+        # モデルsidecarの絶対パスを復元先projectへ書き換える（Issue #145）。
+        # ハッシュ検証済みファイルの内容を書き換えるステップのため、必ず上記の
+        # 復元後検証の後に行う（検証対象を書き換えてしまわないため）
+        path_rebase = _rebase_model_sidecar_paths(target_root, source_pid, restored)
     except Exception:
         # 部分的に復元されたプロジェクトを残さない（新規作成した復元先のみ削除）
         import shutil
@@ -292,6 +399,7 @@ def restore_backup(backup_id: str, new_project_id: str = "") -> dict[str, Any]:
         "mode": entry.get("mode"),
         "source_project_id": source_pid,
         "verified_files": len(hash_by_path),
+        "model_path_rebase": path_rebase,
     }
 
 
