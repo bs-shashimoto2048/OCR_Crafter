@@ -264,7 +264,7 @@ sample_002.png,TY12lt
 - **評価へ引き継ぐ**: Tesseract/PaddleOCR/TrOCRの学習完了時、[評価へ（このモデルを引き継ぐ）]ボタンで学習したモデルとエンジンをそのままモデル評価画面へ引き継げます（評価用データセットは学習データセットとは別概念のため引き継がれず、評価画面側で選択してください。Issue #119）
 - **エラー時**: 学習は非同期Jobです。失敗時は「運用 > ジョブ管理」のエラー要約と学習ログを確認してください。同一プロジェクトでのOCR学習の二重実行は409エラーで拒否されます
 - **注意**: 学習中にBackendを再起動した場合、Jobは「中断（再起動）」となり再実行できます
-- **TrOCRの既知の制約**: TrOCR学習完了時のモデル登録（`.trocr.json`）は、Tesseract/PaddleOCRの登録簿（`.tess.json`/`.ocr.json`）とは別の専用ファイルです。そのため学習完了後のTrOCRモデルは**「16. モデル管理」画面の一覧・カルテ・ダウンロードには表示されません**（現時点では既知の制約）。TrOCRの継続Fine-tune用モデル選択は学習画面自身の「登録済みモデルから選択」・モデル評価/Benchmark Runner画面の同様の選択欄から利用できます。リリース管理（Release Gate）はこの`.trocr.json`を直接認識するため、TrOCRモデルの昇格・状態管理はモデル管理を経由せず「17. リリース管理」画面から行えます
+- **TrOCRのモデル管理**: TrOCR学習完了時のモデル登録（`.trocr.json`）は、Tesseract/PaddleOCRの登録簿（`.tess.json`/`.ocr.json`）とは別の専用ファイルですが、学習完了後のTrOCRモデルは**「16. モデル管理」画面の一覧・ダウンロード・削除に表示されます**（Issue #141でTesseract/PaddleOCRと同等のparityを実現。「方式」列は「OCR認識」と表示され、登録済み＝Export済み扱いのため常にダウンロード可能です）。TrOCRの継続Fine-tune用モデル選択は引き続き学習画面自身の「登録済みモデルから選択」・モデル評価/Benchmark Runner画面の同様の選択欄からも利用できます。リリース管理（Release Gate）はこの`.trocr.json`を直接認識するため、TrOCRモデルの昇格・状態管理はモデル管理を経由せず「17. リリース管理」画面からも行えます
 
 ## 10. Dataset Manager
 
@@ -361,7 +361,7 @@ sample_002.png,TY12lt
 - **推論モデルの切替**: 「推論に使用」ボタンを押すと選択が**プロジェクト単位で即時サーバー側へ保存**され（`GET/POST /api/ocr/inference/model`、`data/projects/<id>/inference_model.json`）、画面遷移・ブラウザ再読み込み・アプリ再起動をまたいで維持されます。すでに別モデルが設定されている状態からの切替時のみ確認ダイアログが表示されます（初回設定時は確認なし）。保存済みモデルが削除・移動済みで見つからない場合は警告を表示し、勝手に別モデルへ置き換えません
 - **切替ボタンは画面内3か所**（①「推論使用モデル」カード ②「最新モデル」カード ③モデル詳細パネル下部）にあります。①のカードは常に現在の使用中モデル自身を表示するサマリーのため切替ボタン自体を持たず（使用中バッジ・モデル評価/ダウンロード/詳細ボタンは表示されます）、②③は対象モデルが現在の使用中モデルと同じ場合のみ「推論使用中」で無効、異なる場合は「推論に使用」として有効です
 - **モデルカルテ**: 学習条件・実験リンク・評価履歴・リリースStatus（＋Version）・学習Dataset（Dataset Managerへのリンク）を表示
-- **ダウンロード**: `.pt`=そのまま / `.ocr.json`（PaddleOCR）=inference ZIP / `.tess.json`（Tesseract）=`.traineddata`
+- **ダウンロード**: `.pt`=そのまま / `.ocr.json`（PaddleOCR）=inference ZIP / `.tess.json`（Tesseract）=`.traineddata` / `.trocr.json`（TrOCR）=モデルディレクトリ一式のZIP（Issue #141）
 - **削除**: 確認ダイアログで対象一覧＋**「DELETE」の入力**が必要です。削除対象が現在の推論使用モデルの場合は個別に警告されます。削除は `models/` 配下に限定される安全ガードつき
 - **注意**: Productionモデルの削除は運用に影響します。リリース管理の状態を確認してから操作してください
 
@@ -372,7 +372,7 @@ sample_002.png,TY12lt
 ![リリース管理](images/releases.png)
 
 - **目的**: モデルのライフサイクル管理と本番モデルの決定
-- **対応エンジン**: Tesseract / PaddleOCR / TrOCR（Release Policyの許可エンジン設定`allowed_engines`にも`trocr`を指定可能）。TrOCRモデルは「16. モデル管理」画面には表示されませんが、本画面には学習完了時に登録された`.trocr.json`がそのまま一覧表示されます
+- **対応エンジン**: Tesseract / PaddleOCR / TrOCR（Release Policyの許可エンジン設定`allowed_engines`にも`trocr`を指定可能）。TrOCRモデルは「16. モデル管理」画面にも表示されます（Issue #141）。本画面には学習完了時に登録された`.trocr.json`がそのまま一覧表示されます
 - **ステータス**: `Draft`（学習直後）→ `Validated`（評価完了で自動遷移）→ `Candidate`（本番候補）→ `Production`（本番使用中）→ `Archived`（旧モデル）
 - **Production は常に0件または1件**です。新しいモデルの昇格時に旧Productionは自動でArchivedになります
 - **昇格フロー**: Candidate → Release Note入力（必須）→ **Release Gate判定** → 昇格

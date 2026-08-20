@@ -48,6 +48,7 @@ import {
   trocrMetadataValidationError,
 } from "./lib/trocrModelMetadata";
 import { mapTrocrTrainedModels, resolveTrocrTrainedModelRef } from "./lib/trocrTrainedModels";
+import { mergeTrocrModelsIntoList } from "./lib/trocrModelManagement";
 import { resolveTrainingEvaluationHandoff } from "./lib/trainingEvaluationHandoff";
 import { resolveEvaluationBenchmarkHandoff } from "./lib/evaluationBenchmarkHandoff";
 import {
@@ -1101,8 +1102,12 @@ export default function App() {
       })
       .filter(Boolean);
     const mergedTypes = [...new Set([...types, ...inferredTypes, "square", "wide"])];
-    setModels(modelItems);
-    setModelInfos(infoMap);
+    // Model ManagerへTrOCRモデルを統合する（Issue #141）。/models・/models/infoは
+    // 無変更のまま、既に取得済みのGET /api/trocr/models（trocrModelsData）をFrontend側
+    // でマージするのみ（新しいAPI・Backend変更は追加しない）
+    const trocrMerged = mergeTrocrModelsIntoList(modelItems, infoMap, trocrModelsData?.items || []);
+    setModels(trocrMerged.modelItems);
+    setModelInfos(trocrMerged.modelInfos);
     setModelTypes(mergedTypes);
     setOfficialPaddleModels(Array.isArray(officialData?.items) ? officialData.items : []);
     setTrocrTrainedModelItems(Array.isArray(trocrModelsData?.items) ? trocrModelsData.items : []);

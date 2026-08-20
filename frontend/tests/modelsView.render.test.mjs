@@ -659,3 +659,66 @@ test("fallbackDownloadName: 未登録EngineはTesseract/PaddleOCR/customいず�
   const result = fallbackDownloadName("some_model.dat", "some-unregistered-engine");
   assert.equal(result, "some_model.dat", "未登録Engineがファイル名をそのまま返していない（特定Engine向けに推測変換された）");
 });
+
+// ---------------------------------------------------------------------------
+// TrOCR Model Management Parity（Issue #141）
+// Model ManagerがTrOCRモデル（training_family: "trocr"）を一覧・ダウンロード・削除で
+// Tesseract/PaddleOCRと同等に扱えることを確認する（App.jsx側のマージ処理自体は
+// frontend/src/lib/trocrModelManagement.js側の単体テストで別途検証する）。
+// ---------------------------------------------------------------------------
+
+// renderSingleModelHtmlと違い、modelInfos 1件分を呼び出し側で自由に指定できる版。
+function renderSingleModelWithInfo(name, info, extraProps = {}) {
+  return renderToString(
+    React.createElement(
+      ModelsView,
+      baseProps({
+        models: [name],
+        modelInfos: { [name]: info },
+        latest: { any: name, byType: {} },
+        ...extraProps,
+      })
+    )
+  );
+}
+
+test("fallbackDownloadName: TrOCRの.trocr.jsonは.trocr.zipへ変換する（download_model_endpoint()のfilenameパターンに一致）", () => {
+  const result = fallbackDownloadName("trocr_job-1.trocr.json", "trocr");
+  assert.equal(result, "trocr_job-1.trocr.zip");
+});
+
+test("TrOCR: 方式列は「OCR認識」（training_family='trocr'固有値だが分類へ誤表示しない）", () => {
+  const html = renderSingleModelWithInfo("trocr_job-1.trocr.json", {
+    model_id: "M0010",
+    engine: "trocr",
+    training_family: "trocr",
+    created_at: "2026-08-01T00:00:00",
+  });
+  assert.ok(html.includes(">OCR認識<"), "TrOCRの方式列が「OCR認識」になっていない");
+  // 「分類」自体はフィルタ用<option>に常時存在するため（表示データに依らない固定選択肢）、
+  // 方式列セル（<span className="px-2 py-2 text-muted">…</span>）だけを対象に確認する
+  assert.ok(!html.includes('<span class="px-2 py-2 text-muted">分類</span>'), "TrOCRの方式列セルが「分類」に誤表示されている");
+});
+
+test("TrOCR: ocr_inference_readyが無くてもダウンロード/推論使用ボタンは無効化されない（登録=完了、Export概念なし）", () => {
+  const html = renderSingleModelWithInfo("trocr_job-1.trocr.json", {
+    model_id: "M0010",
+    engine: "trocr",
+    training_family: "trocr",
+    created_at: "2026-08-01T00:00:00",
+    // ocr_inference_readyは意図的に付与しない（TrOCRのsidecarにこのフィールドは存在しない）
+  });
+  assert.ok(html.includes("ダウンロード"), "TrOCRのダウンロードボタンが表示されていない");
+  assert.ok(!html.includes('title="モデルファイルが見つかりません（未Export）"'), "TrOCRが未Export扱いで無効化されている（isOcrFamily()に誤って含まれている）");
+});
+
+test("Tesseract回帰: TrOCR対応追加後もocr_inference_ready:falseのTesseractモデルは引き続き未Export扱いになる", () => {
+  const html = renderSingleModelWithInfo("model_d.tess.json", {
+    model_id: "M0004",
+    engine: "tesseract",
+    training_family: "tesseract",
+    created_at: "2026-08-01T00:00:00",
+    ocr_inference_ready: false,
+  });
+  assert.ok(html.includes('title="モデルファイルが見つかりません（未Export）"'), "Tesseractの未Exportモデルが無効化されなくなっている（回帰）");
+});
