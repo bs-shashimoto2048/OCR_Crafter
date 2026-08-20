@@ -176,7 +176,7 @@ sidecar's model_dir field still == OLD src path?: True
 
 1. ~~**[Bug] Backup Restore: モデルsidecarの絶対パスが復元先projectを指さない**（§6）。最優先。既存のRestore機能の正しさに関わる。修正方針: restore時にsidecar JSON内の既知パスキー（`_MODEL_DIR_META_KEYS`と同じ集合）を、旧project rootから新project rootへの文字列置換で書き換える。~~ → **Bug #145で修正済み（Completed / Closed）**。単純な文字列置換ではなく、`Path.parts`単位でsource project idをanchorとして特定し、実在・containment検証を経てから書き換える方式を採用した。詳細: `docs/workitems/operations/RESTORE_MODEL_SIDECAR_PATH_REBASE_145.md`
 2. ~~**[Feature] outputs/app.db・job_manager.dbのオンラインバックアップ対応**。`sqlite3.Connection.backup()`を使った専用のbackupモード（または既存`create_backup()`への追加コンポーネント）を設計する。~~ → **Feature #147で実装済み（Completed）**。既存`create_backup()`とは責務分離した新規モジュール`services/sqlite_backup.py`（UI/APIなし）として実装した。詳細: `docs/workitems/operations/SQLITE_ONLINE_BACKUP_147.md`
-3. **[Feature] metadata_onlyバックアップへbenchmark_center.json・inference_model.jsonを追加**。小規模な`_METADATA_FILES`拡張。
+3. ~~**[Feature] metadata_onlyバックアップへbenchmark_center.json・inference_model.jsonを追加**。小規模な`_METADATA_FILES`拡張。~~ → **Feature #150で実装済み（Completed）**。調査の過程で`preprocess/`ディレクトリ（確定済み前処理設定＋履歴）も同基準を満たすことが判明し、あわせて追加した。詳細: `docs/workitems/operations/METADATA_ONLY_BACKUP_COVERAGE_150.md`
 
 3件は独立して実装可能（依存関係なし）。優先順は上記の番号順を推奨する。
 
@@ -223,4 +223,4 @@ Production変更が無いため新規テストは追加していない。本Inve
 
 ## Future Work
 
-上記「Next Issue Split」の3件。1件目（絶対パスのrestore時書換）はBug #145、2件目（SQLite online backup対応）はFeature #147でそれぞれ対応済み。残る1件（`metadata_only`対象拡張）は未着手。
+上記「Next Issue Split」の3件はすべて対応済み: 1件目（絶対パスのrestore時書換）はBug #145、2件目（SQLite online backup対応）はFeature #147、3件目（`metadata_only`対象拡張）はFeature #150。Investigation #143の推奨事項はこれで完結した。

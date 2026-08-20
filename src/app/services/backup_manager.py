@@ -1,6 +1,7 @@
 """プロジェクトバックアップ・復元とデータ保持設定（Backup / Recovery / Retention）。
 
-- バックアップ: metadata_only（設定・ラベル・実験/リリース/Benchmark記録・モデルメタのみ）
+- バックアップ: metadata_only（設定・ラベル・実験/リリース/Benchmark記録・Benchmark
+  Center比較条件・推論使用モデル選択・前処理設定保存・モデルメタのみ、Issue #150で拡張）
   または full（プロジェクトディレクトリ全体）を選択してZIP化。
   保存先 data/backups/<file>.zip ＋ index.json（BK-0001形式・作成日時・サイズ・モード）
 - 復元: **既定で新しいProject IDへ復元する**（既存プロジェクトを上書きしない。
@@ -25,17 +26,27 @@ from ..project_paths import ensure_project_directories
 
 _LOCK = threading.RLock()
 
-# metadata_only で含めるプロジェクト直下の対象（実体画像・学習成果物の実体は含めない）
+# metadata_only で含めるプロジェクト直下の対象（実体画像・学習成果物の実体は含めない）。
+# Issue #150（Investigation #143推奨3件目）: 既存4件に加え、project rootの他JSON
+# metadata書込元（`services/*.py`の`*_FILENAME`定数）を全数調査し、同じ基準
+# （project-local・metadata source-of-truth・binary/large artifactでない・
+# regenerate前提でない・full backupには既に含まれている）で漏れていた2件を追加した
 _METADATA_FILES = [
     "experiments.json",
     "releases.json",
     "benchmarks.json",
     "preprocess_config.json",
+    "benchmark_center.json",  # Benchmark Centerの比較条件（Dataset/Model/フィルタ）
+    "inference_model.json",  # 現在の推論使用モデル選択
 ]
 _METADATA_DIRS = [
     ("annotations", None),  # master.csv・manual_masks.json 等
     ("processed/meta", None),  # 前処理スナップショット
     ("models", {".json"}),  # モデルメタ（.tess.json/.ocr.json等）のみ。traineddata実体は含めない
+    # 「前処理設定保存」（学習に使用する確定済み設定＋履歴、preprocess_config_store.py）。
+    # saved_config.json・history/v{NNNN}.jsonのいずれも.json拡張子のみのため、
+    # modelsディレクトリと同じ拡張子フィルタで安全に絞り込める
+    ("preprocess", {".json"}),
 ]
 
 
