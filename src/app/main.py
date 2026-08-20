@@ -1608,10 +1608,18 @@ def api_backup_restore(backup_id: str, req: BackupRestoreRequest, request: Reque
             request, "restore_failed", target_type="backup", target_id=backup_id, reason=str(e)[:500],
         )
         raise HTTPException(status_code=400, detail=str(e)) from e
+    path_rebase = result.get("model_path_rebase") or {}
     _record_audit_safe(
         request, "backup_restore", project_id=result["project_id"], target_type="backup", target_id=backup_id,
         before={"source_project_id": result.get("source_project_id")},
-        after={"restored_project_id": result["project_id"], "mode": result.get("mode")},
+        after={
+            "restored_project_id": result["project_id"],
+            "mode": result.get("mode"),
+            # モデルsidecarの絶対パスrebase結果（Issue #145）。unrebasedが1件でもあれば
+            # 監査ログから診断できるようにする（silent successにしない）
+            "model_path_rebased_count": len(path_rebase.get("rebased") or []),
+            "model_path_unrebased_count": len(path_rebase.get("unrebased") or []),
+        },
     )
     return result
 
