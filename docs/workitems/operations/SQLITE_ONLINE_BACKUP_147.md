@@ -2,7 +2,7 @@
 
 Related: Feature [#147](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/147) / Investigation [#143](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/143)（Backup/Restore Investigation、本Issueの起点） / Bug [#145](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/145)（Restore Model Sidecar Path Rebase、Investigation #143推奨1件目・対応済み） / Feature [#127](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/127)（JobRepository SQLite移行、`job_manager.db`の作成元）
 
-**状態**: Implemented, PR review pending。
+**状態**: Completed / Closed。PR [#148](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/148)、Squash Commit `c704944`でマージ済み。
 
 ## 目的
 
