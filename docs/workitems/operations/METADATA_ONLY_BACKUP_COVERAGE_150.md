@@ -2,7 +2,7 @@
 
 Related: Feature [#150](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/150) / Investigation [#143](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/143)（Backup/Restore Investigation、本Issueの起点） / Bug [#145](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/145)（Restore Model Sidecar Path Rebase、無回帰を確認） / Feature [#147](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/147)（SQLite Online Backup、Investigation #143推奨2件目・対応済み）
 
-**状態**: Implemented, PR review pending。
+**状態**: Completed / Closed。PR [#151](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/151)、Squash Commit `33d9202`でマージ済み。
 
 ## 目的
 
