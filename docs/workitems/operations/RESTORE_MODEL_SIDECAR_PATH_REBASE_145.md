@@ -2,7 +2,7 @@
 
 Related: Bug [#145](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/145) / Investigation [#143](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/143)（Backup/Restore Investigation、本Issueの起点となった最優先発見） / Feature [#141](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/141)（TrOCR Model Management Parity）
 
-**状態**: Implemented, PR review pending。
+**状態**: Completed / Closed。PR [#146](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/146)、Squash Commit `4174fcc`でマージ済み。
 
 ## 目的
 
