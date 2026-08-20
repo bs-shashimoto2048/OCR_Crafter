@@ -2,7 +2,7 @@
 
 Related: Investigation [#143](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/143) / Investigation [#139](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/139)（本Investigationの起点） / Feature [#127](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/127)（JobRepository SQLite移行） / Reliability [#133](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/133)（Windows Process Tree Termination） / Feature [#141](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/141)（TrOCR Model Management Parity）
 
-**状態**: Completed / Closed（Investigation / Documentation only。Production実装は無し）。
+**状態**: Completed / Closed（Investigation / Documentation only。Production実装は無し）。PR [#144](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/144)、Squash Commit `53eca2f`でマージ済み。
 
 ## 目的
 
