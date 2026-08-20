@@ -36,7 +36,7 @@
 1. docs/24 に従い新サーバーへアプリ配備（リポジトリ＋.venv＋Tesseract＋tessdata＋PaddleOCR）
 2. NAS等から `data/backups/` を新サーバーの `data/backups/` へ配置（`index.json` 含む）
 3. Backend起動 → プロジェクトごとに §3 の復元手順を実施
-4. `data/jobs/`（`job_manager.db`含む） `data/audit/` `outputs/app.db`（Job System Aのtraining_jobsテーブル） `data/model_ids.json` `data/dataset_ids.json` はいずれもバックアップ対象外（project横断のグローバルデータ。Investigation #143で棚卸し済み）。長期保管が必要な場合はファイルコピーで別途保全すること。**`outputs/app.db`・`data/jobs/job_manager.db`は稼働中の単純ファイルコピーが安全でない**（`job_manager.db`はWALモードのため特に、直近のコミットが`-wal`ファイル側にのみ存在し欠落しうる）。コピーする場合はBackend停止時、または`sqlite3.Connection.backup()`（標準ライブラリのOnline Backup API）を使うこと
+4. `data/jobs/`（`job_manager.db`含む） `data/audit/` `outputs/app.db`（Job System Aのtraining_jobsテーブル） `data/model_ids.json` `data/dataset_ids.json` はいずれもproject単位バックアップ（`backup_manager.py`）の対象外（project横断のグローバルデータ。Investigation #143で棚卸し済み）。**`outputs/app.db`・`data/jobs/job_manager.db`は稼働中の単純ファイルコピーが安全でない**（`job_manager.db`はWALモードのため特に、直近のコミットが`-wal`ファイル側にのみ存在し欠落しうる）。両DBとも`services/sqlite_backup.py::backup_app_db()`/`backup_job_manager_db()`（`sqlite3.Connection.backup()`＝標準ライブラリのOnline Backup APIを使用、Backend停止不要、Issue #147）でBackend停止不要のconsistentなsnapshotを作成できる（`data/backups/system/`配下、UI/APIは無し・運用スクリプト/CLIから呼び出す想定）。`data/model_ids.json`・`data/dataset_ids.json`・`data/audit/`は引き続きファイルコピーで別途保全すること
 5. Release Checklist（`docs/RELEASE_CHECKLIST.md`）で復旧後の健全性を確認
 
 ## 5. リストア試験（月次推奨）
