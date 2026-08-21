@@ -97,7 +97,7 @@ Training Job（System A・System B）とも`job_id = str(uuid.uuid4())`でサー
 
 ## Windows/Linux確認
 
-`normalize_project_id()`の絶対パス判定（`Path(value).is_absolute()`）は、Windows形式のdrive-qualified path（`C:\...`）を正しく絶対パスとして拒否する一方、`/etc/passwd`のようなPOSIX形式のパスはWindows環境では`is_absolute()=False`と判定されうることを確認した。ただしこの場合も後続の`"/" in value`チェックが必ず拒否するため、**拒否されること自体はプラットフォームに依存しない**（拒否の理由（メッセージ）がOS依存で変わるのみ）。テストはこの違いを踏まえ、メッセージの厳密一致ではなく「拒否されること」を確認する形にした。
+`normalize_project_id()`の絶対パス判定（`Path(value).is_absolute()`）はpathlibの実装がOS依存であることを、PR #159のCI（GitHub Actions Linuxランナー）で実際に確認した。ローカル（Windows）では`C:\...`形式が`is_absolute()=True`で「absolute path」メッセージとして拒否される一方、Linux CIでは`PurePosixPath`がドライブレターを認識しないため`is_absolute()=False`となり、後続の`"/" in value or "\\" in value`チェックで「'/' and '\\' are not allowed」メッセージとして拒否される（当初この違いに気づかず、Windows限定のメッセージをテストで固定してしまい、Linux CIで2件のテスト失敗として顕在化・修正した）。同様に`/etc/passwd`のようなPOSIX形式パスもOSによって拒否される分岐が変わる。**いずれの分岐でも拒否されること自体はプラットフォームに依存しない**ため、最終的なテストはメッセージの厳密一致ではなく「`ValueError`が送出されること」のみを確認する形に統一した。
 
 ## Tests
 

@@ -56,18 +56,16 @@ class TestNormalizeProjectId:
         with pytest.raises(ValueError):
             normalize_project_id(".")
 
-    @pytest.mark.parametrize("absolute_id", ["C:\\Windows\\System32", "C:/Windows/System32"])
-    def test_windows_drive_qualified_path_rejected(self, absolute_id):
-        with pytest.raises(ValueError, match="absolute path"):
-            normalize_project_id(absolute_id)
-
-    def test_posix_style_absolute_path_rejected(self):
-        """'/etc/passwd'はWindows pathlibでは(drive無しのため)is_absolute()=Falseと
-        判定されるが、'/'を含む時点で別の拒否分岐（path separator禁止）に必ず
-        引っかかるため、いずれにせよ拒否されることを確認する（メッセージの
-        分岐先はOS依存で変わってよいが、拒否されること自体は不変）。"""
+    @pytest.mark.parametrize("absolute_id", ["C:\\Windows\\System32", "C:/Windows/System32", "/etc/passwd"])
+    def test_absolute_or_drive_qualified_path_rejected(self, absolute_id):
+        """絶対パス判定はpathlibの実装がWindows/POSIXで異なるため、拒否される
+        具体的な分岐（'absolute path'メッセージか、'/'/'\\'禁止メッセージか）は
+        プラットフォームによって変わりうる（例: Windows pathlibは'C:\\...'を
+        絶対パスと認識するが、POSIX pathlibは認識せず、後続の separator禁止
+        チェックで拒否される）。いずれの分岐でも**必ず拒否される**ことのみを
+        プラットフォーム非依存で確認する。"""
         with pytest.raises(ValueError):
-            normalize_project_id("/etc/passwd")
+            normalize_project_id(absolute_id)
 
     @pytest.mark.parametrize("separator_id", ["a/b", "a\\b", "sub/dir/deep"])
     def test_path_separator_rejected(self, separator_id):
