@@ -2,7 +2,7 @@
 
 Related: Reliability [#154](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/154) / Investigation [#152](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/152)（Post-Backup Roadmap Refresh、本Issueを最優先(P1)として特定） / Feature [#117](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/117)（Model Card / Deployment Package Multi-engine Parity） / Feature [#141](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/141)（TrOCR Model Management Parity） / Bug [#145](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/145)（Restore Model Sidecar Path Rebase）
 
-**状態**: Implemented, PR review pending。
+**状態**: Completed / Closed。PR [#155](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/155)、Squash Commit `6ae2d39`でマージ済み。
 
 ## 目的
 
