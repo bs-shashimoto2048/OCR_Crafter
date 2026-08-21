@@ -33,10 +33,10 @@
 
 ### A. コード（code-review 残指摘・PLAUSIBLE級）
 
-1. **delete_model のガード深さ**: メタが `models/ocr_runs` 等の共有親ディレクトリを指すと配下の他モデル成果物ごと削除可能（発生には異常/手編集メタが前提）。モデル個別サブディレクトリ深さの検証追加が望ましい。
+1. ~~**delete_model のガード深さ**: メタが `models/ocr_runs` 等の共有親ディレクトリを指すと配下の他モデル成果物ごと削除可能（発生には異常/手編集メタが前提）。モデル個別サブディレクトリ深さの検証追加が望ましい。~~ → **Reliability #154で解消済み**（`docs/workitems/reliability/MODEL_DELETION_ROBUSTNESS_154.md`）。
 2. **相対パスメタの解決**: メタ内相対パスはプロセスCWD基準で resolve され、削除スキップ（fail-safe側）になる。`(models_root / raw)` フォールバック解決の追加余地。
-3. **rmtree封じ込めの実装が3方式併存**: `safe_rmtree`（project_paths）/ allowed_roots（main._cleanup_failed_ocr_dataset）/ relative_to（main._delete_training_artifacts）。`safe_rmtree` への統一が望ましい。
-4. **rmtree(ignore_errors=True) の部分失敗が非検知**: Windowsのファイルロック中削除で実体が中途半端に残ってもAPIは成功を返す。
+3. **rmtree封じ込めの実装が3方式併存**: `safe_rmtree`（project_paths）/ allowed_roots（main._cleanup_failed_ocr_dataset）/ relative_to（main._delete_training_artifacts）。`safe_rmtree` への統一が望ましい（Reliability #154のFuture Workとして継続記録）。
+4. **rmtree(ignore_errors=True) の部分失敗が非検知**: Windowsのファイルロック中削除で実体が中途半端に残ってもAPIは成功を返す（Reliability #154のFuture Workとして継続記録）。
 
 ### B. 復旧関連の未回収資産
 

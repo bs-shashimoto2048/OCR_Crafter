@@ -110,6 +110,8 @@ Issue本文のDecision Principles（① データ損失/誤参照/復旧不能 �
 
 ## E. Recommended Next Issue
 
+> **フォローアップ**: 下記の推奨どおりReliability [#154](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/154)として起票され、Completed / Closedとなった（詳細は`docs/workitems/reliability/MODEL_DELETION_ROBUSTNESS_154.md`）。実装ではContainmentは既存実装が既に妥当であることを確認済みで変更不要と判断し、共有ディレクトリ検出（実装対象1）のみ実装した。`rmtree`封じ込め統一（実装対象2）・部分失敗検知（実装対象3）はIssue #154のExit Criteriaに明記されていなかったため、独立したFuture Workとして#154のworkitem docへ記録した。
+
 **原則1件のみ推奨する。**
 
 ### Title

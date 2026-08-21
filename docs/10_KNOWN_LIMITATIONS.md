@@ -24,10 +24,10 @@
 
 ### コード品質（レビュー残指摘）
 
-- `delete_model` のガード: 手編集メタが共有親ディレクトリを指す場合に配下の他モデルも削除しうる余地
+- ~~`delete_model` のガード: 手編集メタが共有親ディレクトリを指す場合に配下の他モデルも削除しうる余地~~ → **Reliability #154で解消済み**。他モデルのsidecarが同じartifact directoryを参照している場合、共有ディレクトリとして検出し物理削除をスキップする（対象sidecar自体は削除、最後の参照が消えた時点で実際に削除される）。詳細: `docs/workitems/reliability/MODEL_DELETION_ROBUSTNESS_154.md`
 - 相対パスメタが CWD 基準で resolve され削除スキップになる（fail-safe側の挙動）
-- rmtree の封じ込めが3方式併存（`safe_rmtree` / allowed_roots / relative_to）→ 統一が望ましい
-- `rmtree(ignore_errors=True)` の部分失敗（Windowsのファイルロック）が非検知でもAPIは成功を返す
+- rmtree の封じ込めが3方式併存（`safe_rmtree` / allowed_roots / relative_to）→ 統一が望ましい（#154のFuture Workとして継続記録）
+- `rmtree(ignore_errors=True)` の部分失敗（Windowsのファイルロック）が非検知でもAPIは成功を返す（#154のFuture Workとして継続記録）
 
 ### 復旧関連
 

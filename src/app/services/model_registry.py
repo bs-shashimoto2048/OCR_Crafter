@@ -570,8 +570,58 @@ def _is_safe_model_artifact_dir(resolved: Path, models_root: Path) -> bool:
     return resolved.exists() and resolved.is_dir()
 
 
-def _resolve_safe_model_dirs(payload: dict, models_root: Path) -> list[Path]:
-    """メタ情報から削除対象ディレクトリを抽出する。安全検証を通ったものだけ返す。"""
+_MODEL_SIDECAR_GLOBS = ("*.tess.json", "*.ocr.json", "*.trocr.json")
+
+
+def _other_model_sidecars(models_root: Path, exclude_name: str) -> list[Path]:
+    """models直下の他モデルsidecar一覧（削除対象自身`exclude_name`は除く）を返す。"""
+    found: list[Path] = []
+    for pattern in _MODEL_SIDECAR_GLOBS:
+        found.extend(p for p in models_root.glob(pattern) if p.is_file() and p.name != exclude_name)
+    return sorted(found)
+
+
+def _is_dir_referenced_by_other_sidecar(target_dir: Path, models_root: Path, exclude_sidecar_name: str) -> bool:
+    """`target_dir`（resolve済み）を、削除対象自身以外のmodel sidecarが
+    `_MODEL_DIR_META_KEYS`のいずれかで参照しているか確認する（Issue #154）。
+
+    手編集・バグ等で複数モデルのsidecarが同じartifact directoryを共有指定している
+    場合、一方の削除がもう一方のartifactを巻き込んで削除しないようにするための
+    共有参照検出。読み取り不能・JSONパース不能な他sidecarは（保守的に）
+    「参照していない」ものとしてスキップする（推測で「共有あり」とはしない。
+    誤検出でこのモデル自身の削除まで止めないため）。
+    """
+    for sidecar_path in _other_model_sidecars(models_root, exclude_sidecar_name):
+        try:
+            other_payload = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(other_payload, dict):
+            continue
+        for key in _MODEL_DIR_META_KEYS:
+            raw = str(other_payload.get(key) or "").strip()
+            if not raw:
+                continue
+            try:
+                resolved = Path(raw).expanduser().resolve()
+            except (OSError, ValueError, RuntimeError):
+                continue
+            if resolved == target_dir:
+                return True
+    return False
+
+
+def _resolve_safe_model_dirs(payload: dict, models_root: Path, *, exclude_sidecar_name: str = "") -> list[Path]:
+    """メタ情報から削除対象ディレクトリを抽出する。安全検証を通り、かつ他モデルの
+    sidecarから共有参照されていないものだけ返す（Issue #154）。
+
+    `exclude_sidecar_name`（削除対象sidecar自身のファイル名）を指定した場合、
+    そのディレクトリを他のsidecarも参照していれば削除対象から除外する
+    （対象sidecar自体は既存契約どおり削除できる。共有中のartifact directoryは
+    参照countが0になるまで物理削除しない＝最後の参照を削除した時だけ実際に
+    削除される）。未指定（空文字）の場合は共有チェックを行わない後方互換の
+    既存挙動のまま。
+    """
     dirs: list[Path] = []
     seen: set[str] = set()
     for key in _MODEL_DIR_META_KEYS:
@@ -596,6 +646,14 @@ def _resolve_safe_model_dirs(payload: dict, models_root: Path) -> list[Path]:
                 key,
                 resolved,
                 models_root,
+            )
+            continue
+        if exclude_sidecar_name and _is_dir_referenced_by_other_sidecar(resolved, models_root, exclude_sidecar_name):
+            logger.warning(
+                "delete_model: %s=%s は他のモデルのsidecarからも参照されているため、"
+                "共有artifactとして削除をスキップします（そのモデルが削除された時点で実際に削除されます）",
+                key,
+                resolved,
             )
             continue
         dirs.append(resolved)
@@ -647,7 +705,9 @@ def delete_model(project_id: Optional[str], model_name: str) -> str:
                 )
 
         if payload:
-            for model_dir in _resolve_safe_model_dirs(payload, paths.models):
+            # exclude_sidecar_name=safe_name（Issue #154）: 他モデルのsidecarが
+            # 同じartifact directoryを参照している場合、共有artifactとして保護する
+            for model_dir in _resolve_safe_model_dirs(payload, paths.models, exclude_sidecar_name=safe_name):
                 logger.info("delete_model: removing model dir: %s", model_dir)
                 shutil.rmtree(model_dir, ignore_errors=True)
 
