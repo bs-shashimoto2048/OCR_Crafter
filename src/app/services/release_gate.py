@@ -13,7 +13,6 @@ Benchmark結果を検証して PASS / CONDITIONAL_PASS / FAIL / NOT_EVALUATED �
 
 from __future__ import annotations
 
-import os
 from typing import Any, Optional
 
 # ルール判定結果（1行毎）
@@ -142,11 +141,16 @@ def _same_model_ref(a: str, b: str) -> bool:
     Benchmark実行時にユーザーが手入力した同じmodel_ref（forward slash区切り）が、
     実際には同一パスを指しているにも関わらず単純な文字列比較では一致せず、
     Release Gateが実在するBenchmark結果を「Benchmarkなし」として見落とすことを
-    実際に確認した。`os.path.normpath()`で区切り文字を正規化してから比較する
-    （filesystem accessは行わない。Hugging Face model ID同士の比較でも
-    `normpath`は無害）。
+    実際に確認した。
+
+    `os.path.normpath()`はOSごとに区切り文字の解釈が異なる（Linux上の`posixpath`は
+    backslashを区切り文字として扱わず、そのまま素通りする）ため、Windows上でのみ
+    生成される`model_dir`をCI（Linux runner）で正しく比較できない回帰を実際のCI
+    実行で確認した（PR #165・Windows/Linux双方でのpathlib挙動差はIssue #158でも
+    確認済みの既知パターン）。そのため、実行OSに依存しない単純な文字列置換で
+    区切り文字を統一してから比較する（filesystem accessは行わない）。
     """
-    return os.path.normpath(a) == os.path.normpath(b)
+    return a.replace("\\", "/") == b.replace("\\", "/")
 
 
 def _latest_benchmark_result(project_id: str, model: str) -> Optional[dict[str, Any]]:

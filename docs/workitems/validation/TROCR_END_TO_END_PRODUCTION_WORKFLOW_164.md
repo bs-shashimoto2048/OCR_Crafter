@@ -204,6 +204,8 @@ Reliability / Data Safety hardening（Issue #162まで）が完了した現在�
 
 **検証**: 新規回帰テスト`test_gate_benchmark_rank_connects_despite_path_separator_style_difference`（`tests/test_release_gate_trocr.py`）を追加し、区切り文字だけが異なる同一パス（`C:\models\trocr-a` vs `C:/models/trocr-a`）が正しく接続されることを確認。既存の「異なるmodel_dirは誤接続されない」回帰テスト（`test_gate_benchmark_trocr_row_does_not_match_different_model_dir`等）が引き続き通ることも確認し、正規化が**別モデルの誤マッチ**を新たに生まないことを確認した。`tests/test_release_gate_trocr.py`（15件）・`tests/test_release_gate.py`・`tests/test_release_gate_paddleocr_benchmark.py`・`tests/test_releases.py`・`tests/test_benchmark_trocr.py`を合わせて**70 passed**（回帰なし）。
 
+**CI（Linux runner）での再発見・追加修正**: PR #165の初回CI実行で、ローカル（Windows）では通っていた上記の新規回帰テストがLinux上で`assert 'unverified' == 'pass'`で失敗した。原因を切り分けたところ、`os.path.normpath()`はOSごとに区切り文字の解釈が異なり（Linux上の`posixpath`はbackslashを区切り文字として扱わずそのまま素通りする）、Windows上でのみ生成される`model_dir`文字列をLinux CIで正しく正規化できないことが根本原因と判明した（Issue #158で確認済みのWindows/Linux pathlib挙動差と同系統のパターン）。`_same_model_ref()`の実装を、実行OSに依存しない単純な文字列置換（`a.replace("\\", "/") == b.replace("\\", "/")`）へ変更し、未使用になった`import os`を削除した。ローカル（Windows）で259件（TrOCR関連10ファイル・Release Gate関連3ファイル）が再度すべてpassすることを確認し、CIで再検証した。
+
 修正後、Backendを再起動し、実際のE2Eデータ（`BM-0001`）で再確認: `max_benchmark_rank`ルールが`"1位（BM-0001）"`で正しく`pass`することを確認した。
 
 ### Phase 7 最終結果
