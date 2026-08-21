@@ -89,6 +89,105 @@ def _resolve_device(device: str | None) -> str:
     return normalized
 
 
+def _load_processor(model_ref: str, *, local_files_only: bool) -> Any:
+    """`model_ref`のTrOCR Processor（image processor + tokenizer）をロードする。
+
+    Issue #164（TrOCR End-to-End Production Workflow Validation）で実際に
+    Hugging Face Hub上の公式TrOCR checkpoint（`microsoft/trocr-*`）を使って
+    fine-tuneを試みたところ、`transformers==5.14.1`の`AutoProcessor`/
+    `AutoTokenizer`が、これら公式checkpoint（いずれも`tokenizer.json`＝fast
+    tokenizerのシリアライズ済みファイルを同梱しない、2023年以前の形式）の
+    tokenizerを解決できず、次のいずれかの形で失敗することを確認した:
+
+    - `AutoProcessor.from_pretrained()`が例外を送出せず、**tokenizerを持たない
+      image processorのみ**（`DeiTImageProcessor`等）を返す（`vocab.json`+
+      `merges.txt`形式・`sentencepiece.bpe.model`形式のいずれでも再現）
+    - `AutoTokenizer.from_pretrained()`は明示的に`ValueError`
+      （"Couldn't instantiate the backend tokenizer..."）を送出する
+
+    一方、tokenizer_config.jsonが明示する**具象のslow tokenizerクラス**
+    （`RobertaTokenizer`/`XLMRobertaTokenizer`等）を直接`from_pretrained()`
+    すれば正しくロードできることを同じcheckpointで実証済み（Auto解決層の
+    fast tokenizer自動変換パスにのみ問題があり、tokenizer実装自体は健全）。
+
+    このため、まず通常の`AutoProcessor.from_pretrained()`を試し、得られた
+    processorが**`BaseImageProcessor`のインスタンス**（＝tokenizerを伴わない
+    image processor単体）である場合のみ、image processorとtokenizerを
+    個別にロードして`TrOCRProcessor`を組み立てるフォールバックを行う。
+    `transformers.image_processing_utils.BaseImageProcessor`のインスタンスか
+    どうかで判定するのは、実際に壊れて返ってくる`DeiTImageProcessor`等は
+    必ずこの基底クラスを継承する一方、正常な`TrOCRProcessor`（image_processor
+    とtokenizerを内包する複合Processor）はこの基底クラスを継承しない
+    ためであり、かつ本モジュールの単体テストが使うfake processor（plain
+    Pythonオブジェクト。利用箇所ごとに異なる属性のみ実装し、他は意図的に
+    持たない）もこの基底クラスを継承しないため、fakeの属性の有無に関わらず
+    誤ってフォールバック対象にすることがない（属性の有無で判定する方式は
+    各テストファイルのfake形状の違いにより誤検出することを実際に確認済み）。
+    ローカル保存済みcheckpoint（学習後に`save_pretrained()`したもの等）は
+    通常`tokenizer.json`を含むため、フォールバックへは入らず従来どおり
+    `AutoProcessor`のみで完結する。
+    """
+    from transformers import AutoImageProcessor, AutoProcessor, TrOCRProcessor
+    from transformers.image_processing_utils import BaseImageProcessor
+    from transformers.models.auto.tokenization_auto import get_tokenizer_config
+
+    try:
+        processor = AutoProcessor.from_pretrained(model_ref, local_files_only=local_files_only)
+        if not isinstance(processor, BaseImageProcessor):
+            return processor
+    except Exception:  # noqa: BLE001 — フォールバックへ進む（本体の例外は握り潰さず、フォールバックも失敗した場合にのみ後段で送出される）
+        pass
+
+    image_processor = AutoImageProcessor.from_pretrained(model_ref, local_files_only=local_files_only)
+    tokenizer_config = get_tokenizer_config(model_ref, local_files_only=local_files_only)
+    tokenizer_class_name = tokenizer_config.get("tokenizer_class")
+    if not tokenizer_class_name:
+        raise TrOCRModelLoadError(
+            f"could not determine tokenizer_class from tokenizer_config.json for model_ref={model_ref!r}"
+        )
+
+    import transformers as transformers_module
+
+    tokenizer_class = getattr(transformers_module, tokenizer_class_name, None)
+    if tokenizer_class is None:
+        raise TrOCRModelLoadError(
+            f"unknown tokenizer_class {tokenizer_class_name!r} for model_ref={model_ref!r}"
+        )
+    tokenizer = tokenizer_class.from_pretrained(model_ref, local_files_only=local_files_only)
+    return TrOCRProcessor(image_processor=image_processor, tokenizer=tokenizer)
+
+
+def _backfill_config_token_ids(model: Any) -> None:
+    """`model.config.pad_token_id`/`decoder_start_token_id`が欠けている場合、
+    `model.generation_config`から補完する。
+
+    Issue #164（TrOCR End-to-End Production Workflow Validation）で実際に学習を
+    実行したところ、`VisionEncoderDecoderModel.forward()`（`labels`指定時に
+    `decoder_input_ids`を`shift_tokens_right(labels, self.config.pad_token_id,
+    self.config.decoder_start_token_id)`で組み立てる、`transformers`自身の
+    docstring例にも明記されている標準的な使い方）が、`self.config.pad_token_id`
+    に対し`AttributeError`（`'VisionEncoderDecoderConfig' object has no
+    attribute 'pad_token_id'`）を送出することを確認した。これは、この
+    `transformers`バージョンで`pad_token_id`/`decoder_start_token_id`が
+    generation関連fieldとして`config`から`generation_config`側へ集約されている
+    一方、`VisionEncoderDecoderModel.forward()`自体は依然`self.config`側を
+    直接参照するために生じるgap（`generation_config`には正しい値が保持されて
+    いることを確認済み）。既に`config`側に値がある場合は上書きしない
+    （将来この`transformers`側のgapが解消された場合も無害。上書きし得るのは
+    生成専用のtoken ID 2種のみで、他のモデル出力・学習semanticsには影響しない）。
+    """
+    generation_config = getattr(model, "generation_config", None)
+    config = getattr(model, "config", None)
+    if generation_config is None or config is None:
+        return
+    for field in ("pad_token_id", "decoder_start_token_id"):
+        if getattr(config, field, None) is not None:
+            continue
+        value = getattr(generation_config, field, None)
+        if value is not None:
+            setattr(config, field, value)
+
+
 class TrOCREngine:
     """TrOCR互換モデルをロードし、単一画像の文字認識を行う推論コア。
 
@@ -151,14 +250,15 @@ class TrOCREngine:
         resolved_device = _resolve_device(device)
 
         try:
-            from transformers import AutoProcessor, VisionEncoderDecoderModel
+            import transformers  # noqa: F401
+            from transformers import VisionEncoderDecoderModel
         except ImportError as e:
             raise TrOCRDependencyError(
                 "transformers is not installed. Please run: pip install transformers"
             ) from e
 
         try:
-            processor = AutoProcessor.from_pretrained(normalized_ref, local_files_only=local_files_only)
+            processor = _load_processor(normalized_ref, local_files_only=local_files_only)
         except Exception as e:  # noqa: BLE001
             raise TrOCRModelLoadError(
                 f"failed to load TrOCR processor for model_ref={normalized_ref!r}: {e}"
@@ -177,6 +277,8 @@ class TrOCREngine:
             raise TrOCRModelLoadError(
                 f"failed to move TrOCR model to device={resolved_device!r} for model_ref={normalized_ref!r}: {e}"
             ) from e
+
+        _backfill_config_token_ids(model)
 
         model.eval()
 

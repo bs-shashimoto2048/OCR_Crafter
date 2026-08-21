@@ -13,6 +13,7 @@ Benchmark結果を検証して PASS / CONDITIONAL_PASS / FAIL / NOT_EVALUATED �
 
 from __future__ import annotations
 
+import os
 from typing import Any, Optional
 
 # ルール判定結果（1行毎）
@@ -132,11 +133,27 @@ def _resolve_trocr_benchmark_model_ref(project_id: str, model: str) -> str:
     return ""
 
 
+def _same_model_ref(a: str, b: str) -> bool:
+    """TrOCRのmodel_ref（ファイルシステムパスの場合がある）同士を、区切り文字
+    （`/`/`\\`）の違いを吸収して比較する。
+
+    Issue #164（TrOCR End-to-End Production Workflow Validation）の実行中に、
+    `.trocr.json`の`model_dir`（Windows上は`Path`の`str()`によりbackslash区切り）と、
+    Benchmark実行時にユーザーが手入力した同じmodel_ref（forward slash区切り）が、
+    実際には同一パスを指しているにも関わらず単純な文字列比較では一致せず、
+    Release Gateが実在するBenchmark結果を「Benchmarkなし」として見落とすことを
+    実際に確認した。`os.path.normpath()`で区切り文字を正規化してから比較する
+    （filesystem accessは行わない。Hugging Face model ID同士の比較でも
+    `normpath`は無害）。
+    """
+    return os.path.normpath(a) == os.path.normpath(b)
+
+
 def _latest_benchmark_result(project_id: str, model: str) -> Optional[dict[str, Any]]:
     """モデルを含む最新Benchmarkのこのモデルの結果行（rank付き）。なければNone。"""
     from .benchmark import list_benchmarks
 
-    # TrOCRのみ、sidecar名→model_dirへの解決が必要（上記_resolve_trocr_benchmark_model_ref参照）。
+    # TrOCRのみ、sidecar名→model_dirへの解決が必要(上記_resolve_trocr_benchmark_model_ref参照)。
     # 該当しない場合（Tesseract/PaddleOCR等）は空文字のまま=trocr分岐を素通りする
     trocr_model_ref = _resolve_trocr_benchmark_model_ref(project_id, model) if model.endswith(".trocr.json") else ""
 
@@ -153,7 +170,7 @@ def _latest_benchmark_result(project_id: str, model: str) -> Optional[dict[str, 
             # は意図的に対象外とし、"paddleocr_custom"のみに限定する（誤fallback防止）
             if engine == "paddleocr_custom" and row_model == model:
                 return {**row, "benchmark_id": item.get("benchmark_id")}
-            if engine == "trocr" and trocr_model_ref and row_model == trocr_model_ref:
+            if engine == "trocr" and trocr_model_ref and _same_model_ref(row_model, trocr_model_ref):
                 return {**row, "benchmark_id": item.get("benchmark_id")}
     return None
 
