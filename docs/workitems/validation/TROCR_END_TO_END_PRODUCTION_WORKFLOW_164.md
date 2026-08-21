@@ -2,7 +2,7 @@
 
 Related: Validation [#164](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/164) / #27, #85, #96, #98, #100, #102, #104, #117, #119, #121, #141, #162
 
-**状態**: Implemented, PR review pending。
+**状態**: Completed / Closed。PR [#165](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/165)、Squash Commit `ec2694e`でマージ済み。
 
 ## 目的
 
@@ -241,11 +241,36 @@ Reliability / Data Safety hardening（Issue #162まで）が完了した現在�
 |---|---|---|---|---|
 | 1 | Training | Blocker | `transformers==5.14.1`の`AutoProcessor`/`AutoTokenizer`が公式TrOCR checkpointのtokenizerを解決できず、tokenizerを伴わないimage processor単体を返す（または明示的にValueError） | `trocr_engine.py::_load_processor()`に、`BaseImageProcessor`インスタンス判定によるフォールバック（具象tokenizerクラスを直接ロード）を追加。`requirements.txt`へ`sentencepiece`追加 |
 | 2 | Training | Blocker | `VisionEncoderDecoderModel.forward()`が`self.config.pad_token_id`/`decoder_start_token_id`を参照するが、この`transformers`バージョンでは`config`側に存在せず`generation_config`側にのみ存在する | `trocr_engine.py::_backfill_config_token_ids()`を追加し、`TrOCREngine.load()`内で欠けている場合のみ`generation_config`から補完 |
-| 3 | Release Gate | Major | Benchmark Evidence接続が、`.trocr.json`のmodel_dir（backslash区切り）とBenchmark実行時のmodel_ref（forward slash区切り）の単純な文字列比較で、実際には同一パスにも関わらず不一致と判定し、実在するBenchmark結果を見落とす | `release_gate.py::_same_model_ref()`（`os.path.normpath()`による正規化比較）を追加し、TrOCR分岐のみ適用 |
+| 3 | Release Gate | Major | Benchmark Evidence接続が、`.trocr.json`のmodel_dir（backslash区切り）とBenchmark実行時のmodel_ref（forward slash区切り）の単純な文字列比較で、実際には同一パスにも関わらず不一致と判定し、実在するBenchmark結果を見落とす | `release_gate.py::_same_model_ref()`（区切り文字の正規化比較。後述Decision Record参照）を追加し、TrOCR分岐のみ適用 |
 
 **誤検出として棄却した事象**: Phase 8調査中、`RELEASE_NOTE.md`/`MODEL_CARD.md`の日本語文面が本セッションのWindows Git-Bash端末上で文字化けして見える事象に遭遇したが、ファイルI/Oベースの直接検証（端末表示を経由しない`"概要" in text`等の一致確認）で実際の保存データ・生成内容はいずれも正しいUTF-8であることを確認し、**アプリケーションのバグではなく端末表示上の問題**と判断した（誤って報告しないよう実データで裏付けてから判断）。
 
 いずれの3件も、Issue本文の「Blocker/Major」分類基準に該当し、根本原因・修正範囲がE2Eパスに厳密に限定されていたため、本Issue内で修正・回帰テスト追加・再検証を行った。architecturalな変更（`transformers`バージョン変更・Release Gateの評価アーキテクチャ変更等）は行っていない。
+
+## Decision Record: CI結果と`_same_model_ref()`のOS非依存化判断
+
+PR #165は、2回のCI失敗を経て3回目でgreenとなった。いずれも「flakeとして即座に許容する」のではなく、CLAUDE.mdの方針どおり実際の差分・ローカル再現・原因究明を経てから判断した。
+
+### 1回目のCI失敗（`os.path.normpath()`の環境依存性、実際のバグとして修正）
+
+- 現象: 新規追加した`tests/test_release_gate_trocr.py::test_gate_benchmark_rank_connects_despite_path_separator_style_difference`が、GitHub Actions（Linux runner）でのみ`assert 'unverified' == 'pass'`で失敗（ローカルWindowsでは成功していた）
+- 切り分け: `os.path.normpath()`はOSごとに区切り文字の解釈が異なる（Linuxの`posixpath`はbackslashを区切り文字として扱わずそのまま素通りする）ため、Windows上で生成された`model_dir`文字列（backslash区切り）をLinux上で正規化しても forward slash区切りの文字列と一致しない、という**環境依存の実バグ**と特定した（Issue #158で確認済みのWindows/Linux pathlib挙動差と同系統のパターンであり、今回も推測せず実際にCI失敗ログとローカル再現の両方で裏付けた）
+- **判断**: これはflakeではなく、修正が必要な実際のバグ（`_same_model_ref()`の実装が実行環境に依存していた）と判断し、mergeを保留して修正した
+- **最終的なOS非依存化の設計判断**: `os.path`系のAPI（`normpath`/`PureWindowsPath`等）はいずれも「どのOS上で実行されているか」または「どちらのOS形式として解釈するか」を明示的に選択する必要があり、model_dirが常にWindows形式で生成される（本アプリはWindows運用が前提）という前提を`os.path`だけでは表現しきれない。そこで、OSに依存しない最も単純な文字列正規化（`a.replace("\\", "/") == b.replace("\\", "/")`）を採用した。この方式は「区切り文字の違いのみを吸収し、経路の意味解釈（`..`の解決・大文字小文字等）には踏み込まない」という`_same_model_ref()`本来のスコープ（同一パスの表記ゆれ吸収のみ）に対して過不足がなく、実行環境（CI＝Linux／開発機＝Windows）のいずれでも同一の判定結果になることを直接確認した
+- 修正後、ローカル（Windows）で関連259件が全てpassすることを確認してから再度push・CI実行した
+
+### 2回目のCI失敗（`test_preview_batch.py::test_batch_inflight_share_same_key`、既知flakeとして許容）
+
+- 現象: `tests/test_preview_batch.py::test_batch_inflight_share_same_key`が`assert 2 == 1`（in-flight共有されるはずの同一キー推論が2回実行された）で失敗
+- 本PRの差分（`requirements.txt`・`src/app/services/release_gate.py`・`src/app/services/trocr_engine.py`・`tests/test_release_gate_trocr.py`・workitem doc）は、このテストが対象とするOCR推論のin-flight共有ロジック（`main.py`のExecutor/キャッシュ機構）と一切関係がないことを`git diff --stat main`で確認した
+- 同一テストは本セッション内の**Issue #152・Issue #156でも既に既知flakeとして確認済み**（タイミング依存のテストで、diffとは無関係に間欠的に失敗する）という前例があることを踏まえた上で、今回も推測に頼らず以下の証拠を独立に収集した:
+  1. 対象テストをローカルで6回実行し、6/6成功（`.venv`使用）
+  2. `gh run rerun 32472097695 --failed`でコード変更ゼロのまま再実行し、3回目のCI実行が2ジョブとも成功（backend/frontend）
+- **判断**: 上記の証拠（無関係な差分・既知の前例・ローカル安定成功・コード変更なしの再実行成功）に基づき、これを既知のflakeと判断し、severityを下げることなくmergeを進めた
+
+### 最終CI結果
+
+3回目のCI実行（`https://github.com/bs-shashimoto2048/OCR_Crafter/actions/runs/32472097695`）: backend pass・frontend pass。Squash Merge実行、Issue #164自動Close済み。
 
 ## Exit Criteria
 
