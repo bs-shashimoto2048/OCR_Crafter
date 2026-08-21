@@ -99,6 +99,15 @@ Training Job（System A・System B）とも`job_id = str(uuid.uuid4())`でサー
 
 `normalize_project_id()`の絶対パス判定（`Path(value).is_absolute()`）はpathlibの実装がOS依存であることを、PR #159のCI（GitHub Actions Linuxランナー）で実際に確認した。ローカル（Windows）では`C:\...`形式が`is_absolute()=True`で「absolute path」メッセージとして拒否される一方、Linux CIでは`PurePosixPath`がドライブレターを認識しないため`is_absolute()=False`となり、後続の`"/" in value or "\\" in value`チェックで「'/' and '\\' are not allowed」メッセージとして拒否される（当初この違いに気づかず、Windows限定のメッセージをテストで固定してしまい、Linux CIで2件のテスト失敗として顕在化・修正した）。同様に`/etc/passwd`のようなPOSIX形式パスもOSによって拒否される分岐が変わる。**いずれの分岐でも拒否されること自体はプラットフォームに依存しない**ため、最終的なテストはメッセージの厳密一致ではなく「`ValueError`が送出されること」のみを確認する形に統一した。
 
+## Decision Record
+
+| 論点 | 決定 | 理由 |
+|---|---|---|
+| Windows/Linuxでのnormalize_project_id()の不正ID拒否 | **両OSとも不正ID（絶対パス・drive-qualified path・`/`/`\`混入・`..`traversal）を`ValueError`で正しく拒否する。これはOSに依存しない不変の契約とする** | Production側のロジックは変更不要と確認済み（実装済みの`is_absolute()`＋`"/"/"\\"`チェックの2段構えが、どちらの分岐を通っても最終的に拒否へ収束するため） |
+| エラーメッセージの分岐先（"absolute path" vs "'/' and '\\' are not allowed"） | **エラーメッセージの分岐先はOS依存で変わってよいとし、統一・固定しない** | `Path.is_absolute()`はWindows pathlib（`PureWindowsPath`）とLinux pathlib（`PurePosixPath`）で判定基準が異なる（前者はdrive-qualified pathを絶対パスと認識するが、後者はドライブレターの概念自体を持たないため認識しない）。この差はPython標準ライブラリの仕様であり、`normalize_project_id()`側で吸収する必然性・実益がない（どちらの分岐でも最終的に同じ結果＝拒否になるため） |
+| テストの書き方 | **メッセージの厳密一致（`pytest.raises(ValueError, match=...)`の`match`）ではなく、`ValueError`が送出されること自体のみを確認する** | PR #159のCI（Linux）で、Windows限定のメッセージを固定していたテストが2件失敗したことを実地で確認し、修正した。この経緯自体を教訓として本Recordへ残す（プラットフォーム依存の実装詳細をテストの合否条件にしない） |
+| Production codeへの追加修正要否 | **追加修正は不要と判断し、実施しない** | 上記の通り拒否そのものはOSに依存せず不変であり、メッセージ文言の違いはユーザー向けエラー表示の細部に留まる（`main.py::_resolve_project_id()`がいずれのメッセージも同じ`HTTPException(400)`へ変換するため、API利用者から見た挙動＝ステータスコードは統一されている） |
+
 ## Tests
 
 新規: `tests/test_project_id_validation.py`（27件）
