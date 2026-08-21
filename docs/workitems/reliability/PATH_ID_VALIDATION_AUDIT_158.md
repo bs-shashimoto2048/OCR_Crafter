@@ -2,7 +2,7 @@
 
 Related: Reliability [#158](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/158) / Reliability [#156](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/156)（Safe Recursive Deletion、本Issueの起点となった発見） / Bug [#145](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/145)（Restore Model Sidecar Path Rebase）
 
-**状態**: Implemented, PR review pending。
+**状態**: Completed / Closed。PR [#159](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/159)、Squash Commit `f305f30`でマージ済み。
 
 ## 目的
 
