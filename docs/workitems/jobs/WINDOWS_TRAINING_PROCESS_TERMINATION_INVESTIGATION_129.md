@@ -223,7 +223,7 @@ Production変更が無いことを`git diff --stat main -- src/ frontend/src/`�
 
 ## Future Work
 
-- 推奨Issue: Windows環境でのTesseract/PaddleOCR孫プロセス終了対応（§Recommended Action 2）
-- 推奨Issue: `delete_artifacts=True`時の`shutil.rmtree(run_dir)`のtry/except保護（§Recommended Action 3、`docs/10_KNOWN_LIMITATIONS.md`の既存rmtree課題と合わせて検討）
+- ~~推奨Issue: Windows環境でのTesseract/PaddleOCR孫プロセス終了対応（§Recommended Action 2）~~ → **Reliability [#133](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/133)で解消済み**（`_terminate_training_process_tree()`が`taskkill /PID <pid> /T /F`を使い、孫プロセスを含むprocess tree全体の終了を実測確認済み。Investigation #160（本節、2026-08-21）でこの項目の記載が既に解決済みであるにもかかわらず未更新のまま残っていたことを発見し、本注記を追記した）
+- ~~推奨Issue: `delete_artifacts=True`時の`shutil.rmtree(run_dir)`のtry/except保護（§Recommended Action 3、`docs/10_KNOWN_LIMITATIONS.md`の既存rmtree課題と合わせて検討）~~ → **Reliability #133で解消済み**（`main.py::_delete_training_artifacts()`の`shutil.rmtree(run_dir)`は`try/except OSError`で保護済み。Investigation #160で同様に発見・追記）
 - Linux実機での同等probe実行（現状はPOSIX仕様からの妥当な推論のみ。CI環境で安全に実行できる形でのフォローアップがあれば検証を強化できる）
 - `persisted PIDだけでprocess identityを安全に判断できるか（PID再利用リスク）`は本Investigationでは深掘りしていない
