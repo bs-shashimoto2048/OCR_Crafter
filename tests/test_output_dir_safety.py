@@ -3,8 +3,11 @@
 overwrite=true でも許可ルート（プロジェクトの outputs 等）配下以外は削除しない。
 """
 
+import logging
+
 import pytest
 
+import src.app.project_paths as project_paths_module
 from src.app.project_paths import is_within_directory, safe_rmtree
 
 
@@ -65,6 +68,39 @@ class TestAllows:
         assert not target.exists()
         assert sibling.exists()
         assert outputs_root.exists()
+
+
+class TestPartialFailureDetection:
+    """Issue #156: ignore_errors=True でも成否を確認せずsilentに完了扱いしていた
+    既存挙動へ、削除未完了時のwarningログを追加したことの回帰テスト。
+    戻り値・例外送出契約自体は変更していない（呼び出し側への影響なし）。
+    """
+
+    def test_partial_failure_logs_warning_but_keeps_existing_contract(self, outputs_root, monkeypatch, caplog):
+        target = outputs_root / "locked"
+        target.mkdir(parents=True)
+        (target / "file.txt").write_text("x", encoding="utf-8")
+
+        # shutil.rmtree自体を no-op にして「削除が完了しなかった」状態を再現する
+        # （Windowsのファイルロック等、ignore_errors=Trueで従来は無警告のまま完了扱い）
+        monkeypatch.setattr(project_paths_module.shutil, "rmtree", lambda *a, **k: None)
+
+        with caplog.at_level(logging.WARNING, logger="src.app.project_paths"):
+            removed = safe_rmtree(target, [outputs_root], label="partial-failure-test")
+
+        assert removed == target.resolve()  # 戻り値の契約は不変
+        assert target.exists()  # 実際には削除されていない（rmtreeをno-op化したため）
+        assert any("削除が完了しませんでした" in record.message for record in caplog.records)
+
+    def test_full_success_does_not_log_warning(self, outputs_root, caplog):
+        target = outputs_root / "clean"
+        target.mkdir(parents=True)
+
+        with caplog.at_level(logging.WARNING, logger="src.app.project_paths"):
+            safe_rmtree(target, [outputs_root], label="success-test")
+
+        assert not target.exists()
+        assert not any("削除が完了しませんでした" in record.message for record in caplog.records)
 
 
 class TestIsWithinDirectory:

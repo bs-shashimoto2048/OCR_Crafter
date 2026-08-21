@@ -39,6 +39,17 @@ def safe_rmtree(target: Union[str, Path], allowed_roots: Iterable[Path], label: 
         if is_within_directory(resolved, root_resolved):
             logger.info("safe_rmtree: removing %s (%s)", resolved, label or "unlabeled")
             shutil.rmtree(resolved, ignore_errors=True)
+            # Issue #156: ignore_errors=Trueは個々のファイル削除失敗（Windowsの
+            # ファイルロック等）で処理を止めないためのbest-effort設計だが、
+            # 従来は成否を一切確認せずsilentに完了扱いしていた。呼び出し側の
+            # 既存contract（例外を投げない・resolvedを返す）は変更せず、
+            # 削除が完了しなかった場合はログにwarningを残し診断可能にする
+            if resolved.exists():
+                logger.warning(
+                    "safe_rmtree: 削除が完了しませんでした（残存、ファイルロック等の可能性）: %s (%s)",
+                    resolved,
+                    label or "unlabeled",
+                )
             return resolved
     raise ValueError(f"deletion outside allowed directories is not permitted: {resolved}")
 

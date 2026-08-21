@@ -43,6 +43,7 @@ from .services.engine_registry import resolve_engine_id
 from .project_paths import (
     delete_project_directory,
     ensure_project_directories,
+    is_within_directory,
     list_projects,
     normalize_project_id,
 )
@@ -686,8 +687,12 @@ def _cleanup_failed_ocr_dataset(project_id: str, dataset_dir: str) -> bool:
         (paths.outputs / "ocr_dataset").resolve(),
         (paths.outputs / "ocr_dataset_from_logs").resolve(),
     }
-    # プロジェクト管理下の自動生成データのみ削除対象にする
-    if not any(root == dataset_path or root in dataset_path.parents for root in allowed_roots):
+    # プロジェクト管理下の自動生成データの、許可rootより真に配下（root自身は除く）
+    # のみ削除対象にする（Issue #156: 個々のdatasetは常にroot直下のタイムスタンプ付き
+    # サブディレクトリとして作られる契約のため、root自身が渡ることは想定外の値。
+    # is_within_directory()で候補==root自身を明示的に拒否する。従来の
+    # `root == dataset_path or root in dataset_path.parents` はroot自身を誤って許可していた）
+    if not any(is_within_directory(dataset_path, root) for root in allowed_roots):
         return False
 
     # 既存モデルが参照しているデータは削除しない
@@ -695,6 +700,11 @@ def _cleanup_failed_ocr_dataset(project_id: str, dataset_dir: str) -> bool:
         return False
 
     shutil.rmtree(dataset_path, ignore_errors=True)
+    if dataset_path.exists():
+        logging.getLogger(__name__).warning(
+            "_cleanup_failed_ocr_dataset: 削除が完了しませんでした（残存）: %s", dataset_path
+        )
+        return False
     return True
 
 
@@ -1090,11 +1100,15 @@ def _delete_training_artifacts(job: dict[str, Any]) -> dict[str, Any]:
                 try:
                     shutil.rmtree(run_dir)
                     removed["run_dir_removed"] = True
-                except OSError:
+                except OSError as e:
                     # Windowsのファイルロック等（Investigation #129）。呼び出し元
                     # （_stop_training_worker）はtermination確認後にのみここへ到達するが、
-                    # 万一ファイルハンドルが残っていても例外を外部へ漏らさない
-                    pass
+                    # 万一ファイルハンドルが残っていても例外を外部へ漏らさない（Issue #133由来の
+                    # 既存contractは変更しない）。ただしIssue #156でsilentなまま握りつぶさず、
+                    # 診断可能にするためログへ残す
+                    logging.getLogger(__name__).warning(
+                        "_delete_training_artifacts: run_dirの削除に失敗しました: %s (%s)", run_dir, e
+                    )
 
     model_path_raw = str(job.get("model_path") or "").strip()
     if model_path_raw:
@@ -1105,8 +1119,14 @@ def _delete_training_artifacts(job: dict[str, Any]) -> dict[str, Any]:
                 resolved_model_path.relative_to(paths.models.resolve())
                 resolved_model_path.unlink()
                 removed["model_removed"] = True
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001
+            # Issue #156: containment失敗（models配下ではない）・permission error等を
+            # 区別せず一律で握りつぶす既存動作は維持しつつ、診断可能にする
+            logging.getLogger(__name__).warning(
+                "_delete_training_artifacts: model_pathの削除に失敗またはスキップしました: %s (%s)",
+                model_path_raw,
+                e,
+            )
 
     log_path_raw = str(job.get("log_path") or "").strip()
     if log_path_raw:
@@ -1117,8 +1137,12 @@ def _delete_training_artifacts(job: dict[str, Any]) -> dict[str, Any]:
                 resolved_log_path.relative_to(paths.logs.resolve())
                 resolved_log_path.unlink()
                 removed["log_removed"] = True
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001
+            logging.getLogger(__name__).warning(
+                "_delete_training_artifacts: log_pathの削除に失敗またはスキップしました: %s (%s)",
+                log_path_raw,
+                e,
+            )
 
     return removed
 

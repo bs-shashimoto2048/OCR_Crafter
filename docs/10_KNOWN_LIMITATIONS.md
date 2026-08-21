@@ -26,8 +26,8 @@
 
 - ~~`delete_model` のガード: 手編集メタが共有親ディレクトリを指す場合に配下の他モデルも削除しうる余地~~ → **Reliability #154で解消済み**。他モデルのsidecarが同じartifact directoryを参照している場合、共有ディレクトリとして検出し物理削除をスキップする（対象sidecar自体は削除、最後の参照が消えた時点で実際に削除される）。詳細: `docs/workitems/reliability/MODEL_DELETION_ROBUSTNESS_154.md`
 - 相対パスメタが CWD 基準で resolve され削除スキップになる（fail-safe側の挙動）
-- rmtree の封じ込めが3方式併存（`safe_rmtree` / allowed_roots / relative_to）→ 統一が望ましい（#154のFuture Workとして継続記録）
-- `rmtree(ignore_errors=True)` の部分失敗（Windowsのファイルロック）が非検知でもAPIは成功を返す（#154のFuture Workとして継続記録）
+- ~~rmtree の封じ込めが3方式併存（`safe_rmtree` / allowed_roots / relative_to）→ 統一が望ましい~~ → **Reliability #156で部分対応**。`_cleanup_failed_ocr_dataset`のallowed_roots方式は既存の`is_within_directory()`へ統一した。`relative_to`（`_delete_training_artifacts`）・`sanitize_filename`（report_generator）は健全と確認し無理な統一はしていない（詳細: `docs/workitems/reliability/SAFE_RECURSIVE_DELETION_156.md`）
+- ~~`rmtree(ignore_errors=True)` の部分失敗（Windowsのファイルロック）が非検知でもAPIは成功を返す~~ → **Reliability #156で主要4箇所（safe_rmtree/delete_model/_cleanup_failed_ocr_dataset/_delete_training_artifacts）に部分失敗のwarningログを追加済み**。既存の例外送出契約は変更していない。低リスクな残り数箇所（benchmark.py等）はFuture Workとして継続記録
 
 ### 復旧関連
 

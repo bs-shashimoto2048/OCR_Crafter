@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .. import project_paths as project_paths_module
-from ..project_paths import ensure_project_directories
+from ..project_paths import ensure_project_directories, normalize_project_id
 
 _LOCK = threading.RLock()
 
@@ -338,6 +338,11 @@ def restore_backup(backup_id: str, new_project_id: str = "") -> dict[str, Any]:
     - 復元前にmanifestの全ファイルのSHA-256を検証し、**不一致があれば復元を開始しない**
     - 復元後にも書き込んだファイルを再検証する（不一致は復元先を削除してエラー）
     - new_project_id 未指定は `<元ID>_restored_<連番>` を自動採番。指定IDが既存の場合はエラー
+    - new_project_id が明示指定された場合、`normalize_project_id()`（既存のproject_id
+      検証規約、'/'/'\\'・絶対パス・'..'を拒否）へ通してから使う（Issue #156で修正。
+      以前は末尾の`ensure_project_directories(target_pid)`呼び出し時にのみ間接的に
+      検証されており、その前段のZIP展開・失敗時cleanupの`shutil.rmtree`が
+      `data/projects/`外の任意パスに対して実行され得た）
     """
     index = _load_index()
     entry = next((i for i in index["items"] if i.get("backup_id") == backup_id), None)
@@ -360,7 +365,11 @@ def restore_backup(backup_id: str, new_project_id: str = "") -> dict[str, Any]:
     projects_dir = Path(project_paths_module.PROJECTS_DIR)
     source_pid = str(entry.get("project_id") or "project")
     target_pid = str(new_project_id or "").strip()
-    if not target_pid:
+    if target_pid:
+        # 明示指定されたIDはproject_id契約に従って検証する（Issue #156: path traversal対策。
+        # 検証前に`projects_dir / target_pid`を計算・使用してはならない）
+        target_pid = normalize_project_id(target_pid)
+    else:
         suffix = 1
         while (projects_dir / f"{source_pid}_restored_{suffix}").exists():
             suffix += 1
