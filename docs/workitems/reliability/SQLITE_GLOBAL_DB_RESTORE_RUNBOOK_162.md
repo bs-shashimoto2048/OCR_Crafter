@@ -2,7 +2,7 @@
 
 Related: Reliability [#162](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/162) / Investigation [#160](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/160)（Post-Safety-Hardening Roadmap Refresh、本Issueの起点・Top Recommendation） / Feature [#147](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/147)（SQLite Online Backup、本Issueが前提とするbackup artifact contract） / Investigation [#143](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/143) / Feature [#127](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/127)（JobRepository SQLite移行、`job_manager.db`の作成元）
 
-**状態**: Implemented, PR review pending。
+**状態**: Completed / Closed。PR [#163](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/163)、Squash Commit `f0c717b`でマージ済み。
 
 ## 目的
 
