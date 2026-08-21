@@ -168,3 +168,5 @@ Investigation / Documentation onlyのため新規テストは追加していな�
 ## Scope外（Out of Scope、実施しなかったこと）
 
 新機能実装、UI redesign、architecture refactor、Epic #28 Consumer Migration実装、scheduled/cloud backup実装、新Engine追加、次Issue（Model Deletion Robustness）の自動作成（ユーザー判断後に別途起票する）。
+
+> **フォローアップ**: 推奨したModel Deletion Robustnessは Reliability [#154](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/154)として起票・完了し、そこから派生した[#156](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/156)・[#158](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/158)もすべて完了した。その後継としてInvestigation [#160](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/160)（`docs/workitems/roadmap/POST_SAFETY_HARDENING_ROADMAP_REFRESH_160.md`）がroadmapを再棚卸しし、SQLite Global DB Restore Runbook & Verificationを次点として推奨した。

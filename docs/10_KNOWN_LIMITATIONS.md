@@ -3,13 +3,13 @@
 ## TODO / FIXME / HACK コメント
 
 - **リポジトリ内に存在しない**（src/, frontend/src/, tests/, config/, docs/ を走査。0件）。
-- 将来対応を示す唯一のコメント: `src/app/services/ocr_evaluation.py:139` `# 将来: elif engine == "paddleocr": ...`（OCRモデル評価のPaddleOCR対応は未実装）。
+- 将来対応を示す唯一のコメント: `src/app/services/ocr_evaluation.py:139` `# 将来: elif engine == "paddleocr": ...`。**この関数（`build_recognizer()`）自体はTesseract専用の実装のまま据え置く設計判断であり、対応漏れではない**（下記参照）。
 
 ## 未実装・機能面の制約（コード上の事実）
 
 | 項目 | 内容 | 根拠 |
 |---|---|---|
-| OCRモデル評価はTesseract専用 | `build_recognizer` が tesseract 以外を `ValueError` で拒否 | `services/ocr_evaluation.py` |
+| `ocr_evaluation.py::build_recognizer()`はTesseract専用のまま（意図的、Investigation #160で最新状態を確認） | `build_recognizer` が tesseract 以外を `ValueError` で拒否する実装は現在も変わっていないが、これは**このモノリシック関数自体の意図的なスコープ**であり、モデル評価機能全体の制約ではない。Multi-engine Evaluation Dispatcher（Issue #61-#79、Completed）がPaddleOCR/EasyOCR/TrOCRを別の`*EvaluationPredictor`アダプタ経由で対応済み（`build_recognizer()`はTesseract用アダプタが内部で再利用するのみ）。**現在の「モデル評価」画面は4エンジンすべてに対応している** | `services/ocr_evaluation.py`・`services/evaluation_multi_engine.py`・`services/tesseract_evaluation_predictor.py`/`paddleocr_evaluation_predictor.py`/`easyocr_evaluation_predictor.py`/`trocr_evaluation_predictor.py` |
 | OCR学習APIはPaddleOCRのみ | `POST /api/ocr/train/start` は engine=paddleocr のみ許可（Tesseractは別エンドポイント） | `main.py` |
 | PaddleOCRの推論時whitelist不可 | 3.x系APIに実行時whitelistがなく、小文字OFFは出力後の大文字化で実現 | `predict.py`（`_apply_latin_case_to_results` のコメント） |
 | Tesseractのwhitelist指定時は信頼度が取得不能 | Tesseract 5.x のLSTMは `tessedit_char_whitelist` 指定時に信頼度を計算せず conf=0 を返す（実測: v5.3.3）。本アプリのTesseract推論は常にwhitelistを使うため Confidence は null（UI表示 `--`）になる | `tesseract_pipeline.py`（`aggregate_word_confidences`）、`docs/15_CHANGELOG_AI.md` |
