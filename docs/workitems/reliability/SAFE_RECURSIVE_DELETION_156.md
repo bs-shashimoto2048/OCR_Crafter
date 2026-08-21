@@ -2,7 +2,7 @@
 
 Related: Reliability [#156](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/156) / Reliability [#154](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/154)（Model Deletion Robustness、本Issueの起点となったFuture Work） / Bug [#145](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/145)（Restore Model Sidecar Path Rebase） / Reliability [#133](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/133)（Terminate Windows Training Process Trees Safely）
 
-**状態**: Implemented, PR review pending。
+**状態**: Completed / Closed。PR [#157](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/157)、Squash Commit `e1ccafd`でマージ済み。
 
 ## 目的
 
