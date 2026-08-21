@@ -57,7 +57,7 @@ class SqliteRestoreError(Exception):
 
     backup自体の検証失敗時はtargetへ一切書込まれない。復元後検証の失敗時は
     可能な限り復元前のtarget状態へロールバックしてから送出する
-    （`_restore_rollback_performed`属性でロールバック実施の有無を確認できる）。
+    （`rollback_performed`属性でロールバック実施の有無を確認できる）。
     """
 
     def __init__(self, message: str, *, rollback_performed: bool = False) -> None:
