@@ -710,6 +710,13 @@ def delete_model(project_id: Optional[str], model_name: str) -> str:
             for model_dir in _resolve_safe_model_dirs(payload, paths.models, exclude_sidecar_name=safe_name):
                 logger.info("delete_model: removing model dir: %s", model_dir)
                 shutil.rmtree(model_dir, ignore_errors=True)
+                # Issue #156: ignore_errors=Trueによる部分失敗（Windowsファイルロック等）を
+                # silentにしない。既存contract（例外を投げず一覧のsidecarは削除を続行する）は
+                # 変更せず、診断可能にするためログへ残す
+                if model_dir.exists():
+                    logger.warning(
+                        "delete_model: model dirの削除が完了しませんでした（残存）: %s", model_dir
+                    )
 
     logger.info("delete_model: removing model meta: %s", target)
     target.unlink()

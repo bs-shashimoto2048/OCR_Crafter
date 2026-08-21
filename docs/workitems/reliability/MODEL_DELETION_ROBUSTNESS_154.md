@@ -124,6 +124,7 @@ python -m pytest -q
 
 ## Future Work
 
-- `rmtree`封じ込め方式の`safe_rmtree`への統一（`main.py._cleanup_failed_ocr_dataset`のallowed_roots方式・`main.py._delete_training_artifacts`のrelative_to方式を含む）
-- `rmtree(ignore_errors=True)`の部分失敗（Windowsファイルロック等）を検知し、成功を偽装しないようにする
-- 上記2件は`docs/10_KNOWN_LIMITATIONS.md`/`docs/13_QA_STATUS.md`に引き続き既知課題として記載する
+- ~~`rmtree`封じ込め方式の`safe_rmtree`への統一（`main.py._cleanup_failed_ocr_dataset`のallowed_roots方式・`main.py._delete_training_artifacts`のrelative_to方式を含む）~~ → **Reliability #156で対応済み**（`_cleanup_failed_ocr_dataset`を`is_within_directory()`へ統一。`_delete_training_artifacts`のrelative_to方式は健全と確認し維持）
+- ~~`rmtree(ignore_errors=True)`の部分失敗（Windowsファイルロック等）を検知し、成功を偽装しないようにする~~ → **Reliability #156で対応済み**（`safe_rmtree`/`delete_model`/`_cleanup_failed_ocr_dataset`/`_delete_training_artifacts`にwarningログを追加）
+- Reliability #156の調査過程で、`backup_manager.py::restore_backup()`の`new_project_id`検証漏れ（path traversal）という別の重大な発見があり、あわせて修正された（詳細: `docs/workitems/reliability/SAFE_RECURSIVE_DELETION_156.md`）
+- 低リスクな残りのrecursive delete call site（`benchmark.py`のOS一時領域cleanup等）はReliability #156のFuture Workとして引き続き記録
