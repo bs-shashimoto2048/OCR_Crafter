@@ -282,7 +282,7 @@ TrOCRライフサイクルは、現在の`main`（本Issueで発見・修正し�
 - 関連コードのdocstring更新（`trocr_engine.py`モジュールdocstring・`release_gate.py`関数docstring、いずれも発見した事象と対応方針を記録）
 - 既存docsの訂正候補（Future Work、本Issueでは修正せず記録のみ）:
   - Experiment Trackingの`model_engine`「現状はtesseract固定」という記述（`docs/06_API_REFERENCE.md`）が、実際にTrOCRでも正しく`model_engine: "trocr"`が記録される実態と乖離している
-  - `docs/06_API_REFERENCE.md`のBenchmark Runner対応エンジン一覧（「対応= tesseract_model / tesseract_base / paddleocr_official のみ」）が、実際には`paddleocr_custom`・`trocr`も`implemented: true`である実態（`benchmark.py::ENGINE_CATALOG`）と食い違っている（стale docs、Product自体は正しく動作）
+  - `docs/06_API_REFERENCE.md`のBenchmark Runner対応エンジン一覧（「対応= tesseract_model / tesseract_base / paddleocr_official のみ」）が、実際には`paddleocr_custom`・`trocr`も`implemented: true`である実態（`benchmark.py::ENGINE_CATALOG`）と食い違っている（stale docs、Product自体は正しく動作）
 
 ## Scope外（Out of Scope、実施しなかったこと）
 
