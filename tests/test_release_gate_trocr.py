@@ -206,6 +206,24 @@ def test_gate_benchmark_rank_connects_via_model_dir_resolution(temp_projects):
     assert gate["verdict"] == "PASS"
 
 
+def test_gate_benchmark_rank_connects_despite_path_separator_style_difference(temp_projects):
+    """Issue #164（TrOCR End-to-End Production Workflow Validation）で発見した回帰ガード:
+    sidecarのmodel_dir（Windowsでは`\\`区切り）とBenchmark実行時にユーザーが入力した
+    同じmodel_ref（`/`区切り）が、実際には同一パスを指しているにも関わらず単純な文字列
+    比較では一致せず、Release Gateが実在するBenchmark結果を「Benchmarkなし」として
+    見落とすことを実際のE2E実行で確認した。区切り文字が違うだけの同一パスは接続される
+    ことを確認する（`os.path.normpath()`による正規化比較、Issue #164で追加）。"""
+    _seed_trocr_model(model_dir="C:\\models\\trocr-a")
+    _seed_evaluated_trocr_experiment(cer=0.01)
+    _seed_benchmark_result(PID, engine="trocr", model="C:/models/trocr-a", failed=0)
+    set_release_policy(PID, {"max_benchmark_rank": 1, "max_failed": 0})
+    gate = evaluate_release_gate(PID, "trocr_job-1.trocr.json")
+    by_rule = {r["rule"]: r for r in gate["rules"]}
+    assert by_rule["max_benchmark_rank"]["result"] == "pass"
+    assert by_rule["max_failed"]["result"] == "pass"
+    assert gate["verdict"] == "PASS"
+
+
 def test_gate_benchmark_max_failed_fail_via_model_dir_resolution(temp_projects):
     _seed_trocr_model(model_dir="/data/models/trocr-a")
     _seed_evaluated_trocr_experiment(cer=0.01)
