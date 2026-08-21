@@ -129,6 +129,8 @@ Issue #147でBackup作成機能を実装した際、restore（実際に戻す手
 
 本Investigation内では起票しない（Issue本文の明示的指示通り）。
 
+> **フォローアップ**: 上記のとおりReliability [#162](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/162)として起票され、Completed / Closedとなった（詳細は`docs/workitems/reliability/SQLITE_GLOBAL_DB_RESTORE_RUNBOOK_162.md`）。実装前調査の結果、単純な手動手順のみでは「restore先に残る古い`-wal`/`-shm`が復元データを見えなくするsilent failure」に対するoperator error riskが高いと判明したため、documentation-onlyに留めず`services/sqlite_backup.py`へ`restore_app_db()`/`restore_job_manager_db()`を追加した（本Top Recommendationの「検証の結果、追加考慮が必要と判明した場合のみヘルパー追加を検討する」という条件どおりの分岐）。
+
 ## Epic #28 Decision
 
 **Continue Hold（保留継続）。** 根拠は§5に記載のとおり: Canonical Metadataは依然Production consumerゼロ、Legacy pathは全engineで正常機能中、#145/#150/#154の個別改善はいずれも「小さな汎用registryの再利用」で完結しており、Consumer Migrationを必要とする具体的Production problemは新たに生じていない。
