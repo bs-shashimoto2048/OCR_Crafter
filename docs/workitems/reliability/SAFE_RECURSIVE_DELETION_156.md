@@ -143,3 +143,4 @@ python -m pytest -q
 
 - `benchmark.py`・`evaluation_dataset.py`（構築失敗時cleanup）・`report_generator.py`・`tesseract_pipeline.py`の各cleanupへのログ追加（低優先度、データ損失リスクなし）
 - `report_generator.py`の`sanitize_filename()`ベースのcontainmentを、他箇所と統一した`is_within_directory()`ベースへ揃えるかどうかの再検討（現状健全なため緊急性なし）
+- **フォローアップ**: `restore_backup()`の`new_project_id`検証タイミングバグの発見を受け、project/dataset/model/job等のユーザー入力IDがfilesystem pathへ到達する経路全体を横断的に監査するReliability [#158](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/158)を実施した。結論: 本Issue以外に同種の脆弱性は発見されなかった（詳細: `docs/workitems/reliability/PATH_ID_VALIDATION_AUDIT_158.md`）
