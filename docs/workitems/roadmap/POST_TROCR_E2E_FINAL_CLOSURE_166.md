@@ -2,7 +2,7 @@
 
 Related: Investigation [#166](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/166) / Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27)（TrOCR学習・評価・Benchmark・Release Gate統合、Closed） / Epic [#28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28)（Unified Model Metadata Infrastructure、Open） / Validation [#164](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/164) / #141, #143〜#165
 
-**状態**: Implemented, PR review pending。
+**状態**: Completed / Closed。PR [#167](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/167)、Squash Commit `e60d13d`でマージ済み。
 
 ## 目的
 
@@ -180,6 +180,12 @@ cd frontend && npm run build
 ```
 
 `outputs/app.db`のsha256チェックサムは調査開始前後で不変（`dfa73a55...`）であることを確認済み。`git status --short`は本Investigation実行前後で恒常的なローカル差分（`.github/PULL_REQUEST_TEMPLATE.md`・`CLAUDE.md`・未追跡`docs/LOCAL_SYNC.md`）のみで、Production変更は一切生じていない。
+
+### CI結果（既知flakeの4回目の独立した再現）
+
+PR #167（本ドキュメントのみのdocs-only diff）の初回CI実行で、`tests/test_preview_batch.py::test_batch_inflight_share_same_key`が`assert 2 == 1`で再度失敗した。本PRの差分（`docs/workitems/roadmap/POST_TROCR_E2E_FINAL_CLOSURE_166.md`の新規追加のみ）はこのテストと一切関係がないことを`git diff --stat main -- tests/test_preview_batch.py src/app/main.py`で確認し、ローカルで3回実行して3/3成功、`gh run rerun --failed`（コード変更ゼロ）で成功したことを確認した。これは§9で予測したとおりの挙動であり、本開発フェーズ中に独立に再現した**4件目の事例**（#152・#156・#164/PR #165・本PR #167）となった。既知flakeとしての判断（Closureを妨げない）を追加で裏付ける結果となった。
+
+最終CI結果（2回目の実行、`https://github.com/bs-shashimoto2048/OCR_Crafter/actions/runs/32675183576`）: backend pass・frontend pass。Squash Merge実行、Issue #166自動Close済み（Squash Commit `e60d13d`）。
 
 ## Documentation
 
