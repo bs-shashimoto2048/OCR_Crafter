@@ -2,7 +2,7 @@
 
 Related: Documentation [#168](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/168) / Investigation [#166](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/166)（Post-TrOCR E2E Final Closure & Roadmap、本Issueの起点） / Epic [#27](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/27) / Epic [#28](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/28) / Validation [#164](https://github.com/bs-shashimoto2048/OCR_Crafter/issues/164)
 
-**状態**: Implemented, PR review pending。
+**状態**: Completed / Closed。PR [#169](https://github.com/bs-shashimoto2048/OCR_Crafter/pull/169)をSquash Merge（Squash Commit `86689bf8cee90caa8618910f8fa65b1f6a1b1479`）。Issue #168はSquash Merge時の`Closes #168`により自動Close。最終CI結果: backend/frontendともに初回checkでpass（flake再現なし）。マージ後、main上でMarkdownリンク再検証（818リンク中broken 0件、docs/design・docs/workitems内のPython型ヒント記法5件は既知の誤検知）およびProductionコード非変更（`git diff --stat 8aa9be8 86689bf -- src/ frontend/src/`が空）を再確認済み。
 
 ## 目的
 
