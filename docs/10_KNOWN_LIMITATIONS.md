@@ -9,7 +9,8 @@
 
 | 項目 | 内容 | 根拠 |
 |---|---|---|
-| `ocr_evaluation.py::build_recognizer()`はTesseract専用のまま（意図的、Investigation #160で最新状態を確認） | `build_recognizer` が tesseract 以外を `ValueError` で拒否する実装は現在も変わっていないが、これは**このモノリシック関数自体の意図的なスコープ**であり、モデル評価機能全体の制約ではない。Multi-engine Evaluation Dispatcher（Issue #61-#79、Completed）がPaddleOCR/EasyOCR/TrOCRを別の`*EvaluationPredictor`アダプタ経由で対応済み（`build_recognizer()`はTesseract用アダプタが内部で再利用するのみ）。**現在の「モデル評価」画面は4エンジンすべてに対応している** | `services/ocr_evaluation.py`・`services/evaluation_multi_engine.py`・`services/tesseract_evaluation_predictor.py`/`paddleocr_evaluation_predictor.py`/`easyocr_evaluation_predictor.py`/`trocr_evaluation_predictor.py` |
+| `ocr_evaluation.py::build_recognizer()`はTesseract専用のまま（意図的、Investigation #160で最新状態を確認） | `build_recognizer` が tesseract 以外を `ValueError` で拒否する実装は現在も変わっていないが、これは**このモノリシック関数自体の意図的なスコープ**であり、モデル評価機能全体の制約ではない。Multi-engine Evaluation Dispatcher（Issue #61-#79、Completed）がPaddleOCR/EasyOCR/TrOCRを別の`*EvaluationPredictor`アダプタ経由で対応済み（`build_recognizer()`はTesseract用アダプタが内部で再利用するのみ）。**現在の「モデル評価」画面は4エンジンすべてに対応している**（Issue #164のE2E実行で実際に確認済み） | `services/ocr_evaluation.py`・`services/evaluation_multi_engine.py`・`services/tesseract_evaluation_predictor.py`/`paddleocr_evaluation_predictor.py`/`easyocr_evaluation_predictor.py`/`trocr_evaluation_predictor.py` |
+| Epic #28（Unified Model Metadata Infrastructure）は**未完了だが「壊れている機能」ではない** | `ModelMetadata` dataclass・そのConsumer層（`metadata_reader.py`/`metadata_writer.py`/`model_catalog.py`/`models_api.py`/`training_metadata_factory.py`/`legacy_metadata_adapter.py`）は実装・テスト済みだが`main.py`から一切配線されていない。これは実装漏れではなく、**Production Consumerが依然ゼロであり、統一Metadata基盤を要する具体的Production problemが一度も生じていないため意図的にContinue Holdとしている**アーキテクチャ判断（Investigation #160・#166で複数回再確認済み）。TrOCR（Epic #27）を含む既存の各モデル管理は`.tess.json`/`.ocr.json`/`.trocr.json`sidecarパターンで実運用上問題なく機能している | Epic #28本文、`docs/workitems/roadmap/POST_SAFETY_HARDENING_ROADMAP_REFRESH_160.md`、`docs/workitems/roadmap/POST_TROCR_E2E_FINAL_CLOSURE_166.md` |
 | OCR学習APIはPaddleOCRのみ | `POST /api/ocr/train/start` は engine=paddleocr のみ許可（Tesseractは別エンドポイント） | `main.py` |
 | PaddleOCRの推論時whitelist不可 | 3.x系APIに実行時whitelistがなく、小文字OFFは出力後の大文字化で実現 | `predict.py`（`_apply_latin_case_to_results` のコメント） |
 | Tesseractのwhitelist指定時は信頼度が取得不能 | Tesseract 5.x のLSTMは `tessedit_char_whitelist` 指定時に信頼度を計算せず conf=0 を返す（実測: v5.3.3）。本アプリのTesseract推論は常にwhitelistを使うため Confidence は null（UI表示 `--`）になる | `tesseract_pipeline.py`（`aggregate_word_confidences`）、`docs/15_CHANGELOG_AI.md` |
@@ -61,8 +62,8 @@
 
 | 項目 | 内容 |
 |---|---|
-| `main.py` / `App.jsx` / `ocr_pipeline.py` の巨大化 | それぞれ約4830行 / 約4920行 / 約2400行の単一ファイル（機能追加のたびに増加し続けている） |
-| 環境記述の不一致 | Pipfile=Python3.9（docs類はPython3.11+/Windows前提へ統一済み） |
+| `main.py` / `App.jsx` / `ocr_pipeline.py` の巨大化 | それぞれ約5320行 / 約5240行 / 約2400行の単一ファイル（機能追加のたびに増加し続けている） |
+| 環境記述の不一致 | Pipfile=Python3.9（CI・実運用venvは3.10。docsはPython3.10/Windows前提へ統一済み） |
 | `settings.yaml` の絶対パス | `tesseract.tessdata_dir` に開発機の絶対パスがハードコードされている |
 | Paddleキャッシュ隔離 | `HOME` 等の環境変数をプロセス内で上書きする実装（`services/ocr_pipeline.py`） |
 | broad except | `# noqa: BLE001` 付きの広域catchが50箇所以上（意図的な設計） |

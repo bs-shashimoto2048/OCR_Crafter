@@ -48,6 +48,7 @@ OCR Crafterの利用者向け正式マニュアルです。環境構築は [INST
 |---|---|---|---|
 | Tesseract | ○（LSTM fine-tune） | ○ | 既定の学習対象文字 `A-Z0-9klt+-`（[12_TESSERACT_CHARSET_SPEC.md](12_TESSERACT_CHARSET_SPEC.md)） |
 | PaddleOCR | ○（認識モデル） | ○ | `external/PaddleOCR` リポジトリを使用 |
+| TrOCR | ○（Hugging Face Transformers `VisionEncoderDecoderModel` fine-tune） | ○ | 学習 → モデル管理 → 推論 → 評価 → Benchmark → リリース管理までの全工程が実運用可能。confidence・PSM/Whitelistの概念は無し |
 | EasyOCR | ×（推論のみ） | ○ | |
 | custom（分類モデル） | ○（実験機能） | ○ | 文字分割ベースの分類学習 |
 

@@ -3,7 +3,7 @@
 ローカル環境で完結する **OCRモデル開発プラットフォーム**。
 画像の取り込みからデータ作成・学習・CER評価・モデル管理/比較・推論・修正までを1つのWeb UIで行う。
 
-- バックエンド: FastAPI（`src/app/`、port 8000、全140エンドポイント）
+- バックエンド: FastAPI（`src/app/`、port 8000、全142エンドポイント）
 - フロントエンド: React 18 + Vite 5 + Tailwind（`frontend/`、port 5173）
 - データはプロジェクト単位（`data/projects/<project_id>/`）で分離管理
 - 軽量な識別のみ（SSO等は無し）・ローカル実行前提（外部通信なし）
@@ -58,10 +58,10 @@ npm run build    # frontend/dist/ へ出力（バックエンドにビルド工�
 ## 5. Test
 
 ```bash
-python -m pytest -q      # バックエンド（.venv経由・tests/ 44ファイル）
+python -m pytest -q      # バックエンド（.venv経由・tests/ 87ファイル）
 
 cd frontend
-npm test                 # フロントエンド（node:test・依存追加不要・56ファイル）
+npm test                 # フロントエンド（node:test・依存追加不要・71ファイル）
 ```
 
 Tesseractの学習には別途、学習ツール（`lstmtraining` を含むUB-Mannheimビルド等）が必要（[docs/11_TESSERACT_CHECKLIST.md](docs/11_TESSERACT_CHECKLIST.md)）。動作確認済み環境はWindows 11（[docs/INSTALLATION_GUIDE.md](docs/INSTALLATION_GUIDE.md)）。
@@ -74,6 +74,7 @@ Tesseractの学習には別途、学習ツール（`lstmtraining` を含むUB-Ma
 |---|---|---|---|
 | Tesseract | ○（LSTM fine-tune） | ○ | 学習対象文字 `A-Z0-9klt+-`（[docs/12](docs/12_TESSERACT_CHARSET_SPEC.md)） |
 | PaddleOCR | ○（認識モデル） | ○ | `external/PaddleOCR` を使用。公式モデルでの推論も可 |
+| TrOCR | ○（Hugging Face Transformers `VisionEncoderDecoderModel` fine-tune） | ○ | 学習→モデル管理→推論→評価→Benchmark→リリース管理までE2E検証済み（Issue #164）。confidence・PSM/Whitelistの概念は無し |
 | EasyOCR | ×（推論のみ） | ○ | |
 | custom（分類モデル） | ○（実験機能） | ○ | 文字分割ベースの分類学習 |
 
@@ -82,7 +83,7 @@ Tesseractの学習には別途、学習ツール（`lstmtraining` を含むUB-Ma
 ### データ作成・学習
 
 - **データ準備**: OCR画像作成（画像指定・リサイズ → YOLO検出 → BBox選択 → 元画像からのクロップ出力）、前処理パイプライン（二値化・照明ムラ補正・手動マスク補正等・リアルタイムプレビュー）、キーボード中心のラベル編集（OCR候補・辞書近似候補のクリック採用）
-- **学習**: Tesseract LSTM fine-tune / PaddleOCR認識モデル / 分類モデル（実験機能）。いずれも非同期ジョブ（ジョブ管理画面で進捗確認）。実験名・親モデル・学習メモをモデルメタへ保存可能
+- **学習**: Tesseract LSTM fine-tune / PaddleOCR認識モデル / TrOCR（Hugging Face Transformers）fine-tune / 分類モデル（実験機能）。いずれも非同期ジョブ（ジョブ管理画面で進捗確認）。実験名・親モデル・学習メモをモデルメタへ保存可能
 - **前処理の再現性**: 前処理実行時に実効パラメータを完全スナップショットとして保存し、データセット→モデル→比較まで引き継ぐ。前処理ハッシュで一致/差異/未記録を判定し、評価・推論で「学習時前処理」をそのまま再現できる
 
 ### Dataset Manager
@@ -119,7 +120,7 @@ Tesseractの学習には別途、学習ツール（`lstmtraining` を含むUB-Ma
 - 管理No（`M0001`形式・全プロジェクト横断で一意・削除後も再利用しない）
 - モデルカルテ（数字主体のダッシュボード・学習前処理の記録表示・コメント編集・「このモデルを作成したExperiment」リンク）
 - **モデル比較**: 最大3モデルを固定色（ブルー/オレンジ/パープル）で比較。性能サマリー・改善悪化比較・学習条件比較・学習前処理比較（一致判定・差分）・条件差分・次回学習提案・混同比較
-- **リリース管理**: モデルのライフサイクル（Draft→Validated→Candidate→Production→Archived。Productionは1つだけ）、Release Note必須の昇格・バージョン採番・Release History・Rollback、Release Policyに基づく昇格自動判定（PASS/CONDITIONAL_PASS/FAIL）、Model Card自動生成、Deployment Package（ZIP）Export
+- **リリース管理**: モデルのライフサイクル（Draft→Validated→Candidate→Production→Archived。Productionは1つだけ）、Release Note必須の昇格・バージョン採番・Release History・Rollback、Release Policyに基づく昇格自動判定（PASS/CONDITIONAL_PASS/FAIL）、Model Card自動生成、Deployment Package（ZIP）Export。Tesseract/PaddleOCR/TrOCRのいずれのモデルも対象
 
 ### モデル評価
 
@@ -136,7 +137,7 @@ Tesseractの学習には別途、学習ツール（`lstmtraining` を含むUB-Ma
 
 ### 推論・修正
 
-- 単一推論／バッチ推論／YOLO検出+OCR複合推論。エンジン: custom / EasyOCR / PaddleOCR / Tesseract
+- 単一推論／バッチ推論／YOLO検出+OCR複合推論。エンジン: custom / EasyOCR / PaddleOCR / Tesseract / TrOCR
 - OCR修正画面（キーボード中心・修正ログからのデータセット再生成）
 
 ### その他の管理機能
@@ -166,21 +167,23 @@ OCRモデル        … データ作成・学習 / モデル管理 / Dataset Man
 ocr_crafter/
 ├── config/settings.yaml     # 全設定（前処理パイプライン・学習・Tesseract・CORS等）
 ├── src/app/
-│   ├── main.py              # FastAPI本体（全140エンドポイント）
+│   ├── main.py              # FastAPI本体（全142エンドポイント）
 │   ├── schemas.py           # Pydanticリクエストスキーマ
 │   ├── train.py / predict.py / job_runner.py / ocr_tuning.py  # CLIエントリ
-│   └── services/            # 前処理・OCRパイプライン・モデル管理等のドメインロジック（34モジュール）
+│   └── services/            # 前処理・OCRパイプライン（Tesseract/PaddleOCR/TrOCR）・モデル管理等のドメインロジック（57モジュール）
 ├── frontend/
 │   ├── src/
 │   │   ├── App.jsx          # 全状態管理・view切替
 │   │   ├── views/           # 22画面
 │   │   ├── components/      # 共通UI 20種
-│   │   └── lib/             # 純粋ロジック（api.js 等 45種）
-│   └── tests/                # node:test（56ファイル、依存追加不要）
-├── tests/                    # pytest（44ファイル、temp_projectsフィクスチャで実データ隔離）
+│   │   └── lib/             # 純粋ロジック（api.js 等 53種）
+│   └── tests/                # node:test（71ファイル、依存追加不要）
+├── tests/                    # pytest（87ファイル、temp_projectsフィクスチャで実データ隔離）
 ├── docs/                     # ドキュメント（本README・番号付き仕様書・利用者/管理者向けガイド）
 ├── data/projects/<id>/       # プロジェクトデータ（gitignore対象）
-├── models/ / outputs/ / external/   # モデル・出力・外部リポジトリ（gitignore対象）
+├── data/jobs/                # Job System B: job_manager.db（SQLite）・events/・logs/（gitignore対象）
+├── data/backups/             # project単位ZIP backup・system/配下にGlobal SQLite backup（gitignore対象）
+├── models/ / outputs/ / external/   # モデル・出力（outputs/app.db=Job System A）・外部リポジトリ（gitignore対象）
 └── requirements.txt          # 全量スナップショット（UTF-16エンコード・既知課題）
 ```
 
@@ -189,7 +192,7 @@ ocr_crafter/
 ## 開発環境
 
 - 動作確認済みOS: Windows 11（PowerShell）。`config/settings.yaml`の既定値もWindows前提
-- Python 3.11以上を推奨
+- Python 3.10（CI・実運用venvで使用しているバージョン。Pipfileには3.9の記載が残る既知の不一致あり）
 - Node.js（`frontend/package.json`のscripts: dev/build/preview/test）
 - 状態管理はReact標準hooksのみ（Redux等の追加ライブラリ不使用）、TypeScript不使用
 - Tesseract本体は別途インストールが必要（既定パス `C:\Program Files\Tesseract-OCR\`、`config/settings.yaml`で変更可）

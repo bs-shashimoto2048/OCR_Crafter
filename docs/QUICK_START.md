@@ -79,7 +79,7 @@ npm run dev
 1. 学習方式 `ocr`、OCRタイプ（`Tesseract` / `PaddleOCR` / `TrOCR`）を選択
 2. 「OCRデータ作成」を実行（ラベル済み画像から学習用データセットを生成）
 3. 学習パラメータを確認して「OCR学習開始」
-- **完了条件**: 学習ログが `completed` になり、「OCRモデル > モデル管理」へモデルが追加される（管理No: M0001形式。**TrOCRのみ例外**——モデル管理には表示されず、学習画面自身・モデル評価・Benchmark Runner・リリース管理の各画面から直接参照します）
+- **完了条件**: 学習ログが `completed` になり、「OCRモデル > モデル管理」へモデルが追加される（管理No: M0001形式。TrOCRも同じ画面の一覧・ダウンロード・削除に表示されます）
 - **注意**: Tesseract学習は学習ツール（lstmtraining等）の導入が必要です（[INSTALLATION_GUIDE.md](INSTALLATION_GUIDE.md)）。TrOCR学習は`transformers`（Hugging Face）が必要です
 
 ## 9. 評価

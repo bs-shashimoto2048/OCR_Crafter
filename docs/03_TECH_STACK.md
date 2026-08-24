@@ -7,7 +7,7 @@
 | 項目 | 内容 | 根拠 |
 |---|---|---|
 | バックエンド言語 | Python | `src/app/` 全体 |
-| Pythonバージョン | Pipfile は 3.9 指定 / docs/INSTALLATION_GUIDE.md は 3.11以上を推奨（記述間の不一致あり。CI相当の固定はなし） | `Pipfile`, `docs/INSTALLATION_GUIDE.md` |
+| Pythonバージョン | CI（`.github/workflows/ci.yml`）・実運用venvともに **3.10** 系で固定。`Pipfile`は3.9指定のまま未更新（既知の不一致） | `.github/workflows/ci.yml`, `Pipfile` |
 | フロントエンド言語 | JavaScript（JSX）。TypeScript 不使用 | `frontend/src/` |
 | Node.js | バージョン固定なし（`engines` 指定なし） | `frontend/package.json` |
 
@@ -19,8 +19,11 @@
 | uvicorn | 0.46.0 | ASGIサーバ | 起動コマンド（README） |
 | pydantic | 2.13.3 | リクエストスキーマ | `src/app/schemas.py` |
 | python-multipart | 0.0.26 | multipart/form-data（ファイルアップロード） | `/predict` 等 |
-| torch | 2.11.0 | 分類モデルの学習・推論 | `src/app/train.py`, `src/app/predict.py` |
+| torch | 2.11.0 | 分類モデルの学習・推論、TrOCR学習・推論の基盤 | `src/app/train.py`, `src/app/predict.py`, `services/trocr_engine.py`, `services/trocr_training_core.py` |
 | torchvision | 0.26.0 | 画像変換・モデル | `src/app/train.py`, `src/app/predict.py` |
+| transformers | 5.14.1 | TrOCR（`VisionEncoderDecoderModel`・`AutoProcessor`等） | `services/trocr_engine.py` |
+| tokenizers | 0.22.2 | `transformers`が内部で使用するtokenizerバックエンド | `transformers`経由 |
+| sentencepiece | 0.2.2 | XLM-RoBERTa系tokenizer（一部TrOCR checkpointで必須。Issue #164で追加） | `services/trocr_engine.py`（`transformers`経由） |
 | numpy | 2.2.6 | 画像配列処理 | `src/app/services/preprocess.py` ほか |
 | pillow | 12.2.0 | 画像入出力 | 前処理・API全般 |
 | scipy | 1.15.3 | 照明ムラ補正・手動マスクの連結成分抽出 | `services/preprocess.py`, `services/manual_mask.py` |

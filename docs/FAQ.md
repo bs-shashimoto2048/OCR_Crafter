@@ -53,8 +53,8 @@ A. できません。Productionは各プロジェクトで**0件または1件**�
 **Q. Release IDとVersionの違いは何ですか**
 A. Release ID（REL-0001形式）は昇格・Rollbackなど「リリース行為」1回ごとの識別子、Versionは配布物の版番号（Candidate=0.x、Production初回=1.0.0）です。RollbackではVersionは維持され、新しいRelease IDだけが発行されます。
 
-**Q. TrOCRで学習したモデルがモデル管理画面に表示されません**
-A. 既知の制約です。TrOCRのモデル登録簿（`.trocr.json`）はTesseract/PaddleOCR（`.tess.json`/`.ocr.json`）と別ファイル形式のため、現時点では「モデル管理」画面の一覧・カルテ・ダウンロードには統合されていません。TrOCRモデルの参照は学習画面自身の「登録済みモデルから選択」、モデル評価・Benchmark Runner画面の同様の選択欄、リリース管理画面（Release Gateはこのファイルを直接認識します）から行えます。
+**Q. TrOCRで学習したモデルはモデル管理画面に表示されますか**
+A. 表示されます。TrOCRのモデル登録簿（`.trocr.json`）はTesseract/PaddleOCR（`.tess.json`/`.ocr.json`）とは別ファイル形式ですが、「モデル管理」画面の一覧・ダウンロード・削除に統合されています（「方式」列には「OCR認識」と表示されます）。TrOCRモデルの継続Fine-tune用選択は、学習画面自身の「登録済みモデルから選択」、モデル評価・Benchmark Runner画面の同様の選択欄からも引き続き利用できます。
 
 ## テンプレート・設定
 

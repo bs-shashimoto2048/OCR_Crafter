@@ -69,6 +69,12 @@
 - **対処**: CUDA対応版のPyTorch/PaddlePaddleが入っているか確認。学習の `device` を `auto` または `gpu` に
 - **補足**: GPUがなくても全機能はCPUで動作します（[INSTALLATION_GUIDE.md](INSTALLATION_GUIDE.md#4-cpu環境gpuなしでの利用範囲)）
 
+### TrOCRのBase Modelが読み込めない
+
+- **原因**: Hugging Face model IDを指定した場合、初回はモデル取得のためHugging Face Hubへのネットワークアクセスが必要（`local_files_only`を有効にしている場合はローカルキャッシュのみ参照し、未取得なら失敗する）
+- **対処**: ネットワーク接続を確認するか、事前に取得済みのローカルディレクトリパスを指定する（`local_files_only`有効時）
+- **補足**: TrOCRはconfidence（文字単位の確信度）・PSM/Whitelistの概念を持たないため、これらに依存する画面表示（ヒートマップ等）は対象外です
+
 ## 学習
 
 ### 学習が開始しない / JobがQueuedのまま

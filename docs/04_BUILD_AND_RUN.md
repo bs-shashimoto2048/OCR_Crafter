@@ -61,14 +61,14 @@ npm run preview    # ビルド結果のプレビュー
 ### バックエンド（pytest）
 
 ```bash
-python -m pytest -q          # リポジトリルートで実行（tests/ 44ファイル + conftest.py、.venv経由）
+python -m pytest -q          # リポジトリルートで実行（tests/ 87ファイル + conftest.py、.venv経由）
 ```
 
 ### フロントエンド（node:test）
 
 ```bash
 cd frontend
-npm test    # node --test で tests/ 配下56ファイルを実行（package.json scripts.testに列挙。依存追加不要）
+npm test    # node --test で tests/ 配下71ファイルを実行（package.json scripts.testに列挙。依存追加不要）
 ```
 
 ## CLI（学習・推論・データ出力）
@@ -77,9 +77,12 @@ npm test    # node --test で tests/ 配下56ファイルを実行（package.jso
 python3 -m src.app.train --project-id default --model-type square --epochs 5 --batch-size 32
 python3 -m src.app.predict path/to/image.png --project-id default --model-type square
 python3 -m src.app.predict path/to/image.png --project-id default --engine paddleocr --easyocr-langs en
+python3 -m src.app.predict path/to/image.png --project-id default --engine trocr --model microsoft/trocr-base-printed
 python3 -m src.app.ocr_tuning --project-id default --engine both --image-types wide --train-ratio 0.8 --val-ratio 0.1 --test-ratio 0.1
 python3 -m src.app.migrate_legacy_data --project-id default   # 旧データ構造からの移行
 ```
+
+- `predict.py`の`--engine`は`custom`/`easyocr`/`paddleocr`/`tesseract`/`trocr`に対応（`--model`はTrOCRの場合Hugging Face model IDまたはローカルの`model_dir`パス）
 
 ## Lint / フォーマット
 
