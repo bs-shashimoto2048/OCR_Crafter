@@ -73,13 +73,13 @@ OCRモデル        … データ作成・学習 / モデル管理 / Dataset Man
 
 | パス | 内容 |
 |---|---|
-| `src/app/` | FastAPIバックエンド（main.py に全140エンドポイント） |
+| `src/app/` | FastAPIバックエンド（main.py に全142エンドポイント） |
 | `src/app/services/` | 前処理・OCRパイプライン・モデル管理などのドメインロジック |
 | `frontend/` | React UI（views 22画面 / components / lib） |
 | `config/settings.yaml` | 全設定（前処理・学習・Tesseract等） |
 | `data/projects/<id>/` | プロジェクトデータ（gitignore対象）。`data/model_ids.json`=モデル管理No登録簿・`data/dataset_ids.json`=Dataset管理No登録簿（いずれも全プロジェクト共通） |
 | `models/`, `outputs/`, `external/` | モデル・出力・外部リポジトリ（gitignore対象） |
-| `tests/` | pytest テスト（44ファイル） |
+| `tests/` | pytest テスト（87ファイル） |
 | `docs/` | ドキュメント |
 
 詳細は `docs/02_DIRECTORY_STRUCTURE.md` を参照。
@@ -114,5 +114,5 @@ cd frontend && npm test  # フロントエンド（node:test）
 ## 動作環境
 
 - 動作確認済み環境は Windows 11（`config/settings.yaml` の既定値もWindows前提）。詳細は `docs/INSTALLATION_GUIDE.md`
-- Python: 3.11以上を推奨（Pipfile に 3.9 の記載が残る既知の不一致あり）
+- Python: 3.10（`.github/workflows/ci.yml`のCI固定値・実運用venvともに3.10系。Pipfileには3.9の記載が残る既知の不一致がある）
 - 認証なし・ローカル実行前提（CORS許可はローカルのVite開発サーバーのみ）

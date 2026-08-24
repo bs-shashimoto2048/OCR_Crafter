@@ -27,7 +27,7 @@
 
 | 項目 | 要件 |
 |---|---|
-| Python | **3.11以上を推奨**（`docs/USER_GUIDE.md` 旧版より。Pipfileには3.9の記載が残っていますが現行手順は3.11+） |
+| Python | **3.10系**（CI・実運用venvで使用しているバージョン。Pipfileには3.9の記載が残る既知の不一致あり） |
 | Node.js / npm | Vite 5 が動作するLTS版（Node 18以上目安） |
 | Tesseract | 推論に本体、**学習には学習ツール入りビルド**（`lstmtraining`・`combine_tessdata` 同梱。UB-Mannheimビルド等）＋ ベース `eng.traineddata`（tessdata_best推奨）。詳細: [11_TESSERACT_CHECKLIST.md](11_TESSERACT_CHECKLIST.md) |
 | PaddleOCR | 学習には `external/PaddleOCR` リポジトリが必要（`PADDLEOCR_PATH` 環境変数または `settings.yaml` の `ocr_training.paddleocr_repo_dir` で解決） |

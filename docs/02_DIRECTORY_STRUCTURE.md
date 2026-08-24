@@ -8,21 +8,21 @@ ocr_crafter/
 │   └── settings.yaml            # 全設定（前処理・学習・Tesseract・CORS等）
 ├── src/
 │   └── app/
-│       ├── main.py              # FastAPI本体（全140エンドポイント、約4830行）
+│       ├── main.py              # FastAPI本体（全142エンドポイント、約5320行）
 │       ├── schemas.py           # Pydanticリクエストスキーマ
 │       ├── config.py            # settings.yaml 読込（lru_cache）
 │       ├── paths.py             # リポジトリパス定数
 │       ├── project_paths.py     # プロジェクトdir構造・安全削除・ID検証
 │       ├── version.py           # アプリバージョン定数
-│       ├── db.py                # SQLite（training_jobsテーブル）
+│       ├── db.py                # SQLite: Job System A（training_jobsテーブル、outputs/app.db）
 │       ├── train.py             # 分類モデル学習（CLIあり）
-│       ├── predict.py           # 4エンジン推論（CLIあり）
-│       ├── job_runner.py        # 学習ワーカー起動（CLIあり）
+│       ├── predict.py           # 5エンジン推論（custom/EasyOCR/PaddleOCR/Tesseract/TrOCR、CLIあり）
+│       ├── job_runner.py        # 学習ワーカー起動（CLIあり。classification/ocr/tesseract/trocr）
 │       ├── init_dirs.py         # ディレクトリ初期化（CLIあり）
 │       ├── ocr_tuning.py        # OCR学習データ出力CLIラッパー
 │       ├── migrate_legacy_data.py   # 旧データ移行CLI
 │       ├── migrate_ocr_models.py    # OCRモデルinference変換CLI
-│       └── services/            # ドメインロジック（34モジュール）
+│       └── services/            # ドメインロジック（57モジュール）
 │           ├── preprocess.py            # OCR前処理パイプライン本体
 │           ├── ocr_preprocess.py        # 軽量前処理ユーティリティ
 │           ├── manual_mask.py           # 手動マスク補正（行RLE）
@@ -35,8 +35,19 @@ ocr_crafter/
 │           ├── model_registry.py        # モデル一覧・解決・安全削除
 │           ├── ocr_pipeline.py          # PaddleOCR学習・登録・ログ・検証（約2400行）
 │           ├── tesseract_pipeline.py    # Tesseract学習・認識
+│           ├── trocr_engine.py          # TrOCR推論コア（TrOCREngine.load/predict）
+│           ├── trocr_training_core.py   # TrOCR学習ループ（独自AdamW training loop）
+│           ├── trocr_dataset_adapter.py # TrOCR学習データセット読込
+│           ├── trocr_model_registry.py  # TrOCRモデル一覧・登録（.trocr.json sidecar）
+│           ├── trocr_evaluation_predictor.py  # TrOCR評価アダプタ
 │           ├── ocr_tuning.py            # EasyOCR/PaddleOCR学習データ出力
-│           ├── ocr_evaluation.py        # OCRモデル評価（Tesseract）
+│           ├── ocr_evaluation.py        # OCRモデル評価（Tesseract専用の既存関数。Multi-engineはevaluation_dispatcher.py経由）
+│           ├── evaluation_dispatcher.py # Multi-engine Evaluation Dispatcher（Tesseract/PaddleOCR/EasyOCR/TrOCR）
+│           ├── evaluation_multi_engine.py # Multi-engine評価の共通処理
+│           ├── evaluation_runner.py     # 評価バッチ実行
+│           ├── evaluation_metrics.py    # CER等の指標計算共通処理
+│           ├── evaluation_types.py      # Multi-engine評価の型定義
+│           ├── tesseract_evaluation_predictor.py / paddleocr_evaluation_predictor.py / easyocr_evaluation_predictor.py  # エンジン別評価アダプタ
 │           ├── ocr_preview_cache.py     # OCRプレビューのキャッシュ
 │           ├── evaluation.py            # 分類モデル評価
 │           ├── evaluation_dataset.py    # 評価データセット管理
@@ -44,17 +55,22 @@ ocr_crafter/
 │           ├── preprocess_snapshot.py   # 前処理実効パラメータのスナップショット
 │           ├── dataset_registry.py      # Dataset Manager（DS0001採番・一覧・Dataset⇔Model連携）
 │           ├── experiment_tracker.py    # 実験管理（EXP-0001・実験カルテ・比較・推薦）
-│           ├── benchmark.py             # Benchmark Runner（BM-0001・エンジン実行比較）
+│           ├── benchmark.py             # Benchmark Runner（BM-0001・Tesseract/PaddleOCR/TrOCR実行比較）
 │           ├── benchmark_center.py      # Benchmark Center（BMC-0001・横断比較・実行なし）
-│           ├── release_manager.py       # リリース管理（Draft→Production・Rollback）
+│           ├── release_manager.py       # リリース管理（Draft→Production・Rollback。Tesseract/PaddleOCR/TrOCR対応）
 │           ├── release_gate.py          # Release Policy判定（PASS/CONDITIONAL_PASS/FAIL）
-│           ├── job_manager.py           # ジョブ管理（JOB-000001・状態遷移・進捗）
+│           ├── job_manager.py           # Job System B（JOB-000001・JobManager/JobWorker・SQLite JobRepository、data/jobs/job_manager.db）
 │           ├── audit_log.py             # 監査ログ（追記型・32操作）
 │           ├── report_generator.py      # レポート生成（RPT-0001・Markdown/PDF）
 │           ├── operations.py            # 運用ダッシュボード・ヘルスチェック
-│           ├── backup_manager.py        # バックアップ（BK-0001・metadata_only/full）
+│           ├── backup_manager.py        # project単位バックアップ（BK-0001・metadata_only/full）
+│           ├── sqlite_backup.py         # Global SQLiteのOnline Backup/Restore（outputs/app.db・job_manager.db）
 │           ├── inference_model.py       # 推論モデル永続化（GET/POST /api/ocr/inference/model）
+│           ├── engine_capability.py / engine_registry.py  # Engine横断のCapability/Registry
+│           ├── model_metadata.py        # `ModelMetadata` dataclass（Epic #28、Consumer未配線）
+│           ├── metadata_reader.py / metadata_writer.py / model_catalog.py / models_api.py / training_metadata_factory.py / legacy_metadata_adapter.py  # `ModelMetadata`のConsumer層（Epic #28、main.py未配線・Continue Hold）
 │           ├── latin_case.py            # 小文字出力制御の共通判定
+│           ├── atomic_io.py             # 原子的ファイル書き込み共通処理
 │           └── dialogs.py               # ネイティブのファイル/フォルダ選択
 ├── frontend/
 │   ├── index.html               # エントリHTML（lang="ja"）
@@ -64,25 +80,27 @@ ocr_crafter/
 │   ├── package.json             # scripts: dev/build/preview/test
 │   ├── src/
 │   │   ├── main.jsx             # Reactエントリ（StrictMode）
-│   │   ├── App.jsx              # 全状態管理・view切替（約4920行）
+│   │   ├── App.jsx              # 全状態管理・view切替（約5240行）
 │   │   ├── index.css            # Tailwind + カスタムクラス
 │   │   ├── views/               # 22画面（下表）
 │   │   ├── components/          # 共通UI 20種
-│   │   └── lib/                 # 純粋ロジック（api.js 等 45種）
-│   └── tests/                   # node:test（56ファイル、依存追加不要。`npm test`で全件実行）
-├── tests/                       # pytest（44ファイル + conftest.py）
+│   │   └── lib/                 # 純粋ロジック（api.js 等 53種）
+│   └── tests/                   # node:test（71ファイル、依存追加不要。`npm test`で全件実行）
+├── tests/                       # pytest（87ファイル + conftest.py）
 ├── docs/                        # ドキュメント
 ├── data/projects/<project_id>/  # ※gitignore。プロジェクトデータ（下記）
+├── data/jobs/                    # ※gitignore。Job System B: job_manager.db（SQLite）・events/・logs/
+├── data/backups/                # ※gitignore。project単位ZIP backup・system/配下にGlobal SQLite backup（sqlite_backup.py）
 ├── data/model_ids.json          # モデル管理No（M0001形式）の登録簿（全プロジェクト共通）
 ├── data/dataset_ids.json        # Dataset管理No（DS0001形式）の登録簿（全プロジェクト共通）
 ├── models/                      # ※gitignore。tessdata_best / yolo 等
-├── outputs/                     # ※gitignore。app.db（SQLite）等
+├── outputs/                     # ※gitignore。app.db（SQLite、Job System A）等
 ├── external/                    # ※gitignore。PaddleOCRリポジトリ
 ├── requirements.txt             # 全量スナップショット（UTF-16）
 ├── requirements-ci.txt          # CI最小依存
 ├── requirements-dev.txt         # pytest
 ├── requirements-ocr-tuning.txt  # OCRチューニング任意依存
-├── Pipfile                      # pipenv定義
+├── Pipfile                      # pipenv定義（Python 3.9指定。CI/実運用は3.10のため既知の不一致あり）
 ├── readme.md                    # セットアップ・API概要・Quick Start
 ├── CHANGELOG.md                 # 変更履歴
 └── yolo11n.pt                   # YOLOモデル（リポジトリ直下）
@@ -99,7 +117,7 @@ ocr_crafter/
 | `processed/` | 前処理済み画像（single/wide 別） |
 | `annotations/` | `master.csv`（filename,label,type）と `manual_masks.json` |
 | `dataset/` | 分類用データセット（train/val/test） |
-| `models/` | 学習済みモデル（`*.pt` / `*.ocr.json` / `*.tess.json` / `ocr_runs/<job_id>/`） |
+| `models/` | 学習済みモデル（`*.pt` / `*.ocr.json` / `*.tess.json` / `*.trocr.json` / `ocr_runs/<job_id>/` / `trocr_runs/<job_id>/`） |
 | `logs/` | 学習ログ |
 | `outputs/` | 評価・プレビュー・OCRログ（`ocr_logs/predictions.jsonl`）・OCRデータセット（`ocr_dataset*/<フォルダ>/meta.json`＝Dataset Managerが走査する実体）等 |
 | `experiments.json` | 実験カルテ（EXP-0001形式） |
@@ -153,7 +171,7 @@ ocr_crafter/
 | `InfoTooltip.jsx` | 用語説明ツールチップ（「?」アイコン） |
 | `ImagePreview.jsx` / `ResultBadge.jsx` / `LowercaseToggle.jsx` / `ExperimentalNotice.jsx` | 補助表示 |
 
-## lib/（フロント共通ロジック、45種の一部を抜粋）
+## lib/（フロント共通ロジック、53種の一部を抜粋）
 
 | ファイル | 役割 |
 |---|---|
